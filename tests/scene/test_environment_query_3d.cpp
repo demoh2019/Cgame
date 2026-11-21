@@ -118,6 +118,33 @@ TEST_CASE("[EnvironmentQuery3D] Inverted distance range returns zero results") {
 	CHECK(q->query().is_empty());
 }
 
+TEST_CASE("[EnvironmentQuery3D] Vertical terrain difference filters all ranking modes") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(4, 5, 0), Vector3(5, 7, 0), Vector3(6, -1, 0), Vector3(7, 8, 0)
+	});
+	q->set_origin(Vector3(0, 5, 0));
+	q->set_horizontal_only(true);
+	q->set_max_distance(10.0);
+	CHECK(q->get_max_vertical_difference() == 0.0);
+	CHECK(q->query_positions().size() == 4);
+	q->set_max_vertical_difference(2.0);
+	const PackedVector3Array expected = { Vector3(4, 5, 0), Vector3(5, 7, 0) };
+	CHECK(q->query_positions() == expected); // Exact height boundary is inclusive.
+	CHECK(q->query().size() == 2);
+	CHECK(q->query_top_positions(2) == expected);
+	CHECK(q->query_spread_positions(2, 0.0) == expected);
+	ERR_PRINT_OFF
+	q->set_max_vertical_difference(-1.0);
+	q->set_max_vertical_difference(Math::NaN);
+	q->set_max_vertical_difference(Math::INF);
+	ERR_PRINT_ON
+	CHECK(q->get_max_vertical_difference() == 2.0);
+	q->set_horizontal_only(false);
+	CHECK(q->query_positions().size() == 2);
+	q->set_max_vertical_difference(0.0);
+	CHECK(q->query_positions().size() == 4);
+}
+
 TEST_CASE("[EnvironmentQuery3D] Desired-distance ranking") {
 	Ref<EnvironmentQuery3D> q = make_query({ Vector3(0, 0, 0), Vector3(5, 0, 0), Vector3(10, 0, 0) });
 	q->set_desired_distance(5);
@@ -608,6 +635,7 @@ TEST_CASE("[EnvironmentQuery3D] Resource roundtrip preserves parameters") {
 	q->set_desired_distance(6);
 	q->set_max_distance(50);
 	q->set_max_results(1);
+	q->set_max_vertical_difference(2.5);
 	q->set_use_threat(true);
 	q->set_threat_position(Vector3());
 	q->set_threat_positions({ Vector3(0, 0, 0), Vector3(1, 0, 0) });
@@ -621,6 +649,7 @@ TEST_CASE("[EnvironmentQuery3D] Resource roundtrip preserves parameters") {
 	CHECK(loaded->is_using_threat());
 	CHECK(loaded->get_threat_positions() == q->get_threat_positions());
 	CHECK(loaded->get_max_results() == 1);
+	CHECK(loaded->get_max_vertical_difference() == doctest::Approx(2.5));
 	CHECK(loaded->query_positions()[0] == Vector3(6, 0, 0));
 }
 

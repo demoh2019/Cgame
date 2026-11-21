@@ -57,6 +57,7 @@ class EnvironmentQuery3D : public Resource {
 	bool horizontal_only = false;
 	double min_distance = 0.0;
 	double max_distance = 100.0;
+	double max_vertical_difference = 0.0; // Zero disables optional vertical test.
 	double desired_distance = 0.0;
 	double distance_weight = 1.0;
 	double safety_weight = 0.0;
@@ -98,6 +99,8 @@ public:
 	double get_min_distance() const { return min_distance; }
 	void set_max_distance(double p_distance);
 	double get_max_distance() const { return max_distance; }
+	void set_max_vertical_difference(double p_height);
+	double get_max_vertical_difference() const { return max_vertical_difference; }
 	void set_desired_distance(double p_distance);
 	double get_desired_distance() const { return desired_distance; }
 	void set_distance_weight(double p_weight);

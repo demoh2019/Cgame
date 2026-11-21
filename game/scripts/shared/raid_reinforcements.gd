@@ -15,6 +15,7 @@ const ANGLES := 16
 const MAX_THREAT_CONTEXTS := 32
 const MAX_EXCLUSION_CONTEXTS := 128
 const QUERY_MAX_DISTANCE := 64.0
+const MAX_RAID_HEIGHT_DIFFERENCE := 3.0 # Reject steep shelves above or below raid bosses.
 
 
 ## Rank already walkable, server-vetted sites by distance to the nearest
@@ -90,16 +91,25 @@ static func rank_sites(candidates: Array[Vector2], threats: Array[Vector2],
 static func spread_sites(candidates: Array[Vector2], threats: Array[Vector2],
 		center: Vector2, count: int, min_separation: float,
 		prefer_native: bool = true, exclusions: Array[Vector2] = [],
-		min_exclusion_distance: float = 0.0) -> Array[Vector2]:
+		min_exclusion_distance: float = 0.0, candidate_heights: Array[float] = [],
+		center_height: float = 0.0, max_height_difference: float = 0.0) -> Array[Vector2]:
 	var selected: Array[Vector2] = []
 	if not center.is_finite() or count <= 0 or count > 64 \
 			or not is_finite(min_separation) or min_separation < 0.0 \
-			or not is_finite(min_exclusion_distance) or min_exclusion_distance < 0.0:
+			or not is_finite(min_exclusion_distance) or min_exclusion_distance < 0.0 \
+		or not is_finite(center_height) or not is_finite(max_height_difference) \
+		or max_height_difference < 0.0:
+		return selected
+	# Missing heights may hide an unsafe candidate late in the list.
+	if max_height_difference > 0.0 and candidate_heights.size() != candidates.size():
 		return selected
 	var vetted: Array[Vector2] = []
-	for point in candidates:
+	var vetted_heights: Array[float] = []
+	for i in candidates.size():
+		var point: Vector2 = candidates[i]
 		if point.is_finite() and point.distance_to(center) <= QUERY_MAX_DISTANCE:
 			vetted.append(point)
+			vetted_heights.append(candidate_heights[i] if max_height_difference > 0.0 else center_height)
 	if vetted.is_empty():
 		return selected
 
@@ -120,19 +130,23 @@ static func spread_sites(candidates: Array[Vector2], threats: Array[Vector2],
 		var query: Object = ClassDB.instantiate("EnvironmentQuery3D")
 		if query != null and query.has_method("query_spread_positions") \
 				and query.has_method("set_threat_positions") \
+				and (max_height_difference <= 0.0 or query.has_method("set_max_vertical_difference")) \
 				and (valid_exclusions.is_empty() or (
 					valid_exclusions.size() <= MAX_EXCLUSION_CONTEXTS
 					and query.has_method("set_exclusion_positions"))):
 			var positions := PackedVector3Array()
-			for point in vetted:
-				positions.append(Vector3(point.x, 0.0, point.y))
+			for i in vetted.size():
+				var point: Vector2 = vetted[i]
+				positions.append(Vector3(point.x, vetted_heights[i], point.y))
 			var contexts := PackedVector3Array()
 			for threat in valid_threats:
 				contexts.append(Vector3(threat.x, 0.0, threat.y))
 			query.set("candidates", positions)
-			query.set("origin", Vector3(center.x, 0.0, center.y))
+			query.set("origin", Vector3(center.x, center_height, center.y))
 			query.set("horizontal_only", true)
 			query.set("max_distance", QUERY_MAX_DISTANCE)
+			if max_height_difference > 0.0:
+				query.set("max_vertical_difference", max_height_difference)
 			query.set("distance_weight", 0.0)
 			query.set("safety_weight", 1.0)
 			query.set("use_threat", true)
@@ -149,9 +163,14 @@ static func spread_sites(candidates: Array[Vector2], threats: Array[Vector2],
 				selected.append(Vector2(point.x, point.z))
 			return selected
 
-	# The portable path applies the same finite/XZ clearance first.
+	# Portable path applies the same inclusive vertical and XZ clearance.
 	var permitted: Array[Vector2] = []
-	for point in vetted:
+	for i in vetted.size():
+		var point: Vector2 = vetted[i]
+		if max_height_difference > 0.0:
+			if not is_finite(vetted_heights[i]) or \
+					absf(vetted_heights[i] - center_height) > max_height_difference:
+				continue
 		var unoccupied := true
 		if min_exclusion_distance > 0.0:
 			for blocker in valid_exclusions:
@@ -206,6 +225,7 @@ static func sites(world, players: Dictionary, zombies: Dictionary,
 	# Preserve all authoritative terrain, zone, player distance and
 	# existing-infected exclusions *before* native or script ranking.
 	var candidates: Array[Vector2] = []
+	var heights: Array[float] = []
 	for radius in RADII:
 		for index in ANGLES:
 			var angle: float = float((index + phase * 5) % ANGLES) * TAU / ANGLES
@@ -223,6 +243,7 @@ static func sites(world, players: Dictionary, zombies: Dictionary,
 				continue
 			if clear:
 				candidates.append(point)
+				heights.append(world.height_at(point.x, point.y))
 
 	# A bounded multi-actor context covers every nearby living survivor,
 	# rather than testing just one boss target. Sort by distance to origin
@@ -250,4 +271,5 @@ static func sites(world, players: Dictionary, zombies: Dictionary,
 		if enemy.is_alive() and enemy.position.is_finite():
 			occupied.append(Vector2(enemy.position.x, enemy.position.z))
 	return spread_sites(candidates, threats, origin, mini(count, MAX_WAVE),
-		MIN_BETWEEN_ADDS, true, occupied, MIN_INFECTED_DISTANCE)
+		MIN_BETWEEN_ADDS, true, occupied, MIN_INFECTED_DISTANCE,
+		heights, center.y, MAX_RAID_HEIGHT_DIFFERENCE)
