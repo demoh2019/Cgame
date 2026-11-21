@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="SignificanceBudgetPlanner" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Selects the highest-priority nearby actors for a bounded visual or simulation budget.
+	</brief_description>
+	<description>
+		A native, stateless significance selector inspired by Unreal Engine's Significance Manager. For equal priority (0 to 3, higher means more important), closer distance wins, followed by the original candidate index. Results are ordered indices, not a mutated candidate array. Up to 16,384 candidates, 16 viewers, and 128 selection slots are supported. Invalid input returns an empty result atomically. The caller decides whether a selected actor receives HUD, VFX, audio or other optional work. Gameplay authority, visibility and physics are unchanged by the planner.
+	</description>
+	<methods>
+		<method name="select_top" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priorities" type="PackedByteArray" />
+			<param index="2" name="budget" type="int" />
+			<description>Returns at most [param budget] candidate indices ranked by descending priority and ascending nonnegative finite distance. [param priorities] must have the same length as [param distances] and values 0 through 3. [param budget] must be 0 through 128. No input state is mutated.</description>
+		</method>
+		<method name="select_world" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="1" name="viewers" type="PackedVector3Array" />
+			<param index="2" name="priorities" type="PackedByteArray" />
+			<param index="3" name="budget" type="int" />
+			<param index="4" name="max_distance" type="float" default="1000.0" />
+			<description>Ranks candidates by priority, then squared distance to their nearest viewer; excludes candidates beyond inclusive [param max_distance]. Requires 1 to 16 finite viewers, finite positions, matching priorities, and a finite range between 0 and 1,000,000. No scene tree, rendering or physics work is performed.</description>
+		</method>
+	</methods>
+</class>
