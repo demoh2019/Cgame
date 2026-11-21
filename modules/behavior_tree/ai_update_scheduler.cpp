@@ -52,11 +52,11 @@ int AIUpdateScheduler::get_agent_slot(int64_t p_agent_id) const {
 }
 
 bool AIUpdateScheduler::is_due(int64_t p_agent_id, int64_t p_tick_index, bool p_urgent) const {
-	if (p_urgent) {
-		return true;
-	}
 	if (p_tick_index < 0) {
 		return false;
+	}
+	if (p_urgent) {
+		return true;
 	}
 	return p_tick_index % slots_per_cycle == get_agent_slot(p_agent_id);
 }
