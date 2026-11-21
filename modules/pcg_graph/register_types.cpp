@@ -12,6 +12,7 @@
 #include "pcg_graph.h"
 #include "pcg_graph_executor.h"
 #include "pcg_terrain_nodes.h"
+#include "pcg_world_nodes.h"
 #include "pcg_node.h"
 
 #include "core/object/class_db.h"
@@ -58,6 +59,7 @@ void initialize_pcg_graph_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PCGAttributeSetNode);
 	GDREGISTER_CLASS(PCGOutputNode);
 	register_pcg_terrain_nodes();
+	register_pcg_world_nodes();
 }
 
 void uninitialize_pcg_graph_module(ModuleInitializationLevel p_level) {
