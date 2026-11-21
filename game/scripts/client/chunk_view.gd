@@ -1449,9 +1449,15 @@ func _update_hlod_stones() -> void:
 ## geometry is static and consists of at most 384 low-poly octahedra; there
 ## are no per-frame mesh rebuilds, physics bodies, or gameplay mutations.
 func _finalize_hlod_stones() -> void:
-	if _hlod_stone_proxy != null or _hlod_stone_overflow or \
-			_hlod_stone_sources.size() < 2 or \
+	if _hlod_stone_proxy != null:
+		return
+	if _hlod_stone_overflow or _hlod_stone_sources.size() < 2 or \
 			_hlod_stone_transforms.size() < SceneryHlodProxy.MIN_SOURCE_INSTANCES:
+		# Preserve original stone batches, but drop unnecessary temporary
+		# copies if a chunk cannot form a useful common far proxy.
+		_hlod_stone_transforms.clear()
+		_hlod_stone_centers.clear()
+		_hlod_stone_extents.clear()
 		return
 	_hlod_stone_proxy = SceneryHlodProxy.attach_proxy(
 		self, _hlod_stone_transforms, _hlod_stone_centers,
