@@ -36,6 +36,50 @@ per-frame instance sorting, scene-node deletion or RNG draws.
 
 Official inspiration: [Unreal foliage density scalability](https://dev.epicgames.com/documentation/en-us/unreal-engine/foliage-mode-in-unreal-engine).
 
+## Temporal stability for runtime foliage density
+
+The new native
+`PCGFoliageScalability3D.plan_visible_counts_stable(counts, distances,
+previous_counts, quality, deadband=2, near_distance=18, far_distance=125)`
+reuses the deterministic base density planner but retains the old visible
+count for a cluster when the new requested count differs by at most the
+configured **0–8 instance deadband**. Once the difference is larger, the
+new count is adopted immediately. Zero deadband reproduces the original
+stateless policy. This reduces one/two-instance visibility thrashing as the
+camera moves around the same distance while preserving the earlier stable
+bit-reversed spatial instance prefix.
+
+The engine does not store history: callers supply an index-aligned
+`PackedInt32Array` of previous visible counts. A prior count of **-1**
+explicitly means uninitialized or changed graphics tier; it bypasses the
+deadband. This is crucial so Performance and Ultra changes immediately
+apply the correct density, including restoring all instance transforms.
+A previous count of zero cannot make a nonempty cosmetic cluster
+permanently invisible. Invalid late previous counts, array length
+mismatches, invalid distance/count/quality inputs or more than 4096
+clusters reject the complete batch without partial changes.
+
+**Albion After integration:** `SceneryDensityLod.update_instances()` is
+called by real streamed `ChunkView` at the existing 0.6-second refresh
+cadence. Only cosmetic flower/grass/fern/petal `MultiMeshInstance3D` nodes
+opt in. They store their most recently applied *quality tier* in metadata
+so changing graphics quality resets history; the current
+`visible_instance_count` is reused only within that same tier. The
+native API is feature detected; stock Godot/older Cgame binaries use
+an equivalent deterministic GDScript fallback. No new mesh buffers,
+per-frame loops, reuploads, collision work, loot/AI modification,
+network state, or engine-side persistent allocations are introduced.
+
+This combines [Unreal foliage density scalability](https://dev.epicgames.com/documentation/en-us/unreal-engine/foliage-mode-in-unreal-engine)
+with the *temporal stability idea* of [Unreal Skeletal Mesh LOD Hysteresis](https://dev.epicgames.com/documentation/en-us/unreal-engine/skeletal-mesh-lods-in-unreal-engine);
+it is **not** a claim that Unreal itself uses instance-count deadbands.
+
+Run the `[PCGFoliageScalability3D]` native tests, the Albion After
+`game/tests/run_pcg_scenery_spacing.gd` suite, and the static
+`tests/scene/test_pcg_foliage_density_hysteresis_contract.py` contract.
+A measurable FPS increase is not implied: this aims to reduce cosmetic
+popping and redundant visibility-range updates.
+
 ## 3D exclusion zones
 
 ```gdscript
