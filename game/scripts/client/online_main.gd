@@ -2437,6 +2437,30 @@ func _run_demo() -> void:
 		"hub":
 			if _demo_frames == 40:
 				net_ref.c_debug.rpc_id(1, "teleport", {"x": 14.0, "z": 6.0})
+		"house":
+			# Build check: a 2x2-cell cabin next to the survivor (needs --debug-commands).
+			if _demo_frames == 30:
+				net_ref.c_debug.rpc_id(1, "teleport", {"x": 120.0, "z": 96.0})
+			if _demo_frames == 60:
+				net_ref.c_debug.rpc_id(1, "give", {"item": "wood_1", "count": 120})
+				net_ref.c_debug.rpc_id(1, "give", {"item": "stone_1", "count": 30})
+			if _demo_frames == 100:
+				var base := Vector2(client.predicted.x + 3.0, client.predicted.z)
+				var g := HousePieces.GRID
+				for cx in 2:
+					for cz in 2:
+						var c := base + Vector2(cx, cz) * g
+						client.build_piece("floor", c)
+						client.build_piece("roof", c)
+				for cz in 2:
+					client.build_piece("window" if cz == 1 else "wall", base + Vector2(-1.4, cz * g))
+					client.build_piece("wall", base + Vector2(g + 1.4, cz * g))
+				for cx in 2:
+					client.build_piece("door" if cx == 0 else "wall", base + Vector2(cx * g, -1.4))
+					client.build_piece("wall", base + Vector2(cx * g, g + 1.4))
+				for corner in [Vector2(-1.5, -1.5), Vector2(g * 2 - 1.5, -1.5), Vector2(-1.5, g * 2 - 1.5), Vector2(g * 2 - 1.5, g * 2 - 1.5)]:
+					client.build_piece("pillar", base + corner)
+				net_ref.c_debug.rpc_id(1, "teleport", {"x": base.x - 6.0, "z": base.y - 7.0})
 		"campfire":
 			# Grass crush check: a campfire lit just ahead, seen from first person (needs --debug-commands).
 			if _demo_frames == 40:
