@@ -10,9 +10,13 @@
 #include "core/templates/hash_map.h"
 #include "core/templates/vector.h"
 
+#include <algorithm>
+
 void PCGSpatialFilter3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("filter_indices", "candidates", "min_spacing", "max_selected"),
 			&PCGSpatialFilter3D::filter_indices, DEFVAL(MAX_SELECTED));
+	ClassDB::bind_method(D_METHOD("filter_indices_scaled", "candidates", "scales", "min_spacing", "max_selected", "largest_first"),
+			&PCGSpatialFilter3D::filter_indices_scaled, DEFVAL(MAX_SELECTED), DEFVAL(true));
 }
 
 PackedInt32Array PCGSpatialFilter3D::filter_indices(const PackedVector3Array &p_candidates,
@@ -82,6 +86,101 @@ PackedInt32Array PCGSpatialFilter3D::filter_indices(const PackedVector3Array &p_
 			bucket = cells.getptr(key);
 		}
 		bucket->push_back(i);
+	}
+	return result;
+}
+
+
+PackedInt32Array PCGSpatialFilter3D::filter_indices_scaled(const PackedVector3Array &p_candidates,
+		const PackedFloat32Array &p_scales, double p_min_spacing, int p_max_selected, bool p_largest_first) const {
+	PackedInt32Array result;
+	if (p_candidates.size() != p_scales.size() || p_candidates.size() > MAX_CANDIDATES ||
+			p_max_selected < 0 || p_max_selected > MAX_SELECTED ||
+			!Math::is_finite(p_min_spacing) || p_min_spacing < 0.0 ||
+			p_min_spacing > MAX_SPACING ||
+			(p_min_spacing > 0.0 && p_min_spacing < MIN_SPACING)) {
+		return result;
+	}
+
+	// Validate the entire input before admitting any point into a scene.
+	for (int i = 0; i < p_candidates.size(); ++i) {
+		const Vector3 point = p_candidates[i];
+		const double scale = double(p_scales[i]);
+		if (!point.is_finite() || Math::abs(double(point.x)) > MAX_COORDINATE ||
+				Math::abs(double(point.y)) > MAX_COORDINATE ||
+				Math::abs(double(point.z)) > MAX_COORDINATE ||
+				!Math::is_finite(scale) || scale < 0.5 || scale > 2.0) {
+			return result;
+		}
+	}
+	if (p_max_selected == 0) {
+		return result;
+	}
+	// Disabled pruning retains the first N candidates, not size order.
+	if (p_min_spacing == 0.0) {
+		for (int i = 0; i < MIN(p_candidates.size(), p_max_selected); ++i) {
+			result.push_back(i);
+		}
+		return result;
+	}
+
+	Vector<int> order;
+	if (p_largest_first) {
+		order.resize(p_candidates.size());
+		for (int i = 0; i < order.size(); ++i) {
+			order.write[i] = i;
+		}
+		if (order.size() > 1) {
+			std::sort(order.ptrw(), order.ptrw() + order.size(), [&p_scales](int a, int b) {
+				return p_scales[a] > p_scales[b] || (p_scales[a] == p_scales[b] && a < b);
+			});
+		}
+	}
+	HashMap<Vector3i, Vector<int>> cells;
+	for (int visit = 0; visit < p_candidates.size() && result.size() < p_max_selected; ++visit) {
+		const int index = p_largest_first ? order[visit] : visit;
+		const Vector3 point = p_candidates[index];
+		const Vector3i key(int32_t(Math::floor(double(point.x) / p_min_spacing)),
+				int32_t(Math::floor(double(point.y) / p_min_spacing)),
+				int32_t(Math::floor(double(point.z) / p_min_spacing)));
+		bool blocked = false;
+		// The maximum radius is 2*spacing, so 5x5x5 buckets cover
+		// every possible overlap, including vertical stacks and negatives.
+		for (int z = -2; z <= 2 && !blocked; ++z) {
+			for (int y = -2; y <= 2 && !blocked; ++y) {
+				for (int x = -2; x <= 2 && !blocked; ++x) {
+					const Vector<int> *nearby = cells.getptr(key + Vector3i(x, y, z));
+					if (nearby == nullptr) {
+						continue;
+					}
+					for (const int other_index : *nearby) {
+						const Vector3 other = p_candidates[other_index];
+						const double separation = p_min_spacing *
+								(double(p_scales[index]) + double(p_scales[other_index])) * 0.5;
+						const double dx = double(point.x) - double(other.x);
+						const double dy = double(point.y) - double(other.y);
+						const double dz = double(point.z) - double(other.z);
+						if (dx * dx + dy * dy + dz * dz < separation * separation) {
+							blocked = true;
+							break;
+						}
+					}
+				}
+			}
+		}
+		if (blocked) {
+			continue;
+		}
+		result.push_back(index);
+		Vector<int> *bucket = cells.getptr(key);
+		if (bucket == nullptr) {
+			cells.insert(key, Vector<int>());
+			bucket = cells.getptr(key);
+		}
+		bucket->push_back(index);
+	}
+	if (p_largest_first) {
+		result.sort(); // Preserve original MultiMesh transform order.
 	}
 	return result;
 }
