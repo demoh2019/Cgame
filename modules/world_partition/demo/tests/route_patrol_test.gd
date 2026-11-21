@@ -77,6 +77,25 @@ func _run() -> void:
         await physics_frame
     assert(int(npc.call("get_patrol_status")["route_tokens"]) == 2)
 
+    # Opening/closing a world gate changes the route without destroying
+    # the detailed scene. The NPC must release its corridor immediately.
+    var pass_cell := Vector2i(1, 0)
+    var pass_region := right.get_node("WalkableRegion") as NavigationRegion3D
+    streamer.call("set_cell_navigation_enabled", pass_cell, false)
+    pass_region.enabled = false
+    assert(int(streamer.call("get_cell_lease_count_total")) == 0)
+    assert(int(npc.call("get_patrol_status")["route_tokens"]) == 0)
+    var stopped := npc.global_position
+    for i in 6:
+        await physics_frame
+    assert(npc.global_position.distance_to(stopped) < 0.01)
+    streamer.call("set_cell_navigation_enabled", pass_cell, true)
+    pass_region.enabled = true
+    await physics_frame
+    await physics_frame
+    assert(int(streamer.call("get_cell_lease_count_total")) == 2)
+    assert(int(npc.call("get_patrol_status")["route_tokens"]) == 2)
+
     npc.free()
     assert(int(streamer.call("get_cell_lease_count_total")) == 0)
     streamer.free()

@@ -67,6 +67,27 @@ func _run() -> void:
     assert(gate.call("capture_streaming_object_state")["active"] == true)
     champion.free()
 
+    # A new route gate is open by default so the AI can initially patrol.
+    var pass_cell := _open(Vector2i(1, 0))
+    var gate := pass_cell.get_node("PatrolGate") as Node3D
+    assert(gate != null)
+    assert(gate.is_in_group("streaming_stateful"))
+    assert(gate.call("capture_streaming_object_state") == {"active": true, "uses": 0})
+    assert((gate.get_node("InteractionLabel") as Label3D).text == "AI PASS OPEN [E]")
+    assert(pass_cell.call("interact_world_object"))
+    var closed: Dictionary = gate.call("capture_streaming_object_state")
+    assert(closed == {"active": false, "uses": 1})
+    assert((gate.get_node("InteractionLabel") as Label3D).text == "AI PASS CLOSED [E]")
+    pass_cell.free()
+    var restored_pass := _open(Vector2i(1, 0))
+    var restored_gate := restored_pass.get_node("PatrolGate") as Node3D
+    restored_gate.call("restore_streaming_object_state", closed)
+    assert(restored_gate.call("capture_streaming_object_state") == closed)
+    restored_gate.call("restore_streaming_object_state", {})
+    assert(restored_gate.call("capture_streaming_object_state") == {"active": true, "uses": 0})
+    assert(restored_pass.call("interact_world_object"))
+    restored_pass.free()
+
     var ordinary := _open(Vector2i(2, 2))
     assert(ordinary.call("get_interactable") == null)
     assert(not ordinary.call("interact_world_object"))
