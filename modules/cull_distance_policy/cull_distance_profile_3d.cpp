@@ -16,6 +16,8 @@ void CullDistanceProfile3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_profile"), &CullDistanceProfile3D::clear_profile);
 	ClassDB::bind_method(D_METHOD("get_cached_cull_distance", "bounds", "authored_distance"),
 			&CullDistanceProfile3D::get_cached_cull_distance, DEFVAL(0.0));
+	ClassDB::bind_method(D_METHOD("get_cached_cull_distances", "positions", "sizes", "authored_distances"),
+			&CullDistanceProfile3D::get_cached_cull_distances);
 }
 
 bool CullDistanceProfile3D::_valid_pairs(const PackedFloat32Array &p_sizes,
@@ -102,6 +104,31 @@ double CullDistanceProfile3D::get_cached_cull_distance(const AABB &p_bounds,
 		return -1.0;
 	}
 	return _resolve_validated(p_bounds, configured_sizes, configured_ranges, p_authored_distance);
+}
+
+PackedFloat64Array CullDistanceProfile3D::get_cached_cull_distances(
+		const PackedVector3Array &p_positions, const PackedVector3Array &p_sizes,
+		const PackedFloat64Array &p_authored_distances) const {
+	PackedFloat64Array result;
+	const int count = p_positions.size();
+	// All-or-nothing validation: no positional result may be returned if a
+	// later entry is malformed. The limit bounds work on the main thread.
+	if (configured_sizes.is_empty() || count != p_sizes.size() ||
+			count != p_authored_distances.size() || count > MAX_BATCH) {
+		return result;
+	}
+	for (int i = 0; i < count; ++i) {
+		if (!_valid_bounds(AABB(p_positions[i], p_sizes[i]), p_authored_distances[i])) {
+			return result;
+		}
+	}
+	result.resize(count);
+	double *values = result.ptrw();
+	for (int i = 0; i < count; ++i) {
+		values[i] = _resolve_validated(AABB(p_positions[i], p_sizes[i]),
+				configured_sizes, configured_ranges, p_authored_distances[i]);
+	}
+	return result;
 }
 
 double CullDistanceProfile3D::get_cull_distance(const AABB &p_bounds,
