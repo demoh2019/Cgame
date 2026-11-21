@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeDecorator" inherits="BehaviorTreeTask" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Resource-backed single-child behavior tree decorator with cycle checks.</brief_description>
+	<description>
+		Foundation for behavior tree tasks that alter the outcome or timing of exactly one child. The child task Resource can be shared across multiple runners: runtime progress is stored in each runner's execution memory using a separate path per occurrence. Circular child references are rejected. [BehaviorTreeTimeout] and [BehaviorTreeCooldown] implement specific policies.
+	</description>
+	<methods>
+		<method name="set_task"><return type="void" /><param index="0" name="task" type="BehaviorTreeTask" /><description>Sets the wrapped child task after validating that it does not introduce a cycle. Passing null clears the child.</description></method>
+		<method name="get_task" qualifiers="const"><return type="BehaviorTreeTask" /><description>Returns the wrapped child task, or null.</description></method>
+	</methods>
+	<members>
+		<member name="task" type="BehaviorTreeTask">The wrapped child task Resource.</member>
+	</members>
+</class>
