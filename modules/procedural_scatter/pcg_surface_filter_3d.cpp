@@ -53,17 +53,20 @@ PackedInt32Array PCGSurfaceFilter3D::filter_indices(const PackedVector3Array &p_
 		return result;
 	}
 
-	// acos-based slope handles non-unit input normals and inclusive ranges,
-	// including perfectly flat (0 deg) and vertical (90 deg) surfaces.
+	// Only two trigonometric evaluations per batch, not per point.
+	// Cosine decreases monotonically over [0, 90] degrees.
+	const double min_up_dot = p_max_slope_degrees == 90.0 ? 0.0 :
+			Math::cos(Math::deg_to_rad(p_max_slope_degrees));
+	const double max_up_dot = p_min_slope_degrees == 0.0 ? 1.0 :
+			Math::cos(Math::deg_to_rad(p_min_slope_degrees));
 	for (int i = 0; i < count; ++i) {
 		const Vector3 position = p_positions[i];
 		if (position.y < p_min_height || position.y > p_max_height) {
 			continue;
 		}
 		const Vector3 normal = p_normals[i];
-		const double cos_angle = Math::clamp(double(normal.y) / double(normal.length()), -1.0, 1.0);
-		const double angle = Math::rad_to_deg(Math::acos(cos_angle));
-		if (angle < p_min_slope_degrees || angle > p_max_slope_degrees) {
+		const double up_dot = double(normal.y) / double(normal.length());
+		if (up_dot < min_up_dot || up_dot > max_up_dot) {
 			continue;
 		}
 		result.push_back(i);
