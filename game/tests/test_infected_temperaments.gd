@@ -61,6 +61,24 @@ func run(t) -> void:
 	howler.think(world, _players(Vector3(5.5, ground, 0)), 0.3, rng)
 	t.check(not howler.consume_howl(), "no repeated howl for the same survivor")
 
+	t.current = "native howler cooldown suppresses overlapping pack alarms"
+	# Real target checks still create the original one-shot howl; the native
+	# ledger only rate limits a subsequent server-authorized event.
+	howler._howl_pending = true
+	if ClassDB.class_exists("AIActionCooldowns"):
+		t.check(howler._native_howl_cooldowns != null,
+			"first authoritative howl lazily creates the native event ledger")
+		t.check(not howler.consume_howl(), "second target cannot spam the pack instantly")
+		t.check(float(howler.get_ai_debug_snapshot().get("pack_howl_cooldown_seconds", 0.0)) > 0.0,
+			"server diagnostic exposes the remaining native timer")
+		howler.think(world, {}, 6.2, rng)
+		howler._howl_pending = true
+		t.check(howler.consume_howl(), "game simulation time unlocks the howl again")
+	else:
+		t.check(howler.consume_howl(), "stock Godot keeps its previous howl behavior")
+		t.eq(howler.get_ai_debug_snapshot().get("pack_howl_cooldown_seconds"), 0.0,
+			"stock Godot retains a safe no-op cooldown diagnostic")
+
 	t.current = "the wilds teem with varied infected"
 	var types: Dictionary = {}
 	var total := 0
