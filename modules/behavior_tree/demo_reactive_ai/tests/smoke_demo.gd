@@ -150,6 +150,40 @@ func _run_checks() -> void:
         _fail("Low health must preempt other tasks")
         return
 
+    # The sandbox retains replayable decisions instead of only the latest
+    # trace. The health retreat above differs from the previous investigation.
+    var replay_frames: Array = demo.brain.get_trace_history_frames()
+    if replay_frames.size() < 2 or replay_frames.size() > 16:
+        _fail("Playable AI debug history must keep bounded multi-tick decisions")
+        return
+    var changed_frames: Array = demo.brain.get_trace_history_frames(true)
+    if changed_frames.size() < 2:
+        _fail("Investigation and retreat must register different AI decisions")
+        return
+    var slow_nodes: Array = demo.brain.get_slowest_trace_nodes(1)
+    if slow_nodes.is_empty():
+        _fail("The real native AI decision should expose at least one CPU hotspot")
+        return
+    var slowest: Dictionary = slow_nodes[0]
+    if int(slowest.get("self_usec", -1)) < 0 or int(slowest.get("duration_usec", -1)) < int(slowest.get("self_usec", 0)):
+        _fail("Own-time hotspot must be nonnegative and bounded by inclusive time")
+        return
+
+    demo.call("_replay_previous")
+    if demo.trace_replay_tick < 0 or not demo.trace_title.text.contains("REPLAY"):
+        _fail("Previous must display a stored decision instead of the live tree")
+        return
+    demo.call("_replay_next")
+    demo.call("_replay_live")
+    if demo.trace_replay_tick != -1 or not demo.trace_title.text.contains("LIVE"):
+        _fail("Live must restore the latest native AI state")
+        return
+    demo.call("_set_replay_changes_only", true)
+    if not demo.trace_changes_only or not demo.trace_history_label.text.contains("changed-only"):
+        _fail("Changed-only replay toggle should filter identical decisions")
+        return
+    demo.call("_set_replay_changes_only", false)
+
     demo.sensor.reset()
     if demo.sensor.has_target_memory():
         _fail("Reset must clear perception memory")
