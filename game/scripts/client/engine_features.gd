@@ -219,3 +219,16 @@ static func runtime_has_resolve(node: Node, fallback_stacks: int = 0) -> bool:
 			if _resolve_visual_query != null:
 				return bool(_resolve_visual_query.call("matches_stacks", stacks))
 	return runtime_stack_count(node, "Runtime.Status.Resolve", fallback_stacks) >= 2
+
+## Cosmetic only: native stackable hit flashes intensify rapid consecutive hits.
+## Local.Visual is independent from server-owned Runtime status snapshots.
+static func hit_feedback_strength(node: Node, base_strength: float) -> float:
+	if not is_finite(base_strength) or base_strength <= 0.0:
+		return 0.0
+	var timeline: Object = node.get_meta("effect_timeline", null) as Object if node != null else null
+	if timeline != null and timeline.has_method("apply_effect") and timeline.has_method("get_stacks"):
+		var tag := StringName("Local.Visual.RecentHit")
+		if bool(timeline.call("apply_effect", tag, 0.22, 1, 4, 0)):
+			var hits: int = int(timeline.call("get_stacks", tag))
+			return base_strength * (1.0 + 0.12 * float(clampi(hits, 1, 4) - 1))
+	return base_strength
