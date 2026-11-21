@@ -58,11 +58,28 @@ static int distance_tier(double p_distance) {
 	return 4;
 }
 
+// Stateful only through the caller's previous result; no static per-actor
+// memory or actor IDs live in the engine. This also handles large teleports
+// across multiple boundaries in one call.
+static int stable_distance_tier(double p_distance, int p_previous, double p_hysteresis) {
+	static const double thresholds[4] = { 22.0, 38.0, 60.0, 90.0 };
+	int tier = p_previous;
+	while (tier < 4 && p_distance >= thresholds[tier] + p_hysteresis) {
+		tier++;
+	}
+	while (tier > 0 && p_distance < thresholds[tier - 1] - p_hysteresis) {
+		tier--;
+	}
+	return tier;
+}
+
 } // namespace
 
 void CrowdAnimationTierPlanner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("plan_tiers", "distances", "priority_flags", "full_budget", "priority_budget"),
 			&CrowdAnimationTierPlanner::plan_tiers);
+	ClassDB::bind_method(D_METHOD("plan_tiers_stable", "distances", "priority_flags", "previous_tiers",
+			"full_budget", "priority_budget", "hysteresis_meters"), &CrowdAnimationTierPlanner::plan_tiers_stable);
 	ClassDB::bind_method(D_METHOD("plan_visible_tiers", "distances", "priority_flags", "visible_flags", "full_budget", "priority_budget"),
 			&CrowdAnimationTierPlanner::plan_visible_tiers);
 	ClassDB::bind_method(D_METHOD("plan_visible_tiers_stable", "distances", "priority_flags", "visible_flags", "retained_full_flags", "full_budget", "priority_budget", "hysteresis"),
@@ -340,6 +357,59 @@ PackedInt32Array CrowdAnimationTierPlanner::cap_full_pose_cost_grouped(
 			// procedural IK and head look-at are omitted for this frame.
 			output.set(candidate.index, 1);
 		}
+	}
+	return output;
+}
+
+PackedInt32Array CrowdAnimationTierPlanner::plan_tiers_stable(
+		const PackedFloat64Array &p_distances, const PackedByteArray &p_priority_flags,
+		const PackedInt32Array &p_previous_tiers, int p_full_budget, int p_priority_budget,
+		double p_hysteresis_meters) const {
+	PackedInt32Array output;
+	const int count = p_distances.size();
+	ERR_FAIL_COND_V_MSG(count != p_priority_flags.size() || count != p_previous_tiers.size(), output,
+			"Distance, priority and previous tier arrays must match.");
+	ERR_FAIL_COND_V_MSG(count > 16384, output, "Crowd tier planning is limited to 16384 actors.");
+	ERR_FAIL_COND_V_MSG(p_full_budget < 0 || p_full_budget > 256 ||
+					p_priority_budget < 0 || p_priority_budget > 256, output,
+			"Crowd tier budgets must be between 0 and 256.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_hysteresis_meters) || p_hysteresis_meters < 0.0 ||
+					p_hysteresis_meters > 4.0, output, "Hysteresis must be a finite value from 0 to 4 metres.");
+	// Validate the entire cohort, then write an all-or-nothing output.
+	for (int i = 0; i < count; i++) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(p_distances[i]) || p_distances[i] < 0.0 ||
+					p_previous_tiers[i] < 0 || p_previous_tiers[i] > 4, output,
+				"Actor distances must be finite/nonnegative and previous tiers between 0 and 4.");
+	}
+	output.resize(count);
+	int32_t *tiers = output.ptrw();
+	Vector<RankedCandidate> nearest_full;
+	Vector<RankedCandidate> nearest_critical;
+	for (int i = 0; i < count; i++) {
+		const double distance = p_distances[i];
+		const int previous = p_previous_tiers[i];
+		// A tier-0 pose remains budgeted; demote before selecting winners.
+		tiers[i] = MAX(1, stable_distance_tier(distance, previous, p_hysteresis_meters));
+		// Every genuinely near actor may compete for full quality even if
+		// it was previously demoted by a crowded frame's slot budget.
+		if (distance < 22.0 || (previous == 0 && distance < 22.0 + p_hysteresis_meters)) {
+			insert_top(nearest_full, { distance - (previous == 0 ? p_hysteresis_meters : 0.0), i },
+					p_full_budget);
+		}
+		// Previously promoted combat tells keep their priority briefly
+		// across the far limit, but a lost priority flag is never retained.
+		if (p_priority_flags[i] != 0 &&
+					(distance < 90.0 || (previous <= 1 && distance < 90.0 + p_hysteresis_meters))) {
+			insert_top(nearest_critical, { distance - (previous <= 1 ? p_hysteresis_meters : 0.0), i },
+					p_priority_budget);
+		}
+	}
+	for (int i = 0; i < nearest_full.size(); i++) {
+		tiers[nearest_full[i].index] = 0;
+	}
+	for (int i = 0; i < nearest_critical.size(); i++) {
+		const int index = nearest_critical[i].index;
+		tiers[index] = MIN(tiers[index], 1);
 	}
 	return output;
 }

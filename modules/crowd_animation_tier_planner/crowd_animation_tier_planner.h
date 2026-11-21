@@ -24,6 +24,12 @@ public:
 	PackedInt32Array plan_tiers(const PackedFloat64Array &p_distances,
 			const PackedByteArray &p_priority_flags, int p_full_budget, int p_priority_budget) const;
 
+	// Stabilize distance tier changes around boundaries without surrendering
+	// the hard per-frame full-pose or combat-priority budgets. Previous tiers
+	// must correspond 1:1 to the same actors in the same input order.
+	PackedInt32Array plan_tiers_stable(const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_priority_flags, const PackedInt32Array &p_previous_tiers,
+			int p_full_budget, int p_priority_budget, double p_hysteresis_meters) const;
 	// Optional per-frame visibility culling for costly procedural IK.
 	// Non-visible actors never claim full-rate or priority slots and receive
 	// at least tier 2 (30 Hz). All-visible calls match plan_tiers exactly.

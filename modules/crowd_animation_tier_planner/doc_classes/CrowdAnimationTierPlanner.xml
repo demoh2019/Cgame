@@ -76,5 +76,15 @@
 			<param index="3" name="priority_budget" type="int" />
 			<description>Returns the selected LOD tier for each actor, preserving input order. Validates the complete batch before producing a result.</description>
 		</method>
+		<method name="plan_tiers_stable" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priority_flags" type="PackedByteArray" />
+			<param index="2" name="previous_tiers" type="PackedInt32Array" />
+			<param index="3" name="full_budget" type="int" />
+			<param index="4" name="priority_budget" type="int" />
+			<param index="5" name="hysteresis_meters" type="float" />
+			<description>Computes the same bounded pose tiers but delays distance-LOD transitions until the new boundary is crossed by the specified hysteresis margin. Previously selected full-pose and combat-priority actors receive a bounded distance preference, never unlimited slots. Every input array must have the same actor order. Hysteresis must be finite in 0–4 metres; previous tiers must be 0–4. Empty output indicates an invalid request. At zero hysteresis, the result is identical to [method plan_tiers]. This is a numeric planner only; the game owns actor identity and animation playback.</description>
+		</method>
 	</methods>
 </class>
