@@ -118,9 +118,9 @@ TEST_CASE("[BehaviorTreeTimed] Cooldown follows child success and blocks repeat"
 	CHECK(cooldown->execute(blackboard, memory, "root", 0.1) == BehaviorTreeTask::SUCCESS);
 	CHECK(memory.has("root"));
 	CHECK(cooldown->execute(blackboard, memory, "root", 0.25) == BehaviorTreeTask::FAILURE);
-	CHECK(double(memory["root"]) == doctest::Approx(0.75));
+	CHECK(Math::is_equal_approx(double(memory["root"]), 0.75));
 	CHECK(cooldown->execute(blackboard, memory, "root", 0.75) == BehaviorTreeTask::SUCCESS);
-	CHECK(double(memory["root"]) == doctest::Approx(1.0));
+	CHECK(Math::is_equal_approx(double(memory["root"]), 1.0));
 }
 
 TEST_CASE("[BehaviorTreeTimed] Child failure does not begin a cooldown") {
@@ -143,7 +143,7 @@ TEST_CASE("[BehaviorTreeTimed] Child failure does not begin a cooldown") {
 TEST_CASE("[BehaviorTreeTimed] Running child is not interrupted by its own cooldown") {
 	Ref<BehaviorTreeWait> wait;
 	wait.instantiate();
-	wait->set_duration(0.4);
+	wait->set_duration(0.5);
 	Ref<BehaviorTreeCooldown> cooldown;
 	cooldown.instantiate();
 	cooldown->set_task(wait);
@@ -152,7 +152,7 @@ TEST_CASE("[BehaviorTreeTimed] Running child is not interrupted by its own coold
 	CHECK(cooldown->execute(blackboard, memory, "root", 0.2) == BehaviorTreeTask::RUNNING);
 	CHECK_FALSE(memory.has("root"));
 	CHECK(memory.has("root/0"));
-	CHECK(cooldown->execute(blackboard, memory, "root", 0.2) == BehaviorTreeTask::SUCCESS);
+	CHECK(cooldown->execute(blackboard, memory, "root", 0.3) == BehaviorTreeTask::SUCCESS);
 	CHECK_FALSE(memory.has("root/0"));
 	CHECK(cooldown->execute(blackboard, memory, "root", 0.2) == BehaviorTreeTask::FAILURE);
 	CHECK(cooldown->execute(blackboard, memory, "root", 0.4) == BehaviorTreeTask::RUNNING);
@@ -276,7 +276,7 @@ TEST_CASE("[AIActionCooldowns] Invalid inputs and bounded event keys fail closed
 	ERR_PRINT_ON;
 	CHECK(actions->get_snapshot().is_empty());
 	for (int i = 0; i < 16; ++i) {
-		CHECK(actions->try_trigger(StringName("k" + itos(i)), 5.0));
+		CHECK(actions->try_trigger(StringName(String("k") + itos(i)), 5.0));
 	}
 	ERR_PRINT_OFF;
 	CHECK_FALSE(actions->try_trigger(SNAME("overflow"), 5.0));
