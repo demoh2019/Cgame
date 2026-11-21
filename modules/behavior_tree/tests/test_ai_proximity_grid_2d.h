@@ -312,6 +312,15 @@ TEST_CASE("[AIProximityGrid2D] Predictive separation sidesteps head-on crossings
 	CHECK(future[0].length() <= real_t(1.0));
 	CHECK(future[1].length() <= real_t(1.0));
 	CHECK(grid->query_predictive_separation_batch(positions, velocities, sources, 1.5, 2.0, 8, 1.0) == future);
+	// A near miss (not exact equality) must still sidestep before contact.
+	positions.set(1, Vector2(2.2, 0));
+	const PackedVector2Array near_miss = grid->query_predictive_separation_batch(
+			positions, velocities, sources, 1.5, 2.0, 8, 1.0);
+	REQUIRE(near_miss.size() == 2);
+	CHECK(near_miss[0].x == real_t(0.0));
+	CHECK(near_miss[0].y > real_t(0.5));
+	CHECK(near_miss[1].x == real_t(0.0));
+	CHECK(near_miss[1].y < real_t(-0.5));
 }
 
 TEST_CASE("[AIProximityGrid2D] Predictions retain zero-horizon parity and static overlap ties") {
