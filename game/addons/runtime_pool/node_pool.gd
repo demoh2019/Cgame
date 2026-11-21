@@ -45,6 +45,40 @@ func prewarm(target: int) -> int:
 	return added
 
 
+
+## Niagara-inspired frame-sliced resident pool maintenance. Positive return
+## means created, negative means idle nodes freed. Target includes checked-out
+## objects; no active VFX is removed and every call is bounded to 64 changes.
+func maintain_residency(target_total: int, max_changes: int = 2) -> int:
+	if target_total < 0 or target_total > 4096 or max_changes < 0 or max_changes > 64 or max_changes == 0:
+		return 0
+	_prune_invalid()
+	var current: int = _active.size() + _idle.size()
+	if current < target_total:
+		if template == null:
+			return 0
+		var to_create: int = mini(mini(target_total - current, max_changes), max_idle - _idle.size())
+		var created: int = 0
+		for i in to_create:
+			var instance: Node = _new_instance()
+			if instance == null:
+				break
+			_idle.append(instance)
+			created += 1
+		return created
+	if current > target_total:
+		var to_free: int = mini(mini(current - target_total, max_changes), _idle.size())
+		var freed: int = 0
+		for i in to_free:
+			var instance: Node = _idle.pop_back()
+			if is_instance_valid(instance) and not instance.is_queued_for_deletion():
+				instance.free()
+				_disposed_total += 1
+				freed += 1
+		return -freed
+	return 0
+
+
 ## Acquire one node under a gameplay parent; null when unavailable.
 func acquire(parent_node: Node) -> Node:
 	if not is_instance_valid(parent_node) or parent_node.is_queued_for_deletion() or template == null:

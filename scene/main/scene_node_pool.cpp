@@ -67,6 +67,7 @@ void SceneNodePool::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "prewarm_on_ready"), "set_prewarm_on_ready", "is_prewarm_on_ready");
 
 	ClassDB::bind_method(D_METHOD("prewarm", "count"), &SceneNodePool::prewarm);
+	ClassDB::bind_method(D_METHOD("maintain_residency", "target_total", "max_changes"), &SceneNodePool::maintain_residency, DEFVAL(2));
 	ClassDB::bind_method(D_METHOD("acquire", "parent"), &SceneNodePool::acquire);
 	ClassDB::bind_method(D_METHOD("release", "instance"), &SceneNodePool::release);
 	ClassDB::bind_method(D_METHOD("release_deferred", "instance"), &SceneNodePool::release_deferred);
@@ -161,6 +162,54 @@ int SceneNodePool::prewarm(int p_target) {
 		added++;
 	}
 	return added;
+}
+
+
+int SceneNodePool::maintain_residency(int p_target_total, int p_max_changes) {
+	// A malformed request must never create or delete pooled nodes.
+	if (p_target_total < 0 || p_target_total > 4096 ||
+			p_max_changes < 0 || p_max_changes > 64 || p_max_changes == 0) {
+		return 0;
+	}
+	_prune_active();
+	_prune_idle();
+	const int live_total = int(active.size()) + idle.size();
+	if (live_total < p_target_total) {
+		// Do not create idle objects merely because existing instances are
+		// checked out. The total footprint is the true residency target.
+		if (template_scene.is_null()) {
+			return 0;
+		}
+		const int to_create = MIN(MIN(p_target_total - live_total, p_max_changes), max_idle - idle.size());
+		int created = 0;
+		for (int i = 0; i < to_create; i++) {
+			Node *instance = _new_instance();
+			if (instance == nullptr) {
+				break;
+			}
+			idle.push_back(instance->get_instance_id());
+			created++;
+		}
+		return created;
+	}
+	if (live_total > p_target_total) {
+		// Cache shrink touches only detached idle scenes. Active gameplay
+		// effects always finish naturally before they can be recycled.
+		const int to_release = MIN(MIN(live_total - p_target_total, p_max_changes), idle.size());
+		int removed = 0;
+		for (int i = 0; i < to_release; i++) {
+			const ObjectID id = idle[idle.size() - 1];
+			idle.remove_at(idle.size() - 1);
+			Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(id));
+			if (instance != nullptr && !instance->is_queued_for_deletion()) {
+				memdelete(instance);
+				disposed_total++;
+				removed++;
+			}
+		}
+		return -removed;
+	}
+	return 0;
 }
 
 Node *SceneNodePool::acquire(Node *p_parent) {

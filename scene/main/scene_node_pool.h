@@ -77,6 +77,10 @@ public:
 	bool is_prewarm_on_ready() const { return prewarm_on_ready; }
 
 	int prewarm(int p_target);
+	// Signed number of instances created (+) or idle instances disposed (-).
+	// Target applies to all live leases + idle cache; never evicts checked-out
+	// instances. Work is bounded to at most 64 changes per invocation.
+	int maintain_residency(int p_target_total, int p_max_changes = 2);
 	Node *acquire(Node *p_parent);
 	bool release(Node *p_instance);
 	void release_deferred(Node *p_instance);

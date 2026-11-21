@@ -121,4 +121,72 @@ TEST_CASE("[SceneNodePool] Cannot change template while checked out") {
 	memdelete(host);
 }
 
+
+TEST_CASE("[SceneNodePool] Incremental residency honors per-frame budget and protects active leases") {
+	Ref<PackedScene> scene;
+	scene.instantiate();
+	Node *source = memnew(Node);
+	REQUIRE(scene->pack(source) == OK);
+	memdelete(source);
+
+	SceneNodePool pool;
+	pool.set_template_scene(scene);
+	pool.set_max_idle(6);
+	pool.set_max_active(2);
+	pool.set_prewarm_on_ready(false);
+	CHECK(pool.maintain_residency(-1, 2) == 0);
+	CHECK(pool.maintain_residency(4097, 2) == 0);
+	CHECK(pool.maintain_residency(6, -1) == 0);
+	CHECK(pool.maintain_residency(6, 65) == 0);
+	CHECK(pool.maintain_residency(6, 0) == 0);
+	CHECK(pool.get_idle_count() == 0);
+	CHECK(pool.maintain_residency(6, 2) == 2);
+	CHECK(pool.maintain_residency(6, 2) == 2);
+	CHECK(pool.maintain_residency(6, 2) == 2);
+	CHECK(pool.maintain_residency(6, 2) == 0);
+	CHECK(pool.get_idle_count() == 6);
+	CHECK(int(pool.get_stats()["created_total"]) == 6);
+
+	Node *host = memnew(Node);
+	Node *a = pool.acquire(host);
+	Node *b = pool.acquire(host);
+	REQUIRE(a != nullptr);
+	REQUIRE(b != nullptr);
+	CHECK(pool.get_active_count() == 2);
+	CHECK(pool.get_idle_count() == 4);
+	CHECK(pool.maintain_residency(6, 2) == 0);
+	CHECK(int(pool.get_stats()["created_total"]) == 6);
+	CHECK(pool.release(a));
+	CHECK(pool.release(b));
+	CHECK(pool.get_active_count() == 0);
+	CHECK(pool.get_idle_count() == 6);
+
+	CHECK(pool.maintain_residency(2, 1) == -1);
+	CHECK(pool.maintain_residency(2, 1) == -1);
+	CHECK(pool.maintain_residency(2, 2) == -2);
+	CHECK(pool.maintain_residency(2, 2) == 0);
+	CHECK(pool.get_idle_count() == 2);
+	CHECK(int(pool.get_stats()["disposed_total"]) == 4);
+
+	a = pool.acquire(host);
+	b = pool.acquire(host);
+	REQUIRE(a != nullptr);
+	REQUIRE(b != nullptr);
+	CHECK(pool.maintain_residency(0, 2) == 0);
+	CHECK(pool.get_active_count() == 2); // Never disposes checked-out nodes.
+	CHECK(pool.release(a));
+	CHECK(pool.maintain_residency(0, 2) == -1);
+	CHECK(pool.get_active_count() == 1);
+	CHECK(pool.release(b));
+	CHECK(pool.maintain_residency(0, 2) == -1);
+	CHECK(pool.get_idle_count() == 0);
+	CHECK(int(pool.get_stats()["disposed_total"]) == 6);
+	memdelete(host);
+
+	// No scene template: a maintenance query cannot spawn anything.
+	SceneNodePool empty;
+	CHECK(empty.maintain_residency(8, 2) == 0);
+}
+
+
 } // namespace TestSceneNodePool
