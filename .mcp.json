@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "cgame": {
+      "command": "python3",
+      "args": ["tools/cgame_mcp_stdio.py"]
+    }
+  }
+}

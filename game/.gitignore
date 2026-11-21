@@ -16,3 +16,4 @@ assets/models/polyhaven/*/*.bin
 
 # Production secrets for the accounts backend.
 /backend/.env
+.cgame_mcp.json
