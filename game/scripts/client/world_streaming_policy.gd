@@ -198,7 +198,7 @@ static func format_focus_streaming_status(status: Dictionary) -> String:
 	var progress: float = float(status.get("progress", 0.0))
 	if not is_finite(progress):
 		progress = 0.0
-	return "WORLD STREAMING: %d%% (%d chunks remaining)" % [
+	return "WORLD STREAMING: %d%% | pending %d" % [
 		roundi(clampf(progress, 0.0, 1.0) * 100.0), pending]
 
 
