@@ -32,6 +32,8 @@
 
 #include "core/object/ref_counted.h"
 
+#include <cstdint>
+
 // Stateless, deterministic time-slot scheduler for heavy AI decisions.
 // A stable hashed slot spreads NPC decisions over an N-tick cycle without
 // per-agent dictionaries, wall-clock dependencies, or frame-order bias.
