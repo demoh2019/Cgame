@@ -61,6 +61,31 @@ func run(t) -> void:
 	t.eq(no_threats[0], Vector2(8, 0), "no threats preserves source order")
 	t.eq(no_threats[1], Vector2(16, 0), "empty threats still respects spacing")
 
+
+	t.current = "native occupancy contexts exclude all living infected without bypassing guards"
+	var blocked: Array[Vector2] = [Vector2(25, 0)]
+	var script_filtered: Array[Vector2] = RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, false, blocked, 4.0)
+	var native_filtered: Array[Vector2] = RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true, blocked, 4.0)
+	t.eq(native_filtered, script_filtered, "occupied site filtering agrees on stock Godot and Cgame")
+	t.eq(script_filtered.size(), 2, "two legal reinforcement positions remain after occupancy filtering")
+	t.check(not script_filtered.has(blocked[0]),
+		"occupied highest-scoring site is rejected before reinforcement selection")
+	if script_filtered.size() == 2:
+		t.check(script_filtered[0].distance_to(script_filtered[1]) >= 4.0,
+			"occupied-site filtering preserves minimum separation")
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true, blocked, INF),
+		[], "nonfinite exclusion radius cannot return server-owned spawn sites")
+	var many_occupied: Array[Vector2] = []
+	for i in 128:
+		many_occupied.append(Vector2(1000.0 + float(i), 0.0))
+	many_occupied.append(Vector2(25, 0)) # The 129th context must never be truncated.
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true, many_occupied, 4.0),
+		script_filtered, "large exclusion lists check the final infected through fallback")
+
 	t.current = "server only, genuine infected, safe coordinates"
 	var world := FlatWorld.new()
 	var server := GameServer.new(world, 721)
@@ -89,6 +114,9 @@ func run(t) -> void:
 		t.eq(world.zone_at(site.x, site.y), 2, "adds stay in encounter zone")
 		t.check(site.distance_to(Vector2(fighter.position.x, fighter.position.z))
 			>= RaidReinforcements.MIN_PLAYER_DISTANCE, "adds cannot spawn onto players")
+		t.check(site.distance_to(Vector2(boss.position.x, boss.position.z))
+			>= RaidReinforcements.MIN_INFECTED_DISTANCE,
+			"native or fallback occupancy filter prevents spawn inside the living boss")
 	boss.health = 390.0
 	server._tick_raid_encounter()
 	t.eq(server.raid_wave, 1, "server starts phase 1 from actual boss health")

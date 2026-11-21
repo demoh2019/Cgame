@@ -47,6 +47,8 @@ class EnvironmentQuery3D : public Resource {
 	Vector3 origin;
 	Vector3 threat_position;
 	PackedVector3Array threat_positions; // Up to 32 optional multi-actor threat contexts.
+	PackedVector3Array exclusion_positions; // Up to 128 occupied positions for clearance filtering.
+	double min_exclusion_distance = 0.0; // Zero disables this optional filter.
 	bool use_threat = false;
 	bool horizontal_only = false;
 	double min_distance = 0.0;
@@ -70,6 +72,10 @@ public:
 	Vector3 get_threat_position() const { return threat_position; }
 	void set_threat_positions(const PackedVector3Array &p_positions);
 	PackedVector3Array get_threat_positions() const { return threat_positions; }
+	void set_exclusion_positions(const PackedVector3Array &p_positions);
+	PackedVector3Array get_exclusion_positions() const { return exclusion_positions; }
+	void set_min_exclusion_distance(double p_distance);
+	double get_min_exclusion_distance() const { return min_exclusion_distance; }
 	void set_use_threat(bool p_enabled) { use_threat = p_enabled; emit_changed(); }
 	bool is_using_threat() const { return use_threat; }
 	void set_horizontal_only(bool p_enabled) { horizontal_only = p_enabled; emit_changed(); }

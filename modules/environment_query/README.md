@@ -94,3 +94,26 @@ uses this native API on Cgame binaries. It only sends server-vetted positions
 after terrain, water, player distance and occupancy checks. Stock Godot and
 older Cgame binaries continue to use an equivalent stable GDScript algorithm.
 The native query does not replace the server's trust boundary.
+
+## Optional occupancy exclusion contexts
+
+`exclusion_positions` supplies up to 128 **known** finite world-space positions;
+`min_exclusion_distance` rejects candidates closer than that radius to
+**any** such point. A zero radius disables the filter. The boundary is
+inclusive, and `horizontal_only` also controls exclusion distance.
+The same exclusion test runs in `query()`, `query_positions()`,
+`query_top_positions()`, and `query_spread_positions()`; it is performed
+before weighted threat scoring, with worst-case O(N * 128) checks for N
+candidates. Invalid arrays or nonfinite/negative radii leave prior settings
+unchanged.
+
+```gdscript
+query.exclusion_positions = PackedVector3Array([other_enemy.global_position])
+query.min_exclusion_distance = 3.5
+var spawn_points := query.query_spread_positions(2, 5.0)
+```
+
+This is an explicit geometric filter, **not** automatic physics overlap
+detection, line of sight, or navigation validation. Albion After's authoritative
+raid reinforcements supply living infected positions and preserve deterministic
+stock-Godot fallback when more than 128 contexts are present.
