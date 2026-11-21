@@ -246,7 +246,8 @@ TEST_CASE("[AIProximityGrid2D] Cross-set broadphase preserves inclusive radii an
 	const PackedInt32Array second = found[1];
 	CHECK(second.size() == 1);
 	CHECK(second[0] == 2);
-	CHECK(PackedInt32Array(found[2]).is_empty());
+	const PackedInt32Array third = found[2];
+	CHECK(third.is_empty());
 	CHECK(grid->query_cross_radius_batch(sources, targets, 5.0, 5.0) == found);
 }
 
