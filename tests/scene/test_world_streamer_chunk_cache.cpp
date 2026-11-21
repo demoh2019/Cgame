@@ -13,10 +13,18 @@ namespace TestWorldStreamerChunkCache {
 TEST_CASE("[WorldStreamer] Procedural chunk cache is opt-in and bounded") {
 	WorldStreamer *streamer = memnew(WorldStreamer);
 	CHECK(streamer->get_max_cached_chunks() == 0);
+	CHECK(streamer->get_max_cached_chunk_bytes() == 0);
+	CHECK(streamer->get_cached_chunk_bytes() == 0);
 	CHECK(streamer->get_cached_chunk_count() == 0);
 	CHECK(streamer->get_chunk_cache_hit_count() == 0);
 	CHECK(streamer->get_chunk_cache_eviction_count() == 0);
 
+	streamer->set_max_cached_chunk_bytes(-100);
+	CHECK(streamer->get_max_cached_chunk_bytes() == 0);
+	streamer->set_max_cached_chunk_bytes(9999999999LL);
+	CHECK(streamer->get_max_cached_chunk_bytes() == 268435456);
+	streamer->set_max_cached_chunk_bytes(8 * 1048576);
+	CHECK(streamer->get_max_cached_chunk_bytes() == 8 * 1048576);
 	streamer->set_max_cached_chunks(500);
 	CHECK(streamer->get_max_cached_chunks() == 16);
 	streamer->set_max_cached_chunks(-1);

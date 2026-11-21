@@ -419,6 +419,11 @@ void WorldStreamer::set_max_cached_chunk_bytes(int64_t p_bytes) {
 	if (max_cached_chunk_bytes == bounded) {
 		return;
 	}
+	// Entries admitted while size tracking was disabled carry no estimate.
+	// Discard them before enforcing a newly enabled memory budget.
+	if (max_cached_chunk_bytes == 0 && bounded > 0) {
+		_discard_cached_chunks();
+	}
 	max_cached_chunk_bytes = bounded;
 	_trim_cached_chunks();
 }
