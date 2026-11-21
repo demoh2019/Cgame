@@ -38,12 +38,35 @@ void AudioVoiceAdmissionPlanner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("select_victim", "voices", "name", "new_db",
 			"new_priority", "max_voices", "same_sound_max"),
 			&AudioVoiceAdmissionPlanner::select_victim, DEFVAL(24), DEFVAL(5));
+	ClassDB::bind_method(D_METHOD("select_victim_stable", "voices", "name", "new_db",
+			"new_priority", "max_voices", "same_sound_max", "min_voice_age", "early_override_db"),
+			&AudioVoiceAdmissionPlanner::select_victim_stable,
+			DEFVAL(24), DEFVAL(5), DEFVAL(0.12), DEFVAL(12.0));
 }
 
 int AudioVoiceAdmissionPlanner::select_victim(const Array &p_voices,
 		const String &p_new_name, double p_new_db, int p_new_priority,
 		int p_max_voices, int p_same_sound_max) const {
-	if (p_new_name.is_empty() || !Math::is_finite(p_new_db) ||
+	return _select_victim_internal(p_voices, p_new_name, p_new_db, p_new_priority,
+			p_max_voices, p_same_sound_max, 0.0, 0.0);
+}
+
+int AudioVoiceAdmissionPlanner::select_victim_stable(const Array &p_voices,
+		const String &p_new_name, double p_new_db, int p_new_priority,
+		int p_max_voices, int p_same_sound_max, double p_min_voice_age,
+		double p_early_override_db) const {
+	return _select_victim_internal(p_voices, p_new_name, p_new_db, p_new_priority,
+			p_max_voices, p_same_sound_max, p_min_voice_age, p_early_override_db);
+}
+
+int AudioVoiceAdmissionPlanner::_select_victim_internal(const Array &p_voices,
+		const String &p_new_name, double p_new_db, int p_new_priority,
+		int p_max_voices, int p_same_sound_max, double p_min_voice_age,
+		double p_early_override_db) const {
+	if (!Math::is_finite(p_min_voice_age) || p_min_voice_age < 0.0 ||
+			p_min_voice_age > 5.0 || !Math::is_finite(p_early_override_db) ||
+			p_early_override_db < 0.0 || p_early_override_db > 60.0 ||
+			p_new_name.is_empty() || !Math::is_finite(p_new_db) ||
 			p_new_priority < 0 || p_new_priority > 3 ||
 			p_max_voices < 1 || p_max_voices > 128 ||
 			p_same_sound_max < 1 || p_same_sound_max > p_max_voices ||
@@ -106,15 +129,32 @@ int AudioVoiceAdmissionPlanner::select_victim(const Array &p_voices,
 	if (candidates.is_empty()) {
 		return DROP_NEW;
 	}
-	int victim = candidates[0];
+	int victim = -1;
 	for (const int id : candidates) {
-		const Voice &a = voices[id], &b = voices[victim];
+		const Voice &a = voices[id];
+		// A lower-priority voice is always preemptible by important events.
+		// Equal-priority voices get a brief opening transient unless the
+		// newcomer is much more audible. The same-name cap still applies.
+		const bool higher_priority_override = p_new_priority > a.priority;
+		const bool loudness_override = p_new_priority == a.priority &&
+				p_new_db >= a.db + p_early_override_db;
+		if (a.age < p_min_voice_age && !higher_priority_override && !loudness_override) {
+			continue;
+		}
+		if (victim < 0) {
+			victim = id;
+			continue;
+		}
+		const Voice &b = voices[victim];
 		if (a.priority < b.priority ||
 				(a.priority == b.priority && (
 						(Math::abs(a.db - b.db) < 0.5 && a.age > b.age) ||
 						(Math::abs(a.db - b.db) >= 0.5 && a.db < b.db)))) {
 			victim = id;
 		}
+	}
+	if (victim < 0) {
+		return DROP_NEW;
 	}
 	if (p_new_priority < voices[victim].priority ||
 			(p_new_priority == voices[victim].priority &&
