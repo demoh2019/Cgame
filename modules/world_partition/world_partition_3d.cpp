@@ -754,6 +754,7 @@ bool WorldPartition3D::mark_cell_navigation_dirty(const Vector2i &p_cell) {
 		return false;
 	}
 	navigation_dirty_cells.insert(p_cell);
+	navigation_mesh_generation++; // Invalidate cached routes immediately, not only after rebuild.
 	return true;
 }
 
