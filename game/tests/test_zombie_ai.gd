@@ -70,6 +70,24 @@ func run(t) -> void:
 		t.near(remote_a.think_timer, 0.25, 0.0001,
 			"stock Godot preserves original passive target scan cadence")
 
+	t.current = "Aggression interrupts distant passive AI LOD for authoritative threat"
+	var hit_remote := Zombie.new(165, "walker", Vector3(0, ground, 0))
+	hit_remote.think(world, _players(Vector3(100, ground, 0)), 0.05, rng)
+	t.check(not hit_remote.take_damage(1.0, 1),
+		"verified nonlethal attack registers server combat threat")
+	t.near(hit_remote.think_timer, 0.0, 0.0001,
+		"confirmed damage interrupts any previously scheduled passive LOD")
+	hit_remote.think(world, _players(Vector3(12, ground, 0)), 0.05, rng)
+	t.eq(hit_remote.target_id, 1,
+		"attacker is selected on the next authoritative tick")
+	var rejected_damage := Zombie.new(166, "walker", Vector3(0, ground, 0))
+	rejected_damage.think(world, _players(Vector3(100, ground, 0)), 0.05, rng)
+	var previously_scheduled: float = rejected_damage.think_timer
+	t.check(not rejected_damage.take_damage(-1.0, 1),
+		"invalid negative attack does not register as damage")
+	t.near(rejected_damage.think_timer, previously_scheduled, 0.0001,
+		"invalid untrusted damage cannot force target recalculation")
+
 	t.current = "noise attracts infected"
 	z = Zombie.new(80, "walker", Vector3(0, ground, 0))
 	players = _players(Vector3(20, ground, 0))
