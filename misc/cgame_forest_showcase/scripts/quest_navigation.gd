@@ -52,3 +52,23 @@ static func sync_streaming_source(stream: WorldPartition3D, target: Node3D) -> b
         stream.remove_streaming_source(SOURCE_NAME)
         return true
     return stream.set_streaming_source(SOURCE_NAME, target.global_position, 0, STREAMING_PRIORITY)
+
+
+static func cell_route(stream: WorldPartition3D,
+        from_world: Vector3, to_world: Vector3, loaded_only: bool = false) -> Array:
+    # Native bounded grid routing; this is a topology hint, not a navmesh.
+    if not is_instance_valid(stream):
+        return []
+    var from_cell: Vector2i = stream.local_position_to_cell(stream.to_local(from_world))
+    var to_cell: Vector2i = stream.local_position_to_cell(stream.to_local(to_world))
+    return stream.find_cell_path(from_cell, to_cell, loaded_only)
+
+
+static func next_cell_waypoint(stream: WorldPartition3D, route: Array) -> Vector3:
+    # The intermediate waypoint must be inside a registered corridor cell.
+    # For a last-cell hop use the actual quest target instead.
+    if not is_instance_valid(stream) or route.size() < 3:
+        return Vector3.ZERO
+    var next_cell: Vector2i = route[1]
+    var half: float = stream.cell_size * 0.5
+    return stream.to_global(stream.cell_to_local_position(next_cell) + Vector3(half, 0, half))

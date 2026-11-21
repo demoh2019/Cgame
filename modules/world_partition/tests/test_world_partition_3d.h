@@ -837,4 +837,45 @@ TEST_CASE("[WorldPartition3D] Navigation scheduler validates caps, ownership and
 	memdelete(world);
 }
 
+
+TEST_CASE("[WorldPartition3D] Bounded cardinal cell routes handle gaps, loading and extreme coordinates") {
+	WorldPartition3D *world = memnew(WorldPartition3D);
+	const String placeholder = "res://tests/cell_route_placeholder.tscn";
+	CHECK(world->find_cell_path(Vector2i(), Vector2i()).is_empty());
+	world->set_cell_scene(Vector2i(0, 0), placeholder);
+	world->set_cell_scene(Vector2i(0, 1), placeholder);
+	world->set_cell_scene(Vector2i(1, 1), placeholder);
+	world->set_cell_scene(Vector2i(2, 1), placeholder);
+	world->set_cell_scene(Vector2i(2, 0), placeholder);
+
+	Array path = world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0));
+	REQUIRE(path.size() == 5); // No (1,0), must go around the gap.
+	CHECK(path[0] == Vector2i(0, 0));
+	CHECK(path[1] == Vector2i(0, 1));
+	CHECK(path[2] == Vector2i(1, 1));
+	CHECK(path[3] == Vector2i(2, 1));
+	CHECK(path[4] == Vector2i(2, 0));
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(0, 0)).size() == 1);
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0), true).is_empty()); // Configured but not instantiated.
+	CHECK(world->find_cell_path(Vector2i(999, 0), Vector2i(2, 0)).is_empty());
+
+	world->remove_cell_scene(Vector2i(1, 1));
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0)).is_empty());
+
+	// Grids close to 32-bit limits must not wrap when expanding neighbors.
+	world->clear_cell_scenes();
+	const Vector2i extreme(int32_t(2147483647), int32_t(-2147483647 - 1));
+	world->set_cell_scene(extreme, placeholder);
+	CHECK(world->find_cell_path(extreme, extreme).size() == 1);
+	CHECK(world->find_cell_path(extreme, Vector2i()).is_empty());
+
+	world->clear_cell_scenes();
+	for (int i = 0; i <= 512; i++) {
+		world->set_cell_scene(Vector2i(i, 0), placeholder);
+	}
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(512, 0)).is_empty()); // Bounded to 512 visited.
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(1, 0)).size() == 2);
+	memdelete(world);
+}
+
 } // namespace TestWorldPartition3D
