@@ -64,6 +64,11 @@
 			<param index="0" name="lane" type="StringName" />
 			<description>Returns the learned exponential moving average cost in microseconds, 0 if unsampled, or -1 for an unknown lane. Measurements are supplied explicitly through [method record_cost].</description>
 		</method>
+		<method name="get_lane_last_frame_cost_us" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="lane" type="StringName" />
+			<description>Returns caller-reported CPU microseconds for this lane in the previous completed frame, 0 if idle, or -1 if unknown. Current-frame measurements are not exposed partially. This is distinct from the learned cost estimate and does not measure GPU time. Reset clears the sample.</description>
+		</method>
 		<method name="get_reserved_estimated_cost_us" qualifiers="const">
 			<return type="int" />
 			<description>Returns the sum of learned costs for lanes reserved at the last [method begin_frame] call. This is a scheduling estimate, not an actual CPU/GPU timer.</description>
