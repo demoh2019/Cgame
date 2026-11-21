@@ -172,6 +172,27 @@ bool GameplayTagContainer::has_any(const PackedStringArray &p_tags, bool p_exact
 	return false;
 }
 
+int GameplayTagContainer::count_matching_queries(const PackedStringArray &p_queries, bool p_exact) const {
+	// Each *distinct query* contributes at most once. A parent and a child
+	// query can both match; duplicate copies of either cannot double-count.
+	Vector<StringName> seen;
+	int matches = 0;
+	for (const String &query : p_queries) {
+		if (query.is_empty()) {
+			continue;
+		}
+		const StringName name = query;
+		if (seen.has(name)) {
+			continue;
+		}
+		seen.push_back(name);
+		if (has_tag(name, p_exact)) {
+			matches++;
+		}
+	}
+	return matches;
+}
+
 bool GameplayTagContainer::has_all(const PackedStringArray &p_tags, bool p_exact) const {
 	for (const String &s : p_tags) {
 		if (!has_tag(StringName(s), p_exact)) {
@@ -211,6 +232,7 @@ void GameplayTagContainer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear"), &GameplayTagContainer::clear);
 	ClassDB::bind_method(D_METHOD("has_tag", "tag", "exact"), &GameplayTagContainer::has_tag, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("has_any", "tags", "exact"), &GameplayTagContainer::has_any, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("count_matching_queries", "queries", "exact"), &GameplayTagContainer::count_matching_queries, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("has_all", "tags", "exact"), &GameplayTagContainer::has_all, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_tag_count"), &GameplayTagContainer::get_tag_count);
 	ClassDB::bind_method(D_METHOD("is_empty"), &GameplayTagContainer::is_empty);
@@ -218,6 +240,14 @@ void GameplayTagContainer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_tags"), &GameplayTagContainer::get_tags);
 
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "tags"), "set_tags", "get_tags");
+}
+
+void GameplayTagQuery::set_min_any_matches(int p_count) {
+	ERR_FAIL_COND_MSG(p_count < 1 || p_count > 64, "min_any_matches must be between 1 and 64.");
+	if (min_any_matches != p_count) {
+		min_any_matches = p_count;
+		emit_changed();
+	}
 }
 
 bool GameplayTagQuery::matches(const Ref<GameplayTagContainer> &p_container) const {
@@ -228,7 +258,7 @@ bool GameplayTagQuery::matches(const Ref<GameplayTagContainer> &p_container) con
 	if (!c->has_all(all_tags, exact)) {
 		return false;
 	}
-	if (!any_tags.is_empty() && !c->has_any(any_tags, exact)) {
+	if (!any_tags.is_empty() && c->count_matching_queries(any_tags, exact) < min_any_matches) {
 		return false;
 	}
 	if (!none_tags.is_empty() && c->has_any(none_tags, exact)) {
@@ -288,6 +318,8 @@ void GameplayTagQuery::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_none_tags"), &GameplayTagQuery::get_none_tags);
 	ClassDB::bind_method(D_METHOD("set_exact", "exact"), &GameplayTagQuery::set_exact);
 	ClassDB::bind_method(D_METHOD("is_exact"), &GameplayTagQuery::is_exact);
+	ClassDB::bind_method(D_METHOD("set_min_any_matches", "count"), &GameplayTagQuery::set_min_any_matches);
+	ClassDB::bind_method(D_METHOD("get_min_any_matches"), &GameplayTagQuery::get_min_any_matches);
 	ClassDB::bind_method(D_METHOD("set_min_stack_count", "count"), &GameplayTagQuery::set_min_stack_count);
 	ClassDB::bind_method(D_METHOD("get_min_stack_count"), &GameplayTagQuery::get_min_stack_count);
 	ClassDB::bind_method(D_METHOD("matches", "container"), &GameplayTagQuery::matches);
@@ -297,5 +329,6 @@ void GameplayTagQuery::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "any_tags"), "set_any_tags", "get_any_tags");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "none_tags"), "set_none_tags", "get_none_tags");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "exact"), "set_exact", "is_exact");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "min_any_matches", PROPERTY_HINT_RANGE, "1,64,1"), "set_min_any_matches", "get_min_any_matches");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "min_stack_count", PROPERTY_HINT_RANGE, "1,65535,1"), "set_min_stack_count", "get_min_stack_count");
 }
