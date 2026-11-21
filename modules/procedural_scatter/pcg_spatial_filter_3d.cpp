@@ -369,7 +369,7 @@ PackedInt32Array PCGSpatialFilter3D::filter_indices_density(
 				Math::abs(double(point.y)) > MAX_COORDINATE ||
 				Math::abs(double(point.z)) > MAX_COORDINATE ||
 				!Math::is_finite(density) || density < 0.0 || density > 1.0 ||
-				stable_id < 0 || seen_ids.has(stable_id)) {
+				stable_id < 0 || uint64_t(stable_id) >= MODULUS || seen_ids.has(stable_id)) {
 			return PackedInt32Array();
 		}
 		seen_ids.insert(stable_id);
