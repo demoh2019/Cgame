@@ -209,6 +209,29 @@ func run(t) -> void:
                 "server trace reports nonnegative decision CPU microseconds")
         t.check(not bool(untraced.get_ai_trace_snapshot().get("enabled", false)),
             "other NPCs remain untraced independently")
+        t.eq(traced.get_ai_trace_history_frames().size(), 1,
+            "opted-in NPC remembers its first authoritative decision tick")
+        traced.think_timer = 0.0
+        traced.think(world, trace_players, 0.1, rng)
+        t.eq(traced.get_ai_trace_history_frames().size(), 2,
+            "second server decision creates the next replay frame")
+        t.check(not traced.get_ai_slowest_trace_nodes(1).is_empty(),
+            "on-demand native server hotspots include real target-selection work")
+        var changed: Array = traced.get_ai_trace_history_frames(true)
+        t.check(not changed.is_empty(),
+            "server can request meaningful decision changes without CPU jitter")
+        # The bounded replay buffer must never grow with server uptime.
+        for extra_tick in 10:
+            traced.think_timer = 2.0 # Avoid making a new selection unnecessarily.
+            traced.think(world, trace_players, 0.01, rng)
+        t.eq(traced.get_ai_trace_history_frames().size(), 8,
+            "server history is capped at eight ticks for one opted-in NPC")
+        var server_history_debug: Dictionary = traced.get_ai_debug_snapshot()
+        t.check(server_history_debug.has("trace_history") and
+            server_history_debug.has("slowest_ai_phases"),
+            "server-only debug output exposes bounded replay and CPU hotspots")
+        t.eq(untraced.get_ai_trace_history_frames().size(), 0,
+            "untraced NPCs do not allocate per-tick histories")
         var traced_visual: Dictionary = traced.get_ai_state_visual_snapshot()
         var traced_visual_nodes: Array = traced_visual.get("nodes", [])
         if traced_visual_nodes.size() == 8:
@@ -222,9 +245,15 @@ func run(t) -> void:
         traced.think(world, trace_players, 0.1, rng)
         t.check(not bool(traced.get_ai_trace_snapshot().get("enabled", false)),
             "disabled server traces remain empty")
+        t.eq(traced.get_ai_trace_history_frames().size(), 0,
+            "disabling tracing releases all replay history")
     else:
         t.check(traced.get_ai_trace_snapshot().get("steps", []).is_empty(),
             "stock Godot has a safe empty trace fallback")
+        t.check(traced.get_ai_trace_history_frames().is_empty(),
+            "stock Godot safely returns no native replay history")
+        t.check(traced.get_ai_slowest_trace_nodes().is_empty(),
+            "stock Godot safely returns no native CPU hotspot reports")
 
     t.current = "Server AI inspector renders real zombie state machine without leaking clients"
     var visual: Dictionary = traced.get_ai_state_visual_snapshot()
