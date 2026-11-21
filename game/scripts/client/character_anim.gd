@@ -4,6 +4,7 @@ extends RefCounted
 
 const UP := Vector3.UP
 const CombatAnimationPriority = preload("res://scripts/client/combat_animation_priority.gd")
+static var _native_tier_planner: Object = null
 
 # --- Animation LOD / crowd budget (Unreal URO / Unity Animator Culling) --------------------------------------------------
 
@@ -47,6 +48,54 @@ static func assign_tiers(distances: Array, budget: int) -> PackedInt32Array:
 				tier = 1
 		out[index] = tier
 	return out
+
+
+## Batch-selects pose tiers. Native Cgame does bounded top-K on numeric
+## arrays; stock Godot uses an equivalent deterministic GDScript fallback.
+static func plan_crowd_tiers(distances: PackedFloat64Array, priority_flags: PackedByteArray,
+		full_slots: int, priority_slots: int, prefer_native: bool = true) -> PackedInt32Array:
+	var count: int = distances.size()
+	if count != priority_flags.size() or count > 16384 or full_slots < 0 or full_slots > 256 \
+			or priority_slots < 0 or priority_slots > 256:
+		return PackedInt32Array()
+	for distance in distances:
+		if not is_finite(distance) or distance < 0.0:
+			return PackedInt32Array()
+	if prefer_native and ClassDB.class_exists("CrowdAnimationTierPlanner"):
+		if _native_tier_planner == null:
+			_native_tier_planner = ClassDB.instantiate("CrowdAnimationTierPlanner")
+		if _native_tier_planner != null and _native_tier_planner.has_method("plan_tiers"):
+			var native_tiers: PackedInt32Array = _native_tier_planner.call(
+				"plan_tiers", distances, priority_flags, full_slots, priority_slots)
+			if native_tiers.size() == count:
+				return native_tiers
+	# Stable ties by input index. The script path is intentionally simple;
+	# the C++ path avoids sorting every actor in the world each frame.
+	var order: Array[int] = []
+	for i in count:
+		order.append(i)
+	order.sort_custom(func(a: int, b: int) -> bool:
+		return distances[a] < distances[b] if distances[a] != distances[b] else a < b)
+	var tiers := PackedInt32Array()
+	tiers.resize(count)
+	var granted_full: int = 0
+	for index in order:
+		var tier: int = lod_tier(distances[index])
+		if tier == 0:
+			if granted_full < full_slots:
+				granted_full += 1
+			else:
+				tier = 1
+		tiers[index] = tier
+	var granted_priority: int = 0
+	for index in order:
+		if granted_priority >= priority_slots:
+			break
+		if priority_flags[index] == 0 or distances[index] >= 90.0:
+			continue
+		tiers[index] = mini(tiers[index], 1)
+		granted_priority += 1
+	return tiers
 
 
 # --- Smoothing / springs --------------------------------------------------------------------------------------------------
@@ -194,28 +243,23 @@ static func layerable(animation_name: String, moving: bool, zombie: bool) -> boo
 static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: Callable) -> void:
 	if camera == null or models.is_empty():
 		return
-	var cam := camera.global_position
-	var distances: Array = []
+	var cam: Vector3 = camera.global_position
+	var distances := PackedFloat64Array()
+	var priority_mask := PackedByteArray()
 	for model in models:
-		distances.append(model.global_position.distance_to(cam))
-	var tiers := assign_tiers(distances, full_budget(quality))
-	# Stock Godot fallback: maintain full-rate poses (without procedural IK)
-	# for a bounded number of visible critical enemies. Native Cgame owns
-	# its own priority scheduler and must not be driven twice.
-	var preferred: Array[int] = []
-	for i in models.size():
-		var model = models[i]
-		if bool(model.get("external_anim_lod")) or not bool(
-				model.get_meta("aa_combat_animation_priority", false)):
-			continue
-		if float(distances[i]) < 90.0 and camera.is_position_in_frustum(
-				model.global_position + Vector3.UP):
-			preferred.append(i)
-	preferred.sort_custom(func(a: int, b: int) -> bool:
-		return float(distances[a]) < float(distances[b]))
-	var slots: int = mini(CombatAnimationPriority.slots(quality), preferred.size())
-	for j in slots:
-		tiers[preferred[j]] = mini(tiers[preferred[j]], 1)
+		var distance: float = model.global_position.distance_to(cam)
+		distances.append(distance)
+		# Combat urgency is visual-only, and the native mixer controller
+		# already handles critical poses when external_anim_lod is enabled.
+		var critical: bool = not bool(model.get("external_anim_lod")) \
+			and bool(model.get_meta("aa_combat_animation_priority", false)) \
+			and distance < 90.0 and camera.is_position_in_frustum(
+				model.global_position + Vector3.UP)
+		priority_mask.append(1 if critical else 0)
+	var tiers: PackedInt32Array = plan_crowd_tiers(distances, priority_mask,
+		full_budget(quality), CombatAnimationPriority.slots(quality))
+	if tiers.size() != models.size():
+		return
 	for i in models.size():
 		var model = models[i]
 		if ground.is_valid() and not model.has_ground_source():
