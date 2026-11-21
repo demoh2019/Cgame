@@ -60,7 +60,6 @@ func run(t) -> void:
 	var streamer := _make_streamer()
 	streamer.max_unloads_per_update = 2
 	streamer.refresh()
-	var initial_cells: Array = streamer.get_loaded_cells()
 	var count: int = streamer.get_loaded_count()
 	t.check(count > 4, "multiple chunks are ready before teleport")
 	var events: Array[Vector3i] = []
