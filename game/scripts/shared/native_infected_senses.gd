@@ -54,6 +54,8 @@ func record_confirmed_sound(listener: Vector2, source: Vector2, radius: float) -
 
 
 func advance_time(delta: float) -> void:
+    if _vision != null:
+        _vision.advance_time(maxf(delta, 0.0))
     if _hearing != null:
         _hearing.advance_time(maxf(delta, 0.0))
 
