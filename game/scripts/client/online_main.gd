@@ -1238,6 +1238,11 @@ func _on_welcomed() -> void:
 	streamer.load_radius = 150.0
 	streamer.unload_radius = 220.0
 	streamer.update_interval = 0.15
+	# Recover from transient generator/resource failures without an unbounded retry loop.
+	# A null chunk remains an intentionally empty world cell.
+	streamer.max_auto_retries = 2
+	streamer.retry_initial_delay = 0.5
+	streamer.retry_max_delay = 3.0
 	# Prioritize content ahead of actual movement while keeping the same
 	# resident-world radius and unload hysteresis.
 	streamer.lookahead_seconds = 2.0
