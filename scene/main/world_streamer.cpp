@@ -320,6 +320,10 @@ void WorldStreamer::_forget_dead_chunks() {
 		}
 	}
 	for (const Vector3i &cell : dead) {
+		const ObjectID *old_id = loaded.getptr(cell);
+		if (old_id != nullptr) {
+			cache_ineligible_nodes.erase(*old_id);
+		}
 		loaded.erase(cell);
 		const bool *active = simulation_active_cells.getptr(cell);
 		if (active != nullptr && !*active) {
@@ -438,6 +442,8 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell, bool p_allow_cache) {
 	if (!it) {
 		return;
 	}
+	const bool generator_compatible = !cache_ineligible_nodes.has(it->value);
+	cache_ineligible_nodes.erase(it->value);
 	Node *chunk = Object::cast_to<Node>(ObjectDB::get_instance(it->value));
 	loaded.remove(it);
 	const bool *active = simulation_active_cells.getptr(p_cell);
@@ -449,7 +455,7 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell, bool p_allow_cache) {
 	if (chunk) {
 		// Only generator-owned roots that opt in may remain cached. Packed
 		// scenes and mutable/authoritative chunks keep legacy free-on-unload.
-		const bool may_cache = p_allow_cache && max_cached_chunks > 0 && chunk_generator.is_valid() &&
+		const bool may_cache = p_allow_cache && generator_compatible && max_cached_chunks > 0 && chunk_generator.is_valid() &&
 				chunk->get_parent() == _get_parent_for_chunks() && !chunk->is_queued_for_deletion() &&
 				chunk->has_method(SNAME("can_cache_streaming_chunk")) &&
 				bool(chunk->call(SNAME("can_cache_streaming_chunk")));
@@ -987,6 +993,7 @@ void WorldStreamer::_reset_state() {
 	generate_queue.clear();
 	pending_visual_details.clear();
 	simulation_active_cells.clear();
+	cache_ineligible_nodes.clear();
 	simulation_inactive_count = 0;
 	last_queued_view_direction = Vector3();
 	truncated_warned = false;
@@ -1014,6 +1021,7 @@ void WorldStreamer::_notification(int p_what) {
 			if (chunk_parent.is_empty()) {
 				// Chunks are our children and go away with us; just forget them.
 				loaded.clear();
+				cache_ineligible_nodes.clear();
 				simulation_active_cells.clear();
 				simulation_inactive_count = 0;
 				pending_visual_details.clear();
@@ -1266,6 +1274,12 @@ void WorldStreamer::set_chunk_provider(const Callable &p_provider) {
 
 void WorldStreamer::set_chunk_generator(const Callable &p_generator) {
 	clear_cached_chunks(); // Old nodes cannot be reattached under a different generator.
+	// Existing live chunks remain resident under legacy semantics. Mark them
+	// noncacheable so unloading later cannot resurrect geometry from the
+	// old generator under the newly configured callback.
+	for (const KeyValue<Vector3i, ObjectID> &entry : loaded) {
+		cache_ineligible_nodes.insert(entry.value);
+	}
 	chunk_generator = p_generator;
 	generate_queue.clear();
 	missing.clear();
