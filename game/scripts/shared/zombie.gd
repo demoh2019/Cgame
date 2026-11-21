@@ -147,6 +147,7 @@ func get_ai_debug_snapshot() -> Dictionary:
 		"perception": _native_senses.get_debug_snapshot() if _native_senses != null else {},
 		"profiling": get_ai_profile_snapshot(),
 		"native_simulation_lod": _ai_lod_scheduler != null,
+		"native_threat_arbitration": Threat.has_native(),
 		"target_scan_in_seconds": maxf(0.0, think_timer),
 	}
 

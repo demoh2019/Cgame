@@ -1,0 +1,78 @@
+name: Native AI threat table and Albion After combat aggro
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_threat_table_2d.*'
+      - 'modules/behavior_tree/tests/test_ai_threat_table_2d.h'
+      - 'modules/behavior_tree/register_types.cpp'
+      - 'modules/behavior_tree/config.py'
+      - 'game/scripts/shared/threat.gd'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_threat_aggro.gd'
+      - '.github/workflows/native-ai-threat-table.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_threat_table_2d.*'
+      - 'modules/behavior_tree/tests/test_ai_threat_table_2d.h'
+      - 'modules/behavior_tree/register_types.cpp'
+      - 'game/scripts/shared/threat.gd'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_threat_aggro.gd'
+      - '.github/workflows/native-ai-threat-table.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-ai-threat-and-game:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-ai-threat-table
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native hate, hysteresis and safe-zone cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[AIThreatTable2D]*"
+      - name: Import Albion After and parse scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee native-threat-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' native-threat-import.log; then exit 1; fi
+      - name: Run server-authoritative gameplay regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee native-threat-game.log
+          grep -Fq 'test_threat_aggro.gd' native-threat-game.log
+          grep -Fq '0 failures' native-threat-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' native-threat-game.log; then exit 1; fi
+      - name: Upload native/game diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-threat-table-logs
+          if-no-files-found: ignore
+          path: |
+            native-threat-import.log
+            native-threat-game.log

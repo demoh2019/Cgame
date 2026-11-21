@@ -26,6 +26,7 @@ def get_doc_classes():
         "AIExecutionProfiler",
         "AISimulationLOD2D",
         "AIUpdateScheduler",
+        "AIThreatTable2D",
     ]
 
 

@@ -191,3 +191,31 @@ frame time before claiming a speedup.
 
 Concept references: Unreal Engine MassEntity chunk processors and Unity
 Entities IJobEntity; no external code was copied or used.
+
+## Native MMO threat / aggro arbitration
+
+`AIThreatTable2D` provides reusable, stateless-in-the-engine native
+threat accumulation, aging and protected-target filtering over an NPC's
+caller-owned `Dictionary`:
+
+```gdscript
+var table := AIThreatTable2D.new()
+var hate := {} # each NPC owns its own table
+table.record(hate, attacker_id, actual_server_damage)
+table.decay(hate, delta)
+var best_peer_id := table.pick(hate, server_players, enemy_xz, max_leash, current_peer_id)
+```
+
+Threat is capped at five participants / 10,000 points, ages at 0.75
+points per second, and changes target only when a challenger reaches
+1.25 times current hate. Ties use the **lower peer ID** deterministically,
+independent of Dictionary insertion order. Invalid, safe, dead and
+unreachable participants are removed during target selection.
+
+Albion After's existing `scripts/shared/threat.gd` negotiates this class
+once and calls its methods from the authoritative infected state machine,
+with a GDScript reference fallback on stock Godot. Source identities,
+damage validation, safe-zone authority and network synchronization remain
+entirely game-owned. No native threat data is sent to ordinary clients.
+
+See `game/docs/NATIVE_AI_THREAT_TABLE.md`.

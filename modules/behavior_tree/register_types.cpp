@@ -35,6 +35,7 @@
 #include "ai_stimulus_history_2d.h"
 #include "ai_simulation_lod_2d.h"
 #include "ai_update_scheduler.h"
+#include "ai_threat_table_2d.h"
 #include "ai_visual_sensor_2d.h"
 #include "behavior_tree.h"
 
@@ -49,6 +50,7 @@
 #include "tests/test_ai_execution_profiler.h"
 #include "tests/test_ai_simulation_lod_2d.h"
 #include "tests/test_ai_update_scheduler.h"
+#include "tests/test_ai_threat_table_2d.h"
 #endif
 
 void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
@@ -74,6 +76,7 @@ void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(AIExecutionProfiler);
 	GDREGISTER_CLASS(AISimulationLOD2D);
 	GDREGISTER_CLASS(AIUpdateScheduler);
+	GDREGISTER_CLASS(AIThreatTable2D);
 }
 
 void uninitialize_behavior_tree_module(ModuleInitializationLevel) {
