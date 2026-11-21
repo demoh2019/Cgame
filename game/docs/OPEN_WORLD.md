@@ -61,7 +61,7 @@ How the game world is built: `WorldGen.height_at` (shared, deterministic, server
 | Ocean Generation | PARTIAL | sea plane following the player; island edge sinks into it |
 | Ocean Simulation | **PRESENT (batch 3)** | `water.gdshader` vertex Gerstner swell (4 wave trains around the weather wind, stronger in wind and rain) on a radial LOD sea mesh (`sea_surface.gd`: dense rings near the camera, 900 m out); normals and whitecaps follow the swell |
 | Shoreline Simulation | **PRESENT (batch 3)** | island depth map (`sea_surface.gd`, 256² over 6.4 km, filled a few rows per frame) shrinks the swell over shallows; depth-buffer surf and foam on every shore, river and lake |
-| Water Buoyancy | PARTIAL (batch 3) | swimming/diving; loot dropped in water floats and bobs (`EntityView._float_on_water`). No rigid-body buoyancy or boats |
+| Water Buoyancy | **PRESENT (batch 4)** | `buoyancy.gd`: rigid bodies in the "buoyant" group (debris, severed limbs) get lift by submersion, water damping and wind drift; loot bags float and bob; **boats**: a craftable Driftwood Raft (workbench: 10 planks, 8 fiber) lets you paddle deep water at ~2.6x swim speed on the surface (server-authoritative in `Movement.step`, shown by `raft_visual.gd`) |
 | Water Refraction / Caustics | PRESENT | `water_refraction.gd`, `water_caustics.gdshaderinc` |
 | Underwater Rendering | **PRESENT (batch 3)** | the surface is drawn from below (`water.gdshader` back faces): dark teal ceiling with a bright Snell's window overhead and moving ripples, plus underwater fog |
 | Underwater Fog | **PRESENT (batch 1)** | `online_main._apply_underwater_fog`: dense blue-green environment fog that thickens with depth, in the sea, rivers and lakes |
@@ -83,7 +83,7 @@ How the game world is built: `WorldGen.height_at` (shared, deterministic, server
 | GPU Foliage Simulation | PARTIAL | vertex-shader wind/bend |
 | Interactive Vegetation | PRESENT | `plant_interaction.gd` |
 | Vegetation Wind Simulation | PRESENT | `vegetation_wind.gd` |
-| Vegetation Physics | MISSING | — |
+| Vegetation Physics | **PRESENT (batch 4)** | `ChunkView.shake/_fell_tree`: a struck tree shudders about its base; a tree felled while you watch topples (gravity ease-in, bounce) and sinks away instead of vanishing |
 | Foliage LOD | PRESENT | `scenery_lod.gd`, grass tiers |
 | Foliage Impostors | **PRESENT (batch 2)** | `far_field.gd`: impostor pictures baked at start-up from the game's own tree models (off-screen ortho viewport, edge-bled, mipmapped `Texture2DArray`), drawn as cylindrical billboards |
 | Foliage HLOD | **PRESENT (batch 2)** | distant woods as one MultiMesh of impostors beyond the real-tree radius (150 m). Density and species follow the biome; positions are a seeded scatter, not the exact far trees |
@@ -91,5 +91,4 @@ How the game world is built: `WorldGen.height_at` (shared, deterministic, server
 
 ## Next batches (by player-visible value)
 
-1. Vegetation physics (trees that sway/fall when hit), rigid-body buoyancy and boats.
-2. Data Layers (seasonal/event content toggles) and a streaming profiler panel.
+1. Data Layers (seasonal/event content toggles) and a streaming profiler panel.

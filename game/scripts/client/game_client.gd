@@ -197,6 +197,7 @@ func _reconcile(snapshot: Dictionary) -> void:
 		var duration: float = float(entry["dt"])
 		var moving := Vector2(float(replay_input["x"]), float(replay_input["z"])).length_squared() > 0.00001
 		replay_input["mounted"] = bool(you.get("mounted", false))
+		replay_input["raft"] = inventory.count("raft") > 0
 		replay_input["bike_integrity"] = float(you.get("bike_integrity", 100.0))
 		replay_input["tire_grip_seconds"] = float(you.get("tire_grip_seconds", 0.0))
 		replay_input["cargo_factor"] = BikeCargo.movement_factor(inventory,
@@ -239,6 +240,7 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float, crou
 	running = running and float(you.get("fracture", 0.0)) <= 0.0
 	running = running and WadingTravel.can_sprint(world, predicted)
 	var input := {"x": move.x, "z": move.y, "sprint": running, "mounted": mounted, "crouch": crouch,
+		"raft": inventory.count("raft") > 0,
 		"cargo_factor": factor, "speed_bonus": float(you.get("speed_bonus", 0.0)),
 		"injury_factor": Survival.fracture_speed_factor(float(you.get("fracture", 0.0))),
 		"tire_grip_seconds": float(you.get("tire_grip_seconds", 0.0)),

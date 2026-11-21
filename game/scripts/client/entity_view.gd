@@ -7,6 +7,7 @@ const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
+const RaftVisual = preload("res://scripts/client/raft_visual.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const LootLabel = preload("res://scripts/shared/loot_label.gd")
@@ -365,6 +366,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		bike.set_panniers(bool(entity.get("bike_panniers", false)))
 		bike.set_lamp(bool(entity.get("bike_lamp_lit", false)))
 		bike.set_riding(bool(entity.get("mounted", false)) and bool(entity.get("alive", false)))
+		_nodes[key].get_node("Raft").set_rafting(bool(entity.get("rafting", false)) and bool(entity.get("alive", false)))
 		var player_model: Node3D = _nodes[key].get_node("Model")
 		if player_model.pack_mode:
 			# Sneaking and riding are real poses; the weapon they carry is in their hand.
@@ -650,6 +652,10 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		var bike := TrailBikeVisual.new()
 		bike.name = "TrailBike"
 		root.add_child(bike)
+		var raft := RaftVisual.new()
+		raft.name = "Raft"
+		raft.position.y = 0.05
+		root.add_child(raft)
 		var flare := HandFlareVisual.new()
 		flare.name = "HandFlare"
 		root.add_child(flare)

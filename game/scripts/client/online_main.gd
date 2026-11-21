@@ -7,6 +7,8 @@ const WoundFx = preload("res://scripts/client/wound_fx.gd")
 const BrawlMeter = preload("res://scripts/client/brawl_meter.gd")
 const FarField = preload("res://scripts/client/far_field.gd")
 const SeaSurface = preload("res://scripts/client/sea_surface.gd")
+const Buoyancy = preload("res://scripts/client/buoyancy.gd")
+const RaftVisual = preload("res://scripts/client/raft_visual.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
@@ -219,6 +221,7 @@ var _third_person_near := 0.05
 var _fp_body_refresh := 0.0
 var _brawl_meter: Control
 var _far_field: Node3D
+var _raft_visual: Node3D
 var _sea # SeaSurface: depth map for shore-aware swell.
 var _last_charge: Dictionary = {} # peer -> charge of their latest swing (for power-hit gore).
 var _underwater_tint: ColorRect # Blue murk while the camera is below the surface.
@@ -1131,6 +1134,11 @@ func _spawn_effects(event: Dictionary) -> void:
 		var peer_info: Dictionary = client.players.get(int(event.get("peer", -1)), {})
 		var weapon_id: String = str(client.inventory.weapon) if int(event.get("peer", -1)) == client.peer_id else str(peer_info.get("weapon", ""))
 		_wound_fx.finisher(entities.model_of("zombie", int(event.get("zombie", -1))), weapon_id, true)
+	if str(event.get("type", "")) == "gathered" and streamer != null:
+		for cell in streamer.get_loaded_cells():
+			var chunk = streamer.get_chunk(cell)
+			if chunk != null and chunk.has_method("shake"):
+				chunk.shake(int(event.get("node", -1)))
 	if str(event.get("type", "")) == "pounce_warning":
 		entities.telegraph(int(event.get("id", -1)), float(event.get("seconds", 0.5)), str(event.get("kind", "")) == "charge")
 	if str(event.get("type", "")) == "knocked_down" and int(event.get("peer", -1)) == client.peer_id:
@@ -1397,6 +1405,10 @@ func _on_welcomed() -> void:
 	_far_field.name = "FarField"
 	add_child(_far_field)
 	_far_field.setup(client.world)
+	var buoyancy = Buoyancy.new()
+	buoyancy.name = "Buoyancy"
+	buoyancy.world = client.world
+	add_child(buoyancy)
 	# Streaming: chunks are built from the seed as the player walks.
 	streamer = WorldStreamer.new()
 	streamer.cell_size = Defs.CHUNK_SIZE
@@ -1804,6 +1816,11 @@ func _process(delta: float) -> void:
 		bike_visual.set_panniers(client.inventory.count("bike_panniers") > 0)
 		bike_visual.set_lamp(bool(client.you.get("bike_lamp_lit", false)))
 		bike_visual.set_riding(riding, avatar_model.speed, delta)
+		if _raft_visual == null:
+			_raft_visual = RaftVisual.new()
+			avatar.add_child(_raft_visual)
+			_raft_visual.position.y = 0.05
+		_raft_visual.set_rafting(bool(client.you.get("rafting", false)) and avatar.visible)
 		flare_visual.set_burning(avatar.visible and float(client.you.get("flare_seconds", 0.0)) > 0.0)
 		audio.set_footsteps(avatar_model._moving and avatar.visible and not riding)
 		if not riding:

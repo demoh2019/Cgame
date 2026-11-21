@@ -184,6 +184,7 @@ func _acquire(kind: String, size: Vector3) -> RigidBody3D:
 		body.can_sleep = true
 		body.add_child(CollisionShape3D.new())
 		body.add_child(MeshInstance3D.new())
+		body.add_to_group("buoyant") # Floats in water (buoyancy.gd).
 		add_child(body)
 	var box := BoxShape3D.new()
 	var mesh_instance := body.get_child(1) as MeshInstance3D

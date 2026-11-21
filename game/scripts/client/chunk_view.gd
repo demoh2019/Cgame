@@ -1211,7 +1211,7 @@ func _build_objects(data: Dictionary) -> void:
 			# The nearest tree in a MultiMesh group matters more than the chunk centre.
 			_shadow_casters.append({"node": instance, "role": "tree" if kind.begins_with("tree:") else "structure",
 				"bounds": SceneryBatches.bounds_for(multimesh.mesh, transforms)})
-		_groups[batch_id] = {"multimesh": multimesh, "index": index, "transforms": transforms}
+		_groups[batch_id] = {"multimesh": multimesh, "index": index, "transforms": transforms, "tree": kind.begins_with("tree:")}
 	_build_decor(origin, rng, data)
 	_build_windmills(windmills, origin)
 	_build_signposts(origin)
@@ -1394,6 +1394,8 @@ func set_streaming_simulation_active(active: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	if not _shaking.is_empty() or not _falling.is_empty() or _state_seen_pending != _state_seen:
+		_animate_vegetation(delta)
 	# A cheap accumulator skips expensive per-chunk grass/decor/shadow work.
 	# Accumulated elapsed time keeps windmill rotation speed correct.
 	# The near tier (interval = 0) remains exactly the original code path.
@@ -2077,6 +2079,7 @@ func _refresh_ground_contact() -> void:
 ## Hides depleted nodes and opened crates. `hidden_ids` is the set of ids the server says are gone.
 func apply_state(hidden_ids: Dictionary) -> void:
 	var changed := false
+	_state_seen_pending = true
 	for kind in _groups:
 		var group: Dictionary = _groups[kind]
 		var slots := PackedInt32Array()
@@ -2091,6 +2094,9 @@ func apply_state(hidden_ids: Dictionary) -> void:
 			slots.append(slot)
 			transforms.append(Transform3D(Basis().scaled(Vector3.ONE * 0.001), original.origin)
 				if should_hide else original)
+			# A tree felled while you watch topples instead of vanishing (not on the first sync).
+			if should_hide and _state_seen and bool(group.get("tree", false)):
+				_fell_tree(group["multimesh"].mesh, original)
 			changed_ids[id] = should_hide
 		if slots.is_empty():
 			continue
@@ -2242,3 +2248,69 @@ func _build_bridge(bridge: Dictionary, origin: Vector2) -> void:
 				post.material_override = _bridge_wood
 				post.position = Vector3(q0.x, (q0.y + bottom) * 0.5, q0.z)
 				root.add_child(post)
+
+
+# --- Vegetation physics: trees shake when struck and topple when felled ---------------------------------
+
+var _state_seen := false
+var _state_seen_pending := false
+var _shaking: Dictionary = {} # node id -> {"group", "slot", "t"}
+var _falling: Array = [] # [{"node": MeshInstance3D, "base": Transform3D, "axis": Vector3, "t": float}]
+const SHAKE_SECONDS := 0.45
+const FALL_SECONDS := 1.9
+const SINK_SECONDS := 2.5
+
+
+## An axe (or a fist) landed on this tree: it shudders around its base.
+func shake(node_id: int) -> void:
+	for kind in _groups:
+		var group: Dictionary = _groups[kind]
+		if bool(group.get("tree", false)) and group["index"].has(node_id) and not _hidden.has(node_id):
+			_shaking[node_id] = {"group": group, "slot": int(group["index"][node_id]), "t": 0.0}
+			return
+
+
+func _fell_tree(mesh: Mesh, original: Transform3D) -> void:
+	if mesh == null or _falling.size() >= 6:
+		return
+	var log := MeshInstance3D.new()
+	log.mesh = mesh
+	add_child(log)
+	log.transform = original
+	var angle: float = float(WorldGen.mix(int(original.origin.x * 10.0), int(original.origin.z * 10.0), 41) % 628) / 100.0
+	var axis := Vector3(cos(angle), 0.0, sin(angle))
+	_falling.append({"node": log, "base": original, "axis": axis, "t": 0.0})
+
+
+func _animate_vegetation(delta: float) -> void:
+	if _state_seen_pending:
+		_state_seen = true
+	for id in _shaking.keys():
+		var entry: Dictionary = _shaking[id]
+		entry["t"] = float(entry["t"]) + delta
+		var group: Dictionary = entry["group"]
+		var original: Transform3D = group["transforms"][int(entry["slot"])]
+		var k: float = float(entry["t"]) / SHAKE_SECONDS
+		if k >= 1.0 or _hidden.has(id):
+			group["multimesh"].set_instance_transform(int(entry["slot"]), original)
+			_shaking.erase(id)
+			continue
+		var sway: float = sin(k * TAU * 2.5) * (1.0 - k) * 0.06
+		var basis: Basis = Basis(Vector3(1, 0, 0.3).normalized(), sway) * original.basis
+		group["multimesh"].set_instance_transform(int(entry["slot"]), Transform3D(basis, original.origin))
+	for i in range(_falling.size() - 1, -1, -1):
+		var fall: Dictionary = _falling[i]
+		fall["t"] = float(fall["t"]) + delta
+		var t: float = fall["t"]
+		var node: MeshInstance3D = fall["node"]
+		var base: Transform3D = fall["base"]
+		# Gravity-like ease-in to horizontal, a small bounce when it hits, then it sinks away.
+		var k: float = clampf(t / FALL_SECONDS, 0.0, 1.0)
+		var tilt: float = (PI * 0.5 - 0.06) * k * k
+		if k >= 1.0:
+			tilt += sin(clampf((t - FALL_SECONDS) / 0.35, 0.0, 1.0) * PI) * 0.06
+		var sink: float = maxf(t - FALL_SECONDS - 0.6, 0.0) / SINK_SECONDS
+		node.transform = Transform3D(Basis(fall["axis"], tilt) * base.basis, base.origin - Vector3(0.0, sink * 1.6, 0.0))
+		if sink >= 1.0:
+			node.queue_free()
+			_falling.remove_at(i)

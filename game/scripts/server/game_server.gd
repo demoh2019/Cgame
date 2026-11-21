@@ -1161,6 +1161,7 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 		var sprint_allowed: bool = sprint and not player.mounted and not player.crouching and moving and factor >= 0.9999 and WadingTravel.can_sprint(world, player.position) and player.survival.try_sprint(allowed)
 		player.position = Movement.step(world, player.position, {
 			"x": move_x, "z": move_z, "sprint": sprint_allowed, "mounted": player.mounted,
+			"raft": player.inventory.count("raft") > 0, # Carried boat, from the authoritative inventory.
 			"crouch": player.crouching, "cargo_factor": factor, "speed_bonus": player.skills.bonus("move_speed") + player.sprint_buff_speed,
 			"injury_factor": Survival.fracture_speed_factor(player.survival.fracture),
 			"tire_grip_seconds": player.tire_grip_seconds,
@@ -6478,7 +6479,7 @@ func _apply_loot_skills(player: Player, loot: Dictionary, local_rng: RandomNumbe
 
 ## Damage a player takes: toughness reduces it and trains from it.
 func _is_diving(player: Player) -> bool:
-	return not player.mounted and player.crouching and \
+	return not player.mounted and player.crouching and player.inventory.count("raft") < 1 and \
 		Swimming.submerged(world, player.position.x, player.position.z, true)
 
 
@@ -9500,6 +9501,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		if here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:
 			nearby_players.append({"id": other.id, "name": other.name, "x": p.x, "y": p.y, "z": p.z, "yaw": other.yaw,
 				"alive": _alive(other), "crouching": other.crouching, "mounted": other.mounted,
+				"rafting": other.inventory.count("raft") > 0 and Swimming.is_swimming(world, other.position.x, other.position.z),
 				"flare_lit": HandFlare.lit(other.flare_seconds, _alive(other)),
 				"bike_panniers": BikeCargo.installed(other.inventory),
 				"bike_lamp_lit": BikeLantern.lit(other.inventory, other.mounted,
@@ -9688,6 +9690,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"combat_stress_regen": CombatStress.regen_multiplier(player.combat_stress),
 			"crouching": player.crouching,
 			"mounted": player.mounted, "mount_cooldown": player.mount_cooldown,
+			"rafting": player.inventory.count("raft") > 0 and Swimming.is_swimming(world, player.position.x, player.position.z),
 			"smoke_cooldown": player.smoke_cooldown,
 			"smoke_concealed": FieldSmoke.inside(smoke_clouds, player.position, time),
 			"chain_wrap_seconds": player.chain_wrap_seconds,
