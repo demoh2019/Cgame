@@ -3,6 +3,7 @@ extends RefCounted
 
 const Surfaces = preload("res://scripts/client/audio_surfaces.gd")
 const Voices = preload("res://scripts/client/audio_voices.gd")
+const Variants = preload("res://scripts/client/audio_variants.gd")
 const Spatial = preload("res://scripts/client/audio_spatial.gd")
 const Ducking = preload("res://scripts/client/audio_ducking.gd")
 const Mix = preload("res://scripts/client/audio_mix.gd")
@@ -30,6 +31,34 @@ func run(t) -> void:
 	t.near(hi["pitch"], 1.08, 0.001, "max pitch")
 	t.near(Voices.variation(0.5, 0.5)["db"], 0.0, 0.001, "centre has no change")
 	t.near(hi["db"], 1.5, 0.001, "max volume jitter")
+
+	t.current = "weighted audio variations without replacement"
+	var weights := PackedFloat64Array([1.0, 2.0, 3.0])
+	var variants = Variants.new(weights)
+	var fallback = Variants.new(weights, false)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 2601121
+	for cycle in 12:
+		var heard: Array[int] = []
+		for step in 3:
+			var unit: float = rng.randf()
+			var picked: int = variants.choose(unit)
+			t.eq(picked, fallback.choose(unit), "native/fallback weighted cycle parity")
+			t.check(picked >= 0 and not heard.has(picked), "each clip plays once per cycle")
+			heard.append(picked)
+		t.eq(variants.get_played_count(), 3, "cycle exhausted")
+	t.eq(variants.choose(-0.1), -1, "invalid roll rejected")
+	t.eq(variants.get_played_count(), 3, "invalid roll preserves history")
+	t.eq(variants.choose(0.0), fallback.choose(0.0), "new cycle parity")
+	t.eq(variants.get_played_count(), 1, "new cycle restarts at one clip")
+	variants.reset()
+	t.eq(variants.choose(0.0), 0, "explicit reset starts at first clip")
+	var sparse = Variants.new(PackedFloat64Array([0.0, 3.0, 0.0, 1.0]), false)
+	t.eq(sparse.choose(0.0), 1, "zero weights are skipped")
+	t.eq(sparse.choose(0.0), 3, "only remaining nonzero clip plays")
+	t.eq(sparse.choose(0.0), 1, "exhaustion restarts the cycle")
+	var malformed = Variants.new(PackedFloat64Array([1.0, -1.0]), false)
+	t.eq(malformed.choose(0.5), -1, "invalid configuration rejected")
 
 	t.current = "voice limiting"
 	t.check(Voices.audibility(0.0, 50.0) < Voices.audibility(0.0, 2.0), "far voices are quieter")

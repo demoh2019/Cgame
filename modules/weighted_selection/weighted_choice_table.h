@@ -42,6 +42,9 @@ public:
 	// Valid inputs return one index per draw. A malformed batch is rejected
 	// without partial results (empty array); no random draws are consumed.
 	PackedInt32Array sample_many(const PackedFloat64Array &p_units) const;
+	// Draw from entries not in p_excluded; the caller owns its history/RNG.
+	// Invalid input or an exhausted positive-weight set returns -1.
+	int sample_excluding(double p_unit, const PackedInt32Array &p_excluded) const;
 
 	int get_option_count() const { return weights.size(); }
 	double get_total_weight() const { return total_weight; }
