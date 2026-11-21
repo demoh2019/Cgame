@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CullDistanceProfile3D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Bounded, deterministic size-to-cull-distance profiles for 3D scenery.
+	</brief_description>
+	<description>
+		Resolves the visibility end distance from an object's axis-aligned bounding box and size/range pairs, inspired by Cull Distance Volumes in Unreal Engine. The object's size is the longest dimension of [param bounds], not its area or diagonal. Pairs are matched by nearest size with no interpolation. Pair order does not matter, and equally near pairs use the smallest positive cull range (0 means no extra culling). A positive [param authored_distance] is always an upper limit, so the result never increases it. Zero means unlimited. The method is pure and never changes visibility, render state or game objects; callers choose whether to apply it. Inputs must be finite and non-negative, with 1–128 pairs, size and distance up to 1,000,000, and bounds positions within +/-10,000,000. Invalid inputs return -1, distinguishable from the valid unlimited distance 0.
+	</description>
+	<methods>
+		<method name="get_cull_distance" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="bounds" type="AABB" />
+			<param index="1" name="sizes" type="PackedFloat32Array" />
+			<param index="2" name="ranges" type="PackedFloat32Array" />
+			<param index="3" name="authored_distance" type="float" default="0.0" />
+			<description>
+				Returns a draw distance for the object's longest bounds dimension. A zero range pair does not override an authored positive cap; positive ranges are clamped by that cap. Returns -1 when any input is invalid, and 0 only for valid unlimited visibility.
+			</description>
+		</method>
+	</methods>
+</class>

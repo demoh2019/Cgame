@@ -201,7 +201,7 @@ WorldStreamer::AuxiliaryCompletion WorldStreamer::_get_focus_completion(
 	// actual streaming scheduler, but do not inspect the optional waypoint
 	// source (whose progress is available from the auxiliary source API).
 	LocalVector<Vector3i> wanted;
-	WorldStreamingGrid::cells_in_radius(position, load_radius, cell_size,
+	WorldStreamingGrid::cells_in_radius(position, get_effective_load_radius(), cell_size,
 			_grid_axes(), wanted, WorldStreamingGrid::MAX_CELLS, &r_truncated);
 	for (const Vector3i &cell : wanted) {
 		++result.total;
@@ -241,7 +241,7 @@ Dictionary WorldStreamer::get_focus_streaming_status(bool p_require_visual_detai
 }
 
 bool WorldStreamer::_cell_requested(const Vector3 &p_focus, const Vector3i &p_cell) const {
-	if (WorldStreamingGrid::distance_to_cell(p_focus, p_cell, cell_size, _grid_axes()) <= load_radius) {
+	if (WorldStreamingGrid::distance_to_cell(p_focus, p_cell, cell_size, _grid_axes()) <= get_effective_load_radius()) {
 		return true;
 	}
 	return _auxiliary_is_near_focus(p_focus) &&
@@ -905,7 +905,7 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 	}
 	if (have_focus) {
 		WorldStreamingGrid::prioritize_cells_for_motion_and_view(ready_cells, position,
-				velocity_hint, lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
+				velocity_hint, lookahead_seconds, MIN(get_effective_load_radius() * real_t(0.4), cell_size),
 				view_direction, view_priority, cell_size, _grid_axes(), view_cone_half_angle_degrees);
 	}
 	for (const Vector3i &cell : ready_cells) {
@@ -1030,13 +1030,13 @@ void WorldStreamer::_update_streaming() {
 
 	LocalVector<Vector3i> wanted;
 	bool truncated = false;
-	WorldStreamingGrid::cells_in_radius(position, load_radius, cell_size, _grid_axes(), wanted, WorldStreamingGrid::MAX_CELLS, &truncated);
+	WorldStreamingGrid::cells_in_radius(position, get_effective_load_radius(), cell_size, _grid_axes(), wanted, WorldStreamingGrid::MAX_CELLS, &truncated);
 	// Camera/motion hints reprioritize only the main focus cells; the
 	// optional explicit auxiliary source may add a separately bounded set.
 	// Predicted velocity never enlarges resident world memory.
 
 	WorldStreamingGrid::prioritize_cells_for_motion_and_view(wanted, position,
-			velocity_hint, lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
+			velocity_hint, lookahead_seconds, MIN(get_effective_load_radius() * real_t(0.4), cell_size),
 			view_direction, view_priority, cell_size, _grid_axes(), view_cone_half_angle_degrees);
 	// Route hints only REORDER cells already selected for player residency.
 	// Route pathfinding is performed by gameplay (AStarGrid2D), not by
@@ -1235,6 +1235,9 @@ void WorldStreamer::_notification(int p_what) {
 			if (Engine::get_singleton()->is_editor_hint()) {
 				return;
 			}
+			// Grow the requested area before reconciling the current queue.
+			// The ordinary streamer cadence still caps scheduling work.
+			advance_loading_range_ramp(get_process_delta_time());
 			// One budget and wall-clock deadline are shared by threaded
 			// scene finalization and procedural world generation this frame.
 			if (adaptive_chunk_budget_enabled) {
@@ -1385,6 +1388,59 @@ void WorldStreamer::set_load_radius(real_t p_radius) {
 
 void WorldStreamer::set_unload_radius(real_t p_radius) {
 	unload_radius = MAX(p_radius, real_t(0.0));
+}
+
+real_t WorldStreamer::get_effective_load_radius() const {
+	if (loading_range_area_fraction >= real_t(1.0) || load_radius <= real_t(0.0)) {
+		return load_radius;
+	}
+	// On the XZ/XY planes, reducing area to 25% halves the distance.
+	// A 3D cubic grid instead scales by the cube root of volume.
+	const real_t exponent = axes == AXES_XYZ ? real_t(1.0 / 3.0) : real_t(0.5);
+	return load_radius * Math::pow(loading_range_area_fraction, exponent);
+}
+
+void WorldStreamer::begin_loading_range_ramp(real_t p_initial_area_fraction, real_t p_delay_seconds, real_t p_duration_seconds) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_initial_area_fraction) ||
+					!Math::is_finite(p_delay_seconds) || !Math::is_finite(p_duration_seconds),
+			"WorldStreamer loading range ramp parameters must be finite.");
+	// Never exclude the player's own terrain for an initial zero-area plan.
+	loading_ramp_initial_fraction = CLAMP(p_initial_area_fraction, real_t(0.05), real_t(1.0));
+	loading_ramp_delay = CLAMP(p_delay_seconds, real_t(0.0), real_t(60.0));
+	loading_ramp_duration = CLAMP(p_duration_seconds, real_t(0.0), real_t(120.0));
+	loading_ramp_elapsed = 0.0;
+	loading_ramp_active = loading_ramp_initial_fraction < real_t(1.0) &&
+			(loading_ramp_delay > real_t(0.0) || loading_ramp_duration > real_t(0.0));
+	loading_range_area_fraction = loading_ramp_active ? loading_ramp_initial_fraction : real_t(1.0);
+	// Rebuild eligible work on the next scheduler tick; no scene creation here.
+	time_since_update = MAX(time_since_update, update_interval);
+}
+
+void WorldStreamer::advance_loading_range_ramp(real_t p_delta_seconds) {
+	if (!loading_ramp_active || !Math::is_finite(p_delta_seconds) || p_delta_seconds <= real_t(0.0)) {
+		return;
+	}
+	loading_ramp_elapsed = MIN(loading_ramp_elapsed + p_delta_seconds, loading_ramp_delay + loading_ramp_duration);
+	if (loading_ramp_elapsed < loading_ramp_delay) {
+		return;
+	}
+	const real_t progress = loading_ramp_duration > real_t(0.0) ?
+			CLAMP((loading_ramp_elapsed - loading_ramp_delay) / loading_ramp_duration, real_t(0.0), real_t(1.0)) : real_t(1.0);
+	loading_range_area_fraction = Math::lerp(loading_ramp_initial_fraction, real_t(1.0), progress);
+	if (progress >= real_t(1.0)) {
+		loading_range_area_fraction = real_t(1.0);
+		loading_ramp_active = false;
+	}
+}
+
+void WorldStreamer::cancel_loading_range_ramp() {
+	if (!loading_ramp_active && loading_range_area_fraction >= real_t(1.0)) {
+		return;
+	}
+	loading_ramp_active = false;
+	loading_range_area_fraction = real_t(1.0);
+	loading_ramp_elapsed = loading_ramp_delay + loading_ramp_duration;
+	time_since_update = MAX(time_since_update, update_interval);
 }
 
 void WorldStreamer::set_velocity_hint(const Vector3 &p_velocity) {
@@ -1649,6 +1705,12 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_load_radius"), &WorldStreamer::get_load_radius);
 	ClassDB::bind_method(D_METHOD("set_unload_radius", "radius"), &WorldStreamer::set_unload_radius);
 	ClassDB::bind_method(D_METHOD("get_unload_radius"), &WorldStreamer::get_unload_radius);
+	ClassDB::bind_method(D_METHOD("begin_loading_range_ramp", "initial_area_fraction", "delay_seconds", "duration_seconds"), &WorldStreamer::begin_loading_range_ramp);
+	ClassDB::bind_method(D_METHOD("advance_loading_range_ramp", "delta_seconds"), &WorldStreamer::advance_loading_range_ramp);
+	ClassDB::bind_method(D_METHOD("cancel_loading_range_ramp"), &WorldStreamer::cancel_loading_range_ramp);
+	ClassDB::bind_method(D_METHOD("is_loading_range_ramping"), &WorldStreamer::is_loading_range_ramping);
+	ClassDB::bind_method(D_METHOD("get_loading_range_area_percent"), &WorldStreamer::get_loading_range_area_percent);
+	ClassDB::bind_method(D_METHOD("get_effective_load_radius"), &WorldStreamer::get_effective_load_radius);
 	ClassDB::bind_method(D_METHOD("set_velocity_hint", "velocity"), &WorldStreamer::set_velocity_hint);
 	ClassDB::bind_method(D_METHOD("get_velocity_hint"), &WorldStreamer::get_velocity_hint);
 	ClassDB::bind_method(D_METHOD("set_lookahead_seconds", "seconds"), &WorldStreamer::set_lookahead_seconds);

@@ -93,4 +93,51 @@ TEST_CASE("[SmartObjects] bounded table rejects overflow and retains atomic recl
 	CHECK(pool->get_claim_count() == 0);
 }
 
+
+TEST_CASE("[SmartObjects] hashed claim indices survive swap removal, migration and expiry") {
+	Ref<SmartObjectSlotReservations> pool;
+	pool.instantiate();
+	for (int64_t actor = 1; actor <= 256; ++actor) {
+		CHECK(pool->try_claim_first({ 10000 + actor }, actor, 1.0) == 10000 + actor);
+	}
+	CHECK(pool->get_claim_count() == 256);
+	CHECK(pool->get_actor_slot(0) == 0);
+	CHECK(pool->get_actor_slot(257) == 0);
+	// Swap-delete every third reservation; moved-back claims must update BOTH maps.
+	for (int64_t actor = 1; actor <= 256; actor += 3) {
+		CHECK(pool->release_actor(actor) == 1);
+		CHECK(pool->get_owner(10000 + actor) == 0);
+		CHECK(pool->get_actor_slot(actor) == 0);
+	}
+	for (int64_t actor = 1; actor <= 256; ++actor) {
+		if ((actor - 1) % 3 == 0) {
+			continue;
+		}
+		CHECK(pool->get_actor_slot(actor) == 10000 + actor);
+		CHECK(pool->get_owner(10000 + actor) == actor);
+	}
+	// An already indexed actor switches slots without changing claim count.
+	const int before = pool->get_claim_count();
+	CHECK(pool->try_claim_first({ 100000 }, 2, 0.9) == 100000);
+	CHECK(pool->get_actor_slot(2) == 100000);
+	CHECK(pool->get_owner(10002) == 0);
+	CHECK(pool->get_owner(100000) == 2);
+	CHECK(pool->get_claim_count() == before);
+	CHECK(pool->try_claim_first({ 100001, 100000 }, 2, 1.0) == 100000); // Retain owned.
+	CHECK(pool->release_slot(100000, 2));
+	CHECK(pool->get_actor_slot(2) == 0);
+	// Expiry removes arbitrary positions after swaps and leaves no stale map keys.
+	pool->advance_time(1.0);
+	CHECK(pool->get_claim_count() == 0);
+	for (int64_t actor = 1; actor <= 256; ++actor) {
+		CHECK(pool->get_actor_slot(actor) == 0);
+		CHECK(pool->get_owner(10000 + actor) == 0);
+	}
+	CHECK(pool->try_claim_first({ 10005 }, 500, 1.0) == 10005);
+	pool->clear();
+	CHECK(pool->get_actor_slot(500) == 0);
+	CHECK(pool->get_owner(10005) == 0);
+	CHECK(pool->get_claim_count() == 0);
+}
+
 } // namespace TestSmartObjectSlotReservations

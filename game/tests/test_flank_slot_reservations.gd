@@ -18,6 +18,10 @@ func _exercise(t, pool) -> void:
 	t.eq(pool.try_claim_first(ranked, 2, 1.5), 102, "second zombie reserves a different slot")
 	t.eq(pool.try_claim_first(ranked, 3, 1.5), 103, "third zombie uses the final slot")
 	t.eq(pool.get_claim_count(), 3, "three independent claims remain active")
+	if pool.has_method("get_actor_slot"):
+		t.eq(int(pool.get_actor_slot(1)), 101, "actor index returns its server-owned slot")
+		t.eq(int(pool.get_actor_slot(2)), 102, "another actor index is independent")
+		t.eq(int(pool.get_actor_slot(0)), 0, "invalid actor has no indexed slot")
 	t.eq(pool.try_claim_first(ranked, 4, 1.5), 0, "fourth zombie cannot steal a claimed slot")
 	t.check(not pool.release_slot(101, 2), "wrong owner cannot revoke another actor's claim")
 	t.eq(pool.get_owner(101), 1, "wrong-owner release is a no-op")
@@ -30,6 +34,8 @@ func _exercise(t, pool) -> void:
 		"an actor atomically moves to a new available smart-object slot")
 	t.eq(pool.get_owner(102), 0, "the old slot is released when the actor moves")
 	t.eq(pool.get_owner(105), 2, "new slot belongs exclusively to its reserver")
+	if pool.has_method("get_actor_slot"):
+		t.eq(int(pool.get_actor_slot(2)), 105, "migration updates actor index")
 	t.check(not pool.release_slot(105, 3), "unauthorized removal stays impossible")
 
 	t.current = "invalid slot requests fail atomically"
@@ -57,6 +63,8 @@ func _exercise(t, pool) -> void:
 	t.eq(pool.get_owner(105), 2, "renewed lease outlives other expired positions")
 	pool.advance_time(0.5)
 	t.eq(pool.get_claim_count(), 0, "all leases expire deterministically on server ticks")
+	if pool.has_method("get_actor_slot"):
+		t.eq(int(pool.get_actor_slot(2)), 0, "expiry removes actor index")
 	pool.clear()
 	t.eq(pool.get_claim_count(), 0, "clear is idempotent")
 
@@ -110,6 +118,20 @@ func run(t) -> void:
 		t.check(first_spot.distance_to(second_spot) > 0.1,
 			"two infected cannot reserve exactly the same physical flank slot")
 		t.eq(pool.get_claim_count(), 2, "two distinct target-ring leases exist in the actual game AI")
+		# Lease loss during the 300ms flank-goal cache must force an EQS
+		# replan, rather than sending a zombie to a slot it no longer owns.
+		var portable_pool := Portable.new()
+		var third := Zombie.new(1003, "walker", Vector3(0, WorldGen.HUB_HEIGHT, 0))
+		third.target_id = 77
+		third.flank_reservations = portable_pool
+		third._flank_goal(here, target)
+		var initial_claim: int = portable_pool.get_actor_slot(third.id)
+		t.check(initial_claim > 0, "portable zombie claims its flank slot")
+		t.eq(portable_pool.release_actor(third.id), 1, "simulation invalidates its claim")
+		third._flank_goal(here, target)
+		t.check(portable_pool.get_actor_slot(third.id) > 0,
+			"invalid cached flank goal is replanned and reserved immediately")
+		t.eq(portable_pool.get_claim_count(), 1, "replan does not duplicate claims")
 		pool.advance_time(2.0)
 		t.eq(pool.get_claim_count(), 0, "abandoned flank reservations release when a zombie stops chasing")
 	else:

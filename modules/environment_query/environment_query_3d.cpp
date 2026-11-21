@@ -202,6 +202,7 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query_top_positions", "count"), &EnvironmentQuery3D::query_top_positions);
 	ClassDB::bind_method(D_METHOD("query_spread_positions", "count", "min_separation"), &EnvironmentQuery3D::query_spread_positions);
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_ring", "center", "radius", "count", "phase"), &EnvironmentQuery3D::sample_ring, DEFVAL(0.0));
+	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_donut", "center", "inner_radius", "outer_radius", "ring_count", "points_per_ring", "phase", "spiral"), &EnvironmentQuery3D::sample_donut, DEFVAL(0.0), DEFVAL(false));
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_grid", "center", "half_extents", "spacing", "max_points"), &EnvironmentQuery3D::sample_grid, DEFVAL(4096));
 
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "candidates"), "set_candidates", "get_candidates");
@@ -487,6 +488,36 @@ PackedVector3Array EnvironmentQuery3D::sample_ring(const Vector3 &p_center, doub
 	for (int i = 0; i < p_count; i++) {
 		const double angle = p_phase + Math::TAU * double(i) / double(p_count);
 		ptr[i] = p_center + Vector3(Math::cos(angle) * p_radius, 0.0, Math::sin(angle) * p_radius);
+	}
+	return output;
+}
+
+// Native, bounded counterpart to Unreal's EQS Points: Donut generator.
+// Candidate generation remains geometric: gameplay validates nav, collision,
+// height and occupancy independently before allowing spawns.
+PackedVector3Array EnvironmentQuery3D::sample_donut(const Vector3 &p_center, double p_inner_radius, double p_outer_radius, int p_ring_count, int p_points_per_ring, double p_phase, bool p_spiral) {
+	PackedVector3Array output;
+	ERR_FAIL_COND_V_MSG(!p_center.is_finite() || !Math::is_finite(p_inner_radius) || !Math::is_finite(p_outer_radius) ||
+			p_inner_radius < 0.0 || p_outer_radius < p_inner_radius, output,
+			"Donut center/radii must be finite and satisfy 0 <= inner_radius <= outer_radius.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_phase) || p_ring_count < 1 || p_ring_count > 256 ||
+			p_points_per_ring < 1 || p_points_per_ring > 4096, output,
+			"Donut phase must be finite, ring count 1..256 and points per ring 1..4096.");
+	const int64_t total = int64_t(p_ring_count) * p_points_per_ring;
+	ERR_FAIL_COND_V_MSG(total > 65536, output, "Donut sample budget is limited to 65536 points.");
+	output.resize(int(total));
+	Vector3 *ptr = output.ptrw();
+	for (int ring = 0; ring < p_ring_count; ring++) {
+		// With a single ring, match sample_ring(outer_radius).
+		const double radius = p_ring_count == 1 ? p_outer_radius :
+				p_inner_radius + (p_outer_radius - p_inner_radius) * double(ring) / double(p_ring_count - 1);
+		const double ring_offset = p_spiral ? double(ring) / double(p_ring_count) : 0.0;
+		for (int index = 0; index < p_points_per_ring; index++) {
+			const double angle = p_phase + Math::TAU * (double(index) + ring_offset) / double(p_points_per_ring);
+			const Vector3 point = p_center + Vector3(Math::cos(angle) * radius, 0.0, Math::sin(angle) * radius);
+			ERR_FAIL_COND_V_MSG(!point.is_finite(), PackedVector3Array(), "Donut sample coordinates must be finite.");
+			ptr[ring * p_points_per_ring + index] = point;
+		}
 	}
 	return output;
 }

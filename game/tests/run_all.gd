@@ -91,6 +91,7 @@ const SUITES := [
 	"res://tests/test_world_streamer_simulation_tiers.gd",
 	"res://tests/test_world_streamer_chunk_cache.gd",
 	"res://tests/test_world_streamer_unload_budget.gd",
+	"res://tests/test_world_streamer_loading_range_ramp.gd",
 	"res://tests/test_world_streamer_tick_interval.gd",
 	"res://tests/test_waypoint_streaming_source.gd",
 	"res://tests/test_auxiliary_streaming_readiness.gd",

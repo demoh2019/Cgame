@@ -212,6 +212,35 @@ static func kinds(phase: int) -> Array[String]:
 	return []
 
 
+## Sample three encounter bands with the native EQS Donut generator when available.
+## Preserve the original source ordering (ring, then phase-rotated angle).
+## This only generates untrusted *candidate* geometry; sites() validates all
+## terrain, nav, water, player and infected occupancy guards independently.
+static func candidate_ring_points(center: Vector2, phase: int,
+		prefer_native: bool = true) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	if not center.is_finite() or phase < 1 or phase > MAX_PHASE:
+		return points
+	var donut := PackedVector3Array()
+	if prefer_native and ClassDB.class_exists("EnvironmentQuery3D") \
+			and ClassDB.class_has_method("EnvironmentQuery3D", "sample_donut"):
+		# Reflection avoids a parse-time dependency on the optional native class.
+		donut = ClassDB.class_call_static("EnvironmentQuery3D", "sample_donut",
+			Vector3(center.x, 0.0, center.y), float(RADII[0]),
+			float(RADII[RADII.size() - 1]), RADII.size(), ANGLES)
+	var has_native: bool = donut.size() == RADII.size() * ANGLES
+	for ring_index in RADII.size():
+		for index in ANGLES:
+			var angle_index: int = (index + phase * 5) % ANGLES
+			if has_native:
+				var sample: Vector3 = donut[ring_index * ANGLES + angle_index]
+				points.append(Vector2(sample.x, sample.z))
+			else:
+				var angle: float = float(angle_index) * TAU / ANGLES
+				points.append(center + Vector2.from_angle(angle) * float(RADII[ring_index]))
+	return points
+
+
 ## Bounded deterministic search on walkable terrain, same PvP risk zone.
 static func sites(world, players: Dictionary, zombies: Dictionary,
 		center: Vector3, phase: int, count: int) -> Array[Vector2]:
@@ -226,24 +255,20 @@ static func sites(world, players: Dictionary, zombies: Dictionary,
 	# existing-infected exclusions *before* native or script ranking.
 	var candidates: Array[Vector2] = []
 	var heights: Array[float] = []
-	for radius in RADII:
-		for index in ANGLES:
-			var angle: float = float((index + phase * 5) % ANGLES) * TAU / ANGLES
-			var point: Vector2 = origin + Vector2.from_angle(angle) * radius
-			if world.zone_at(point.x, point.y) != zone or world.is_safe(point.x, point.y) \
-					or world.is_water(point.x, point.y) or not Movement._is_free(world, point):
-				continue
-			var clear := true
-			for player in players.values():
-				if player.survival.alive and player.position.is_finite() \
-						and point.distance_to(Vector2(player.position.x, player.position.z)) < MIN_PLAYER_DISTANCE:
-					clear = false
-					break
-			if not clear:
-				continue
-			if clear:
-				candidates.append(point)
-				heights.append(world.height_at(point.x, point.y))
+	for point in candidate_ring_points(origin, phase):
+		if world.zone_at(point.x, point.y) != zone or world.is_safe(point.x, point.y) \
+				or world.is_water(point.x, point.y) or not Movement._is_free(world, point):
+			continue
+		var clear := true
+		for player in players.values():
+			if player.survival.alive and player.position.is_finite() \
+					and point.distance_to(Vector2(player.position.x, player.position.z)) < MIN_PLAYER_DISTANCE:
+				clear = false
+				break
+		if not clear:
+			continue
+		candidates.append(point)
+		heights.append(world.height_at(point.x, point.y))
 
 	# A bounded multi-actor context covers every nearby living survivor,
 	# rather than testing just one boss target. Sort by distance to origin

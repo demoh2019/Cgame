@@ -638,6 +638,50 @@ TEST_CASE("[EnvironmentQuery3D] Invalid ring parameters are bounded") {
 	ERR_PRINT_ON
 }
 
+TEST_CASE("[EnvironmentQuery3D] Donut samples concentric radii and preserves stable angle order") {
+	const Vector3 center(10, 5, 20);
+	const PackedVector3Array points = EnvironmentQuery3D::sample_donut(center, 2.0, 4.0, 3, 4);
+	REQUIRE(points.size() == 12);
+	CHECK(points[0].is_equal_approx(Vector3(12, 5, 20)));
+	CHECK(points[1].is_equal_approx(Vector3(10, 5, 22)));
+	CHECK(points[4].is_equal_approx(Vector3(13, 5, 20)));
+	CHECK(points[8].is_equal_approx(Vector3(14, 5, 20)));
+	CHECK(points[11].is_equal_approx(Vector3(10, 5, 16)));
+	CHECK(EnvironmentQuery3D::sample_donut(center, 2.0, 4.0, 3, 4) == points);
+	CHECK(EnvironmentQuery3D::sample_donut(center, 1.0, 4.0, 1, 4) ==
+			EnvironmentQuery3D::sample_ring(center, 4.0, 4));
+}
+
+TEST_CASE("[EnvironmentQuery3D] Donut spiral stagger and phase are deterministic") {
+	const PackedVector3Array spokes = EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 2.0, 2, 4);
+	const PackedVector3Array spiral = EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 2.0, 2, 4, 0.0, true);
+	REQUIRE(spokes.size() == 8);
+	REQUIRE(spiral.size() == 8);
+	CHECK(spokes[0] == spiral[0]); // First ring has no extra phase.
+	CHECK(!spiral[4].is_equal_approx(spokes[4]));
+	CHECK(spiral[4].is_equal_approx(Vector3(Math::sqrt(2.0), 0, Math::sqrt(2.0))));
+	CHECK(spiral == EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 2.0, 2, 4, 0.0, true));
+	const PackedVector3Array rotated = EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 1.0, 1, 4, Math::PI / 2.0);
+	REQUIRE(rotated.size() == 4);
+	CHECK(rotated[0].is_equal_approx(Vector3(0, 0, 1)));
+}
+
+TEST_CASE("[EnvironmentQuery3D] Donut rejects invalid geometry and respects hard allocation cap") {
+	ERR_PRINT_OFF
+	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), -1.0, 4.0, 3, 4).is_empty());
+	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 5.0, 4.0, 3, 4).is_empty());
+	CHECK(EnvironmentQuery3D::sample_donut(Vector3(NaN, 0, 0), 1.0, 4.0, 3, 4).is_empty());
+	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 0.0, Math::INF, 3, 4).is_empty());
+	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 4.0, 3, 4, NaN).is_empty());
+	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 4.0, 0, 4).is_empty());
+	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 4.0, 257, 4).is_empty());
+	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 4.0, 3, 0).is_empty());
+	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 4.0, 3, 4097).is_empty());
+	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 4.0, 17, 4096).is_empty());
+	ERR_PRINT_ON
+	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 4.0, 16, 4096).size() == 65536);
+}
+
 TEST_CASE("[EnvironmentQuery3D] Grid produces deterministic XZ lattice") {
 	PackedVector3Array p = EnvironmentQuery3D::sample_grid(Vector3(5, 7, 9), Vector2(1, 1), 1);
 	REQUIRE(p.size() == 9);

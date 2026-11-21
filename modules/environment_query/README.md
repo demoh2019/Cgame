@@ -185,3 +185,27 @@ Godot keeps ordinary direct pursuit. Authoritative movement and navigation
 validation remain unchanged.
 
 Reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/eqs-node-reference-tests-in-unreal-engine
+
+## Native concentric Donut candidate generator (Unreal EQS)
+
+`sample_donut(center, inner_radius, outer_radius, ring_count, points_per_ring,
+phase=0.0, spiral=false)` adds a deterministic XZ multi-ring generator,
+analogous to Unreal's *Points: Donut* EQS generator. Rings progress inclusively
+from the inner to outer radius; a single ring uses the outer radius, identical
+to `sample_ring()`. Setting `spiral=true` offsets each subsequent ring to
+prevent radial spokes. Sampling is a pure-data operation: it **does not** call
+PhysicsServer, NavigationServer, raycasts or scene nodes.
+
+Nonfinite positions, radii and phase, negative/inverted radii, ring counts
+outside 1..256, points per ring outside 1..4096, and total allocations greater
+than 65536 points fail closed. Callers remain responsible for nav reachability,
+terrain height, blockers, safe zones and actor occupancy.
+
+Albion After uses this generator to precompute three 16-site candidate rings
+for **server-authoritative raid reinforcements** instead of calculating 48
+trigonometric coordinates in GDScript on each request. The existing server
+checks and source ordering are retained. Stock Godot and older Cgame builds
+still use the previous pure GDScript loop, and game tests verify native/fallback
+point positions within floating-point tolerance.
+
+Reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/eqs-node-reference-generators-in-unreal-engine

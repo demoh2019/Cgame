@@ -6,26 +6,107 @@ extends RefCounted
 
 const TILE_SIZE := 32.0
 const SPLIT_MIN_INSTANCES := 48
+const MAX_SCENERY_INSTANCES := 65536
+const MAX_SCENERY_CLUSTERS := 256
 const BOUNDS_MARGIN := 0.6 # Mesh movement in wind and imprecise imported bounds.
 
+static var _cluster_native: Object = null
+static var _cluster_checked := false
 
-## Preserves placement and input order; a small batch remains a single draw call.
+
+## Conservative fallback, matching the native Unreal HISM-inspired 3D grid.
+## Small lists stay one MultiMesh draw call; pathological overpartitioning
+## falls back to one draw call instead of dropping instances or exceeding budget.
+static func _single_cluster_indices(count: int) -> Array:
+	var result: Array = []
+	if count == 0:
+		return result
+	var indices := PackedInt32Array()
+	indices.resize(count)
+	for i in count:
+		indices[i] = i
+	result.append(indices)
+	return result
+
+
+static func _cluster_indices_fallback(points: PackedVector3Array, cell_size: float,
+		min_split_count: int, max_clusters: int) -> Array:
+	var result: Array = []
+	if points.size() > MAX_SCENERY_INSTANCES or min_split_count < 1 or \
+			min_split_count > MAX_SCENERY_INSTANCES or max_clusters < 1 or \
+			max_clusters > MAX_SCENERY_CLUSTERS or not is_finite(cell_size) or \
+			cell_size < 0.5 or cell_size > 10000.0:
+		return result
+	for p in points:
+		if not p.is_finite() or absf(p.x) > 10000000.0 or \
+				absf(p.y) > 10000000.0 or absf(p.z) > 10000000.0:
+			return result
+	if points.is_empty():
+		return result
+	if points.size() < min_split_count or max_clusters == 1:
+		return _single_cluster_indices(points.size())
+	var buckets: Dictionary = {}
+	var order: Array[Vector3i] = []
+	for i in points.size():
+		var p: Vector3 = points[i]
+		var cell := Vector3i(floori(p.x / cell_size), floori(p.y / cell_size),
+			floori(p.z / cell_size))
+		if not buckets.has(cell):
+			if order.size() >= max_clusters:
+				return _single_cluster_indices(points.size())
+			order.append(cell)
+			buckets[cell] = PackedInt32Array()
+		var indices: PackedInt32Array = buckets[cell]
+		indices.append(i)
+		buckets[cell] = indices
+	for cell in order:
+		result.append(buckets[cell])
+	return result
+
+
+## Native module computes the index buckets; no scene objects or RNG are touched.
+## Use prefer_native=false to test the exact portable policy independently.
+static func partition_indices_3d(points: PackedVector3Array, cell_size: float = TILE_SIZE,
+		min_split_count: int = SPLIT_MIN_INSTANCES,
+		max_clusters: int = MAX_SCENERY_CLUSTERS, prefer_native: bool = true) -> Array:
+	if prefer_native:
+		if not _cluster_checked:
+			_cluster_checked = true
+			if ClassDB.class_exists("PCGInstanceCluster3D"):
+				var instance: Object = ClassDB.instantiate("PCGInstanceCluster3D")
+				if instance != null and instance.has_method("partition_indices"):
+					_cluster_native = instance
+		if _cluster_native != null:
+			return _cluster_native.call("partition_indices", points, cell_size,
+				min_split_count, max_clusters)
+	return _cluster_indices_fallback(points, cell_size, min_split_count, max_clusters)
+
+
+## Native 3D spatial cells yield tighter cullable MultiMesh bounds on steep
+## terrain; flat ground still produces the same stable 32 m XY-plane tiles.
+## Every instance appears in exactly one batch, preserving its original order.
 static func partition(transforms: Array[Transform3D]) -> Array:
 	if transforms.is_empty():
 		return []
-	if transforms.size() < SPLIT_MIN_INSTANCES:
+	if transforms.size() < SPLIT_MIN_INSTANCES or transforms.size() > MAX_SCENERY_INSTANCES:
 		return [transforms]
-	var buckets: Dictionary = {}
-	var order: Array[Vector2i] = []
-	for transform in transforms:
-		var tile := Vector2i(floori(transform.origin.x / TILE_SIZE), floori(transform.origin.z / TILE_SIZE))
-		if not buckets.has(tile):
-			buckets[tile] = []
-			order.append(tile)
-		(buckets[tile] as Array).append(transform)
+	var points := PackedVector3Array()
+	points.resize(transforms.size())
+	for i in transforms.size():
+		points[i] = transforms[i].origin
+	var index_groups: Array = partition_indices_3d(points)
+	if index_groups.is_empty():
+		return [transforms] # Fail open for cosmetic geometry; never drop transforms.
 	var result: Array = []
-	for tile in order:
-		result.append(buckets[tile])
+	var assigned := 0
+	for indices in index_groups:
+		var group: Array[Transform3D] = []
+		for index in indices:
+			group.append(transforms[index])
+		assigned += group.size()
+		result.append(group)
+	if assigned != transforms.size():
+		return [transforms]
 	return result
 
 

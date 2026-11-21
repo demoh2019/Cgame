@@ -53,6 +53,29 @@ func run(t) -> void:
 	t.eq(RaidReinforcements.kinds(2).size(), 2, "final wave is bounded")
 
 
+	t.current = "native EQS Donut generator and portable ring-source parity"
+	var ring_center := Vector2(215.0, 200.0)
+	for phase_id in [1, 2]:
+		var scripted_ring: PackedVector2Array = RaidReinforcements.candidate_ring_points(
+			ring_center, phase_id, false)
+		var native_ring: PackedVector2Array = RaidReinforcements.candidate_ring_points(
+			ring_center, phase_id, true)
+		t.eq(scripted_ring.size(), RaidReinforcements.RADII.size() * RaidReinforcements.ANGLES,
+			"portable raid sampling retains every original site in every encounter phase")
+		t.eq(native_ring.size(), scripted_ring.size(),
+			"native EQS donut path preserves the exact candidate budget")
+		for index in scripted_ring.size():
+			t.check(native_ring[index].distance_to(scripted_ring[index]) < 0.001,
+				"all ring candidate coordinates and their phase-rotated source indices agree")
+			var ring_index: int = index / RaidReinforcements.ANGLES
+			t.near(native_ring[index].distance_to(ring_center),
+				float(RaidReinforcements.RADII[ring_index]), 0.001,
+				"candidates retain the correct server-owned raid distance band")
+	t.eq(RaidReinforcements.candidate_ring_points(Vector2(INF, 0), 1).size(), 0,
+		"nonfinite raid centers cannot generate native or script candidates")
+	t.eq(RaidReinforcements.candidate_ring_points(ring_center, 3).size(), 0,
+		"invalid raid phase cannot generate positions")
+
 	t.current = "bounded deterministic spread ranking"
 	var candidates: Array[Vector2] = [
 		Vector2(8, 0), Vector2(8, 1), Vector2(16, 0),
