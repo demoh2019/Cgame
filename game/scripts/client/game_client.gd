@@ -12,6 +12,7 @@ const Survival = preload("res://scripts/shared/survival.gd")
 const WadingTravel = preload("res://scripts/shared/wading_travel.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 const PartySupplyBeacon = preload("res://scripts/client/party_supply_beacon.gd")
+const PcgSpawns = preload("res://scripts/server/pcg_spawns.gd")
 
 signal snapshot_received
 signal event_received(event: Dictionary)
@@ -71,6 +72,7 @@ func _init(p_net) -> void:
 
 func on_welcome(world_seed: int, _tick_rate: int) -> void:
 	world = WorldGen.new(world_seed)
+	PcgSpawns.attach(world) # Same deterministic crate list as the server; only presentation (the server stays authoritative).
 	welcomed = true
 	peer_id = net.multiplayer.get_unique_id()
 	predicted_stamina = Defs.MAX_STAMINA

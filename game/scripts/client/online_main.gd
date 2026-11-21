@@ -6,6 +6,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WoundFx = preload("res://scripts/client/wound_fx.gd")
 const BrawlMeter = preload("res://scripts/client/brawl_meter.gd")
 const FarField = preload("res://scripts/client/far_field.gd")
+const PcgWorldDressing = preload("res://scripts/client/pcg_world_dressing.gd")
 const SeaSurface = preload("res://scripts/client/sea_surface.gd")
 const Buoyancy = preload("res://scripts/client/buoyancy.gd")
 const RaftVisual = preload("res://scripts/client/raft_visual.gd")
@@ -224,6 +225,7 @@ var _brawl_meter: Control
 var _far_field: Node3D
 var _raft_visual: Node3D
 var _profiler: Control # World streaming profiler (Ctrl+F3).
+var _pcg_dressing: Node3D # Engine PCG graphs: roadside props, ground clutter, ruin debris (null without the module).
 var _sea # SeaSurface: depth map for shore-aware swell.
 var _last_charge: Dictionary = {} # peer -> charge of their latest swing (for power-hit gore).
 var _underwater_tint: ColorRect # Blue murk while the camera is below the surface.
@@ -1411,6 +1413,10 @@ func _on_welcomed() -> void:
 	buoyancy.name = "Buoyancy"
 	buoyancy.world = client.world
 	add_child(buoyancy)
+	_pcg_dressing = PcgWorldDressing.new()
+	_pcg_dressing.name = "PcgDressing"
+	add_child(_pcg_dressing)
+	_pcg_dressing.setup(client.world)
 	# Streaming: chunks are built from the seed as the player walks.
 	streamer = WorldStreamer.new()
 	streamer.cell_size = Defs.CHUNK_SIZE
@@ -1833,6 +1839,8 @@ func _process(delta: float) -> void:
 		if _far_field != null:
 			_far_field.update(position)
 		_apply_data_layers(delta)
+		if _pcg_dressing != null:
+			_pcg_dressing.update(position, delta)
 		# Cheap, local movement hint for native chunk queue ordering. Server
 		# correction and teleports never prefetch in an unrelated direction.
 		var moved: Vector3 = position - _stream_previous_position

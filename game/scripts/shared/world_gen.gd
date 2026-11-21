@@ -26,6 +26,7 @@ var poi_building := false # While sites are being found, terrain is read without
 var roads # Seeded roads shared by renderer and movement physics.
 var rivers # Seeded rivers and lakes carved into the land (world_rivers.gd).
 var poi # Villages, camps, forts, ruined cities and the rest: see world_poi.gd.
+var spawn_extender = null # Optional per-chunk content hook (server/pcg_spawns.gd); null = classic chunks.
 const CACHE_LIMIT := 256
 
 # Height range in meters. The hub is leveled to HUB_HEIGHT so the town can be built flat.
@@ -709,7 +710,10 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 	_add_hostiles(cell, origin, zone, ruin, spawns)
 	_add_groves(cell, origin, tier, nodes, sites)
 	_add_outposts(cell, origin, zone, ruin, structures, crates, props, sites)
-	return {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
+	var generated := {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
+	if spawn_extender != null:
+		spawn_extender.extend(cell, generated)
+	return generated
 
 
 ## Trees and rocks keep out of the inner part of a settlement, camp or city.

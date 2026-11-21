@@ -196,6 +196,7 @@ const TrailRation = preload("res://scripts/shared/trail_ration.gd")
 const FoodSafety = preload("res://scripts/shared/food_safety.gd")
 const CombatStress = preload("res://scripts/shared/combat_stress.gd")
 const PartyFeast = preload("res://scripts/shared/party_feast.gd")
+const PcgSpawns = preload("res://scripts/server/pcg_spawns.gd")
 
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
 const WORKBENCH_RANGE := 6.0
@@ -518,6 +519,7 @@ var _next_id: int = 5_000_000_000
 
 func _init(p_world, p_seed: int = 1) -> void:
 	world = p_world
+	PcgSpawns.attach(p_world) # PCG loot caches and encounter spots (no-op without the engine module).
 	territory = TerritoryControl.new(p_world)
 	rng.seed = p_seed
 
