@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/variant/typed_array.h"
 #include "scene/resources/mesh.h"
 #include "servers/rendering/rendering_server_enums.h"
 
@@ -105,6 +106,13 @@ public:
 	PhysicsInterpolationQuality get_physics_interpolation_quality() const { return _physics_interpolation_quality; }
 
 	void set_instance_transform(int p_instance, const Transform3D &p_transform);
+	// Sparse, prevalidated instance transform updates (3D and 2D).
+	bool set_instance_transforms_batch(const PackedInt32Array &p_indices, const TypedArray<Transform3D> &p_transforms);
+	// Prevalidated sparse 3D transform + vertex color updates for instanced gameplay.
+	bool set_instance_visual_states_batch(const PackedInt32Array &p_indices, const TypedArray<Transform3D> &p_transforms, const PackedColorArray &p_colors);
+	// Sparse instanced actor states: position, tint and animation payload.
+	bool set_instance_full_states_batch(const PackedInt32Array &p_indices, const TypedArray<Transform3D> &p_transforms, const PackedColorArray &p_colors, const PackedColorArray &p_custom_data);
+	bool set_instance_transforms_2d_batch(const PackedInt32Array &p_indices, const TypedArray<Transform2D> &p_transforms);
 	void set_instance_transform_2d(int p_instance, const Transform2D &p_transform);
 	Transform3D get_instance_transform(int p_instance) const;
 	Transform2D get_instance_transform_2d(int p_instance) const;

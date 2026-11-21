@@ -97,6 +97,48 @@
 				This custom instance data has to be manually accessed in your custom shader using [code]INSTANCE_CUSTOM[/code].
 			</description>
 		</method>
+		<method name="set_instance_full_states_batch">
+			<return type="bool" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<param index="1" name="transforms" type="Array[Transform3D]" />
+			<param index="2" name="colors" type="PackedColorArray" />
+			<param index="3" name="custom_data" type="PackedColorArray" />
+			<description>
+				Updates the [Transform3D], vertex color and 4-channel custom shader data for each selected 3D MultiMesh instance in one GDScript call. Suitable for pooled workers, moving resource props and entity state indicators.
+				Requires [enum TRANSFORM_3D], [member use_colors] and [member use_custom_data]. All four arrays must have identical lengths. Indices may be unsorted and may reference hidden slots but must be unique and in range. All transform, RGBA and custom-data components must be finite. Input is validated in full [b]before[/b] the first renderer update. Invalid input returns [code]false[/code] without changing any instance; an empty valid batch returns [code]true[/code].
+				The method does not change visibility, allocation, entity identity, collision or physics state. It reduces scripting overhead but makes [b]three[/b] RenderingServer updates for each instance (transform, color and custom data). It is not one GPU upload or a complete entity-component system. For dense updates consider [method set_buffer].
+			</description>
+		</method>
+		<method name="set_instance_visual_states_batch">
+			<return type="bool" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<param index="1" name="transforms" type="Array[Transform3D]" />
+			<param index="2" name="colors" type="PackedColorArray" />
+			<description>
+				Updates both a sparse set of 3D instance transforms and per-instance vertex colors in one scripting call. This is intended for pooled cargo, interactive entities and factory conveyors where an instance's movement and visual status must remain synchronized.
+				Requires [enum TRANSFORM_3D] and [member use_colors] enabled. All three arrays must have equal lengths, indices must be unique and within the allocated [member instance_count], and all transform and color components must be finite. Hidden slots may be updated. Invalid input returns [code]false[/code] without modifying any instance; an empty batch succeeds when the format and color mode are valid.
+				The method does [b]not[/b] change [member visible_instance_count], [member instance_count], custom shader data, physics collision or navigation. It uses separate RenderingServer transform and color updates internally per index: one scripting entry point, [b]not[/b] one GPU upload. Whole-buffer updates can use [method set_buffer] instead.
+			</description>
+		</method>
+		<method name="set_instance_transforms_batch">
+			<return type="bool" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<param index="1" name="transforms" type="Array[Transform3D]" />
+			<description>
+				Sets sparse [Transform3D] values for the corresponding MultiMesh instance indices, with one scripting API call. Both arrays must have equal lengths and all instance indices must be unique and within [member instance_count]. [member transform_format] must be [enum TRANSFORM_3D], and every transform must contain finite components.
+				The full input is checked before any instance is updated, so invalid input returns [code]false[/code] without partial mutation. An empty pair returns [code]true[/code] when the transform format matches. Hidden instances may also be updated. Neither [member instance_count] nor [member visible_instance_count] is modified.
+				This method reduces GDScript-to-C++ call overhead for sparse animation, pooled gameplay objects and conveyor visuals. It still issues one RenderingServer transform update per instance; it is [b]not[/b] a GPU batch upload. For whole-buffer updates, use [method set_buffer].
+			</description>
+		</method>
+		<method name="set_instance_transforms_2d_batch">
+			<return type="bool" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<param index="1" name="transforms" type="Array[Transform2D]" />
+			<description>
+				The 2D counterpart to [method set_instance_transforms_batch]. Each index must be unique and within [member instance_count], and each [Transform2D] must be finite. [member transform_format] must be [enum TRANSFORM_2D]. Invalid input returns [code]false[/code] without changes. An empty pair is valid.
+				This is a CPU-side sparse update helper, not a new GPU instancing or culling system.
+			</description>
+		</method>
 		<method name="set_instance_transform">
 			<return type="void" />
 			<param index="0" name="instance" type="int" />

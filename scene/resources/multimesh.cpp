@@ -30,6 +30,8 @@
 
 #include "multimesh.h"
 
+#include "core/math/math_funcs.h"
+
 #include "core/object/class_db.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -255,6 +257,128 @@ void MultiMesh::set_physics_interpolation_quality(PhysicsInterpolationQuality p_
 	RenderingServer::get_singleton()->multimesh_set_physics_interpolation_quality(multimesh, (RSE::MultimeshPhysicsInterpolationQuality)p_quality);
 }
 
+bool MultiMesh::set_instance_full_states_batch(const PackedInt32Array &p_indices, const TypedArray<Transform3D> &p_transforms, const PackedColorArray &p_colors, const PackedColorArray &p_custom_data) {
+	ERR_FAIL_COND_V_MSG(transform_format != TRANSFORM_3D, false, "Full instance state batches require a 3D MultiMesh.");
+	ERR_FAIL_COND_V_MSG(!use_colors || !use_custom_data, false, "Full instance state batches require use_colors and use_custom_data enabled.");
+	ERR_FAIL_COND_V_MSG(p_indices.size() != p_transforms.size() || p_indices.size() != p_colors.size() || p_indices.size() != p_custom_data.size(), false, "Indices, transforms, colors and custom data arrays must have equal lengths.");
+	if (p_indices.is_empty()) {
+		return true;
+	}
+
+	PackedInt32Array sorted = p_indices;
+	sorted.sort();
+	for (int i = 0; i < sorted.size(); i++) {
+		ERR_FAIL_INDEX_V_MSG(sorted[i], instance_count, false, "Full instance state index is out of bounds.");
+		if (i > 0) {
+			ERR_FAIL_COND_V_MSG(sorted[i] == sorted[i - 1], false, "Duplicate full state instance indices are not allowed.");
+		}
+	}
+	// Validate all floats BEFORE mutating any slot, including the 4 custom
+	// shader channels. This guarantees all-or-nothing for bad user input.
+	for (int i = 0; i < p_indices.size(); i++) {
+		const Transform3D transform = p_transforms[i];
+		const Color &color = p_colors[i];
+		const Color &custom = p_custom_data[i];
+		ERR_FAIL_COND_V_MSG(!transform.is_finite(), false, "Full state instance transforms must be finite.");
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(color.r) || !Math::is_finite(color.g) || !Math::is_finite(color.b) || !Math::is_finite(color.a), false, "Full state instance color components must be finite.");
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(custom.r) || !Math::is_finite(custom.g) || !Math::is_finite(custom.b) || !Math::is_finite(custom.a), false, "Full state instance custom data components must be finite.");
+	}
+	// One script-to-engine crossing, but still three RenderingServer updates
+	// per instance. Not an atomic GPU command nor a renderer-side ECS.
+	for (int i = 0; i < p_indices.size(); i++) {
+		const Transform3D transform = p_transforms[i];
+		RenderingServer::get_singleton()->multimesh_instance_set_transform(multimesh, p_indices[i], transform);
+		RenderingServer::get_singleton()->multimesh_instance_set_color(multimesh, p_indices[i], p_colors[i]);
+		RenderingServer::get_singleton()->multimesh_instance_set_custom_data(multimesh, p_indices[i], p_custom_data[i]);
+	}
+	return true;
+}
+
+bool MultiMesh::set_instance_visual_states_batch(const PackedInt32Array &p_indices, const TypedArray<Transform3D> &p_transforms, const PackedColorArray &p_colors) {
+	ERR_FAIL_COND_V_MSG(transform_format != TRANSFORM_3D, false, "Visual state batches require a 3D MultiMesh.");
+	ERR_FAIL_COND_V_MSG(!use_colors, false, "Visual state batches require use_colors to be enabled.");
+	ERR_FAIL_COND_V_MSG(p_indices.size() != p_transforms.size() || p_indices.size() != p_colors.size(), false, "Indices, 3D transforms and colors must have matching lengths.");
+	if (p_indices.is_empty()) {
+		return true;
+	}
+
+	// Preflight ALL slots and values before touching RenderingServer, so
+	// malformed input never leaves a partly moved/partly recolored cargo fleet.
+	PackedInt32Array sorted = p_indices;
+	sorted.sort();
+	for (int i = 0; i < sorted.size(); i++) {
+		ERR_FAIL_INDEX_V_MSG(sorted[i], instance_count, false, "Visual state instance index is out of bounds.");
+		if (i > 0) {
+			ERR_FAIL_COND_V_MSG(sorted[i] == sorted[i - 1], false, "Duplicate visual state indices are not allowed.");
+		}
+	}
+	for (int i = 0; i < p_transforms.size(); i++) {
+		const Transform3D transform = p_transforms[i];
+		const Color &color = p_colors[i];
+		ERR_FAIL_COND_V_MSG(!transform.is_finite(), false, "Visual state transforms must have finite components.");
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(color.r) || !Math::is_finite(color.g) || !Math::is_finite(color.b) || !Math::is_finite(color.a), false, "Visual state color components must be finite.");
+	}
+	for (int i = 0; i < p_indices.size(); i++) {
+		const Transform3D transform = p_transforms[i];
+		RenderingServer::get_singleton()->multimesh_instance_set_transform(multimesh, p_indices[i], transform);
+		RenderingServer::get_singleton()->multimesh_instance_set_color(multimesh, p_indices[i], p_colors[i]);
+	}
+	return true;
+}
+
+bool MultiMesh::set_instance_transforms_batch(const PackedInt32Array &p_indices, const TypedArray<Transform3D> &p_transforms) {
+	ERR_FAIL_COND_V_MSG(transform_format != TRANSFORM_3D, false, "Use a 3D MultiMesh for Transform3D batch updates.");
+	ERR_FAIL_COND_V_MSG(p_indices.size() != p_transforms.size(), false, "Indices and transforms must have equal lengths.");
+	if (p_indices.is_empty()) {
+		return true;
+	}
+
+	// No partial updates on bad input: preflight indices, duplicates and data.
+	PackedInt32Array sorted = p_indices;
+	sorted.sort();
+	for (int i = 0; i < sorted.size(); i++) {
+		ERR_FAIL_INDEX_V_MSG(sorted[i], instance_count, false, "3D batch instance index is out of bounds.");
+		if (i > 0) {
+			ERR_FAIL_COND_V_MSG(sorted[i] == sorted[i - 1], false, "Duplicate 3D batch instance indices are not allowed.");
+		}
+	}
+	for (int i = 0; i < p_transforms.size(); i++) {
+		const Transform3D transform = p_transforms[i];
+		ERR_FAIL_COND_V_MSG(!transform.is_finite(), false, "3D batch instance transforms must be finite.");
+	}
+	for (int i = 0; i < p_indices.size(); i++) {
+		const Transform3D transform = p_transforms[i];
+		RenderingServer::get_singleton()->multimesh_instance_set_transform(multimesh, p_indices[i], transform);
+	}
+	return true;
+}
+
+bool MultiMesh::set_instance_transforms_2d_batch(const PackedInt32Array &p_indices, const TypedArray<Transform2D> &p_transforms) {
+	ERR_FAIL_COND_V_MSG(transform_format != TRANSFORM_2D, false, "Use a 2D MultiMesh for Transform2D batch updates.");
+	ERR_FAIL_COND_V_MSG(p_indices.size() != p_transforms.size(), false, "Indices and transforms must have equal lengths.");
+	if (p_indices.is_empty()) {
+		return true;
+	}
+
+	PackedInt32Array sorted = p_indices;
+	sorted.sort();
+	for (int i = 0; i < sorted.size(); i++) {
+		ERR_FAIL_INDEX_V_MSG(sorted[i], instance_count, false, "2D batch instance index is out of bounds.");
+		if (i > 0) {
+			ERR_FAIL_COND_V_MSG(sorted[i] == sorted[i - 1], false, "Duplicate 2D batch instance indices are not allowed.");
+		}
+	}
+	for (int i = 0; i < p_transforms.size(); i++) {
+		const Transform2D transform = p_transforms[i];
+		ERR_FAIL_COND_V_MSG(!transform.is_finite(), false, "2D batch instance transforms must be finite.");
+	}
+	for (int i = 0; i < p_indices.size(); i++) {
+		const Transform2D transform = p_transforms[i];
+		RenderingServer::get_singleton()->multimesh_instance_set_transform_2d(multimesh, p_indices[i], transform);
+	}
+	return true;
+}
+
 void MultiMesh::set_instance_transform(int p_instance, const Transform3D &p_transform) {
 	ERR_FAIL_INDEX_MSG(p_instance, instance_count, "Instance index out of bounds. Instance index must be less than `instance_count` and greater than or equal to zero.");
 	ERR_FAIL_COND_MSG(transform_format == TRANSFORM_2D, "Can't set Transform3D on a Multimesh configured to use Transform2D. Ensure that you have set the `transform_format` to `TRANSFORM_3D`.");
@@ -379,6 +503,10 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_physics_interpolation_quality", "quality"), &MultiMesh::set_physics_interpolation_quality);
 	ClassDB::bind_method(D_METHOD("get_physics_interpolation_quality"), &MultiMesh::get_physics_interpolation_quality);
 	ClassDB::bind_method(D_METHOD("set_instance_transform", "instance", "transform"), &MultiMesh::set_instance_transform);
+	ClassDB::bind_method(D_METHOD("set_instance_transforms_batch", "indices", "transforms"), &MultiMesh::set_instance_transforms_batch);
+	ClassDB::bind_method(D_METHOD("set_instance_visual_states_batch", "indices", "transforms", "colors"), &MultiMesh::set_instance_visual_states_batch);
+	ClassDB::bind_method(D_METHOD("set_instance_full_states_batch", "indices", "transforms", "colors", "custom_data"), &MultiMesh::set_instance_full_states_batch);
+	ClassDB::bind_method(D_METHOD("set_instance_transforms_2d_batch", "indices", "transforms"), &MultiMesh::set_instance_transforms_2d_batch);
 	ClassDB::bind_method(D_METHOD("set_instance_transform_2d", "instance", "transform"), &MultiMesh::set_instance_transform_2d);
 	ClassDB::bind_method(D_METHOD("get_instance_transform", "instance"), &MultiMesh::get_instance_transform);
 	ClassDB::bind_method(D_METHOD("get_instance_transform_2d", "instance"), &MultiMesh::get_instance_transform_2d);
