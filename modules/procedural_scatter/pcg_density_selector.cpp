@@ -72,12 +72,12 @@ PackedInt32Array PCGDensitySelector::select_indices(const PackedFloat32Array &p_
 		if (density == 0.0f) {
 			continue;
 		}
-		// Exact unsigned 32-bit xorshift hash, independently seeded per stable
-		// ID. This does not mutate a shared RNG and tolerates input reordering.
+		// Exact unsigned 32-bit avalanche mixer; nearby small grid IDs
+		// must not yield nearly identical probabilities. No shared RNG.
 		uint32_t hash = uint32_t(p_stable_ids[i]) ^ uint32_t(p_seed) ^ 0x9E3779B9u;
-		hash ^= hash << 13;
-		hash ^= hash >> 17;
-		hash ^= hash << 5;
+		hash = (hash ^ (hash >> 16)) * 0x045d9f3bu;
+		hash = (hash ^ (hash >> 16)) * 0x045d9f3bu;
+		hash ^= hash >> 16;
 		if (density == 1.0f || double(hash) < double(density) * 4294967296.0) {
 			selected.push_back(i);
 			if (selected.size() == p_max_selected) {
