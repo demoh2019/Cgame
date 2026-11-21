@@ -1,4 +1,6 @@
 extends SceneTree
+
+const LODPlan = preload("res://pcg_instance_lod.gd")
 ## Run: godot --headless --path games/days_after --script res://smoke_test.gd
 
 
@@ -132,6 +134,17 @@ func _smoke() -> void:
             ok = false
         var lod_tiers: PackedInt32Array = foliage.call("get_lod_tiers")
         var lod_counts: PackedInt32Array = foliage.call("get_lod_batch_sizes")
+        var rebuild_counts_before: PackedInt32Array = foliage.call("get_lod_batch_rebuild_counts")
+        var old_resource_ids := PackedInt64Array()
+        for variant_index in 3:
+            for lod_index in 2:
+                var old_renderer := foliage.call(
+                    "get_lod_renderer", variant_index, lod_index) as MultiMeshInstance3D
+                old_resource_ids.append(old_renderer.multimesh.get_instance_id()
+                    if old_renderer != null and old_renderer.multimesh != null else -1)
+        if rebuild_counts_before.size() != 6 or old_resource_ids.size() != 6:
+            push_error("PCG LOD partial GPU update diagnostics did not initialize")
+            ok = false
         if lod_tiers.size() != positions.size() or lod_counts.size() != 6:
             push_error("Two-level PCG geometry LOD is not fully initialized")
             ok = false
@@ -334,6 +347,50 @@ func _smoke() -> void:
             push_error("Foliage LOD did not accept a far-away viewer")
             ok = false
         var far_view_tiers: PackedInt32Array = foliage.call("get_lod_tiers")
+        # Only groups containing migrated plants may reallocate GPU buffers.
+        var planned_dirty: PackedByteArray = LODPlan.plan_dirty_variant_lod_groups(
+            weighted, lod_tiers, far_view_tiers, 3, false)
+        var actual_dirty: PackedByteArray = foliage.call("get_last_lod_dirty_flags")
+        var rebuild_counts_after: PackedInt32Array = foliage.call(
+            "get_lod_batch_rebuild_counts")
+        if planned_dirty.size() != 6 or actual_dirty != planned_dirty or \
+                rebuild_counts_after.size() != 6:
+            push_error("PCG native dirty-group mask disagrees with actual LOD transition")
+            ok = false
+        else:
+            for group_index in 6:
+                var variant_index: int = int(group_index / 2)
+                var lod_index: int = group_index % 2
+                var updated_renderer := foliage.call(
+                    "get_lod_renderer", variant_index, lod_index) as MultiMeshInstance3D
+                if updated_renderer == null or updated_renderer.multimesh == null:
+                    push_error("PCG LOD incremental update lost an instancing renderer")
+                    ok = false
+                    continue
+                var resource_id: int = updated_renderer.multimesh.get_instance_id()
+                if rebuild_counts_after[group_index] - rebuild_counts_before[group_index] != \
+                        int(planned_dirty[group_index]):
+                    push_error("PCG LOD rebuilt an unchanged GPU batch")
+                    ok = false
+                if planned_dirty[group_index] == 0 and resource_id != old_resource_ids[group_index]:
+                    push_error("PCG LOD replaced a GPU buffer with unchanged membership")
+                    ok = false
+                elif planned_dirty[group_index] == 1 and \
+                        resource_id == old_resource_ids[group_index]:
+                    push_error("PCG LOD failed to update a changed mesh group")
+                    ok = false
+        # Explicit forced refresh is idempotent when the viewer has not
+        # caused another geometry-tier transition.
+        if not bool(foliage.call(
+                "force_lod_refresh", Vector3(300.0, 0.15, 300.0))):
+            push_error("Repeat forced LOD refresh was not accepted")
+            ok = false
+        if rebuild_counts_after != foliage.call("get_lod_batch_rebuild_counts"):
+            push_error("Unchanged forced LOD refresh still reuploaded GPU buffers")
+            ok = false
+        if foliage.call("get_last_lod_dirty_flags") != PackedByteArray([0, 0, 0, 0, 0, 0]):
+            push_error("Unchanged forced LOD refresh reported dirty GPU groups")
+            ok = false
         for tier in far_view_tiers:
             if tier != 1:
                 push_error("Far-view LOD retained detailed plant geometry")
@@ -349,6 +406,16 @@ func _smoke() -> void:
             push_error("Native LOD hysteresis diverged after changing camera distance")
             ok = false
         foliage.call("regenerate")
+        var counts_after_regeneration: PackedInt32Array = foliage.call(
+            "get_lod_batch_rebuild_counts")
+        if counts_after_regeneration.size() != 6 or rebuild_counts_after.size() != 6:
+            push_error("Regeneration lost LOD GPU rebuild counters")
+            ok = false
+        else:
+            for group_index in 6:
+                if counts_after_regeneration[group_index] != rebuild_counts_after[group_index] + 1:
+                    push_error("Regeneration did not rebuild all six authored GPU batches")
+                    ok = false
         if lod_tiers != foliage.call("get_lod_tiers"):
             push_error("Foliage regeneration did not restore authored near/far LOD")
             ok = false
