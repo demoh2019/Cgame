@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameWorldSharding" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Plans which server owns which world region and how players move between them.
+	</brief_description>
+	<description>
+		[CgameWorldSharding] maps a grid of square regions onto zone servers. It assigns regions with a greedy longest-processing-time rule ([method assign_initial]), rebalances them when one server is clearly hotter than another ([method rebalance]), reports which neighbouring servers need a ghost copy of an entity near a border ([method ghost_servers]) and runs an idempotent four-step player handoff ([method begin_transfer], [method send_state], [method ack_transfer], [method release_transfer]).
+		The planner holds no network code: the caller moves the bytes and reports the results. Every step of the handoff may be repeated safely, so a duplicated or replayed message never changes ownership twice.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="cols" type="int" />
+			<param index="1" name="rows" type="int" />
+			<param index="2" name="cell" type="float" />
+			<param index="3" name="servers" type="int" />
+			<description>
+				Resizes the grid and resets [member region_owner] to server 0. At least one server is kept.
+			</description>
+		</method>
+		<method name="region_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns [code]cols * rows[/code].
+			</description>
+		</method>
+		<method name="region_of" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="pos" type="Vector2" />
+			<description>
+				Returns the index of the region containing [param pos]. Positions outside the grid clamp to the nearest edge region.
+			</description>
+		</method>
+		<method name="owner_at" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="pos" type="Vector2" />
+			<description>
+				Returns the server owning the region at [param pos].
+			</description>
+		</method>
+		<method name="server_loads" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="loads" type="Array" />
+			<description>
+				Sums the per-region [param loads] for every server and returns one float per server. Missing entries count as zero.
+			</description>
+		</method>
+		<method name="assign_initial">
+			<return type="void" />
+			<param index="0" name="loads" type="Array" />
+			<description>
+				Assigns regions heaviest first to the least loaded server (ties: fewest regions).
+			</description>
+		</method>
+		<method name="rebalance">
+			<return type="Array" />
+			<param index="0" name="loads" type="Array" />
+			<description>
+				Moves regions from the hottest to the coldest server while that strictly lowers the peak load, up to [member max_moves] times. Does nothing inside the [member imbalance_ratio] band. Returns [code]{region, from, to}[/code] dictionaries and applies them.
+			</description>
+		</method>
+		<method name="claim_entity">
+			<return type="void" />
+			<param index="0" name="entity_id" type="String" />
+			<param index="1" name="server" type="int" />
+			<description>
+				Records [param server] as the owner of an entity.
+			</description>
+		</method>
+		<method name="owner_of" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="entity_id" type="String" />
+			<description>
+				Returns the owning server of an entity, or [code]-1[/code] if unknown.
+			</description>
+		</method>
+		<method name="entities_on" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="server" type="int" />
+			<description>
+				Returns the ids of all entities owned by [param server].
+			</description>
+		</method>
+		<method name="ghost_servers" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="pos" type="Vector2" />
+			<param index="1" name="owner" type="int" />
+			<description>
+				Returns the sorted servers other than [param owner] whose regions fall within [member border_margin] of [param pos].
+			</description>
+		</method>
+		<method name="handoff_needed" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="player_pos" type="Vector2" />
+			<param index="1" name="current_server" type="int" />
+			<description>
+				Returns the server the player should be handed to, or [code]-1[/code] while the player is still within [member handoff_hysteresis] of a region owned by [param current_server].
+			</description>
+		</method>
+		<method name="track_player">
+			<return type="void" />
+			<param index="0" name="player_id" type="String" />
+			<param index="1" name="pos" type="Vector2" />
+			<param index="2" name="server" type="int" />
+			<description>
+				Starts tracking a player as stable on [param server].
+			</description>
+		</method>
+		<method name="update_player">
+			<return type="Dictionary" />
+			<param index="0" name="player_id" type="String" />
+			<param index="1" name="pos" type="Vector2" />
+			<description>
+				Moves a tracked player and returns [code]{ghosts, handoff_to}[/code]. [code]handoff_to[/code] is [code]-1[/code] unless a handoff is due and the player is not frozen.
+			</description>
+		</method>
+		<method name="begin_transfer">
+			<return type="String" />
+			<param index="0" name="player_id" type="String" />
+			<param index="1" name="to_server" type="int" />
+			<param index="2" name="transfer_id" type="String" />
+			<description>
+				Freezes the player and records the handoff. Returns [param transfer_id], or an empty string if rejected (unknown or already frozen player, same server). A repeated id is ignored and returns the id.
+			</description>
+		</method>
+		<method name="send_state">
+			<return type="bool" />
+			<param index="0" name="transfer_id" type="String" />
+			<param index="1" name="payload" type="Dictionary" />
+			<description>
+				Stores the player state to send and moves the transfer to [code]"transferring"[/code]. Idempotent past that step; returns [code]false[/code] for unknown or aborted transfers.
+			</description>
+		</method>
+		<method name="ack_transfer">
+			<return type="bool" />
+			<param index="0" name="transfer_id" type="String" />
+			<description>
+				The destination confirms it has the state. Idempotent.
+			</description>
+		</method>
+		<method name="release_transfer">
+			<return type="bool" />
+			<param index="0" name="transfer_id" type="String" />
+			<description>
+				The source releases authority: ownership flips to the destination and the player becomes stable again. Only valid after [method ack_transfer]; idempotent once done.
+			</description>
+		</method>
+		<method name="abort_transfer">
+			<return type="bool" />
+			<param index="0" name="transfer_id" type="String" />
+			<description>
+				Cancels an unfinished transfer and unfreezes the player on the source. Returns [code]false[/code] for finished, aborted or unknown transfers.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="cell_size" type="float" setter="set_cell_size" getter="get_cell_size" default="100.0">
+			Edge length of one square region.
+		</member>
+		<member name="cols" type="int" setter="set_cols" getter="get_cols" default="4">
+			Number of region columns.
+		</member>
+		<member name="rows" type="int" setter="set_rows" getter="get_rows" default="4">
+			Number of region rows.
+		</member>
+		<member name="server_count" type="int" setter="set_server_count" getter="get_server_count" default="2">
+			Number of zone servers.
+		</member>
+		<member name="border_margin" type="float" setter="set_border_margin" getter="get_border_margin" default="15.0">
+			Ghost replication distance: servers whose regions lie within this distance of a position receive a ghost.
+		</member>
+		<member name="handoff_hysteresis" type="float" setter="set_handoff_hysteresis" getter="get_handoff_hysteresis" default="3.0">
+			A player must be this far inside the new region before [method handoff_needed] reports a handoff.
+		</member>
+		<member name="imbalance_ratio" type="float" setter="set_imbalance_ratio" getter="get_imbalance_ratio" default="1.25">
+			[method rebalance] only acts when the hottest server's load exceeds the coldest server's load times this ratio.
+		</member>
+		<member name="max_moves" type="int" setter="set_max_moves" getter="get_max_moves" default="8">
+			Maximum number of region moves per [method rebalance] call.
+		</member>
+		<member name="region_owner" type="PackedInt32Array" setter="set_region_owner" getter="get_region_owner" default="PackedInt32Array()">
+			Owning server of every region, indexed [code]row * cols + col[/code].
+		</member>
+		<member name="entity_owner" type="Dictionary" setter="set_entity_owner" getter="get_entity_owner" default="{}">
+			Owning server of every claimed entity id.
+		</member>
+		<member name="players" type="Dictionary" setter="set_players" getter="get_players" default="{}">
+			Tracked players keyed by id: [code]pos[/code], [code]state[/code] ([code]"stable"[/code] or [code]"frozen"[/code]), [code]transfer[/code] and [code]ghosts[/code].
+		</member>
+		<member name="transfers" type="Dictionary" setter="set_transfers" getter="get_transfers" default="{}">
+			Handoffs keyed by transfer id: [code]player[/code], [code]from[/code], [code]to[/code], [code]state[/code] and [code]payload[/code].
+		</member>
+	</members>
+</class>

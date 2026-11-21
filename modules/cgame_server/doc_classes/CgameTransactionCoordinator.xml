@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameTransactionCoordinator" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Two-phase-commit coordinator with a durable decision log and a persistent order book.
+	</brief_description>
+	<description>
+		[CgameTransactionCoordinator] drives atomic multi-participant transactions with presumed abort. [method begin] logs the intent and the per-participant operations, [method run] asks every participant to prepare and then logs a single durable COMMIT or ABORT decision before delivering it. Per-participant acknowledgements are logged too, so a restart never re-sends a finished commit.
+		Participants are registered as [Callable]s with [method add_participant]. The prepare callable receives the transaction id and the participant's operation and must return [code]true[/code] to vote yes; the commit and abort callables receive the transaction id and must be idempotent, because [method recover] re-delivers logged decisions.
+		When [member store_path] is set, every state change is written to a temporary file next to the store and renamed over it, so the log is never half written. [method recover] finishes in-doubt transactions after a restart: a logged decision is re-delivered, and no decision means abort.
+		The same store also holds a persistent order book with price-time priority matching ([method place_order], [method match_orders]).
+		All public methods lock an internal recursive mutex, so the coordinator may be shared between threads. Participant callables run while that lock is held and must not block on another thread that uses the coordinator.
+		[codeblock]
+		var coordinator := CgameTransactionCoordinator.new()
+		coordinator.set_path("user://tx_log.json")
+		coordinator.add_participant("a", Callable(ledger_a, "prepare"), Callable(ledger_a, "commit"), Callable(ledger_a, "abort"))
+		coordinator.add_participant("b", Callable(ledger_b, "prepare"), Callable(ledger_b, "commit"), Callable(ledger_b, "abort"))
+		var tx = coordinator.begin({"a": {"kind": "out", "ids": ["i0-1"]}, "b": {"kind": "in", "recs": [...]}})
+		print(coordinator.run(tx)) # "committed" or "aborted"
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_participant">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="prepare" type="Callable" />
+			<param index="2" name="commit" type="Callable" />
+			<param index="3" name="abort" type="Callable" />
+			<description>
+				Registers a participant. [param prepare] is called as [code]prepare(tx_id, op)[/code] and returns a [bool] vote; [param commit] and [param abort] are called as [code]fn(tx_id)[/code].
+			</description>
+		</method>
+		<method name="clear_participants">
+			<return type="void" />
+			<description>
+				Removes all participants. Use it to break reference cycles when the participant callables point back at their owner.
+			</description>
+		</method>
+		<method name="set_path">
+			<return type="void" />
+			<param index="0" name="path" type="String" />
+			<description>
+				Sets [member store_path].
+			</description>
+		</method>
+		<method name="load_store">
+			<return type="bool" />
+			<description>
+				Loads the store from [member store_path]. Returns [code]false[/code] when the path is empty, the file is missing or it is corrupt; the coordinator then keeps its current (empty) state.
+			</description>
+		</method>
+		<method name="save_store">
+			<return type="bool" />
+			<description>
+				Writes the store to a temporary file and renames it over [member store_path]. Returns [code]true[/code] when nothing needs writing (in-memory mode) or the write succeeded.
+			</description>
+		</method>
+		<method name="begin">
+			<return type="String" />
+			<param index="0" name="ops_by_participant" type="Dictionary" />
+			<description>
+				Logs a new transaction whose operations are keyed by participant name and returns its id ([code]"tx1"[/code], [code]"tx2"[/code], ...).
+			</description>
+		</method>
+		<method name="status" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="tx_id" type="String" />
+			<description>
+				Returns the transaction state: [code]"begun"[/code], [code]"decided"[/code], [code]"done"[/code] or [code]"unknown"[/code].
+			</description>
+		</method>
+		<method name="run">
+			<return type="String" />
+			<param index="0" name="tx_id" type="String" />
+			<description>
+				Drives the transaction to completion and returns [code]"committed"[/code], [code]"aborted"[/code] or [code]"crashed"[/code]. Running a finished transaction again is a no-op that returns its outcome; an unknown id is presumed aborted.
+			</description>
+		</method>
+		<method name="recover">
+			<return type="Dictionary" />
+			<description>
+				Clears [member crashed] and [member crash_point] and finishes every unfinished transaction: a logged decision is re-delivered, a missing decision becomes an abort. Returns transaction id to outcome.
+			</description>
+		</method>
+		<method name="abort_stale">
+			<return type="int" />
+			<param index="0" name="now_unix" type="float" />
+			<param index="1" name="max_age_sec" type="float" />
+			<description>
+				Aborts undecided transactions that started more than [param max_age_sec] seconds before [param now_unix] and returns how many were aborted.
+			</description>
+		</method>
+		<method name="place_order">
+			<return type="String" />
+			<param index="0" name="owner" type="String" />
+			<param index="1" name="side" type="String" />
+			<param index="2" name="item" type="String" />
+			<param index="3" name="price" type="float" />
+			<param index="4" name="qty" type="int" />
+			<description>
+				Adds an order to the persistent book. [param side] is [code]"buy"[/code] or [code]"sell"[/code]. Returns the new order id.
+			</description>
+		</method>
+		<method name="cancel_order">
+			<return type="bool" />
+			<param index="0" name="order_id" type="String" />
+			<description>
+				Removes an order. Returns [code]false[/code] if it does not exist.
+			</description>
+		</method>
+		<method name="open_orders" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="item" type="String" />
+			<param index="1" name="side" type="String" />
+			<description>
+				Returns the open orders for [param item] and [param side], best price first and the older order first on equal prices.
+			</description>
+		</method>
+		<method name="match_orders">
+			<return type="Array" />
+			<param index="0" name="item" type="String" />
+			<description>
+				Matches crossing orders with price-time priority. Trades execute at the resting (older) order's price. Returns an array of dictionaries with [code]buyer[/code], [code]seller[/code], [code]item[/code], [code]price[/code], [code]qty[/code], [code]buy_id[/code] and [code]sell_id[/code].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="store_path" type="String" setter="set_store_path" getter="get_store_path" default="&quot;&quot;">
+			Path of the durable store. An empty path keeps everything in memory.
+		</member>
+		<member name="prepare_timeout_msec" type="int" setter="set_prepare_timeout_msec" getter="get_prepare_timeout_msec" default="0">
+			A prepare call slower than this many milliseconds counts as a refusal. [code]0[/code] disables the timeout.
+		</member>
+		<member name="crash_point" type="String" setter="set_crash_point" getter="get_crash_point" default="&quot;&quot;">
+			Test hook. [code]"before_decision"[/code] or [code]"after_decision"[/code] makes the next [method run] stop at that point and set [member crashed].
+		</member>
+		<member name="crashed" type="bool" setter="set_crashed" getter="is_crashed" default="false">
+			[code]true[/code] after a simulated crash. [method run] returns [code]"crashed"[/code] until [method recover] clears it.
+		</member>
+		<member name="txs" type="Dictionary" setter="set_txs" getter="get_txs" default="{}">
+			Transaction records keyed by transaction id. Each record has [code]state[/code], [code]ops[/code], [code]decision[/code], [code]acked[/code] and [code]started[/code].
+		</member>
+		<member name="persistent_orders" type="Dictionary" setter="set_persistent_orders" getter="get_persistent_orders" default="{}">
+			Open orders keyed by order id. Each order has [code]id[/code], [code]seq[/code], [code]owner[/code], [code]side[/code], [code]item[/code], [code]price[/code] and [code]qty[/code].
+		</member>
+	</members>
+</class>

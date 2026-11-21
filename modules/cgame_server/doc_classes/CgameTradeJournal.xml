@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameTradeJournal" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Crash-safe redo log for two-account deals such as trades and market sales.
+	</brief_description>
+	<description>
+		[CgameTradeJournal] stores the post-deal snapshots (after-images) of both characters of a deal on disk before the backend commits the pair, so a crash between "deal done in memory" and "backend confirmed" can be replayed on restart with the same transaction id.
+		A side becomes superseded once a later save of that account succeeded: its snapshot is older than the backend and must never be written back. [method replay_kind] tells which sides of an entry are still newest.
+		The journal is rewritten through a temporary file and an atomic rename. A corrupt journal makes [method open_file] fail instead of guessing. All public methods lock an internal recursive mutex.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="open_file">
+			<return type="bool" />
+			<param index="0" name="journal_path" type="String" />
+			<description>
+				Opens (or creates) the journal at [param journal_path] and loads its entries. Returns [code]false[/code] if the file is corrupt, has an unknown version or cannot be written.
+			</description>
+		</method>
+		<method name="valid_entry" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="entry" type="Variant" />
+			<description>
+				Returns whether [param entry] has the shape of a journal entry.
+			</description>
+		</method>
+		<method name="record">
+			<return type="bool" />
+			<param index="0" name="tx" type="String" />
+			<param index="1" name="user_a" type="String" />
+			<param index="2" name="data_a" type="Dictionary" />
+			<param index="3" name="user_b" type="String" />
+			<param index="4" name="data_b" type="Dictionary" />
+			<description>
+				Journals a deal before it is committed. Returns [code]false[/code] if it could not be made durable, the transaction id is empty or the journal holds [constant MAX_ENTRIES] entries.
+			</description>
+		</method>
+		<method name="settle">
+			<return type="void" />
+			<param index="0" name="tx" type="String" />
+			<description>
+				Removes a confirmed or replayed deal.
+			</description>
+		</method>
+		<method name="supersede">
+			<return type="void" />
+			<param index="0" name="user_id" type="String" />
+			<description>
+				Marks the journaled sides of an account as stale after a newer save landed. Deals with both sides superseded are dropped.
+			</description>
+		</method>
+		<method name="replay_kind" qualifiers="static">
+			<return type="String" />
+			<param index="0" name="entry" type="Dictionary" />
+			<description>
+				Returns [code]"pair"[/code] when both sides are newest, [code]"single"[/code] when only one is, otherwise [code]"none"[/code].
+			</description>
+		</method>
+		<method name="accounts" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Returns every account that appears in an unsettled deal.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="path" type="String" setter="set_path" getter="get_path" default="&quot;&quot;">
+			Journal file. An empty path keeps the journal in memory.
+		</member>
+		<member name="entries" type="Dictionary" setter="set_entries" getter="get_entries" default="{}">
+			Unsettled deals keyed by transaction id: [code]a[/code] and [code]b[/code] sides ([code]user[/code], [code]data[/code], [code]superseded[/code]) and [code]time[/code].
+		</member>
+	</members>
+	<constants>
+		<constant name="VERSION" value="1">
+			Journal file format version.
+		</constant>
+		<constant name="MAX_ENTRIES" value="256">
+			Maximum number of unsettled deals.
+		</constant>
+	</constants>
+</class>

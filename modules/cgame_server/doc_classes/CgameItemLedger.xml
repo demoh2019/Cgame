@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameItemLedger" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Per-server item ownership ledger that takes part in two-phase commits.
+	</brief_description>
+	<description>
+		[CgameItemLedger] gives items globally unique ids ([code]"i&lt;server&gt;-&lt;n&gt;"[/code]), moves them between servers exactly once and detects duplicates.
+		Items are [code]"active"[/code] (usable), [code]"locked"[/code] (prepared for an outgoing move) or [code]"quarantined"[/code] (suspected duplicate, frozen until [method resolve_duplicate] decides). A ledger is a participant of [CgameTransactionCoordinator]: register [method prepare], [method commit] and [method abort] as the three callables. A transaction operation is [code]{"kind": "out", "ids": [...]}[/code] on the source and [code]{"kind": "in", "recs": [...]}[/code] on the target. All three steps are idempotent, so re-delivered decisions are harmless.
+		The static helpers inspect several ledgers at once, for example after a crash.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="mint">
+			<return type="String" />
+			<param index="0" name="owner" type="String" />
+			<param index="1" name="def" type="String" />
+			<description>
+				Creates a new active item and returns its unique id.
+			</description>
+		</method>
+		<method name="has_item" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Returns whether the ledger holds the item in any state.
+			</description>
+		</method>
+		<method name="state_of" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Returns the item state, or an empty string for an unknown item.
+			</description>
+		</method>
+		<method name="is_active" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Returns whether the item exists and is usable.
+			</description>
+		</method>
+		<method name="owner_of" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Returns the item's owner, or an empty string for an unknown item.
+			</description>
+		</method>
+		<method name="epoch_of" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Returns how many server moves the item has made, or [code]-1[/code] for an unknown item.
+			</description>
+		</method>
+		<method name="total_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of items in any state.
+			</description>
+		</method>
+		<method name="active_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of active items.
+			</description>
+		</method>
+		<method name="ids_sorted" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns all item ids in sorted order.
+			</description>
+		</method>
+		<method name="items_of" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="owner" type="String" />
+			<description>
+				Returns the sorted ids of the active items owned by [param owner].
+			</description>
+		</method>
+		<method name="snapshot" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="ids" type="Array" />
+			<description>
+				Returns deep copies of the item records for the given ids (unknown ids are skipped), ready to travel in an [code]"in"[/code] operation.
+			</description>
+		</method>
+		<method name="prepare">
+			<return type="bool" />
+			<param index="0" name="tx_id" type="String" />
+			<param index="1" name="op" type="Variant" />
+			<description>
+				Votes on a transaction. An [code]"out"[/code] operation locks the items and fails if any is missing, locked or quarantined; an [code]"in"[/code] operation fails if the ledger already holds one of the ids. Repeating a prepare returns the earlier vote.
+			</description>
+		</method>
+		<method name="commit">
+			<return type="void" />
+			<param index="0" name="tx_id" type="String" />
+			<description>
+				Applies a prepared transaction: removes outgoing items, or adds incoming ones with their epoch increased by one. Idempotent.
+			</description>
+		</method>
+		<method name="abort">
+			<return type="void" />
+			<param index="0" name="tx_id" type="String" />
+			<description>
+				Drops a prepared transaction and unlocks outgoing items. Idempotent.
+			</description>
+		</method>
+		<method name="quarantine_item">
+			<return type="void" />
+			<param index="0" name="id" type="String" />
+			<param index="1" name="reason" type="String" />
+			<description>
+				Freezes an item until it is resolved.
+			</description>
+		</method>
+		<method name="find_duplicates" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="ledgers" type="Array" />
+			<description>
+				Returns [code]{item id: [server ids]}[/code] for every id held by more than one of the given ledgers, in any state.
+			</description>
+		</method>
+		<method name="quarantine_duplicates" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="ledgers" type="Array" />
+			<description>
+				Quarantines every copy of every duplicated id and returns the sorted ids.
+			</description>
+		</method>
+		<method name="resolve_duplicate" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="ledgers" type="Array" />
+			<param index="1" name="id" type="String" />
+			<description>
+				Keeps the copy with the highest epoch (ties: lowest server id) active and deletes the others. Returns the surviving server id, or [code]-1[/code] if the id is unknown.
+			</description>
+		</method>
+		<method name="to_dict" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Serialises the ledger to a dictionary that survives a JSON round trip.
+			</description>
+		</method>
+		<method name="from_dict">
+			<return type="void" />
+			<param index="0" name="dict" type="Dictionary" />
+			<description>
+				Restores the ledger from [method to_dict] output.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="server_id" type="int" setter="set_server_id" getter="get_server_id" default="0">
+			Id of the server that owns this ledger. It is part of every minted item id.
+		</member>
+		<member name="items" type="Dictionary" setter="set_items" getter="get_items" default="{}">
+			Items keyed by id: [code]id[/code], [code]owner[/code], [code]def[/code], [code]epoch[/code], [code]state[/code] and [code]lock_tx[/code].
+		</member>
+		<member name="pending" type="Dictionary" setter="set_pending" getter="get_pending" default="{}">
+			Prepared transactions keyed by transaction id.
+		</member>
+		<member name="applied" type="Dictionary" setter="set_applied" getter="get_applied" default="{}">
+			Idempotence memory: transaction id to [code]"commit"[/code] or [code]"abort"[/code].
+		</member>
+		<member name="quarantine" type="Dictionary" setter="set_quarantine" getter="get_quarantine" default="{}">
+			Quarantined item ids with the reason.
+		</member>
+	</members>
+</class>

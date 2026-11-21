@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameLagCompensation" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Server-side rewind of target positions for fair PvP hit detection.
+	</brief_description>
+	<description>
+		[CgameLagCompensation] keeps a short position history for every character so the server can judge a swing or shot against where the target was on the attacker's screen: half the round trip plus the client's interpolation delay ago. The rewind is capped, so high-ping players cannot hit around corners.
+		[codeblock]
+		history.record(target_id, now, target.position)
+		var rewind := CgameLagCompensation.rewind_for(attacker_round_trip)
+		var where := history.position_at(target_id, now - rewind, target.position)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="record">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="now" type="float" />
+			<param index="2" name="position" type="Vector3" />
+			<description>
+				Appends a sample and drops samples older than the history window (always keeping two).
+			</description>
+		</method>
+		<method name="forget">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Drops the history of one character.
+			</description>
+		</method>
+		<method name="prune">
+			<return type="void" />
+			<param index="0" name="alive_ids" type="Dictionary" />
+			<description>
+				Drops the history of every character whose id is not a key of [param alive_ids].
+			</description>
+		</method>
+		<method name="sample_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the number of stored samples for a character.
+			</description>
+		</method>
+		<method name="rewind_for" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="round_trip" type="float" />
+			<description>
+				Returns how far back to judge an attacker with this round-trip time: [code]round_trip * 0.5 + client interpolation[/code], clamped to the maximum rewind. Zero, negative or non-finite input returns [code]0.0[/code].
+			</description>
+		</method>
+		<method name="position_at" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="at" type="float" />
+			<param index="2" name="fallback" type="Vector3" />
+			<description>
+				Returns the interpolated position at time [param at]. Returns [param fallback] when there is no history or [param at] is not older than the newest sample, and the oldest sample when [param at] precedes the history.
+			</description>
+		</method>
+		<method name="get_history_seconds" qualifiers="static">
+			<return type="float" />
+			<description>
+				Returns the length of the history window, [code]0.5[/code] seconds.
+			</description>
+		</method>
+		<method name="get_max_rewind" qualifiers="static">
+			<return type="float" />
+			<description>
+				Returns the maximum rewind, [code]0.25[/code] seconds.
+			</description>
+		</method>
+		<method name="get_client_interpolation" qualifiers="static">
+			<return type="float" />
+			<description>
+				Returns the assumed client interpolation delay, [code]0.12[/code] seconds.
+			</description>
+		</method>
+	</methods>
+</class>

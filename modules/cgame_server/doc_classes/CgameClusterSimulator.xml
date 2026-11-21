@@ -1,0 +1,304 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameClusterSimulator" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Deterministic in-process simulation of a cluster of game servers with injected faults.
+	</brief_description>
+	<description>
+		[CgameClusterSimulator] runs N servers in one process to exercise the cross-server components together: item moves through [CgameTransactionCoordinator] 2PC, [CgameGuildSync] replication, [CgamePartyMigration], region leases with fencing ([CgameOwnershipLeases]) and load-based region reassignment ([CgameWorldSharding]) with player migration.
+		Messages travel through a queue with random latency, so they reorder. A crashed server stops processing but keeps its durable state, and messages addressed to it are held until it restarts. The coordinator can be made to crash before or after its decision. Everything derives from one seeded [RandomNumberGenerator], so a run is reproducible: the same seed and calls give the same [member stats].
+		After a run, call [method quiesce] to heal and drain the cluster and [method check_invariants] to verify item conservation, absence of duplicates, finished transactions, converged guilds and parties and consistent leases.
+		[codeblock]
+		var sim := CgameClusterSimulator.new()
+		sim.setup(4, 42)
+		sim.add_player("p0", Vector2(50, 50), 3)
+		sim.run_random(350)
+		assert(sim.quiesce())
+		assert(sim.check_invariants().is_empty())
+		sim.teardown()
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="servers" type="int" />
+			<param index="1" name="seed_value" type="int" />
+			<param index="2" name="cols" type="int" default="4" />
+			<param index="3" name="rows" type="int" default="4" />
+			<param index="4" name="cell" type="float" default="100.0" />
+			<description>
+				Creates [param servers] servers, seeds the generator, assigns the region grid round-robin and takes a lease for every region.
+			</description>
+		</method>
+		<method name="teardown">
+			<return type="void" />
+			<description>
+				Clears the coordinator's participants. Call it when finished with the simulator.
+			</description>
+		</method>
+		<method name="ledger" qualifiers="const">
+			<return type="CgameItemLedger" />
+			<param index="0" name="i" type="int" />
+			<description>
+				Returns the ledger of server [param i].
+			</description>
+		</method>
+		<method name="guilds" qualifiers="const">
+			<return type="CgameGuildSync" />
+			<param index="0" name="i" type="int" />
+			<description>
+				Returns the guild replica of server [param i].
+			</description>
+		</method>
+		<method name="parties" qualifiers="const">
+			<return type="CgamePartyMigration" />
+			<param index="0" name="i" type="int" />
+			<description>
+				Returns the party directory of server [param i].
+			</description>
+		</method>
+		<method name="is_alive" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="i" type="int" />
+			<description>
+				Returns whether server [param i] is up.
+			</description>
+		</method>
+		<method name="mint_item">
+			<return type="String" />
+			<param index="0" name="server" type="int" />
+			<param index="1" name="owner" type="String" />
+			<param index="2" name="def" type="String" default="&quot;item&quot;" />
+			<description>
+				Mints an item on a server and returns its id.
+			</description>
+		</method>
+		<method name="add_player">
+			<return type="void" />
+			<param index="0" name="pid" type="String" />
+			<param index="1" name="pos" type="Vector2" />
+			<param index="2" name="items_count" type="int" default="0" />
+			<description>
+				Adds a player at [param pos] on the server owning that region and mints [param items_count] items for them.
+			</description>
+		</method>
+		<method name="player_server" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="pid" type="String" />
+			<description>
+				Returns the server currently owning the player.
+			</description>
+		</method>
+		<method name="create_party">
+			<return type="void" />
+			<param index="0" name="party_id" type="String" />
+			<param index="1" name="leader" type="String" />
+			<param index="2" name="members" type="Array" default="[]" />
+			<description>
+				Creates a party on the leader's server, adds [param members] and replicates it.
+			</description>
+		</method>
+		<method name="move_items">
+			<return type="String" />
+			<param index="0" name="from" type="int" />
+			<param index="1" name="to" type="int" />
+			<param index="2" name="ids" type="Array" />
+			<param index="3" name="meta" type="Dictionary" default="{}" />
+			<description>
+				Moves items between servers with a 2PC. Returns [code]"committed"[/code], [code]"aborted"[/code], [code]"crashed"[/code] or [code]"rejected"[/code] (a precondition failed and nothing started).
+			</description>
+		</method>
+		<method name="migrate_player">
+			<return type="String" />
+			<param index="0" name="pid" type="String" />
+			<param index="1" name="dest" type="int" />
+			<description>
+				Hands a player and their items to another server: freeze, 2PC item move, ownership flip. Returns the same outcomes as [method move_items].
+			</description>
+		</method>
+		<method name="guild_op">
+			<return type="Dictionary" />
+			<param index="0" name="server" type="int" />
+			<param index="1" name="gid" type="String" />
+			<param index="2" name="type" type="String" />
+			<param index="3" name="pid" type="String" default="&quot;&quot;" />
+			<param index="4" name="arg" type="int" default="0" />
+			<param index="5" name="text" type="String" default="&quot;&quot;" />
+			<description>
+				Applies a guild operation ([code]"join"[/code], [code]"rank"[/code], [code]"kick"[/code], [code]"motd"[/code] or deposit) on a server and queues it for the others.
+			</description>
+		</method>
+		<method name="gossip_pair">
+			<return type="void" />
+			<param index="0" name="a" type="int" />
+			<param index="1" name="b" type="int" />
+			<description>
+				Runs a two-way anti-entropy exchange between two live servers.
+			</description>
+		</method>
+		<method name="region_loads" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the number of players standing in each region.
+			</description>
+		</method>
+		<method name="server_load_report" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the per-server player load.
+			</description>
+		</method>
+		<method name="rebalance">
+			<return type="Array" />
+			<description>
+				Reassigns hot regions, hands their leases over with fresh fencing tokens and migrates the players standing in them. Returns the region moves.
+			</description>
+		</method>
+		<method name="migrate_misplaced_players">
+			<return type="int" />
+			<description>
+				Migrates every player whose region is owned by another server. Returns how many committed.
+			</description>
+		</method>
+		<method name="parties_settled" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns whether every party member and its home sit on the leader's server.
+			</description>
+		</method>
+		<method name="crash_server">
+			<return type="void" />
+			<param index="0" name="i" type="int" />
+			<param index="1" name="down_for" type="int" />
+			<description>
+				Stops server [param i] for [param down_for] ticks.
+			</description>
+		</method>
+		<method name="restart_server">
+			<return type="void" />
+			<param index="0" name="i" type="int" />
+			<description>
+				Brings server [param i] back immediately.
+			</description>
+		</method>
+		<method name="live_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of running servers.
+			</description>
+		</method>
+		<method name="recover_coordinator">
+			<return type="void" />
+			<description>
+				Runs the coordinator's recovery and finishes the affected transactions.
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<description>
+				Advances one tick: restarts, coordinator recovery, message delivery, lease renewal and failover, party reconciliation and occasional gossip.
+			</description>
+		</method>
+		<method name="run_random">
+			<return type="void" />
+			<param index="0" name="ticks" type="int" />
+			<description>
+				Runs a random workload with faults (item moves, guild edits, server and coordinator crashes, player and party migrations, rebalancing) for [param ticks] ticks.
+			</description>
+		</method>
+		<method name="idle" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns whether no message is in flight, no transaction is pending and the coordinator is up.
+			</description>
+		</method>
+		<method name="quiesce">
+			<return type="bool" />
+			<param index="0" name="max_ticks" type="int" default="600" />
+			<description>
+				Heals everything: restarts servers, recovers the coordinator, drains queues, runs anti-entropy and lets parties converge. Returns [code]false[/code] if the cluster did not settle.
+			</description>
+		</method>
+		<method name="check_invariants" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns human-readable violations (empty means all good). Call it after [method quiesce].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="n" type="int" setter="set_n" getter="get_n" default="3">
+			Number of servers.
+		</member>
+		<member name="tick" type="int" setter="set_tick" getter="get_tick" default="0">
+			Current simulation tick.
+		</member>
+		<member name="min_latency" type="int" setter="set_min_latency" getter="get_min_latency" default="1">
+			Minimum message latency in ticks.
+		</member>
+		<member name="max_latency" type="int" setter="set_max_latency" getter="get_max_latency" default="4">
+			Maximum message latency in ticks.
+		</member>
+		<member name="lease_ttl" type="float" setter="set_lease_ttl" getter="get_lease_ttl" default="20.0">
+			Lifetime of region leases in ticks.
+		</member>
+		<member name="gossip_every" type="int" setter="set_gossip_every" getter="get_gossip_every" default="25">
+			Run one random anti-entropy exchange every this many ticks. [code]0[/code] disables it.
+		</member>
+		<member name="alive" type="Array" setter="set_alive" getter="get_alive" default="[]">
+			One [bool] per server.
+		</member>
+		<member name="ledgers" type="Array" setter="set_ledgers" getter="get_ledgers" default="[]">
+			The [CgameItemLedger] of every server.
+		</member>
+		<member name="guild_replicas" type="Array" setter="set_guild_replicas" getter="get_guild_replicas" default="[]">
+			The [CgameGuildSync] of every server.
+		</member>
+		<member name="party_dirs" type="Array" setter="set_party_dirs" getter="get_party_dirs" default="[]">
+			The [CgamePartyMigration] of every server.
+		</member>
+		<member name="queue" type="Array" setter="set_queue" getter="get_queue" default="[]">
+			Messages in flight: [code]{at, seq, to, kind, data}[/code].
+		</member>
+		<member name="restart_at" type="Dictionary" setter="set_restart_at" getter="get_restart_at" default="{}">
+			Crashed server to the tick it restarts at.
+		</member>
+		<member name="coord_recover_at" type="int" setter="set_coord_recover_at" getter="get_coord_recover_at" default="-1">
+			Tick at which a crashed coordinator recovers, or [code]-1[/code].
+		</member>
+		<member name="tx_meta" type="Dictionary" setter="set_tx_meta" getter="get_tx_meta" default="{}">
+			Per-transaction bookkeeping for player migrations.
+		</member>
+		<member name="player_ids" type="Array" setter="set_player_ids" getter="get_player_ids" default="[]">
+			Ids of the simulated players.
+		</member>
+		<member name="party_ids" type="Array" setter="set_party_ids" getter="get_party_ids" default="[]">
+			Ids of the simulated parties.
+		</member>
+		<member name="region_token" type="Dictionary" setter="set_region_token" getter="get_region_token" default="{}">
+			Newest fencing token per region.
+		</member>
+		<member name="minted" type="int" setter="set_minted" getter="get_minted" default="0">
+			Number of items minted, used for the conservation check.
+		</member>
+		<member name="stats" type="Dictionary" setter="set_stats" getter="get_stats" default="{}">
+			Counters: [code]moves_committed[/code], [code]moves_aborted[/code], [code]moves_crashed[/code], [code]migrations[/code], [code]failovers[/code], [code]server_crashes[/code], [code]coord_crashes[/code] and [code]region_moves[/code].
+		</member>
+		<member name="rng" type="RandomNumberGenerator" getter="get_rng">
+			The seeded generator that drives latency and the random workload. Read-only.
+		</member>
+		<member name="coordinator" type="CgameTransactionCoordinator" getter="get_coordinator">
+			The shared transaction coordinator. Read-only.
+		</member>
+		<member name="sharding" type="CgameWorldSharding" getter="get_sharding">
+			The region and player planner. Read-only.
+		</member>
+		<member name="leases" type="CgameOwnershipLeases" getter="get_leases">
+			The region lease table. Read-only.
+		</member>
+		<member name="fenced" type="CgameFencedStore" getter="get_fenced">
+			The fenced store written with every region claim. Read-only.
+		</member>
+	</members>
+</class>

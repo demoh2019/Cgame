@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameReplayRecorder" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Records and replays server sessions deterministically with per-tick state hashes.
+	</brief_description>
+	<description>
+		[CgameReplayRecorder] records the inputs of a session (seeds, initial players and, per tick, the delta and every command) and re-runs them on a fresh server with [method play], returning a state hash per tick. Two runs of the same recording must produce identical hash lists; [method compare] returns the first differing tick, which pinpoints a determinism bug or a tampered recording.
+		Only methods named [code]cmd_*[/code] and [code]submit_input[/code] can be recorded or replayed; everything else ([code]add_player[/code], [code]tick[/code], [code]restore[/code], ...) is refused, so a replay file cannot drive privileged server entry points. Replay files are written with [method FileAccess.store_var] without objects, so loading one can never instantiate scripts.
+		The state hash is 64-bit FNV-1a over canonical JSON ([method hash_variant]).
+		[codeblock]
+		var rec := CgameReplayRecorder.new()
+		rec.seed_value = 42
+		rec.add_initial_player(1, "Alpha")
+		rec.record_command(1, "submit_input", [1, 1.0, 0.0])
+		rec.end_tick(0.05)
+		var result := CgameReplayRecorder.play(rec.to_dict(), make_server, hash_state)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_initial_player">
+			<return type="void" />
+			<param index="0" name="peer" type="int" />
+			<param index="1" name="name" type="String" />
+			<description>
+				Registers a player that exists before the first tick.
+			</description>
+		</method>
+		<method name="record_command">
+			<return type="bool" />
+			<param index="0" name="peer" type="int" />
+			<param index="1" name="method" type="String" />
+			<param index="2" name="args" type="Array" default="[]" />
+			<description>
+				Queues a command for the tick being recorded. Returns [code]false[/code] for methods other than [code]cmd_*[/code] and [code]submit_input[/code].
+			</description>
+		</method>
+		<method name="end_tick">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>
+				Closes the current tick with the delta that is passed to the server's [code]tick()[/code].
+			</description>
+		</method>
+		<method name="is_allowed_method" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="method" type="String" />
+			<description>
+				Returns whether a method may be recorded or replayed.
+			</description>
+		</method>
+		<method name="to_dict" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the recording as a dictionary with [code]format[/code], [code]seed[/code], [code]world_seed[/code], [code]players[/code] and [code]frames[/code].
+			</description>
+		</method>
+		<method name="save" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="path" type="String" />
+			<description>
+				Writes the recording to [param path]. Returns [code]false[/code] if the file cannot be opened.
+			</description>
+		</method>
+		<method name="load" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="path" type="String" />
+			<description>
+				Reads a recording written by [method save]. Returns an empty dictionary if the file is missing or malformed.
+			</description>
+		</method>
+		<method name="play" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="replay" type="Dictionary" />
+			<param index="1" name="make_server" type="Callable" />
+			<param index="2" name="hash_fn" type="Callable" default="Callable()" />
+			<description>
+				Re-runs a recording. [param make_server] is called as [code]make_server(seed, world_seed)[/code] and returns the server object, which needs [code]add_player(peer, name)[/code], [code]tick(delta)[/code] and the replayed methods. After each tick the state is hashed with [code]hash_fn(server)[/code]: an [int] result is used as the hash, any other value is hashed with [method hash_variant]. Without [param hash_fn] the result of the server's [code]capture_state()[/code] is hashed. Returns [code]{hashes: Array, rejected: Array[String], ok: bool}[/code]; commands that are not allowed or not implemented by the server are listed in [code]rejected[/code] and skipped.
+			</description>
+		</method>
+		<method name="fnv1a" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="text" type="String" />
+			<description>
+				Returns the 64-bit FNV-1a hash of the UTF-8 bytes of [param text].
+			</description>
+		</method>
+		<method name="hash_variant" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="value" type="Variant" />
+			<description>
+				Returns the FNV-1a hash of the canonical (sorted-key) JSON text of [param value].
+			</description>
+		</method>
+		<method name="compare" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="a_hashes" type="Array" />
+			<param index="1" name="b_hashes" type="Array" />
+			<description>
+				Returns the first tick index at which two hash lists differ (a length mismatch counts), or [code]-1[/code] if they are identical.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="seed_value" type="int" setter="set_seed_value" getter="get_seed_value" default="0">
+			Seed passed to the server factory.
+		</member>
+		<member name="world_seed" type="int" setter="set_world_seed" getter="get_world_seed" default="0">
+			World seed passed to the server factory.
+		</member>
+		<member name="players" type="Array" setter="set_players" getter="get_players" default="[]">
+			Initial players: [code]{id, name}[/code].
+		</member>
+		<member name="frames" type="Array" setter="set_frames" getter="get_frames" default="[]">
+			Recorded ticks: [code]{tick, delta, commands}[/code], each command being [code]{peer, method, args}[/code].
+		</member>
+	</members>
+</class>

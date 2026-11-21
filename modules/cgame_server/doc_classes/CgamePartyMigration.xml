@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgamePartyMigration" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Cross-server party directory whose authority follows the party leader.
+	</brief_description>
+	<description>
+		[CgamePartyMigration] keeps the parties known to one server. A party document is [code]{id, leader, home, epoch, version, members}[/code], where [code]members[/code] maps each player to the server that hosts them. Only the home server (the leader's server) may change a party. [method leader_handoff] moves the home and increases the epoch, so a stale former home cannot overwrite newer state. Other servers install snapshots with [method apply_replica]: a higher (epoch, version) wins and replays are no-ops.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="has_party" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Returns whether the directory knows the party.
+			</description>
+		</method>
+		<method name="get_doc" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Returns the live party document (not a copy), or an empty dictionary.
+			</description>
+		</method>
+		<method name="snapshot" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Returns a deep copy of the party document for replication.
+			</description>
+		</method>
+		<method name="create">
+			<return type="bool" />
+			<param index="0" name="id" type="String" />
+			<param index="1" name="leader" type="String" />
+			<description>
+				Creates a party led by [param leader], hosted on this server, which becomes the home. Returns [code]false[/code] if the id exists.
+			</description>
+		</method>
+		<method name="add_member">
+			<return type="bool" />
+			<param index="0" name="id" type="String" />
+			<param index="1" name="pid" type="String" />
+			<param index="2" name="server" type="int" />
+			<description>
+				Adds a member hosted on [param server]. Refused unless this server is the home.
+			</description>
+		</method>
+		<method name="remove_member">
+			<return type="bool" />
+			<param index="0" name="id" type="String" />
+			<param index="1" name="pid" type="String" />
+			<description>
+				Removes a member. Removing the leader promotes the lowest-sorted remaining member and bumps the epoch; an empty party disbands. Refused unless this server is the home.
+			</description>
+		</method>
+		<method name="set_member_server">
+			<return type="bool" />
+			<param index="0" name="id" type="String" />
+			<param index="1" name="pid" type="String" />
+			<param index="2" name="server" type="int" />
+			<description>
+				Updates the server hosting a member. Returns [code]false[/code] if nothing changed or this server is not the home.
+			</description>
+		</method>
+		<method name="leader_handoff">
+			<return type="Dictionary" />
+			<param index="0" name="id" type="String" />
+			<param index="1" name="dest" type="int" />
+			<description>
+				Moves the home to [param dest] after the leader moved there and bumps the epoch. Returns the snapshot to replicate, or an empty dictionary if refused.
+			</description>
+		</method>
+		<method name="follow_plan" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="id" type="String" />
+			<param index="1" name="dest" type="int" />
+			<param index="2" name="nearby" type="Array" default="[]" />
+			<description>
+				Returns [code]{player, from, to}[/code] steps for the members that should follow the leader to [param dest]. A non-empty [param nearby] restricts the plan to those players.
+			</description>
+		</method>
+		<method name="apply_replica">
+			<return type="bool" />
+			<param index="0" name="doc" type="Dictionary" />
+			<description>
+				Installs a snapshot if it is newer by (epoch, version). Returns [code]true[/code] if anything changed.
+			</description>
+		</method>
+		<method name="servers_of" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Returns the sorted servers that host a member, plus the home.
+			</description>
+		</method>
+		<method name="same_as" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="other" type="Object" />
+			<param index="1" name="id" type="String" />
+			<description>
+				Returns whether another directory (any object with [code]get_doc()[/code]) holds an identical document for [param id].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="server_id" type="int" setter="set_server_id" getter="get_server_id" default="0">
+			Id of the server that owns this directory.
+		</member>
+		<member name="parties" type="Dictionary" setter="set_parties" getter="get_parties" default="{}">
+			Party documents keyed by party id.
+		</member>
+	</members>
+</class>

@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameGuildSync" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Replicated guild state with deterministic, order-independent conflict resolution.
+	</brief_description>
+	<description>
+		[CgameGuildSync] keeps one replica of the guild documents on every server. Local edits ([method join], [method set_rank], [method kick], [method set_motd], [method deposit]) are logged as operations with a Lamport timestamp and returned so the caller can push them; [method receive] applies remote operations and [method sync_from] performs pull-based anti-entropy using version vectors. Operations are commutative and idempotent, so replicas converge regardless of delivery order or duplication.
+		Conflict policy: rank and message of the day are last-writer-wins by (Lamport clock, origin server); a kick wins over a concurrent rank change or join, and a member only returns through a join that has seen the kick; treasury deposits are summed per unique operation id so a replayed deposit never counts twice.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="join">
+			<return type="Dictionary" />
+			<param index="0" name="gid" type="String" />
+			<param index="1" name="pid" type="String" />
+			<param index="2" name="rank" type="int" />
+			<description>
+				Adds a player to a guild and returns the operation to replicate.
+			</description>
+		</method>
+		<method name="set_rank">
+			<return type="Dictionary" />
+			<param index="0" name="gid" type="String" />
+			<param index="1" name="pid" type="String" />
+			<param index="2" name="rank" type="int" />
+			<description>
+				Changes a member's rank and returns the operation to replicate.
+			</description>
+		</method>
+		<method name="kick">
+			<return type="Dictionary" />
+			<param index="0" name="gid" type="String" />
+			<param index="1" name="pid" type="String" />
+			<description>
+				Removes a member and returns the operation to replicate.
+			</description>
+		</method>
+		<method name="set_motd">
+			<return type="Dictionary" />
+			<param index="0" name="gid" type="String" />
+			<param index="1" name="text" type="String" />
+			<description>
+				Sets the message of the day and returns the operation to replicate.
+			</description>
+		</method>
+		<method name="deposit">
+			<return type="Dictionary" />
+			<param index="0" name="gid" type="String" />
+			<param index="1" name="amount" type="int" />
+			<description>
+				Adds gold to the guild treasury and returns the operation to replicate.
+			</description>
+		</method>
+		<method name="receive">
+			<return type="bool" />
+			<param index="0" name="op" type="Dictionary" />
+			<description>
+				Applies a remote operation. Returns [code]true[/code] if it was new; safe to call repeatedly and out of order.
+			</description>
+		</method>
+		<method name="ops_after" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="remote_vv" type="Dictionary" />
+			<description>
+				Returns the logged operations a replica with the version vector [param remote_vv] has not seen.
+			</description>
+		</method>
+		<method name="sync_from">
+			<return type="int" />
+			<param index="0" name="other" type="Object" />
+			<description>
+				Pulls the missing operations from another replica (any object with [code]ops_after()[/code]) and applies them in timestamp order. Returns the number of new operations.
+			</description>
+		</method>
+		<method name="is_member" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="gid" type="String" />
+			<param index="1" name="pid" type="String" />
+			<description>
+				Returns whether the player is currently a guild member.
+			</description>
+		</method>
+		<method name="rank_of" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="gid" type="String" />
+			<param index="1" name="pid" type="String" />
+			<description>
+				Returns the member's rank, or [code]-1[/code] for non-members.
+			</description>
+		</method>
+		<method name="members" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="gid" type="String" />
+			<description>
+				Returns the sorted ids of the current members.
+			</description>
+		</method>
+		<method name="motd" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="gid" type="String" />
+			<description>
+				Returns the message of the day.
+			</description>
+		</method>
+		<method name="treasury" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="gid" type="String" />
+			<description>
+				Returns the treasury total.
+			</description>
+		</method>
+		<method name="version" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="gid" type="String" />
+			<description>
+				Returns how many operations have been applied to the guild.
+			</description>
+		</method>
+		<method name="digest" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="gid" type="String" />
+			<description>
+				Returns a canonical string of the player-visible state. Equal digests mean converged replicas.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="server_id" type="int" setter="set_server_id" getter="get_server_id" default="0">
+			Id of the server that owns this replica.
+		</member>
+		<member name="clock" type="int" setter="set_clock" getter="get_clock" default="0">
+			Lamport clock.
+		</member>
+		<member name="guilds" type="Dictionary" setter="set_guilds" getter="get_guilds" default="{}">
+			Guild documents keyed by guild id.
+		</member>
+		<member name="log" type="Dictionary" setter="set_log" getter="get_log" default="{}">
+			Every known operation keyed by its id ([code]"origin:seq"[/code]).
+		</member>
+		<member name="vv" type="Dictionary" setter="set_vv" getter="get_vv" default="{}">
+			Version vector: origin server (as a string) to the highest contiguous sequence applied.
+		</member>
+	</members>
+</class>

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameOwnershipLeases" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Expiring ownership leases with monotonic fencing tokens.
+	</brief_description>
+	<description>
+		[CgameOwnershipLeases] grants time-bounded exclusive ownership of a key. The holder must stop acting before the lease expires, and the table does not re-grant until it has. Because a paused holder cannot notice its own expiry, every new grant carries a strictly increasing fencing token that the protected resource ([CgameFencedStore]) checks to reject stale writers.
+		Time is passed in explicitly (seconds or ticks), so the table is deterministic.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="acquire">
+			<return type="Dictionary" />
+			<param index="0" name="key" type="String" />
+			<param index="1" name="holder" type="String" />
+			<param index="2" name="now" type="float" />
+			<param index="3" name="ttl" type="float" />
+			<description>
+				Grants or re-confirms the lease and returns [code]{ok, token, expires}[/code]. A different holder is refused until the current lease has expired; a new grant always gets a higher token than any before it.
+			</description>
+		</method>
+		<method name="renew">
+			<return type="bool" />
+			<param index="0" name="key" type="String" />
+			<param index="1" name="holder" type="String" />
+			<param index="2" name="token" type="int" />
+			<param index="3" name="now" type="float" />
+			<param index="4" name="ttl" type="float" />
+			<description>
+				Extends the lease. Refused once expired or when holder or token do not match the current grant.
+			</description>
+		</method>
+		<method name="release">
+			<return type="bool" />
+			<param index="0" name="key" type="String" />
+			<param index="1" name="holder" type="String" />
+			<param index="2" name="token" type="int" />
+			<description>
+				Releases the lease. A stale holder or token is ignored.
+			</description>
+		</method>
+		<method name="holder_of" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="key" type="String" />
+			<param index="1" name="now" type="float" />
+			<description>
+				Returns the current holder, or an empty string when the key is free or expired.
+			</description>
+		</method>
+		<method name="token_of" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="key" type="String" />
+			<description>
+				Returns the last token ever issued for the key. It survives release and expiry.
+			</description>
+		</method>
+		<method name="is_valid" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="key" type="String" />
+			<param index="1" name="holder" type="String" />
+			<param index="2" name="token" type="int" />
+			<param index="3" name="now" type="float" />
+			<description>
+				Returns whether [param holder] holds the lease with exactly [param token] at [param now].
+			</description>
+		</method>
+		<method name="client_valid" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="expires" type="float" />
+			<param index="1" name="now" type="float" />
+			<param index="2" name="drift" type="float" />
+			<description>
+				Holder-side check with a clock drift allowance: returns [code]true[/code] only while [code]now &lt; expires - drift[/code].
+			</description>
+		</method>
+		<method name="reap">
+			<return type="Array" />
+			<param index="0" name="now" type="float" />
+			<description>
+				Drops expired leases and returns their keys. Tokens are kept so the next grant is higher.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="leases" type="Dictionary" getter="get_leases" default="{}">
+			Active leases keyed by name: [code]holder[/code], [code]token[/code] and [code]expires[/code].
+		</member>
+	</members>
+</class>

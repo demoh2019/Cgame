@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameFencedStore" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Resource that rejects writes carrying an outdated fencing token.
+	</brief_description>
+	<description>
+		[CgameFencedStore] is the protected resource of a lease table ([CgameOwnershipLeases]). It remembers the highest fencing token accepted per key and refuses any write with a lower token, so a paused or zombie lease holder cannot overwrite the state written by its successor.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="write">
+			<return type="bool" />
+			<param index="0" name="key" type="String" />
+			<param index="1" name="token" type="int" />
+			<param index="2" name="value" type="Variant" />
+			<description>
+				Stores [param value] if [param token] is not lower than the highest token seen for [param key]. Returns [code]false[/code] and counts a rejection otherwise.
+			</description>
+		</method>
+		<method name="read" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="key" type="String" />
+			<description>
+				Returns the stored value, or [code]null[/code].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="max_token" type="Dictionary" setter="set_max_token" getter="get_max_token" default="{}">
+			Highest accepted token per key.
+		</member>
+		<member name="values" type="Dictionary" setter="set_values" getter="get_values" default="{}">
+			Current value per key.
+		</member>
+		<member name="rejected" type="int" setter="set_rejected" getter="get_rejected" default="0">
+			Number of writes refused so far.
+		</member>
+	</members>
+</class>

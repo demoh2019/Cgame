@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameSaveMigrations" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Registry of versioned, single-step save-data migrations.
+	</brief_description>
+	<description>
+		[CgameSaveMigrations] holds migration steps [code]{from_version, to_version, migrate}[/code]. [method migrate] walks the chain from the save's [code]version[/code] to the target version. It never mutates the caller's dictionary and refuses gaps, downgrades and saves without a numeric version, reporting the reason in [member last_error]. [method verify_roundtrip] proves that a sample survives migration and still passes a validator, so every schema bump can ship with a fixture.
+		A migration callable receives a [Dictionary] (already a deep copy that it may mutate) and returns the upgraded dictionary without touching [code]version[/code]; the runner stamps it. Steps must advance exactly one version and must be pure.
+		[method character_registry] returns a registry with two example character migrations: version 2 renames [code]money[/code] to [code]silver[/code] and version 3 adds a [code]focus[/code] meter defaulting to [code]100.0[/code].
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="character_registry" qualifiers="static">
+			<return type="CgameSaveMigrations" />
+			<description>
+				Returns a registry preloaded with the example version 1 to 3 character migrations.
+			</description>
+		</method>
+		<method name="register">
+			<return type="bool" />
+			<param index="0" name="from_version" type="int" />
+			<param index="1" name="to_version" type="int" />
+			<param index="2" name="migrate_fn" type="Callable" />
+			<description>
+				Adds a step. Returns [code]false[/code] and sets [member last_error] if the step does not advance exactly one version, the source version is already registered or the callable is invalid.
+			</description>
+		</method>
+		<method name="migrate">
+			<return type="Dictionary" />
+			<param index="0" name="data" type="Dictionary" />
+			<param index="1" name="target_version" type="int" />
+			<description>
+				Returns the migrated deep copy, or an empty dictionary with [member last_error] set (gap, downgrade, missing version or a step that did not return a dictionary).
+			</description>
+		</method>
+		<method name="verify_roundtrip">
+			<return type="Array[String]" />
+			<param index="0" name="data" type="Dictionary" />
+			<param index="1" name="migrate_to" type="int" />
+			<param index="2" name="validate" type="Callable" default="Callable()" />
+			<description>
+				Returns the problems found (empty means ok): migration failure, mutated input, wrong final version, validator rejection, or a second [method migrate] call that is not a no-op. The optional validator receives the migrated data and returns a [bool], a [String] or an [Array] of messages.
+			</description>
+		</method>
+		<method name="example_v1_to_v2" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="data" type="Dictionary" />
+			<description>
+				Example step: renames [code]money[/code] to [code]silver[/code]; an existing [code]silver[/code] wins.
+			</description>
+		</method>
+		<method name="example_v2_to_v3" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="data" type="Dictionary" />
+			<description>
+				Example step: adds [code]focus[/code] with the value [code]100.0[/code] when absent.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="last_error" type="String" setter="set_last_error" getter="get_last_error" default="&quot;&quot;">
+			Reason the last [method register] or [method migrate] call failed. Empty after a successful migration.
+		</member>
+	</members>
+	<constants>
+		<constant name="CHARACTER_LATEST" value="3">
+			Latest version of the example character save.
+		</constant>
+	</constants>
+</class>
