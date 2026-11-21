@@ -176,6 +176,8 @@ var _zoom := 1.0
 var _first_person := false
 var _fp_yaw := PI
 var _fp_pitch := 0.0
+var _demo_house_plan: Array = []
+var _demo_house_done_at := -1
 var _start_first_person := false # --first-person launch flag (also for screenshots).
 var _jump_time := -1.0 # Seconds into the current cosmetic first-person hop, or -1 on the ground.
 var _crosshair: Control
@@ -2438,29 +2440,35 @@ func _run_demo() -> void:
 			if _demo_frames == 40:
 				net_ref.c_debug.rpc_id(1, "teleport", {"x": 14.0, "z": 6.0})
 		"house":
-			# Build check: a 2x2-cell cabin next to the survivor (needs --debug-commands).
+			# Build check: a 2x2-cell cabin around the survivor (needs --debug-commands).
 			if _demo_frames == 30:
 				net_ref.c_debug.rpc_id(1, "teleport", {"x": 120.0, "z": 96.0})
 			if _demo_frames == 60:
 				net_ref.c_debug.rpc_id(1, "give", {"item": "wood_1", "count": 120})
 				net_ref.c_debug.rpc_id(1, "give", {"item": "stone_1", "count": 30})
-			if _demo_frames == 100:
-				var base := Vector2(client.predicted.x + 3.0, client.predicted.z)
+			if _demo_frames == 80:
+				# The survivor stands on the shared corner of the four cells.
+				var corner := Vector2(roundf(client.predicted.x / HousePieces.GRID), roundf(client.predicted.z / HousePieces.GRID)) * HousePieces.GRID
 				var g := HousePieces.GRID
-				for cx in 2:
-					for cz in 2:
-						var c := base + Vector2(cx, cz) * g
-						client.build_piece("floor", c)
-						client.build_piece("roof", c)
-				for cz in 2:
-					client.build_piece("window" if cz == 1 else "wall", base + Vector2(-1.4, cz * g))
-					client.build_piece("wall", base + Vector2(g + 1.4, cz * g))
-				for cx in 2:
-					client.build_piece("door" if cx == 0 else "wall", base + Vector2(cx * g, -1.4))
-					client.build_piece("wall", base + Vector2(cx * g, g + 1.4))
-				for corner in [Vector2(-1.5, -1.5), Vector2(g * 2 - 1.5, -1.5), Vector2(-1.5, g * 2 - 1.5), Vector2(g * 2 - 1.5, g * 2 - 1.5)]:
-					client.build_piece("pillar", base + corner)
-				net_ref.c_debug.rpc_id(1, "teleport", {"x": base.x - 6.0, "z": base.y - 7.0})
+				_demo_house_plan.clear()
+				for cell in [Vector2(-0.5, -0.5), Vector2(0.5, -0.5), Vector2(-0.5, 0.5), Vector2(0.5, 0.5)]:
+					_demo_house_plan.append(["floor", corner + cell * g])
+				for k in [-0.5, 0.5]:
+					_demo_house_plan.append(["window" if k > 0 else "wall", corner + Vector2(-g * 0.95, k * g)])
+					_demo_house_plan.append(["wall", corner + Vector2(g * 0.95, k * g)])
+					_demo_house_plan.append(["door" if k < 0 else "wall", corner + Vector2(k * g, -g * 0.95)])
+					_demo_house_plan.append(["wall", corner + Vector2(k * g, g * 0.95)])
+				for cell in [Vector2(-0.5, -0.5), Vector2(0.5, -0.5), Vector2(-0.5, 0.5), Vector2(0.5, 0.5)]:
+					_demo_house_plan.append(["roof", corner + cell * g])
+				for c in [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 1), Vector2(1, 1)]:
+					_demo_house_plan.append(["pillar", corner + c * g])
+			if _demo_frames > 80 and _demo_frames % 8 == 0 and not _demo_house_plan.is_empty():
+				var step: Array = _demo_house_plan.pop_front()
+				client.build_piece(str(step[0]), step[1])
+				if _demo_house_plan.is_empty():
+					_demo_house_done_at = _demo_frames
+			if _demo_house_done_at > 0 and _demo_frames == _demo_house_done_at + 30:
+				net_ref.c_debug.rpc_id(1, "teleport", {"x": client.predicted.x - 9.0, "z": client.predicted.z - 10.0})
 		"campfire":
 			# Grass crush check: a campfire lit just ahead, seen from first person (needs --debug-commands).
 			if _demo_frames == 40:
