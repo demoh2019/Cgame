@@ -52,6 +52,14 @@ func _smoke() -> void:
         var positions: PackedVector3Array = foliage.call("get_selected_positions")
         var centers: PackedVector3Array = foliage.call("get_exclusion_centers")
         var radii: PackedFloat64Array = foliage.call("get_exclusion_radii")
+        var box_mins: PackedVector3Array = foliage.call("get_exclusion_box_mins")
+        var box_maxs: PackedVector3Array = foliage.call("get_exclusion_box_maxs")
+        if box_mins.size() != 6 or box_mins.size() != box_maxs.size():
+            push_error("PCG rectangle exclusion zone configuration is incomplete")
+            ok = false
+        if int(foliage.call("get_box_only_candidate_count")) < 1:
+            push_error("Rectangular exclusion volumes are not covering any additional grass candidates")
+            ok = false
         if positions.size() == 0 or positions.size() > 160 or foliage.multimesh.instance_count != positions.size():
             push_error("PCG foliage did not create a bounded instancing batch")
             ok = false
@@ -59,6 +67,14 @@ func _smoke() -> void:
             for zone in range(centers.size()):
                 if positions[i].distance_squared_to(centers[zone]) <= radii[zone] * radii[zone]:
                     push_error("PCG foliage appeared inside an exclusion sphere")
+                    ok = false
+                    break
+            for box_index in range(box_mins.size()):
+                var lo: Vector3 = box_mins[box_index]
+                var hi: Vector3 = box_maxs[box_index]
+                var point: Vector3 = positions[i]
+                if point.x >= lo.x and point.x <= hi.x and point.y >= lo.y and point.y <= hi.y and point.z >= lo.z and point.z <= hi.z:
+                    push_error("PCG foliage appeared inside an inclusive rectangular exclusion volume")
                     ok = false
                     break
             for previous in range(i):

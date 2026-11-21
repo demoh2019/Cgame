@@ -47,3 +47,40 @@ draw-call savings should be measured in a compiled game before claiming FPS
 improvements.
 
 Reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-pcg-biome-core-and-sample-plugins-reference-guide-in-unreal-engine
+
+## Mixed 3D exclusion volumes (spheres + boxes)
+
+The `PCGSpatialFilter3D.filter_indices_excluding_volumes()` method extends
+the sphere-only PCG filter with **up to 128 inclusive axis-aligned boxes**:
+
+```gdscript
+var pcg := PCGSpatialFilter3D.new()
+var selected := pcg.filter_indices_excluding_volumes(
+    candidates, sphere_centers, sphere_radii, box_mins, box_maxs,
+    2.1, 160)
+```
+
+- `box_mins` and `box_maxs` are matching `PackedVector3Array` bounds;
+  each min component must be <= its corresponding max component.
+  Degenerate point/plane/line boxes are valid and inclusive.
+- All coordinates must be finite and within +/- 10,000,000. Box count
+  cannot exceed 128; sphere count retains its independent 128 limit.
+  Invalid boxes, spheres, candidate positions, spacing or budgets fail
+  the entire request without partial output.
+- Boxes are removed **before** spherical filtering and spatial-hash
+  spacing, so excluded instances never reserve space. Original source
+  indices are returned in deterministic order.
+- Empty box arrays are exactly equivalent to the existing
+  `filter_indices_excluding()`; empty sphere and box arrays reduce to
+  `filter_indices()`. These APIs remain unchanged.
+- The cost of checking boxes is bounded by O(N * boxes) on top of the
+  existing spherical filtering and spatial-hash thinning. No physics,
+  scene-tree mutations or GPU operations occur inside the native API.
+
+The Days After prototype uses this to exclude decorative grass from
+**elongated ruin walls and rectangular building/prop footprints**, while
+keeping spherical exclusion around spawn and harvest points. The Cgame
+native selector and stock Godot GDScript fallback are checked for parity
+in the same headless gameplay smoke.
+
+Reference: [Unreal Engine PCG Biome exclusions and volumes](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-pcg-biome-core-and-sample-plugins-overview-guide-in-unreal-engine).

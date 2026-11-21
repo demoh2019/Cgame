@@ -37,4 +37,15 @@ public:
 			const PackedVector3Array &p_exclusion_centers,
 			const PackedFloat64Array &p_exclusion_radii, double p_min_spacing,
 			int p_max_selected = MAX_SELECTED) const;
+
+	// Combined spherical and axis-aligned 3D exclusion volumes. Both kinds
+	// are applied before spacing; source indices are preserved and all
+	// inputs (including eventually excluded points) are validated.
+	PackedInt32Array filter_indices_excluding_volumes(
+			const PackedVector3Array &p_candidates,
+			const PackedVector3Array &p_exclusion_centers,
+			const PackedFloat64Array &p_exclusion_radii,
+			const PackedVector3Array &p_box_mins,
+			const PackedVector3Array &p_box_maxs,
+			double p_min_spacing, int p_max_selected = MAX_SELECTED) const;
 };

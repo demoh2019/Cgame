@@ -75,3 +75,21 @@ This affects visual decoration only, not gathering, physics collisions, AI,
 spawning, networking, or server state. The standalone headless smoke verifies
 exclusion boundaries, spacing, instancing limits, deterministic regeneration,
 and native/fallback parity. No FPS improvement is claimed without profiling.
+
+## Combined PCG sphere and box exclusions
+
+The grass generator now calls the general-purpose
+`PCGSpatialFilter3D.filter_indices_excluding_volumes()` native engine
+method. In addition to its existing spherical masks, it uses six
+axis-aligned rectangular volumes to protect the narrow ruin walls,
+barricade, scrap container and supply crate from decorative foliage.
+These boxes also exclude source points the spheres alone would retain.
+Instances are still generated deterministically in one `MultiMesh`
+batch with a 160-instance cap and 2.1-metre minimum center spacing.
+
+With stock Godot or an older Cgame build, the GDScript fallback checks
+the same inclusive sphere and box boundaries in the same source order.
+The game smoke checks native/fallback parity, box-only candidate
+coverage, reserved zone safety and regeneration stability. Gameplay
+colliders, resource interactions, AI and networking remain untouched.
+Measure a compiled game to determine actual CPU/GPU benefit.

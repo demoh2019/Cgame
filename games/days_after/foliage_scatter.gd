@@ -19,6 +19,24 @@ const ZONE_CENTERS = [
     Vector3(9.0, 0.0, -4.0),  # Tree stump
 ]
 const ZONE_RADII = [3.5, 2.7, 2.3, 2.5, 6.0, 4.0, 3.4, 3.0, 2.2, 2.2]
+# Unlike spheres, boxes closely fit elongated ruin walls and containers.
+# Keep geometry presentation-only: no physics/interaction shape is culled.
+const BOX_MINS = [
+    Vector3(-9.8, -1.0, -18.0),  # RuinWest wall
+    Vector3(-9.5, -1.0, -17.7),  # RuinNorth wall
+    Vector3(6.3, -1.0, -16.0),   # RuinEast wall
+    Vector3(3.3, -1.0, -1.5),    # Barricade footprint
+    Vector3(7.6, -1.0, 2.0),     # Scrap container footprint
+    Vector3(-4.2, -1.0, -7.2),   # Supply crate
+]
+const BOX_MAXS = [
+    Vector3(-6.3, 1.3, -4.0),
+    Vector3(5.6, 1.3, -14.2),
+    Vector3(9.7, 1.3, -5.5),
+    Vector3(8.7, 1.3, 1.5),
+    Vector3(12.4, 1.3, 8.0),
+    Vector3(-1.8, 1.3, -4.8),
+]
 
 var _selected_positions := PackedVector3Array()
 
@@ -39,6 +57,14 @@ func get_exclusion_radii() -> PackedFloat64Array:
     return PackedFloat64Array(ZONE_RADII)
 
 
+func get_exclusion_box_mins() -> PackedVector3Array:
+    return PackedVector3Array(BOX_MINS)
+
+
+func get_exclusion_box_maxs() -> PackedVector3Array:
+    return PackedVector3Array(BOX_MAXS)
+
+
 func _make_candidates() -> PackedVector3Array:
     var candidates := PackedVector3Array()
     # 137 is coprime to 625, so each grid cell is visited exactly once.
@@ -54,20 +80,36 @@ func _make_candidates() -> PackedVector3Array:
     return candidates
 
 
+func _in_any_box(point: Vector3,
+        box_mins: PackedVector3Array, box_maxs: PackedVector3Array) -> bool:
+    for b in range(box_mins.size()):
+        var lo: Vector3 = box_mins[b]
+        var hi: Vector3 = box_maxs[b]
+        if (point.x >= lo.x and point.x <= hi.x
+                and point.y >= lo.y and point.y <= hi.y
+                and point.z >= lo.z and point.z <= hi.z):
+            return true
+    return false
+
+
 func _filter_fallback(candidates: PackedVector3Array,
-        centers: PackedVector3Array, radii: PackedFloat64Array) -> PackedInt32Array:
+        centers: PackedVector3Array, radii: PackedFloat64Array,
+        box_mins: PackedVector3Array, box_maxs: PackedVector3Array) -> PackedInt32Array:
     var indices := PackedInt32Array()
     for index in range(candidates.size()):
+        var point: Vector3 = candidates[index]
+        if _in_any_box(point, box_mins, box_maxs):
+            continue
         var excluded: bool = false
         for zone in range(centers.size()):
-            if candidates[index].distance_squared_to(centers[zone]) <= radii[zone] * radii[zone]:
+            if point.distance_squared_to(centers[zone]) <= radii[zone] * radii[zone]:
                 excluded = true
                 break
         if excluded:
             continue
         var blocked: bool = false
         for previous in indices:
-            if candidates[index].distance_squared_to(candidates[previous]) < MIN_SPACING * MIN_SPACING:
+            if point.distance_squared_to(candidates[previous]) < MIN_SPACING * MIN_SPACING:
                 blocked = true
                 break
         if not blocked:
@@ -78,26 +120,52 @@ func _filter_fallback(candidates: PackedVector3Array,
 
 
 func _select_indices(candidates: PackedVector3Array,
-        centers: PackedVector3Array, radii: PackedFloat64Array) -> PackedInt32Array:
+        centers: PackedVector3Array, radii: PackedFloat64Array,
+        box_mins: PackedVector3Array, box_maxs: PackedVector3Array) -> PackedInt32Array:
     if ClassDB.class_exists("PCGSpatialFilter3D"):
         var filter: Object = ClassDB.instantiate("PCGSpatialFilter3D")
-        if filter != null and filter.has_method("filter_indices_excluding"):
-            return filter.call("filter_indices_excluding", candidates,
-                centers, radii, MIN_SPACING, MAX_INSTANCES)
-    return _filter_fallback(candidates, centers, radii)
+        if filter != null and filter.has_method("filter_indices_excluding_volumes"):
+            return filter.call("filter_indices_excluding_volumes", candidates,
+                centers, radii, box_mins, box_maxs, MIN_SPACING, MAX_INSTANCES)
+    return _filter_fallback(candidates, centers, radii, box_mins, box_maxs)
+
+
+func get_box_only_candidate_count() -> int:
+    # Confirms rectangular footprints are actually doing additional work.
+    var candidates := _make_candidates()
+    var box_mins := get_exclusion_box_mins()
+    var box_maxs := get_exclusion_box_maxs()
+    var centers := get_exclusion_centers()
+    var radii := get_exclusion_radii()
+    var count: int = 0
+    for point in candidates:
+        if not _in_any_box(point, box_mins, box_maxs):
+            continue
+        var in_sphere: bool = false
+        for z in range(centers.size()):
+            if point.distance_squared_to(centers[z]) <= radii[z] * radii[z]:
+                in_sphere = true
+                break
+        if not in_sphere:
+            count += 1
+    return count
 
 
 func verify_native_fallback_parity() -> bool:
     var candidates := _make_candidates()
     var centers := get_exclusion_centers()
     var radii := get_exclusion_radii()
-    return _select_indices(candidates, centers, radii) == _filter_fallback(candidates, centers, radii)
+    var box_mins := get_exclusion_box_mins()
+    var box_maxs := get_exclusion_box_maxs()
+    return (_select_indices(candidates, centers, radii, box_mins, box_maxs)
+        == _filter_fallback(candidates, centers, radii, box_mins, box_maxs))
 
 
 func regenerate() -> void:
     var candidates := _make_candidates()
     var selected := _select_indices(candidates,
-        get_exclusion_centers(), get_exclusion_radii())
+        get_exclusion_centers(), get_exclusion_radii(),
+        get_exclusion_box_mins(), get_exclusion_box_maxs())
     _selected_positions.clear()
     for index in selected:
         _selected_positions.push_back(candidates[index])

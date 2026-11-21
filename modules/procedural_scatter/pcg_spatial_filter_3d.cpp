@@ -19,6 +19,8 @@ void PCGSpatialFilter3D::_bind_methods() {
 			&PCGSpatialFilter3D::filter_indices_scaled, DEFVAL(MAX_SELECTED), DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("filter_indices_excluding", "candidates", "exclusion_centers", "exclusion_radii", "min_spacing", "max_selected"),
 			&PCGSpatialFilter3D::filter_indices_excluding, DEFVAL(MAX_SELECTED));
+	ClassDB::bind_method(D_METHOD("filter_indices_excluding_volumes", "candidates", "exclusion_centers", "exclusion_radii", "box_mins", "box_maxs", "min_spacing", "max_selected"),
+			&PCGSpatialFilter3D::filter_indices_excluding_volumes, DEFVAL(MAX_SELECTED));
 }
 
 PackedInt32Array PCGSpatialFilter3D::filter_indices(const PackedVector3Array &p_candidates,
@@ -252,6 +254,84 @@ PackedInt32Array PCGSpatialFilter3D::filter_indices_excluding(
 		}
 	}
 	const PackedInt32Array local = filter_indices(eligible, p_min_spacing, p_max_selected);
+	PackedInt32Array result;
+	result.resize(local.size());
+	for (int i = 0; i < local.size(); ++i) {
+		result.set(i, original_indices[local[i]]);
+	}
+	return result;
+}
+
+PackedInt32Array PCGSpatialFilter3D::filter_indices_excluding_volumes(
+		const PackedVector3Array &p_candidates,
+		const PackedVector3Array &p_exclusion_centers,
+		const PackedFloat64Array &p_exclusion_radii,
+		const PackedVector3Array &p_box_mins,
+		const PackedVector3Array &p_box_maxs,
+		double p_min_spacing, int p_max_selected) const {
+	PackedInt32Array empty;
+	const int box_count = p_box_mins.size();
+	if (box_count != p_box_maxs.size() || box_count > MAX_EXCLUSION_ZONES ||
+			p_candidates.size() > MAX_CANDIDATES) {
+		return empty;
+	}
+	// Validate every AABB before looking at candidate points. A zero-size
+	// box excludes exactly its inclusive point/boundary. Reversed boxes and
+	// non-finite coordinates reject the entire request, never a partial set.
+	for (int b = 0; b < box_count; ++b) {
+		const Vector3 lo = p_box_mins[b];
+		const Vector3 hi = p_box_maxs[b];
+		if (!lo.is_finite() || !hi.is_finite() ||
+				lo.x > hi.x || lo.y > hi.y || lo.z > hi.z ||
+				Math::abs(double(lo.x)) > MAX_COORDINATE ||
+				Math::abs(double(lo.y)) > MAX_COORDINATE ||
+				Math::abs(double(lo.z)) > MAX_COORDINATE ||
+				Math::abs(double(hi.x)) > MAX_COORDINATE ||
+				Math::abs(double(hi.y)) > MAX_COORDINATE ||
+				Math::abs(double(hi.z)) > MAX_COORDINATE) {
+			return empty;
+		}
+	}
+	// Empty boxes take the exact existing sphere filtering path.
+	if (box_count == 0) {
+		return filter_indices_excluding(p_candidates, p_exclusion_centers,
+				p_exclusion_radii, p_min_spacing, p_max_selected);
+	}
+	// Candidates are validated *before* box rejection so an invalid point
+	// in a box cannot conceal malformed input. Sphere/radius and spacing
+	// validation are delegated to the existing atomic sphere selector.
+	for (const Vector3 &point : p_candidates) {
+		if (!point.is_finite() || Math::abs(double(point.x)) > MAX_COORDINATE ||
+				Math::abs(double(point.y)) > MAX_COORDINATE ||
+				Math::abs(double(point.z)) > MAX_COORDINATE) {
+			return empty;
+		}
+	}
+	PackedVector3Array not_in_boxes;
+	PackedInt32Array original_indices;
+	for (int i = 0; i < p_candidates.size(); ++i) {
+		const Vector3 point = p_candidates[i];
+		bool blocked = false;
+		for (int b = 0; b < box_count; ++b) {
+			const Vector3 lo = p_box_mins[b];
+			const Vector3 hi = p_box_maxs[b];
+			if (point.x >= lo.x && point.x <= hi.x &&
+					point.y >= lo.y && point.y <= hi.y &&
+					point.z >= lo.z && point.z <= hi.z) {
+				blocked = true;
+				break;
+			}
+		}
+		if (!blocked) {
+			not_in_boxes.push_back(point);
+			original_indices.push_back(i);
+		}
+	}
+	// Spheres are removed from the box-filtered points before the native
+	// spatial-hash selection, so neither excluded kind reserves a spacing
+	// cell. O(N * boxes + N * spheres + N) expected, bounded to 128 each.
+	const PackedInt32Array local = filter_indices_excluding(not_in_boxes,
+			p_exclusion_centers, p_exclusion_radii, p_min_spacing, p_max_selected);
 	PackedInt32Array result;
 	result.resize(local.size());
 	for (int i = 0; i < local.size(); ++i) {
