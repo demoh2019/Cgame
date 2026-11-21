@@ -594,6 +594,51 @@ TEST_CASE("[GameplayFX] CooldownTracker individual and shared cooldowns") {
 	CHECK(tracker->get_cooldown_count() == 1);
 }
 
+TEST_CASE("[GameplayFX] CooldownTracker bounded batch query respects order and shared group lock") {
+	Ref<GameplayCooldownTracker> tracker;
+	tracker.instantiate();
+	CHECK(tracker->set_remaining("Ability.Global", 0.4));
+	CHECK(tracker->set_remaining("Ability.Weapon", 3.5));
+	CHECK(tracker->set_remaining("Ability.Head", 1.25));
+	CHECK(tracker->set_remaining("Local.UI.Activation.weapon", 0.22));
+	const PackedStringArray tags = { "Ability.Weapon", "Ability.Armor", "Ability.Head", "Ability.Feet", "Ability.Weapon" };
+	const PackedFloat64Array values = tracker->get_effective_remaining_batch(tags, "Ability.Global");
+	REQUIRE(values.size() == 5);
+	CHECK(values[0] == doctest::Approx(3.5));
+	CHECK(values[1] == doctest::Approx(0.4));
+	CHECK(values[2] == doctest::Approx(1.25));
+	CHECK(values[3] == doctest::Approx(0.4));
+	CHECK(values[4] == doctest::Approx(3.5)); // Repeat keeps input ordering.
+	const PackedFloat64Array without_group = tracker->get_effective_remaining_batch(tags);
+	REQUIRE(without_group.size() == 5);
+	CHECK(without_group[0] == doctest::Approx(3.5));
+	CHECK(without_group[1] == 0.0);
+	CHECK(tracker->get_cooldown_count() == 4); // Reads never create timers.
+	CHECK(tracker->tick(0.5).size() == 2);
+	const PackedFloat64Array after = tracker->get_effective_remaining_batch(tags, "Ability.Global");
+	REQUIRE(after.size() == 5);
+	CHECK(after[0] == doctest::Approx(3.0));
+	CHECK(after[1] == 0.0);
+	CHECK(after[2] == doctest::Approx(0.75));
+	CHECK(after[3] == 0.0);
+	CHECK(tracker->get_cooldown_count() == 2);
+}
+
+TEST_CASE("[GameplayFX] CooldownTracker batch rejects malformed requests without side effects") {
+	Ref<GameplayCooldownTracker> tracker;
+	tracker.instantiate();
+	CHECK(tracker->set_remaining("Ability.Weapon", 2.0));
+	const Dictionary before = tracker->get_snapshot();
+	CHECK(tracker->get_effective_remaining_batch({ "Ability.Weapon", ".invalid" }).is_empty());
+	CHECK(tracker->get_effective_remaining_batch({ "Ability.Weapon", "" }).is_empty());
+	CHECK(tracker->get_effective_remaining_batch({ "Ability.Weapon" }, ".invalid").is_empty());
+	PackedStringArray oversized;
+	oversized.resize(65);
+	CHECK(tracker->get_effective_remaining_batch(oversized).is_empty());
+	CHECK(tracker->get_effective_remaining_batch(PackedStringArray()).is_empty());
+	CHECK(tracker->get_snapshot() == before);
+}
+
 TEST_CASE("[GameplayFX] CooldownTracker snapshot rollback and frame-rate independence") {
 	Ref<GameplayCooldownTracker> tracker;
 	tracker.instantiate();
