@@ -67,7 +67,45 @@ bool GameplayCueQueue::emit_cue(const StringName &p_tag, double p_magnitude, int
 			p_magnitude < 0.0 || p_magnitude > 1000000.0 || !_valid_priority(p_priority)) {
 		return false;
 	}
-	return _enqueue(pending, p_tag, EVENT_EXECUTED, 0, p_magnitude, p_priority);
+	if (pending.size() < MAX_PENDING) {
+		return _enqueue(pending, p_tag, EVENT_EXECUTED, 0, p_magnitude, p_priority);
+	}
+	// A repeated pulse must still coalesce even when all slots are occupied.
+	for (const PendingCue &entry : pending) {
+		if (entry.type == EVENT_EXECUTED && entry.tag == p_tag) {
+			return _enqueue(pending, p_tag, EVENT_EXECUTED, 0, p_magnitude, p_priority);
+		}
+	}
+	// Niagara-style significance admission. Evict only an expendable
+	// transient with strictly lower priority. First matching entry wins
+	// ties (oldest of the lowest-priority candidates). Never discard
+	// persistent started/updated/stopped events: they drive visual cleanup.
+	int victim = -1;
+	for (int i = 0; i < pending.size(); ++i) {
+		const PendingCue &entry = pending[i];
+		if (entry.type == EVENT_EXECUTED && entry.priority < p_priority &&
+				(victim < 0 || entry.priority < pending[victim].priority)) {
+			victim = i;
+		}
+	}
+	if (victim < 0) {
+		if (rejected_transient_count < 2147483647) {
+			++rejected_transient_count;
+		}
+		return false;
+	}
+	// Reuse the queue's usual validation/coalescing. Do not partially
+	// discard a queued cue if admission unexpectedly fails.
+	Vector<PendingCue> next_pending = pending;
+	next_pending.remove_at(victim);
+	if (!_enqueue(next_pending, p_tag, EVENT_EXECUTED, 0, p_magnitude, p_priority)) {
+		return false;
+	}
+	pending = next_pending;
+	if (evicted_transient_count < 2147483647) {
+		++evicted_transient_count;
+	}
+	return true;
 }
 
 bool GameplayCueQueue::set_active(const StringName &p_tag, int p_stacks, int p_priority) {
@@ -180,6 +218,8 @@ Array GameplayCueQueue::take_events(int p_max_events) {
 void GameplayCueQueue::reset() {
 	active.clear();
 	pending.clear();
+	evicted_transient_count = 0;
+	rejected_transient_count = 0;
 }
 
 void GameplayCueQueue::_bind_methods() {
@@ -192,5 +232,7 @@ void GameplayCueQueue::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("take_events", "max_events"), &GameplayCueQueue::take_events, DEFVAL(32));
 	ClassDB::bind_method(D_METHOD("get_active_count"), &GameplayCueQueue::get_active_count);
 	ClassDB::bind_method(D_METHOD("get_pending_count"), &GameplayCueQueue::get_pending_count);
+	ClassDB::bind_method(D_METHOD("get_evicted_transient_count"), &GameplayCueQueue::get_evicted_transient_count);
+	ClassDB::bind_method(D_METHOD("get_rejected_transient_count"), &GameplayCueQueue::get_rejected_transient_count);
 	ClassDB::bind_method(D_METHOD("reset"), &GameplayCueQueue::reset);
 }

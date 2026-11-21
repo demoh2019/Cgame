@@ -833,4 +833,85 @@ TEST_CASE("[GameplayFX] application gate atomic snapshot rollback and hostile ta
 	CHECK_FALSE(gate->can_apply("Effect.CrowdControl.Stagger", effect_gate_tags({"Life.Alive"})));
 }
 
+
+TEST_CASE("[GameplayFX] CueQueue preserves lifecycle while higher-priority pulses displace ambience") {
+	Ref<GameplayCueQueue> cue;
+	cue.instantiate();
+	CHECK(cue->set_active("GameplayCue.Status.Resolve", 3, 7));
+	for (int i = 0; i < GameplayCueQueue::MAX_PENDING - 1; ++i) {
+		CHECK(cue->emit_cue(StringName(String("GameplayCue.Ambient.") + itos(i)), 1.0, 0));
+	}
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK_FALSE(cue->emit_cue("GameplayCue.Ambient.Rejected", 1.0, 0));
+	CHECK(cue->get_rejected_transient_count() == 1);
+	CHECK(cue->get_evicted_transient_count() == 0);
+	// Existing tags still coalesce even on the full queue.
+	CHECK(cue->emit_cue("GameplayCue.Ambient.1", 0.8, 0));
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	// Lifecycle updates remain atomic when no slot is available.
+	CHECK_FALSE(cue->set_active("GameplayCue.Status.Resolve", 4, 7));
+	CHECK(cue->get_active_stacks("GameplayCue.Status.Resolve") == 3);
+	CHECK(cue->emit_cue("GameplayCue.Status.CriticalHit", 2.0, 6));
+	CHECK(cue->get_evicted_transient_count() == 1);
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(cue->get_rejected_transient_count() == 1);
+	Array events = cue->take_events(2);
+	REQUIRE(events.size() == 2);
+	CHECK(String(events[0]["event"]) == "started");
+	CHECK(String(events[0]["tag"]) == "GameplayCue.Status.Resolve");
+	CHECK(String(events[1]["event"]) == "executed");
+	CHECK(String(events[1]["tag"]) == "GameplayCue.Status.CriticalHit");
+	CHECK(int(events[1]["priority"]) == 6);
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING - 2);
+	// Under equal background priorities, the oldest eligible event goes.
+	bool saw_oldest = false;
+	bool saw_next = false;
+	int remaining_count = 0;
+	while (cue->get_pending_count() > 0) {
+		const Array batch = cue->take_events(32);
+		for (int i = 0; i < batch.size(); ++i) {
+			const String tag = String(batch[i]["tag"]);
+			saw_oldest |= tag == "GameplayCue.Ambient.0";
+			if (tag == "GameplayCue.Ambient.1") {
+				saw_next = true;
+				CHECK(int(batch[i]["count"]) == 2);
+			}
+			++remaining_count;
+		}
+	}
+	CHECK_FALSE(saw_oldest);
+	CHECK(saw_next);
+	CHECK(remaining_count == GameplayCueQueue::MAX_PENDING - 2);
+	cue->reset();
+	CHECK(cue->get_evicted_transient_count() == 0);
+	CHECK(cue->get_rejected_transient_count() == 0);
+}
+
+TEST_CASE("[GameplayFX] CueQueue never evicts lifecycle-only saturation or equal priorities") {
+	Ref<GameplayCueQueue> cue;
+	cue.instantiate();
+	Dictionary snapshots;
+	for (int i = 0; i < GameplayCueQueue::MAX_ACTIVE; ++i) {
+		snapshots[StringName(String("GameplayCue.Status.") + itos(i))] = 1;
+	}
+	CHECK(cue->replace_active(snapshots));
+	CHECK(cue->get_active_count() == GameplayCueQueue::MAX_ACTIVE);
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK_FALSE(cue->emit_cue("GameplayCue.Status.ImportantHit", 1.0, 7));
+	CHECK(cue->get_rejected_transient_count() == 1);
+	CHECK(cue->get_evicted_transient_count() == 0);
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(cue->get_active_stacks("GameplayCue.Status.0") == 1);
+	CHECK_FALSE(cue->emit_cue("GameplayCue.Status.ImportantHit", Math::NaN, 7));
+	CHECK(cue->get_rejected_transient_count() == 1); // Invalid input is not overload.
+	cue->reset();
+	for (int i = 0; i < GameplayCueQueue::MAX_PENDING; ++i) {
+		CHECK(cue->emit_cue(StringName(String("GameplayCue.Important.") + itos(i)), 1.0, 7));
+	}
+	CHECK_FALSE(cue->emit_cue("GameplayCue.Important.SamePriority", 1.0, 7));
+	CHECK(cue->get_evicted_transient_count() == 0);
+	CHECK(cue->get_rejected_transient_count() == 1);
+}
+
+
 } // namespace TestGameplayFX

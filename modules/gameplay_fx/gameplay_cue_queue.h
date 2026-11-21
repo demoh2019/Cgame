@@ -48,6 +48,8 @@ private:
 
 	Vector<ActiveCue> active;
 	Vector<PendingCue> pending;
+	int evicted_transient_count = 0;
+	int rejected_transient_count = 0;
 
 	static bool _valid_tag(const StringName &p_tag);
 	static bool _valid_priority(int p_priority);
@@ -61,6 +63,8 @@ protected:
 public:
 	// Immediate, nonpersistent cue (particles, sound, HUD, etc.). Repeats
 	// coalesce by tag, capped at MAX_DUPLICATES per undrained cue.
+	// On a full queue, a higher-priority transient may evict the oldest
+	// lowest-priority transient; persistent status lifecycle events are safe.
 	bool emit_cue(const StringName &p_tag, double p_magnitude = 1.0, int p_priority = 0);
 	// 0 stacks stops an active cue; an unchanged value never emits another event.
 	bool set_active(const StringName &p_tag, int p_stacks, int p_priority = 0);
@@ -75,5 +79,8 @@ public:
 	Array take_events(int p_max_events = 32);
 	int get_active_count() const { return active.size(); }
 	int get_pending_count() const { return pending.size(); }
+	// Diagnostic counters since the last reset. Lifecycle cues are never evicted.
+	int get_evicted_transient_count() const { return evicted_transient_count; }
+	int get_rejected_transient_count() const { return rejected_transient_count; }
 	void reset();
 };

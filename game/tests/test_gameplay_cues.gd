@@ -60,3 +60,43 @@ func run(t) -> void:
 		t.eq(pulse_events.size(), 1, "stock Godot still renders periodic effects")
 		t.eq(str(pulse_events[0]["event"]), "executed", "stock fallback event is cosmetic")
 	actor.free()
+
+	t.current = "Niagara-style critical cue admission when visual backlog is full"
+	var pressure_actor := Node3D.new()
+	CueBridge.attach(pressure_actor)
+	var busy_queue: Object = pressure_actor.get_meta("gameplay_cues", null) as Object
+	if busy_queue != null and busy_queue.has_method("get_evicted_transient_count"):
+		var accepted := 0
+		for i in 128:
+			if bool(busy_queue.call("emit_cue", StringName("GameplayCue.Ambient.%d" % i), 1.0, 0)):
+				accepted += 1
+		t.eq(accepted, 128, "entire native transient cue queue filled with low-priority ambience")
+		var critical: Array = CueBridge.frame_events(pressure_actor, {
+			"Runtime.Status.Sundered": 2.0,
+			"Runtime.Status.Resolve": 4.0,
+		})
+		t.eq(critical.size(), 8, "per-frame cue draw cap respected even when saturated")
+		t.eq(str(critical[0].get("tag", "")), "GameplayCue.Status.Resolve",
+			"resolve cue at priority 6 survives and drains before minor effects")
+		t.eq(str(critical[1].get("tag", "")), "GameplayCue.Status.Sundered",
+			"sunder cue at priority 4 also survives the ambient queue")
+		t.eq(int(critical[0].get("priority", -1)), 6, "resolve critical priority mapped")
+		t.eq(int(critical[1].get("priority", -1)), 4, "sunder ordinary priority mapped")
+		t.eq(int(busy_queue.call("get_evicted_transient_count")), 2,
+			"two low-priority effects evicted with hard queue size preserved")
+		t.eq(int(busy_queue.call("get_pending_count")), 120,
+			"overflow admission does not grow bounded engine allocation")
+	else:
+		var normal: Array = CueBridge.frame_events(pressure_actor, {
+			"Runtime.Status.Sundered": 2.0,
+			"Runtime.Status.Resolve": 4.0,
+		})
+		t.eq(normal.size(), 2, "older native or stock engine keeps visual pulses")
+		var priority_by_tag := {}
+		for entry in normal:
+			priority_by_tag[str(entry.get("tag", ""))] = int(entry.get("priority", -1))
+		t.eq(int(priority_by_tag.get("GameplayCue.Status.Resolve", -1)), 6,
+			"stock fallback preserves critical Resolve priority")
+		t.eq(int(priority_by_tag.get("GameplayCue.Status.Sundered", -1)), 4,
+			"stock fallback preserves normal Sunder priority")
+	pressure_actor.free()

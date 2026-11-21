@@ -11,6 +11,12 @@ const PULSE_TAGS := {
 	"Runtime.Status.Sundered": "GameplayCue.Status.Sundered",
 	"Runtime.Status.Resolve": "GameplayCue.Status.Resolve",
 }
+## Niagara-style effect priority: visible Resolve stacks beat ambient debuff
+## pulses during cue queue saturation; no combat or status value changes.
+const PULSE_PRIORITY := {
+	"Runtime.Status.Sundered": 4,
+	"Runtime.Status.Resolve": 6,
+}
 
 
 static func attach(node: Node) -> void:
@@ -62,7 +68,7 @@ static func frame_events(node: Node, periodic: Dictionary) -> Array:
 			if not (raw is int or raw is float) or not is_finite(float(raw)) or float(raw) <= 0.0:
 				continue
 			cues.call("emit_cue", StringName(cue_tag),
-				clampf(float(raw), 0.0, 32.0), 4)
+				clampf(float(raw), 0.0, 32.0), int(PULSE_PRIORITY.get(str(status), 4)))
 		if cues.has_method("get_pending_count") and int(cues.call("get_pending_count")) == 0:
 			return []
 		return cues.call("take_events", 8) as Array
@@ -77,7 +83,7 @@ static func frame_events(node: Node, periodic: Dictionary) -> Array:
 		events.append({
 			"tag": StringName(cue_tag), "event": "executed",
 			"stacks": 0, "magnitude": float(periodic[status]),
-			"priority": 4, "count": 1
+			"priority": int(PULSE_PRIORITY.get(str(status), 4)), "count": 1
 		})
 	return events
 
