@@ -16,9 +16,29 @@ const MAX_SQUAD: int = 10
 
 ## Counts living enemies in a bounded radius. Early exit avoids scanning the
 ## rest of the world after the local crowd has saturated the encounter.
-static func nearby_infected(zombies: Dictionary, center: Vector3) -> int:
+static func nearby_infected(zombies: Dictionary, center: Vector3,
+		prefer_native: bool = true) -> int:
 	if not center.is_finite():
 		return LOCAL_HARD_CAP
+	# Reusable Unreal-style 3D relevancy broadphase. Keep exact sphere semantics:
+	# underground and aboveground infected must not count as neighbors.
+	# Small parties pay no native allocation or hash setup cost.
+	# Only trusted server entities are indexed; the client supplies no positions.
+	if prefer_native and zombies.size() > 12 and ClassDB.class_exists("SpatialPointGrid3D"):
+		var native: Object = ClassDB.instantiate("SpatialPointGrid3D")
+		if native != null and native.has_method("rebuild") and native.has_method("count_within"):
+			var living_positions: Array[Vector3] = []
+			for infected in zombies.values():
+				if infected == null or not infected.has_method("is_alive") or not infected.is_alive():
+					continue
+				var candidate: Variant = infected.get("position")
+				if candidate is Vector3 and candidate.is_finite():
+					living_positions.append(candidate)
+			if bool(native.call("rebuild", living_positions)):
+				var count: int = int(native.call("count_within", center,
+					LOCAL_RADIUS, LOCAL_HARD_CAP))
+				if count >= 0:
+					return count
 	var radius_squared: float = LOCAL_RADIUS * LOCAL_RADIUS
 	var found: int = 0
 	for infected in zombies.values():
