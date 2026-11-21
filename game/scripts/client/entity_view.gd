@@ -70,6 +70,10 @@ func _init() -> void:
 	# only resets this local presentation buffer, never server simulation.
 	_snapshot_buffer.configure(INTERPOLATION_DELAY, NetworkJitterBuffer.MAX_DELAY,
 		1.0 / float(Defs.SNAPSHOT_RATE))
+	# A few stable *new* snapshots must arrive before shedding the
+	# interpolation reserve after loss. Old Cgame binaries ignore this.
+	if _snapshot_buffer.has_method("set_recovery_guard_packets"):
+		_snapshot_buffer.set_recovery_guard_packets(3)
 
 
 ## House piece models (Kenney Fantasy Town Kit, CC0), sized to the 3 m building grid. Upgraded
@@ -130,6 +134,16 @@ func set_wetness_step(step: int) -> void:
 ## Server-side privacy and gameplay snapshots are never modified.
 func network_jitter_stats() -> Dictionary:
 	return _snapshot_buffer.get_stats()
+
+
+## Native/script read-only counters used by the online profiler.
+## Scalar getters avoid allocating a full stats Dictionary per sample.
+func network_missing_snapshot_estimate() -> int:
+	return int(_snapshot_buffer.get_estimated_missing_snapshots()) if _snapshot_buffer.has_method("get_estimated_missing_snapshots") else 0
+
+
+func network_recovery_hold_remaining() -> int:
+	return int(_snapshot_buffer.get_recovery_hold_remaining()) if _snapshot_buffer.has_method("get_recovery_hold_remaining") else 0
 
 
 func update_from(client) -> void:
