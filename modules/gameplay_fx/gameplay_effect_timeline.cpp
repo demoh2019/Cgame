@@ -428,10 +428,9 @@ Dictionary GameplayEffectTimeline::get_snapshot() const {
 	return result;
 }
 
-PackedStringArray GameplayEffectTimeline::tick(double p_delta) {
-	PackedStringArray expired;
+void GameplayEffectTimeline::_advance(double p_delta, PackedStringArray *r_expired) {
 	if (!Math::is_finite(p_delta) || p_delta <= 0.0) {
-		return expired;
+		return;
 	}
 	int i = 0;
 	while (i < effects.size()) {
@@ -450,14 +449,29 @@ PackedStringArray GameplayEffectTimeline::tick(double p_delta) {
 			effect.next_period -= elapsed;
 		}
 		if (p_delta >= effect.remaining) {
-			expired.push_back(String(effect.tag));
+			if (r_expired != nullptr) {
+				r_expired->push_back(String(effect.tag));
+			}
 			effects.remove_at(i);
 		} else {
 			effect.remaining -= p_delta;
 			i++;
 		}
 	}
+	return;
+}
+
+PackedStringArray GameplayEffectTimeline::tick(double p_delta) {
+	PackedStringArray expired;
+	_advance(p_delta, &expired);
 	return expired;
+}
+
+Dictionary GameplayEffectTimeline::tick_and_take_periodic_pulses(double p_delta) {
+	// Cosmetic rendering never uses the expired tag array. Skip that output,
+	// but preserve the exact phase, expiry and bounded pulse accumulation.
+	_advance(p_delta, nullptr);
+	return take_periodic_pulses();
 }
 
 double GameplayEffectTimeline::get_remaining(const StringName &p_tag) const {
@@ -483,6 +497,7 @@ void GameplayEffectTimeline::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_periodic", "tag", "period", "reset_on_reapply"), &GameplayEffectTimeline::set_periodic, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("get_periodic", "tag"), &GameplayEffectTimeline::get_periodic);
 	ClassDB::bind_method(D_METHOD("take_periodic_pulses"), &GameplayEffectTimeline::take_periodic_pulses);
+	ClassDB::bind_method(D_METHOD("tick_and_take_periodic_pulses", "delta"), &GameplayEffectTimeline::tick_and_take_periodic_pulses);
 	ClassDB::bind_method(D_METHOD("remove_effect", "tag"), &GameplayEffectTimeline::remove_effect);
 	ClassDB::bind_method(D_METHOD("clear"), &GameplayEffectTimeline::clear);
 	ClassDB::bind_method(D_METHOD("replace_snapshot", "effects"), &GameplayEffectTimeline::replace_snapshot);
