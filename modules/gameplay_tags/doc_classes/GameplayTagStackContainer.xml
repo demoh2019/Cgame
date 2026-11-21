@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GameplayTagStackContainer" inherits="Resource" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Stores bounded counts of hierarchical gameplay tags for stacking effects and status snapshots.
+	</brief_description>
+	<description>
+		Each exact tag stores a positive integer stack count. A non-exact lookup of a parent, such as [code]Runtime.Status[/code], sums counts of matching descendant tags on a dot boundary. This is useful for buffs, poison stacks, resolve and other counted states. Each tag is capped at 65535 stacks. Snapshot replacements validate all keys and values before mutating anything, and repeated identical snapshots do not emit a change notification.
+	</description>
+	<methods>
+		<method name="add_stacks">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="count" type="int" default="1" />
+			<description>Adds a positive number of stacks. Returns [code]false[/code] for invalid tags, counts or overflow; the old state remains unchanged.</description>
+		</method>
+		<method name="remove_stacks">
+			<return type="int" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="count" type="int" default="1" />
+			<description>Removes up to [param count] stacks from the exact tag. Returns the number removed; zero-count tags are deleted.</description>
+		</method>
+		<method name="get_stack_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="exact" type="bool" default="false" />
+			<description>Returns the exact stack count, or the sum of stacks for [param tag] and all matching descendants when [param exact] is [code]false[/code].</description>
+		</method>
+		<method name="has_tag" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="exact" type="bool" default="false" />
+			<description>Returns [code]true[/code] if the requested tag has positive stacks.</description>
+		</method>
+		<method name="replace_stacks">
+			<return type="bool" />
+			<param index="0" name="stacks" type="Dictionary" />
+			<description>Atomically replaces all counts using String or StringName keys and positive integer values up to 65535. Returns [code]false[/code] without altering the resource if any entry is invalid.</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>Removes every stack. Does not notify listeners if already empty.</description>
+		</method>
+		<method name="get_tag_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns the number of exact tags with positive counts.</description>
+		</method>
+		<method name="is_empty" qualifiers="const">
+			<return type="bool" />
+			<description>Returns [code]true[/code] if there are no stacks.</description>
+		</method>
+	</methods>
+	<members>
+		<member name="stacks" type="Dictionary" setter="set_stacks" getter="get_stacks" default="{}">
+			A copy of the exact tag-to-count mapping. Mutating the retrieved dictionary does not change the resource.
+		</member>
+	</members>
+</class>

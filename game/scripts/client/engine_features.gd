@@ -15,6 +15,10 @@ static func tag_node(node: Node, tags: Array) -> void:
 	for tag in tags:
 		container.add_tag(StringName(str(tag)))
 	node.set_meta("tags", container)
+	# Counted status effects are separate from boolean identity tags.
+	# Neither class is required by stock Godot binaries.
+	if has("GameplayTagStackContainer"):
+		node.set_meta("tag_stacks", ClassDB.instantiate("GameplayTagStackContainer"))
 
 
 ## Creates an engine class by name and applies properties; returns null when the binary lacks it.
@@ -104,6 +108,27 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 	var container: Object = node.get_meta("tags") as Object
 	if container != null and container.has_method("replace_tag_branch"):
 		container.call("replace_tag_branch", StringName("Runtime"), runtime_tags(kind, snapshot))
+	# A complete, validated snapshot prevents stale effect stacks after expiry.
+	if node.has_meta("tag_stacks"):
+		var stack_container: Object = node.get_meta("tag_stacks") as Object
+		if stack_container != null and stack_container.has_method("replace_stacks"):
+			var counts: Dictionary = {}
+			for tag in runtime_tags(kind, snapshot):
+				counts[StringName(tag)] = 1
+			var resolve_tag := StringName("Runtime.Status.Resolve")
+			if counts.has(resolve_tag):
+				counts[resolve_tag] = clampi(int(snapshot.get("resolve_stacks", 0)), 2, 65535)
+			stack_container.call("replace_stacks", counts)
+
+
+## Presentation-only stack counts. The server remains authoritative for combat.
+## Falls back to the validated snapshot on stock Godot/older engine builds.
+static func runtime_stack_count(node: Node, tag: String, fallback: int = 0) -> int:
+	if node != null and node.has_meta("tag_stacks"):
+		var stack_container: Object = node.get_meta("tag_stacks") as Object
+		if stack_container != null and stack_container.has_method("get_stack_count"):
+			return maxi(0, int(stack_container.call("get_stack_count", StringName(tag), true)))
+	return maxi(0, fallback)
 
 
 static func runtime_has(node: Node, tag: String, fallback: bool = false) -> bool:

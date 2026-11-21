@@ -33,6 +33,7 @@
 
 #include "../animation_lod_controller.h"
 #include "../gameplay_tag_container.h"
+#include "../gameplay_tag_stack_container.h"
 #include "scene/animation/animation_player.h"
 
 #include "tests/test_macros.h"
@@ -129,6 +130,60 @@ TEST_CASE("[GameplayTags] branch replacement is atomic and respects hierarchy bo
 	CHECK(c->get_matching_tags("Runtime").is_empty());
 	CHECK(c->has_tag("Enemy", false));
 	CHECK(c->has_tag("RuntimeExtra", false));
+}
+
+TEST_CASE("[GameplayTags] counted tags, hierarchy and bounded deltas") {
+	Ref<GameplayTagStackContainer> c;
+	c.instantiate();
+	CHECK(c->is_empty());
+	CHECK(c->add_stacks("Runtime.Status.Resolve", 2));
+	CHECK(c->add_stacks("Runtime.Status.Staggered"));
+	CHECK(c->add_stacks("Runtime.State.Alive"));
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 2);
+	CHECK(c->get_stack_count("Runtime.Status") == 3);
+	CHECK(c->get_stack_count("Runtime") == 4);
+	CHECK(c->get_stack_count("Runtime.St") == 0); // Dotted boundary, not prefix.
+	CHECK_FALSE(c->has_tag("Runtime.Status.Resolve", true) == false);
+	CHECK_FALSE(c->add_stacks("Runtime.Status.Resolve", 65535)); // Overflow.
+	CHECK_FALSE(c->add_stacks("Runtime..Broken"));
+	CHECK_FALSE(c->add_stacks("Runtime.Status.Resolve", -2));
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 2);
+	CHECK(c->remove_stacks("Runtime.Status.Resolve") == 1);
+	CHECK(c->remove_stacks("Runtime.Status.Resolve", 10) == 1);
+	CHECK(c->remove_stacks("Runtime.Status.Resolve") == 0);
+	CHECK_FALSE(c->has_tag("Runtime.Status.Resolve"));
+	CHECK(c->get_tag_count() == 2);
+}
+
+TEST_CASE("[GameplayTags] atomic snapshots reject corruption and isolate dictionary copies") {
+	Ref<GameplayTagStackContainer> c;
+	c.instantiate();
+	Dictionary initial;
+	initial[StringName("Runtime.Status.Resolve")] = 3;
+	initial[StringName("Runtime.Life.Alive")] = 1;
+	CHECK(c->replace_stacks(initial));
+	CHECK(c->replace_stacks(initial)); // Repeated snapshot is a no-op.
+	initial[StringName("Runtime.Status.Resolve")] = 99;
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 3);
+	Dictionary returned = c->get_stacks();
+	returned[StringName("Runtime.Life.Alive")] = 500;
+	CHECK(c->get_stack_count("Runtime.Life.Alive", true) == 1);
+
+	Dictionary bad;
+	bad[StringName("Runtime.Status.Resolve")] = 5;
+	bad[StringName("Runtime..Malformed")] = 2;
+	CHECK_FALSE(c->replace_stacks(bad));
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 3);
+	bad.erase(StringName("Runtime..Malformed"));
+	bad[StringName("Runtime.Status.Poisoned")] = -1;
+	CHECK_FALSE(c->replace_stacks(bad));
+	bad[StringName("Runtime.Status.Poisoned")] = 1.5;
+	CHECK_FALSE(c->replace_stacks(bad));
+	bad[StringName("Runtime.Status.Poisoned")] = 65536;
+	CHECK_FALSE(c->replace_stacks(bad));
+	CHECK(c->get_tag_count() == 2);
+	CHECK(c->replace_stacks(Dictionary()));
+	CHECK(c->is_empty());
 }
 
 TEST_CASE("[GameplayTags] query all/any/none") {
