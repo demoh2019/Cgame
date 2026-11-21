@@ -256,6 +256,19 @@ static func runtime_stack_count(node: Node, tag: String, fallback: int = 0) -> i
 	return maxi(0, fallback)
 
 
+## Independently active crowd controls from server snapshots. A native
+## distinct-query match is used when available; stock Godot reads timers.
+static func zombie_control_count(node: Node, snapshot: Dictionary) -> int:
+	if node != null and node.has_meta("tags"):
+		var container: Object = node.get_meta("tags") as Object
+		if container != null and container.has_method("count_matching_queries"):
+			return int(container.call("count_matching_queries", PackedStringArray([
+				"Runtime.Status.Staggered", "Runtime.Status.Snared", "Runtime.Status.Sundered"]), true))
+	return int(float(snapshot.get("stagger_seconds", 0.0)) > 0.0) \
+		+ int(float(snapshot.get("snared_seconds", 0.0)) > 0.0) \
+		+ int(float(snapshot.get("sunder_seconds", 0.0)) > 0.0)
+
+
 static func runtime_has(node: Node, tag: String, fallback: bool = false) -> bool:
 	if node != null and node.has_meta("tags"):
 		var container: Object = node.get_meta("tags") as Object
