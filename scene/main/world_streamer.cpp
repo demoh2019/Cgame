@@ -276,6 +276,99 @@ bool WorldStreamer::_finalize_chunk(const Vector3i &p_cell, const String &p_path
 	return _adopt_chunk(p_cell, chunk);
 }
 
+// Main-thread chunk creation remains indivisible. Generation and adoption
+// time includes Node::_ready() callbacks, even for missing/failed cells.
+void WorldStreamer::_generate_cell(const Vector3i &cell) {
+	Variant cell_variant = cell;
+	const Variant *args[1] = { &cell_variant };
+	Variant result;
+	Callable::CallError error;
+	chunk_generator.callp(args, 1, result, error);
+	if (error.error != Callable::CallError::CALL_OK) {
+		_record_failure(cell, String("generator call failed"));
+		return;
+	}
+	if (result.get_type() == Variant::NIL) {
+		missing.insert(cell); // Null is an intentionally empty cell, not a retryable error.
+		return;
+	}
+	if (result.get_type() != Variant::OBJECT) {
+		_record_failure(cell, String("generator returned a non-Node value"));
+		return;
+	}
+	Node *chunk = Object::cast_to<Node>(result.get_validated_object());
+	if (!chunk) {
+		_record_failure(cell, String("generator returned an unusable object"));
+		return;
+	}
+	if (!_adopt_chunk(cell, chunk)) {
+		memdelete(chunk);
+		_record_failure(cell, String("generator returned an unusable node"));
+	}
+}
+
+void WorldStreamer::_record_chunk_work(uint64_t p_started_usec) {
+	const uint64_t now = OS::get_singleton()->get_ticks_usec();
+	const uint64_t elapsed = now >= p_started_usec ? now - p_started_usec : 0;
+	frame_chunk_work_usec = MIN(int64_t(1000000000),
+			frame_chunk_work_usec + int64_t(MIN(elapsed, uint64_t(1000000000))));
+	frame_chunk_attempt_count++;
+}
+
+void WorldStreamer::_finish_chunk_work_frame() {
+	last_frame_chunk_work_usec = frame_chunk_work_usec;
+	last_frame_chunk_attempt_count = frame_chunk_attempt_count;
+	frame_chunk_work_usec = 0;
+	frame_chunk_attempt_count = 0;
+}
+
+void WorldStreamer::set_adaptive_chunk_budget_enabled(bool p_enabled) {
+	adaptive_chunk_budget_enabled = p_enabled;
+	if (!p_enabled) {
+		streaming_frame_pressure = 0.0;
+	}
+}
+
+double WorldStreamer::advance_chunk_pressure(double p_pressure, double p_frame_delta) {
+	if (!Math::is_finite(p_pressure)) {
+		p_pressure = 0.0;
+	}
+	const double previous = CLAMP(p_pressure, 0.0, 1.0);
+	if (!Math::is_finite(p_frame_delta) || p_frame_delta <= 0.0) {
+		return previous;
+	}
+	if (p_frame_delta > 0.030) {
+		return MIN(1.0, previous + 0.16);
+	}
+	if (p_frame_delta < 0.020) {
+		return MAX(0.0, previous - 0.05);
+	}
+	return previous;
+}
+
+int WorldStreamer::get_effective_instantiations_per_frame() const {
+	const int configured = MAX(max_instantiations_per_frame, 1);
+	if (!adaptive_chunk_budget_enabled) {
+		return configured;
+	}
+	const int reduction = streaming_frame_pressure >= 0.8 ? 2 :
+			(streaming_frame_pressure >= 0.4 ? 1 : 0);
+	return MAX(1, configured - reduction);
+}
+
+int WorldStreamer::get_effective_chunk_work_usec() const {
+	if (!adaptive_chunk_budget_enabled || max_chunk_work_usec <= 0) {
+		return max_chunk_work_usec;
+	}
+	if (streaming_frame_pressure >= 0.8) {
+		return MIN(max_chunk_work_usec, MAX(250, max_chunk_work_usec / 2));
+	}
+	if (streaming_frame_pressure >= 0.4) {
+		return MIN(max_chunk_work_usec, MAX(250, (max_chunk_work_usec * 3) / 4));
+	}
+	return max_chunk_work_usec;
+}
+
 // Generates queued cells on the main thread, a bounded number per call.
 void WorldStreamer::_run_generator_queue(int &r_instantiation_budget, uint64_t p_frame_started_usec) {
 	if (!enabled || r_instantiation_budget <= 0 || generate_queue.is_empty() || !chunk_generator.is_valid()) {
@@ -289,8 +382,8 @@ void WorldStreamer::_run_generator_queue(int &r_instantiation_budget, uint64_t p
 	while (consumed < generate_queue.size() && r_instantiation_budget > 0) {
 		// A single generator call cannot be interrupted. After at least one
 		// chunk, stop before the next one if this frame's CPU budget ran out.
-		if (max_chunk_work_usec > 0 && r_instantiation_budget < MAX(max_instantiations_per_frame, 1) &&
-				OS::get_singleton()->get_ticks_usec() - p_frame_started_usec >= uint64_t(max_chunk_work_usec)) {
+		if (active_chunk_work_budget_usec > 0 && r_instantiation_budget < active_instantiation_budget &&
+				OS::get_singleton()->get_ticks_usec() - p_frame_started_usec >= uint64_t(active_chunk_work_budget_usec)) {
 			break;
 		}
 		const Vector3i cell = generate_queue[consumed++];
@@ -303,32 +396,9 @@ void WorldStreamer::_run_generator_queue(int &r_instantiation_budget, uint64_t p
 		}
 		// Generator calls can be expensive even when a chunk is missing or fails.
 		r_instantiation_budget--;
-		Variant cell_variant = cell;
-		const Variant *args[1] = { &cell_variant };
-		Variant result;
-		Callable::CallError error;
-		chunk_generator.callp(args, 1, result, error);
-		if (error.error != Callable::CallError::CALL_OK) {
-			_record_failure(cell, String("generator call failed"));
-			continue;
-		}
-		if (result.get_type() == Variant::NIL) {
-			missing.insert(cell); // Null is an intentionally empty cell, not a retryable error.
-			continue;
-		}
-		if (result.get_type() != Variant::OBJECT) {
-			_record_failure(cell, String("generator returned a non-Node value"));
-			continue;
-		}
-		Node *chunk = Object::cast_to<Node>(result.get_validated_object());
-		if (!chunk) {
-			_record_failure(cell, String("generator returned an unusable object"));
-			continue;
-		}
-		if (!_adopt_chunk(cell, chunk)) {
-			memdelete(chunk);
-			_record_failure(cell, String("generator returned an unusable node"));
-		}
+		const uint64_t generation_started_usec = OS::get_singleton()->get_ticks_usec();
+		_generate_cell(cell);
+		_record_chunk_work(generation_started_usec);
 	}
 	if (consumed > 0) {
 		LocalVector<Vector3i> rest;
@@ -399,13 +469,16 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 			ResourceLoader::load_threaded_get(path);
 			continue;
 		}
-		if (r_instantiation_budget <= 0 || (max_chunk_work_usec > 0 && r_instantiation_budget < MAX(max_instantiations_per_frame, 1) &&
-				OS::get_singleton()->get_ticks_usec() - p_frame_started_usec >= uint64_t(max_chunk_work_usec))) {
+		if (r_instantiation_budget <= 0 || (active_chunk_work_budget_usec > 0 && r_instantiation_budget < active_instantiation_budget &&
+				OS::get_singleton()->get_ticks_usec() - p_frame_started_usec >= uint64_t(active_chunk_work_budget_usec))) {
 			continue; // Keep loaded resources ready for the next frame.
 		}
 		r_instantiation_budget--;
 		loading.erase(cell);
-		if (!_finalize_chunk(cell, path)) {
+		const uint64_t finalization_started_usec = OS::get_singleton()->get_ticks_usec();
+		const bool finalized = _finalize_chunk(cell, path);
+		_record_chunk_work(finalization_started_usec);
+		if (!finalized) {
 			_record_failure(cell, path);
 		}
 	}
@@ -622,7 +695,12 @@ void WorldStreamer::_notification(int p_what) {
 			}
 			// One budget and wall-clock deadline are shared by threaded
 			// scene finalization and procedural world generation this frame.
-			int frame_budget = MAX(max_instantiations_per_frame, 1);
+			if (adaptive_chunk_budget_enabled) {
+				streaming_frame_pressure = advance_chunk_pressure(streaming_frame_pressure, get_process_delta_time());
+			}
+			active_instantiation_budget = get_effective_instantiations_per_frame();
+			active_chunk_work_budget_usec = get_effective_chunk_work_usec();
+			int frame_budget = active_instantiation_budget;
 			const uint64_t frame_started_usec = OS::get_singleton()->get_ticks_usec();
 			_poll_loading(frame_budget, frame_started_usec);
 			time_since_update += get_process_delta_time();
@@ -641,6 +719,7 @@ void WorldStreamer::_notification(int p_what) {
 			// this path both ran procedural generation on update frames, doubling
 			// max_instantiations_per_frame and causing occasional frame spikes.
 			_run_generator_queue(frame_budget, frame_started_usec);
+			_finish_chunk_work_frame();
 		} break;
 	}
 }
@@ -883,7 +962,9 @@ TypedArray<Vector3i> WorldStreamer::get_loaded_cells() const {
 
 void WorldStreamer::refresh(bool p_retry) {
 	// Explicit refresh also shares its budget across both kinds of chunks.
-	int refresh_budget = MAX(max_instantiations_per_frame, 1);
+	active_instantiation_budget = get_effective_instantiations_per_frame();
+	active_chunk_work_budget_usec = get_effective_chunk_work_usec();
+	int refresh_budget = active_instantiation_budget;
 	const uint64_t started_usec = OS::get_singleton()->get_ticks_usec();
 	if (p_retry) {
 		missing.clear();
@@ -894,6 +975,7 @@ void WorldStreamer::refresh(bool p_retry) {
 	_poll_loading(refresh_budget, started_usec);
 	_update_streaming();
 	_run_generator_queue(refresh_budget, started_usec);
+	_finish_chunk_work_frame();
 	time_since_update = 0.0;
 }
 
@@ -944,6 +1026,14 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_instantiations_per_frame"), &WorldStreamer::get_max_instantiations_per_frame);
 	ClassDB::bind_method(D_METHOD("set_max_chunk_work_usec", "microseconds"), &WorldStreamer::set_max_chunk_work_usec);
 	ClassDB::bind_method(D_METHOD("get_max_chunk_work_usec"), &WorldStreamer::get_max_chunk_work_usec);
+	ClassDB::bind_method(D_METHOD("set_adaptive_chunk_budget_enabled", "enabled"), &WorldStreamer::set_adaptive_chunk_budget_enabled);
+	ClassDB::bind_method(D_METHOD("is_adaptive_chunk_budget_enabled"), &WorldStreamer::is_adaptive_chunk_budget_enabled);
+	ClassDB::bind_static_method("WorldStreamer", D_METHOD("advance_chunk_pressure", "pressure", "frame_delta"), &WorldStreamer::advance_chunk_pressure);
+	ClassDB::bind_method(D_METHOD("get_effective_chunk_work_usec"), &WorldStreamer::get_effective_chunk_work_usec);
+	ClassDB::bind_method(D_METHOD("get_effective_instantiations_per_frame"), &WorldStreamer::get_effective_instantiations_per_frame);
+	ClassDB::bind_method(D_METHOD("get_streaming_frame_pressure_percent"), &WorldStreamer::get_streaming_frame_pressure_percent);
+	ClassDB::bind_method(D_METHOD("get_last_frame_chunk_work_usec"), &WorldStreamer::get_last_frame_chunk_work_usec);
+	ClassDB::bind_method(D_METHOD("get_last_frame_chunk_attempt_count"), &WorldStreamer::get_last_frame_chunk_attempt_count);
 	ClassDB::bind_method(D_METHOD("set_max_auto_retries", "count"), &WorldStreamer::set_max_auto_retries);
 	ClassDB::bind_method(D_METHOD("get_max_auto_retries"), &WorldStreamer::get_max_auto_retries);
 	ClassDB::bind_method(D_METHOD("set_retry_initial_delay", "seconds"), &WorldStreamer::set_retry_initial_delay);
@@ -985,6 +1075,7 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "axes", PROPERTY_HINT_ENUM, "XZ (3D ground),XY (2D),XYZ (volume)"), "set_axes", "get_axes");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cell_size", PROPERTY_HINT_RANGE, "1,100000,0.1,or_greater,suffix:m"), "set_cell_size", "get_cell_size");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "load_radius", PROPERTY_HINT_RANGE, "0,100000,0.1,or_greater,suffix:m"), "set_load_radius", "get_load_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "adaptive_chunk_budget_enabled"), "set_adaptive_chunk_budget_enabled", "is_adaptive_chunk_budget_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "unload_radius", PROPERTY_HINT_RANGE, "0,100000,0.1,or_greater,suffix:m"), "set_unload_radius", "get_unload_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "velocity_hint", PROPERTY_HINT_NONE, "suffix:m/s"), "set_velocity_hint", "get_velocity_hint");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lookahead_seconds", PROPERTY_HINT_RANGE, "0,4,0.1,suffix:s"), "set_lookahead_seconds", "get_lookahead_seconds");
