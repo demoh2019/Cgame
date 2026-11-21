@@ -59,6 +59,11 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 240s "$BIN" --headless --test --test-case="*PCGPathFalloff*" --no-colors 2>&1 | tee pcg-path-falloff-native.log
+      - name: Native PCG weighted variant tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*PCGWeightedVariantSelector*" --no-colors 2>&1 | tee pcg-weighted-native.log
       - name: Import Albion After game
         run: |
           set -euo pipefail
@@ -78,6 +83,13 @@ jobs:
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 180s "$BIN" --headless --path games/days_after --editor --import --quit 2>&1 | tee pcg-days-after-import.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' pcg-days-after-import.log; then exit 1; fi
+      - name: Days After weighted variant native/fallback parity
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path games/days_after --script res://pcg_weighted_variants_smoke_test.gd 2>&1 | tee pcg-weighted-game.log
+          grep -F 'PCG WEIGHTED VARIANTS TOTAL: 0 failures' pcg-weighted-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-weighted-game.log; then exit 1; fi
       - name: Run native exclusion-volume gameplay smoke
         run: |
           set -euo pipefail
@@ -93,6 +105,8 @@ jobs:
           if-no-files-found: ignore
           path: |
             pcg-native.log
+            pcg-weighted-native.log
+            pcg-weighted-game.log
             pcg-path-falloff-native.log
             pcg-surface-native.log
             pcg-import.log
