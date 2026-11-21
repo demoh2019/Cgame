@@ -20,6 +20,14 @@
 			<description>Returns ranked points without score details.</description>
 		</method>
 
+		<method name="query_spread_positions_avoiding" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<param index="0" name="count" type="int" />
+			<param index="1" name="min_separation" type="float" />
+			<param index="2" name="occupied_positions" type="PackedVector3Array" />
+			<param index="3" name="clearance" type="float" />
+			<description>Returns up to [param count] ranked points with pairwise [param min_separation], excluding every candidate whose distance from any [param occupied_positions] is strictly less than [param clearance]. Exactly-on-boundary positions remain valid. Avoidance and pairwise spacing use XZ distance when [member horizontal_only] is true. The occupied list accepts at most 128 finite coordinates. [param clearance] must be finite and nonnegative, and zero disables avoidance. Invalid inputs produce an empty result. The method does not query physics or navigation; the game must validate terrain and authority separately. When [param occupied_positions] is empty, this is equivalent to [method query_spread_positions]. Stable ordering and [member max_results] are preserved.</description>
+		</method>
 		<method name="query_spread_positions" qualifiers="const">
 			<return type="PackedVector3Array" />
 			<param index="0" name="count" type="int" />
