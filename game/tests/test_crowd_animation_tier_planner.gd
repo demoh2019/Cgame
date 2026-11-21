@@ -504,11 +504,18 @@ func run(t) -> void:
 			for frame in 480:
 				# Separate extended hot/cold/neutral windows plus missing samples
 				# and quality transitions verify all state-machine branches.
-				var q: int = 2 if frame < 240 else 1 if frame < 360 else 3
+				var q: int = 2
 				if frame >= 460:
 					q = 0
-				var process_us: int = 25000 if frame % 120 < 54 else 2500 \
-					if frame % 120 < 102 else 10000
+				elif frame >= 360:
+					q = 3
+				elif frame >= 240:
+					q = 1
+				var process_us: int = 10000
+				if frame % 120 < 54:
+					process_us = 25000
+				elif frame % 120 < 102:
+					process_us = 2500
 				if frame % 41 == 0:
 					process_us = 0
 				if q != sampled_quality:
