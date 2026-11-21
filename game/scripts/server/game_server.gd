@@ -9066,7 +9066,7 @@ func get_camp_alarm_query_stats() -> Dictionary:
 
 func _native_camp_alarm_counts() -> Dictionary:
 	last_camp_alarm_query_stats = {"native": false, "centers": 0, "targets": 0}
-	if zombies.size() < 32 or zombies.size() > 8192:
+	if zombies.size() < 32 or zombies.size() > 8192 or campfires.size() < 4:
 		return {}
 	if _pack_spatial_grid == null and ClassDB.class_exists("AIProximityGrid2D"):
 		_pack_spatial_grid = ClassDB.instantiate("AIProximityGrid2D")
