@@ -10,6 +10,7 @@ on:
       - 'game/tests/test_ambient_tick_budget.gd'
       - 'game/tests/run_ambient_budget.gd'
       - 'tests/scene/test_frame_update_budget_contract.py'
+      - 'tests/scene/test_frame_update_budget_significance.py'
       - '.github/workflows/frame-update-budget-contract.yml'
   pull_request:
     paths:
@@ -19,6 +20,7 @@ on:
       - 'game/tests/test_ambient_tick_budget.gd'
       - 'game/tests/run_ambient_budget.gd'
       - 'tests/scene/test_frame_update_budget_contract.py'
+      - 'tests/scene/test_frame_update_budget_significance.py'
       - '.github/workflows/frame-update-budget-contract.yml'
 
 permissions:
@@ -39,9 +41,12 @@ jobs:
             game/tests/run_ambient_budget.gd
             game/tests/run_all.gd
             tests/scene/test_frame_update_budget_contract.py
+            tests/scene/test_frame_update_budget_significance.py
           sparse-checkout-cone-mode: false
       - name: Validate native and gameplay integration
-        run: python3 -m unittest tests/scene/test_frame_update_budget_contract.py -v
+        run: |
+          python3 -m unittest tests/scene/test_frame_update_budget_contract.py -v
+          python3 -m unittest tests/scene/test_frame_update_budget_significance.py -v
 
   native-and-game:
     needs: contract
