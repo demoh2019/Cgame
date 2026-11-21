@@ -78,6 +78,39 @@ func run(t) -> void:
         "perception snapshot exposes remaining memory lifetimes")
 
 
+    t.current = "Optional per-infected AI profiling is disabled by default"
+    t.check(not bool(infected.get_ai_profile_snapshot().get("enabled", false)),
+        "ordinary infected do not allocate native timing counters")
+    var has_profiler := ClassDB.class_exists("AIExecutionProfiler")
+    t.eq(infected.enable_ai_profiling(true), has_profiler,
+        "native profiling is enabled only on a custom fork")
+    if has_profiler:
+        var profile_before: Dictionary = infected.get_ai_profile_snapshot()
+        t.check(bool(profile_before.get("enabled", false)),
+            "profiler is active on the selected infected only")
+        infected.think(world, players, 0.3, rng)
+        var recorded: Dictionary = infected.get_ai_profile_snapshot()
+        var categories: Dictionary = recorded.get("categories", {})
+        var selection: Dictionary = categories.get("target_selection", {})
+        t.check(int(selection.get("count", 0)) >= 1,
+            "a real server target-selection tick produces timing data")
+        t.check(int(selection.get("max_usec", -1)) >= 0,
+            "recorded microsecond duration is nonnegative")
+        var server_profile: Dictionary = infected.get_ai_debug_snapshot().get("profiling", {})
+        t.eq(server_profile.get("total_samples"), recorded.get("total_samples"),
+            "debug snapshot includes the actual per-NPC timings")
+        infected.enable_ai_profiling(false)
+        var samples_before := int(infected.get_ai_profile_snapshot().get("total_samples", 0))
+        infected.think(world, players, 0.3, rng)
+        t.eq(infected.get_ai_profile_snapshot().get("total_samples"), samples_before,
+            "disabled profiling does not collect new samples")
+        infected.reset_ai_profile()
+        t.eq(infected.get_ai_profile_snapshot().get("total_samples"), 0,
+            "per-infected performance counters can reset independently")
+    else:
+        t.check(not bool(infected.get_ai_profile_snapshot().get("enabled", false)),
+            "stock Godot preserves no-op profiling behavior")
+
     t.current = "Safe-zone players never create native hearing stimulus"
     var protected := Zombie.new(973, "walker", Vector3(0.0, height, 0.0))
     protected.think(world, {41: {"position": Vector3(12.0, height, 0.0),
