@@ -40,6 +40,7 @@
 #include "scene/3d/physics/collision_shape_3d.h"
 #include "scene/3d/physics/rigid_body_3d.h"
 #include "scene/3d/navigation/navigation_region_3d.h"
+#include "scene/3d/navigation/navigation_link_3d.h"
 
 #include <cstdint>
 
@@ -101,6 +102,7 @@ void WorldPartition3D::_notify_cell_activating(const Vector2i &p_cell, Node *p_i
 	// Scene scripts may enable regions in streaming_activated(). Apply
 	// persisted navigation gate after that callback, before subscribers run.
 	_apply_cell_navigation_state(p_cell, p_instance);
+	_apply_cell_navigation_links(p_cell, p_instance);
 	emit_signal(SNAME("cell_activated"), p_cell);
 }
 
@@ -555,6 +557,13 @@ Array WorldPartition3D::acquire_cell_route(const Vector2i &p_from, const Vector2
 			return Array();
 		}
 	}
+	for (int i = 1; i < cells.size(); i++) {
+		const Vector2i previous = cells[i - 1];
+		const Vector2i current = cells[i];
+		if (!_is_route_connection_open(previous, current)) {
+			return Array();
+		}
+	}
 	Array tokens;
 	for (int i = 0; i < cells.size(); i++) {
 		const int token = acquire_cell_lease(cells[i]);
@@ -677,6 +686,176 @@ bool WorldPartition3D::is_layer_enabled(const String &p_layer) const {
 
 bool WorldPartition3D::is_cell_layer_enabled(const Vector2i &p_cell) const {
 	return _is_cell_layer_enabled(p_cell);
+}
+
+void WorldPartition3D::_apply_loaded_navigation_link(const Vector2i &p_cell, const String &p_link_path, bool p_enabled) {
+	if (!_valid_body_path(p_link_path) || p_link_path.length() > 256) {
+		return;
+	}
+	Node *root = get_cell_instance(p_cell);
+	if (root == nullptr) {
+		return;
+	}
+	const NodePath path(p_link_path);
+	NavigationLink3D *link = Object::cast_to<NavigationLink3D>(root->get_node_or_null(path));
+	if (link != nullptr && root->is_ancestor_of(link)) {
+		link->set_enabled(p_enabled);
+	}
+}
+
+void WorldPartition3D::_apply_cell_navigation_links(const Vector2i &p_cell, Node *p_instance) {
+	if (p_instance == nullptr || !navigation_link_states.has(p_cell)) {
+		return;
+	}
+	const Dictionary state = navigation_link_states[p_cell];
+	const Array paths = state.keys();
+	for (int i = 0; i < paths.size(); i++) {
+		const String path = paths[i];
+		_apply_loaded_navigation_link(p_cell, path, false);
+	}
+}
+
+bool WorldPartition3D::is_cell_navigation_link_enabled(const Vector2i &p_cell, const String &p_link_path) const {
+	if (!navigation_link_states.has(p_cell)) {
+		return true;
+	}
+	const Dictionary states = navigation_link_states[p_cell];
+	return !states.has(p_link_path);
+}
+
+void WorldPartition3D::set_cell_navigation_link_enabled(const Vector2i &p_cell, const String &p_link_path, bool p_enabled) {
+	ERR_FAIL_COND_MSG(!_valid_body_path(p_link_path) || p_link_path.length() > 256, "WorldPartition3D navigation link path must be a safe relative NodePath of at most 256 characters.");
+	if (is_cell_navigation_link_enabled(p_cell, p_link_path) == p_enabled) {
+		return;
+	}
+	Dictionary states = navigation_link_states.get(p_cell, Dictionary());
+	if (p_enabled) {
+		states.erase(p_link_path);
+	} else {
+		ERR_FAIL_COND_MSG(states.size() >= 128, "WorldPartition3D permits a maximum of 128 disabled navigation links per cell.");
+		states[p_link_path] = false;
+	}
+	if (states.is_empty()) {
+		navigation_link_states.erase(p_cell);
+	} else {
+		navigation_link_states[p_cell] = states;
+	}
+	_apply_loaded_navigation_link(p_cell, p_link_path, p_enabled);
+	emit_signal(SNAME("cell_navigation_link_state_changed"), p_cell, p_link_path, p_enabled);
+}
+
+void WorldPartition3D::set_navigation_link_states(const Dictionary &p_states) {
+	Dictionary clean;
+	const Array cells = p_states.keys();
+	for (int i = 0; i < cells.size() && clean.size() < 4096; i++) {
+		const Variant cell = cells[i];
+		if (cell.get_type() != Variant::VECTOR2I || p_states[cell].get_type() != Variant::DICTIONARY) {
+			continue;
+		}
+		const Dictionary entries = p_states[cell];
+		Dictionary validated;
+		const Array paths = entries.keys();
+		for (int j = 0; j < paths.size() && validated.size() < 128; j++) {
+			const Variant key = paths[j];
+			if (key.get_type() != Variant::STRING || !_valid_body_path(String(key)) || String(key).length() > 256 || entries[key].get_type() != Variant::BOOL || bool(entries[key])) {
+				continue;
+			}
+			validated[key] = false;
+		}
+		if (!validated.is_empty()) {
+			clean[cell] = validated;
+		}
+	}
+	const Dictionary previous = navigation_link_states.duplicate(true);
+	navigation_link_states = clean;
+	const Array old_cells = previous.keys();
+	for (int i = 0; i < old_cells.size(); i++) {
+		const Vector2i cell = old_cells[i];
+		const Dictionary old_entries = previous[cell];
+		const Dictionary now = clean.get(cell, Dictionary());
+		const Array keys = old_entries.keys();
+		for (int j = 0; j < keys.size(); j++) {
+			const String path = keys[j];
+			if (!now.has(path)) {
+				_apply_loaded_navigation_link(cell, path, true);
+				emit_signal(SNAME("cell_navigation_link_state_changed"), cell, path, true);
+			}
+		}
+	}
+	const Array new_cells = clean.keys();
+	for (int i = 0; i < new_cells.size(); i++) {
+		const Vector2i cell = new_cells[i];
+		const Dictionary entries = clean[cell];
+		const Dictionary old_entries = previous.get(cell, Dictionary());
+		const Array keys = entries.keys();
+		for (int j = 0; j < keys.size(); j++) {
+			const String path = keys[j];
+			_apply_loaded_navigation_link(cell, path, false);
+			if (!old_entries.has(path)) {
+				emit_signal(SNAME("cell_navigation_link_state_changed"), cell, path, false);
+			}
+		}
+	}
+}
+
+Dictionary WorldPartition3D::get_navigation_link_states() const {
+	return navigation_link_states.duplicate(true);
+}
+
+int WorldPartition3D::get_disabled_navigation_link_count() const {
+	int total = 0;
+	const Array cells = navigation_link_states.keys();
+	for (int i = 0; i < cells.size(); i++) {
+		const Dictionary cell_states = navigation_link_states[cells[i]];
+		total += cell_states.size();
+	}
+	return total;
+}
+
+void WorldPartition3D::set_route_connection_link(const Vector2i &p_from, const Vector2i &p_to, const String &p_link_path) {
+	const int64_t dx = int64_t(p_to.x) - int64_t(p_from.x);
+	const int64_t dy = int64_t(p_to.y) - int64_t(p_from.y);
+	const int64_t ax = dx < 0 ? -dx : dx;
+	const int64_t ay = dy < 0 ? -dy : dy;
+	ERR_FAIL_COND_MSG(ax + ay != 1, "WorldPartition3D route connection must join orthogonally adjacent cells.");
+	ERR_FAIL_COND_MSG(!_valid_body_path(p_link_path) || p_link_path.length() > 256, "WorldPartition3D route connection requires a safe scene-relative NavigationLink3D path.");
+	Dictionary from_links = route_connection_links.get(p_from, Dictionary());
+	ERR_FAIL_COND_MSG(!from_links.has(p_to) && from_links.size() >= 128, "WorldPartition3D route connection registry allows at most 128 edges per source cell.");
+	from_links[p_to] = p_link_path;
+	route_connection_links[p_from] = from_links;
+}
+
+void WorldPartition3D::clear_route_connection_link(const Vector2i &p_from, const Vector2i &p_to) {
+	if (!route_connection_links.has(p_from)) {
+		return;
+	}
+	Dictionary from_links = route_connection_links[p_from];
+	from_links.erase(p_to);
+	if (from_links.is_empty()) {
+		route_connection_links.erase(p_from);
+	} else {
+		route_connection_links[p_from] = from_links;
+	}
+}
+
+String WorldPartition3D::get_route_connection_link(const Vector2i &p_from, const Vector2i &p_to) const {
+	if (!route_connection_links.has(p_from)) {
+		return String();
+	}
+	const Dictionary from_links = route_connection_links[p_from];
+	return from_links.get(p_to, String());
+}
+
+bool WorldPartition3D::_is_route_connection_open(const Vector2i &p_from, const Vector2i &p_to) const {
+	const String forward = get_route_connection_link(p_from, p_to);
+	if (!forward.is_empty() && !is_cell_navigation_link_enabled(p_from, forward)) {
+		return false;
+	}
+	const String reverse = get_route_connection_link(p_to, p_from);
+	if (!reverse.is_empty() && !is_cell_navigation_link_enabled(p_to, reverse)) {
+		return false;
+	}
+	return true;
 }
 
 void WorldPartition3D::_apply_cell_navigation_state(const Vector2i &p_cell, Node *p_instance) {
@@ -1570,6 +1749,14 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_navigation_cell_states", "states"), &WorldPartition3D::set_navigation_cell_states);
 	ClassDB::bind_method(D_METHOD("get_navigation_cell_states"), &WorldPartition3D::get_navigation_cell_states);
 	ClassDB::bind_method(D_METHOD("get_disabled_navigation_cell_count"), &WorldPartition3D::get_disabled_navigation_cell_count);
+	ClassDB::bind_method(D_METHOD("set_cell_navigation_link_enabled", "cell", "link_path", "enabled"), &WorldPartition3D::set_cell_navigation_link_enabled);
+	ClassDB::bind_method(D_METHOD("is_cell_navigation_link_enabled", "cell", "link_path"), &WorldPartition3D::is_cell_navigation_link_enabled);
+	ClassDB::bind_method(D_METHOD("set_navigation_link_states", "states"), &WorldPartition3D::set_navigation_link_states);
+	ClassDB::bind_method(D_METHOD("get_navigation_link_states"), &WorldPartition3D::get_navigation_link_states);
+	ClassDB::bind_method(D_METHOD("get_disabled_navigation_link_count"), &WorldPartition3D::get_disabled_navigation_link_count);
+	ClassDB::bind_method(D_METHOD("set_route_connection_link", "from_cell", "to_cell", "link_path"), &WorldPartition3D::set_route_connection_link);
+	ClassDB::bind_method(D_METHOD("clear_route_connection_link", "from_cell", "to_cell"), &WorldPartition3D::clear_route_connection_link);
+	ClassDB::bind_method(D_METHOD("get_route_connection_link", "from_cell", "to_cell"), &WorldPartition3D::get_route_connection_link);
 	ClassDB::bind_method(D_METHOD("set_cell_state", "cell", "state"), &WorldPartition3D::set_cell_state);
 	ClassDB::bind_method(D_METHOD("get_cell_state", "cell"), &WorldPartition3D::get_cell_state);
 	ClassDB::bind_method(D_METHOD("has_cell_state", "cell"), &WorldPartition3D::has_cell_state);
@@ -1616,6 +1803,7 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "cell_layers"), "set_cell_layers", "get_cell_layers");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "layer_states"), "set_layer_states", "get_layer_states");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "navigation_cell_states"), "set_navigation_cell_states", "get_navigation_cell_states");
+	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "navigation_link_states"), "set_navigation_link_states", "get_navigation_link_states");
 	ADD_GROUP("Streaming", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "streaming_enabled"), "set_streaming_enabled", "is_streaming_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "persist_rigid_bodies"), "set_persist_rigid_bodies", "is_persisting_rigid_bodies");
@@ -1637,6 +1825,7 @@ void WorldPartition3D::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("cell_state_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::DICTIONARY, "state")));
 	ADD_SIGNAL(MethodInfo("cell_object_state_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::DICTIONARY, "states")));
 	ADD_SIGNAL(MethodInfo("cell_navigation_state_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::BOOL, "enabled")));
+	ADD_SIGNAL(MethodInfo("cell_navigation_link_state_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::STRING, "link_path"), PropertyInfo(Variant::BOOL, "enabled")));
 	ADD_SIGNAL(MethodInfo("layer_state_changed", PropertyInfo(Variant::STRING, "layer"), PropertyInfo(Variant::BOOL, "enabled")));
 }
 
