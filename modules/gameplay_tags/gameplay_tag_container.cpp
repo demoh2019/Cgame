@@ -71,6 +71,73 @@ void GameplayTagContainer::add_tags(const PackedStringArray &p_tags) {
 	}
 }
 
+PackedStringArray GameplayTagContainer::get_matching_tags(const StringName &p_query, bool p_exact) const {
+	PackedStringArray result;
+	for (const StringName &tag : tags) {
+		if (tag_matches(tag, p_query, p_exact)) {
+			result.push_back(String(tag));
+		}
+	}
+	return result;
+}
+
+bool GameplayTagContainer::replace_tag_branch(const StringName &p_query, const PackedStringArray &p_replacements) {
+	const String query = p_query;
+	// Invalid scopes/replacements never partially clear an actor's status.
+	if (query.is_empty() || query.begins_with(".") || query.ends_with(".") || query.contains("..")) {
+		return false;
+	}
+	Vector<StringName> replacements;
+	for (const String &value : p_replacements) {
+		if (value.is_empty() || value.begins_with(".") || value.ends_with(".") || value.contains("..") ||
+				!tag_matches(StringName(value), p_query) || replacements.has(StringName(value))) {
+			return false;
+		}
+		replacements.push_back(StringName(value));
+	}
+
+	// Frequent network snapshots often repeat the same state. Avoid allocating a
+	// second tag vector or firing resource change notifications for a no-op.
+	int matched = 0;
+	bool unchanged = true;
+	for (const StringName &tag : tags) {
+		if (!tag_matches(tag, p_query)) {
+			continue;
+		}
+		if (matched >= replacements.size() || tag != replacements[matched]) {
+			unchanged = false;
+		}
+		matched++;
+	}
+	if (unchanged && matched == replacements.size()) {
+		return true;
+	}
+	Vector<StringName> next;
+	for (const StringName &tag : tags) {
+		if (!tag_matches(tag, p_query)) {
+			next.push_back(tag);
+		}
+	}
+	for (const StringName &tag : replacements) {
+		next.push_back(tag);
+	}
+
+	bool modified = tags.size() != next.size();
+	if (!modified) {
+		for (int i = 0; i < tags.size(); ++i) {
+			if (tags[i] != next[i]) {
+				modified = true;
+				break;
+			}
+		}
+	}
+	if (modified) {
+		tags = next;
+		emit_changed();
+	}
+	return true;
+}
+
 void GameplayTagContainer::remove_tag(const StringName &p_tag) {
 	int idx = tags.find(p_tag);
 	if (idx >= 0) {
@@ -137,6 +204,8 @@ void GameplayTagContainer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("add_tag", "tag"), &GameplayTagContainer::add_tag);
 	ClassDB::bind_method(D_METHOD("add_tags", "tags"), &GameplayTagContainer::add_tags);
+	ClassDB::bind_method(D_METHOD("get_matching_tags", "query", "exact"), &GameplayTagContainer::get_matching_tags, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("replace_tag_branch", "query", "replacements"), &GameplayTagContainer::replace_tag_branch);
 	ClassDB::bind_method(D_METHOD("remove_tag", "tag"), &GameplayTagContainer::remove_tag);
 	ClassDB::bind_method(D_METHOD("clear"), &GameplayTagContainer::clear);
 	ClassDB::bind_method(D_METHOD("has_tag", "tag", "exact"), &GameplayTagContainer::has_tag, DEFVAL(false));

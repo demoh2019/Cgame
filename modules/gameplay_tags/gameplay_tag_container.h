@@ -54,6 +54,11 @@ public:
 
 	void add_tag(const StringName &p_tag);
 	void add_tags(const PackedStringArray &p_tags);
+	// Scope operations operate on an entire dotted tag branch, without touching siblings.
+	// replace_tag_branch validates every replacement before mutating; true means success
+	// (including an unchanged result), false means invalid input and no changes.
+	PackedStringArray get_matching_tags(const StringName &p_query, bool p_exact = false) const;
+	bool replace_tag_branch(const StringName &p_query, const PackedStringArray &p_replacements);
 	void remove_tag(const StringName &p_tag);
 	void clear();
 	bool has_tag(const StringName &p_tag, bool p_exact = false) const;

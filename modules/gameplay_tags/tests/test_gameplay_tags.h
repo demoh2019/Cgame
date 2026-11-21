@@ -83,6 +83,54 @@ TEST_CASE("[GameplayTags] container add/remove/has") {
 	CHECK(c->get_tag_count() == 1);
 }
 
+TEST_CASE("[GameplayTags] branch replacement is atomic and respects hierarchy boundaries") {
+	Ref<GameplayTagContainer> c;
+	c.instantiate();
+	c->add_tag("Enemy.Infected.Elite");
+	c->add_tag("Runtime.State.Alive");
+	c->add_tag("Runtime.Status.Staggered");
+	c->add_tag("RuntimeExtra.Keep");
+
+	PackedStringArray before = c->get_matching_tags("Runtime");
+	CHECK(before.size() == 2);
+	CHECK(c->get_matching_tags("Runtime.State", true).is_empty());
+	CHECK(c->get_matching_tags("Runtime.State").size() == 1);
+
+	PackedStringArray next;
+	next.push_back("Runtime.State.Dead");
+	next.push_back("Runtime.Status.Snared");
+	CHECK(c->replace_tag_branch("Runtime", next));
+	CHECK(c->get_tag_count() == 4);
+	CHECK(c->has_tag("Runtime.State.Dead", true));
+	CHECK_FALSE(c->has_tag("Runtime.State.Alive", true));
+	CHECK_FALSE(c->has_tag("Runtime.Status.Staggered", true));
+	CHECK(c->has_tag("Enemy.Infected.Elite", true));
+	CHECK(c->has_tag("RuntimeExtra.Keep", true));
+
+	// Re-applying an identical authoritative snapshot is idempotent.
+	PackedStringArray stable = c->get_tags();
+	CHECK(c->replace_tag_branch("Runtime", next));
+	CHECK(c->get_tags() == stable);
+
+	PackedStringArray invalid;
+	invalid.push_back("Runtime.State.Alive");
+	invalid.push_back("Other.Escaped");
+	CHECK_FALSE(c->replace_tag_branch("Runtime", invalid));
+	CHECK(c->get_tags() == stable);
+	invalid.clear();
+	invalid.push_back("Runtime.Status.Snared");
+	invalid.push_back("Runtime.Status.Snared");
+	CHECK_FALSE(c->replace_tag_branch("Runtime", invalid));
+	CHECK_FALSE(c->replace_tag_branch("", next));
+	CHECK_FALSE(c->replace_tag_branch("Runtime..State", next));
+	CHECK(c->get_tags() == stable);
+
+	CHECK(c->replace_tag_branch("Runtime", PackedStringArray()));
+	CHECK(c->get_matching_tags("Runtime").is_empty());
+	CHECK(c->has_tag("Enemy", false));
+	CHECK(c->has_tag("RuntimeExtra", false));
+}
+
 TEST_CASE("[GameplayTags] query all/any/none") {
 	Ref<GameplayTagContainer> c;
 	c.instantiate();
