@@ -259,10 +259,13 @@ TEST_CASE("[AIStimulusHistory2D] Selective forget preserves other identities and
 	CHECK(history->get_event_count() == 3);
 	CHECK(history->get_best(AIStimulusHistory2D::SIGHT)["source_id"] == 41);
 	const Array kept = history->get_recent(3);
-	CHECK(Dictionary(kept[0])["source_id"] == -1);
-	CHECK(Dictionary(kept[1])["source_id"] == 42);
-	CHECK(Dictionary(kept[2])["source_id"] == 41);
-	CHECK(Dictionary(kept[1])["remaining_seconds"] == real_t(3.75));
+	const Dictionary anonymous = kept[0];
+	const Dictionary survivor = kept[1];
+	const Dictionary sight = kept[2];
+	CHECK(anonymous["source_id"] == -1);
+	CHECK(survivor["source_id"] == 42);
+	CHECK(sight["source_id"] == 41);
+	CHECK(survivor["remaining_seconds"] == real_t(3.75));
 	CHECK(history->forget_source(41) == 1);
 	CHECK(history->forget_source(41) == 0);
 	CHECK(history->get_event_count() == 2);
