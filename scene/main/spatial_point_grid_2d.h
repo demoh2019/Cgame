@@ -37,6 +37,7 @@
 #include "core/templates/vector.h"
 #include "core/variant/dictionary.h"
 #include "core/variant/typed_array.h"
+#include "core/variant/variant.h"
 
 // Rebuildable point broadphase for world-space 2D/XZ proximity queries.
 // Stores data only, no Node or PhysicsServer dependency. Unlike a collider
@@ -51,6 +52,7 @@ class SpatialPointGrid2D : public RefCounted {
 	int direct_scan_threshold = 8;
 	bool indexed_mode = false;
 	uint64_t queries = 0;
+	uint64_t batch_calls = 0;
 	uint64_t candidate_checks = 0;
 	uint64_t bucket_lookups = 0;
 
@@ -72,6 +74,8 @@ public:
 
 	void rebuild(const TypedArray<Vector2> &p_positions);
 	bool any_within(const Vector2 &p_point, real_t p_radius, bool p_inclusive = true);
+	// Batched probes share one script/native transition, with ordered 0/1 results.
+	PackedByteArray any_within_batch(const PackedVector2Array &p_points, real_t p_radius, bool p_inclusive = true);
 	Dictionary snapshot() const;
 	int get_point_count() const { return positions.size(); }
 	void clear();

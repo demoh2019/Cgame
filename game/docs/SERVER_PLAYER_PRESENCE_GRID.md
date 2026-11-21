@@ -120,3 +120,35 @@ The approach follows the spatial query/broadphase concepts in Unity Physics
 and cell-based world organization in Unreal Engine:
 https://docs.unity.cn/Packages/com.unity.physics@1.0/manual/collision-queries.html
 https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine
+
+## Batched proximity queries (Cgame engine + live Albion After)
+
+The native `SpatialPointGrid2D.any_within_batch(points: PackedVector2Array,
+radius: float, inclusive: bool = true) -> PackedByteArray` processes multiple
+point-radius probes with **one GDScript/C++ call**. Each output byte is 0 or 1
+in the same order as its input point. Invalid probes return 0; the scalar
+`any_within` implementation remains the source of strict/inclusive rules,
+distance calculations, index safeguards and statistics. `batch_calls` in
+`snapshot()` counts batch invocations, including an empty batch; `queries`
+still counts valid individual point probes. Rebuilding the index resets both.
+
+The stock-Godot `player_presence_grid.gd` implements the same API and
+statistics. `GameServer._manage_zombie_population()` now gathers living,
+unprotected zombie positions into one batch, queries all 130 m survivor
+retention checks in one pass, and uses the flags to unload only distant
+infected. Dead infected and protected loot guards/night-horde members
+retain their existing rules. The strict 12 m spawn check is unchanged.
+
+This architecture borrows the **batched hot-path invocation** idea from
+Unity ECS entity queries and Unreal Mass Entity processors, without
+introducing an ECS or changing the authoritative networking model:
+- https://dev.epicgames.com/documentation/unreal-engine/overview-of-mass-entity-in-unreal-engine
+- https://learn.unity.com/article/c-and-dots-specific-performance-tips
+
+Native doctest plus GDScript parity and live GameServer integration tests
+exercise ordering, empty batches, NaN/large-radius behavior, 12 m boundaries,
+statistics and backend equivalence. The existing
+`.github/workflows/native-spatial-point-grid.yml` automatically rebuilds
+Cgame and runs the native and game suites when these files change. This
+reduces cross-language calls but **does not establish an FPS improvement**
+without a completed build and benchmark.
