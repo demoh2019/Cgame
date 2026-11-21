@@ -364,8 +364,58 @@ class VisualQualityPackageTests(unittest.TestCase):
             self.assertIn(feature, demo)
         self.assertLess(demo.index('add_child(quest)'), demo.index('add_child(interaction_router)'))
 
+    def test_item_catalog_has_validated_caps_and_declarative_recipes(self):
+        source = (ROOT / 'addons/visual_quality/item_catalog.gd').read_text()
+        for marker in ('class_name VisualItemCatalog', 'DEFINITIONS', 'RECIPES',
+                       'max_stack', 'is_valid_item', 'get_recipe', 'forest_lantern',
+                       'spark_core', 'forest_essence', 'light_shard'):
+            self.assertIn(marker, source)
+        self.assertIn('return RECIPES.get(recipe_id, {}).duplicate(true)', source)
+
+    def test_inventory_supports_idempotency_limits_and_safe_persistence(self):
+        source = (ROOT / 'addons/visual_quality/inventory_component.gd').read_text()
+        for marker in ('class_name WorldInventory3D', 'FORMAT_VERSION',
+                       'MAX_REWARD_CLAIMS', '_claimed_sources', 'grant_once',
+                       'import_quest_history', 'can_add', 'add_item', 'remove_item',
+                       'items_snapshot', 'valid_source_uid', 'save_now',
+                       'load_from_disk', 'save_path.begins_with("user://")',
+                       'ConfigFile.new()', 'DirAccess.rename_absolute',
+                       '_persist_or_rollback', 'simulate_recipe', 'item_crafted.emit'):
+            self.assertIn(marker, source)
+        self.assertLess(source.index('save_now() == OK'), source.index('_items = old_items.duplicate(true)'))
+        self.assertNotIn('get_node("', source)
+
+    def test_crafting_is_transactional_and_never_spends_before_validation(self):
+        source = (ROOT / 'addons/visual_quality/inventory_component.gd').read_text()
+        body = source.split('static func simulate_recipe(', 1)[1]
+        self.assertIn('current.duplicate(true)', body)
+        self.assertIn('remaining == 0', body)
+        self.assertIn('Catalog.max_stack(output_id) - output_count', body)
+        self.assertLess(body.index('if int(updated.get(output_id, 0)) >'),
+                        body.index('updated[output_id] ='))
+        self.assertIn('if updated.is_empty():', source)
+        self.assertIn('if not _persist_or_rollback(before, _claimed_sources):', source)
+
+    def test_inventory_rewards_crafting_and_ui_are_in_playable_demo(self):
+        quest = (ROOT / 'addons/visual_quality/exploration_quest.gd').read_text()
+        forest = (ROOT / 'world/forest_cell.gd').read_text()
+        demo = (ROOT / 'demo.gd').read_text()
+        for marker in ('signal shard_collected(index: int)', 'shard_collected.emit(index)'):
+            self.assertIn(marker, quest)
+        for marker in ('signal resource_awarded(', 'resource_awarded.emit("forest_essence"'):
+            self.assertIn(marker, forest)
+        for marker in ('Inventory.new()', 'inventory.grant_once',
+                       'inventory.import_quest_history', 'world_state.get_saved_state(coord)',
+                       'quest.shard_collected.connect', 'resource_awarded',
+                       'inventory.craft(recipe_id)', 'WorldInventoryPanel',
+                       'KEY_I', 'KEY_C', 'KEY_J', 'KEY_T',
+                       '_build_inventory_ui()', 'OmniLight3D.new()',
+                       'get_view_camera().add_child(equipped_lantern)'):
+            self.assertIn(marker, demo)
+        self.assertLess(demo.index('add_child(inventory)'), demo.index('add_child(streamer)'))
+
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd', 'test_world_telemetry.gd', 'test_world_budget_governor.gd', 'test_streaming_planner.gd', 'test_streaming_cell_profiler.gd', 'test_predictive_streaming_runtime.gd', 'test_world_interaction.gd', 'test_world_interaction_runtime.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd', 'test_world_telemetry.gd', 'test_world_budget_governor.gd', 'test_streaming_planner.gd', 'test_streaming_cell_profiler.gd', 'test_predictive_streaming_runtime.gd', 'test_world_interaction.gd', 'test_world_interaction_runtime.gd', 'test_inventory_component.gd', 'test_inventory_crafting.gd', 'test_inventory_persistence.gd', 'test_inventory_gameplay.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
