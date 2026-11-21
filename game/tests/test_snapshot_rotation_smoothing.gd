@@ -67,6 +67,11 @@ func run(t) -> void:
 		1.0, 0.000001, "missing future packets hold the latest server yaw")
 	t.near(Smooth.sample_yaw([], older, newer, [], -2.0),
 		0.0, 0.000001, "render time cannot precede first yaw sample")
+	var stale_prev := [1.04, Vector3.ZERO, -2.0]
+	var inverted_next := [1.08, Vector3.ZERO, 3.0]
+	t.near(Smooth.sample_yaw(stale_prev, older, newer, inverted_next, 0.5),
+		0.5, 0.000001,
+		"out-of-order neighbor snapshots cannot distort trusted rotation")
 
 	t.current = "Cgame engine and portable script agree across angular input matrix"
 	var native: Object = null

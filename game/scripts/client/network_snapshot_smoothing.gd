@@ -152,9 +152,10 @@ static func sample_yaw(previous: Array, older: Array, newer: Array,
 		var prev_angle: float = float(previous[2])
 		var prev_delta: float = _yaw_delta(prev_angle, a) if is_finite(prev_angle) else INF
 		var earlier_span: float = t1 - prev_t
-		if is_finite(earlier_span) and earlier_span > 0.00001 \
+		if is_finite(prev_t) and prev_t < t0 \
+				and is_finite(earlier_span) and earlier_span > 0.00001 \
 				and earlier_span <= MAX_SAMPLE_SECONDS * 3.0 \
-				and absf(prev_delta) <= 2.4:
+				and absf(prev_angle) <= 10000.0 and absf(prev_delta) <= 2.4:
 			v0 = (prev_delta + turn) / earlier_span
 			have_neighbor = true
 	if following.size() >= 3:
@@ -162,9 +163,10 @@ static func sample_yaw(previous: Array, older: Array, newer: Array,
 		var next_angle: float = float(following[2])
 		var next_delta: float = _yaw_delta(b, next_angle) if is_finite(next_angle) else INF
 		var later_span: float = next_t - t0
-		if is_finite(later_span) and later_span > 0.00001 \
+		if is_finite(next_t) and next_t > t1 \
+				and is_finite(later_span) and later_span > 0.00001 \
 				and later_span <= MAX_SAMPLE_SECONDS * 3.0 \
-				and absf(next_delta) <= 2.4:
+				and absf(next_angle) <= 10000.0 and absf(next_delta) <= 2.4:
 			v1 = (turn + next_delta) / later_span
 			have_neighbor = true
 	if not have_neighbor:
