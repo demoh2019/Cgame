@@ -6,9 +6,11 @@ class_name StreamedForestCell3D
 const Foliage = preload("res://addons/visual_quality/foliage_chunks.gd")
 const NavigationTile = preload("res://addons/visual_quality/navigation_tile.gd")
 const NPC = preload("res://addons/visual_quality/streamed_patrol_npc.gd")
+const Sentry = preload("res://addons/visual_quality/hostile_sentry.gd")
 
 signal stream_state_changed()
 signal resource_awarded(item_id: String, source_uid: String)
+signal sentry_defeated(coord: Vector2i)
 
 @export var world_seed: int = 20261120
 @export var local_chunk_size: float = 14.0
@@ -18,6 +20,7 @@ var _quality_profile: int = 1
 var _foliage: ChunkedFoliage3D
 var _navigation_tile: StreamedNavigationTile3D
 var _npc: StreamedPatrolNPC3D
+var _sentry: WorldHostileSentry3D
 var ai_enabled: bool = true
 var _rock: StaticBody3D
 var beacon_activated: bool = false
@@ -41,6 +44,7 @@ func _ready() -> void:
 	_foliage.set_quality(_quality_profile)
 	_create_beacon()
 	_create_navigation_and_npc()
+	_create_hostile_sentry()
 
 
 func set_quality(profile: int) -> void:
@@ -55,10 +59,16 @@ func set_ai_enabled(value: bool) -> void:
 	ai_enabled = value
 	if is_instance_valid(_npc):
 		_npc.set_physics_process(ai_enabled)
+	if is_instance_valid(_sentry):
+		_sentry.set_ai_enabled(ai_enabled)
 
 
 func get_active_npc() -> StreamedPatrolNPC3D:
 	return _npc
+
+
+func get_hostile_sentry() -> WorldHostileSentry3D:
+	return _sentry
 
 
 func _create_navigation_and_npc() -> void:
@@ -81,6 +91,30 @@ func _create_navigation_and_npc() -> void:
 	add_child(_npc)
 	set_quality(_quality_profile)
 	set_ai_enabled(ai_enabled)
+
+
+func _create_hostile_sentry() -> void:
+	_sentry = Sentry.new()
+	_sentry.position = Vector3(4.0, 0.0, 4.0)
+	var owner_streamer: WorldStreamer3D = get_parent() as WorldStreamer3D
+	if owner_streamer != null and is_instance_valid(owner_streamer.source):
+		_sentry.player = owner_streamer.source
+		_sentry.player_combatant = owner_streamer.source.get_node_or_null("PlayerCombatant") as WorldCombatant3D
+	_sentry.state_changed.connect(_on_sentry_state_changed)
+	_sentry.sentry_defeated.connect(_on_sentry_defeated)
+	add_child(_sentry)
+	_sentry.set_ai_enabled(ai_enabled)
+
+
+func _on_sentry_state_changed() -> void:
+	stream_state_changed.emit()
+
+
+func _on_sentry_defeated() -> void:
+	# Save before issuing a reward to prevent defeat state loss on unload.
+	stream_state_changed.emit()
+	resource_awarded.emit("forest_essence", "sentry:%d:%d" % [cell_coord.x, cell_coord.y])
+	sentry_defeated.emit(cell_coord)
 
 
 func _create_rock_obstacle() -> void:
@@ -208,6 +242,8 @@ func save_stream_state() -> Dictionary:
 		state["activated"] = true
 	if npc_talk_count > 0:
 		state["npc_talk_count"] = npc_talk_count
+	if is_instance_valid(_sentry):
+		state.merge(_sentry.save_sentry_state())
 	if is_instance_valid(_npc):
 		# Unmodified NPCs do not inflate the persistent save.
 		var npc_data: Dictionary = _npc.export_npc_state()
@@ -220,6 +256,8 @@ func load_stream_state(state: Dictionary) -> void:
 	beacon_activated = state.get("activated", false) == true
 	npc_talk_count = clampi(int(state.get("npc_talk_count", 0)), 0, 999)
 	_update_beacon_visual()
+	if is_instance_valid(_sentry):
+		_sentry.load_sentry_state(state)
 	if is_instance_valid(_npc):
 		if state.has("npc_position") or state.has("npc_patrol"):
 			_npc.import_npc_state(state)
