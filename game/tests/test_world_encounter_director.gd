@@ -61,6 +61,58 @@ func run(t) -> void:
 	t.eq(Director.nearby_infected(enemies, Vector3.INF), Director.LOCAL_HARD_CAP,
 		"invalid source positions fail closed")
 
+	t.current = "native 3D crowd pressure agrees with exact server distance"
+	var close_enemy_positions: Dictionary = {}
+	var random_grid := RandomNumberGenerator.new()
+	random_grid.seed = 370121
+	for index in range(45):
+		var p := Vector3(random_grid.randf_range(-170.0, 170.0),
+			random_grid.randf_range(-180.0, 180.0),
+			random_grid.randf_range(-170.0, 170.0))
+		close_enemy_positions[index] = Zombie.new(3000 + index, "walker", p)
+	# A vertical separation exceeds 75 m, even when XZ coordinates overlap.
+	var cave := Zombie.new(7001, "walker", Vector3(0.0, -100.0, 0.0))
+	close_enemy_positions[7001] = cave
+	var surface := Zombie.new(7002, "walker", Vector3(0.0, 100.0, 0.0))
+	close_enemy_positions[7002] = surface
+	var corpse := Zombie.new(7003, "walker", Vector3.ZERO)
+	corpse.state = Zombie.State.DEAD
+	close_enemy_positions[7003] = corpse
+	t.eq(Director.nearby_infected(close_enemy_positions, Vector3.ZERO),
+		Director.nearby_infected(close_enemy_positions, Vector3.ZERO, false),
+		"2D map overlap cannot produce a false 3D local-pressure hit")
+	for iteration in range(65):
+		var center := Vector3(random_grid.randf_range(-220.0, 220.0),
+			random_grid.randf_range(-210.0, 210.0),
+			random_grid.randf_range(-220.0, 220.0))
+		t.eq(Director.nearby_infected(close_enemy_positions, center),
+			Director.nearby_infected(close_enemy_positions, center, false),
+			"native counts match exact server game fallback at probe %d" % iteration)
+	t.eq(Director.nearby_infected(close_enemy_positions, Vector3.INF),
+		Director.LOCAL_HARD_CAP, "bad 3D centers fail closed before native indexing")
+	if ClassDB.class_exists("SpatialPointGrid3D"):
+		var grid3d: Object = ClassDB.instantiate("SpatialPointGrid3D")
+		t.check(grid3d != null, "native reusable volumetric index instantiates")
+		if grid3d != null:
+			t.check(bool(grid3d.call("rebuild", [
+				Vector3.ZERO, Vector3(0, 75, 0), Vector3(0, -75, 0),
+				Vector3(0, 76, 0), Vector3(0, 0, 75)])),
+				"native 3D index accepts finite volumetric points")
+			t.eq(int(grid3d.call("count_within", Vector3.ZERO, 75.0, 20)), 4,
+				"volume radius includes boundary but rejects elevated outlier")
+			t.eq(int(grid3d.call("count_within", Vector3.ZERO, 75.0, 2)), 2,
+				"early-exit count cap prevents unnecessary crowd scanning")
+			var batches: PackedInt32Array = grid3d.call("count_within_batch",
+				PackedVector3Array([Vector3.ZERO, Vector3(0, 1000, 0)]), 75.0, 20)
+			t.eq(batches, PackedInt32Array([4, 0]),
+				"native batched volume queries retain probe order")
+			t.eq(int(grid3d.call("count_within", Vector3.INF, 75.0, 20)), -1,
+				"invalid 3D center cannot produce a positive count")
+	else:
+		t.eq(Director.nearby_infected(close_enemy_positions, Vector3.ZERO),
+			Director.nearby_infected(close_enemy_positions, Vector3.ZERO, false),
+			"stock Godot preserves legacy encounter behavior")
+
 	t.current = "integration: authoritative GameServer refuses saturated crowds"
 	var world := WorldGen.new(17417)
 	var server := GameServer.new(world, 17417)
