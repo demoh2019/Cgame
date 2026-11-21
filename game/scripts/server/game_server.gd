@@ -7879,7 +7879,8 @@ func _manage_zombie_population() -> void:
 				active_cells[Vector2i(cell.x + dx, cell.y + dz)] = true
 	# Reuse one authoritative index for spawn suppression and unload checks;
 	# retain exact 2D world-space radius semantics on cell boundaries.
-	var presence = PlayerPresenceGrid.new()
+	# Native Cgame broadphase; stock Godot keeps identical GDScript rules.
+	var presence = ClassDB.instantiate("SpatialPointGrid2D") if ClassDB.class_exists("SpatialPointGrid2D") else PlayerPresenceGrid.new()
 	presence.rebuild(player_positions)
 	for cell in active_cells:
 		var data: Dictionary = world.chunk(cell)
