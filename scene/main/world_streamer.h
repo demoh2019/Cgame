@@ -155,14 +155,19 @@ private:
 		ObjectID node_id;
 		uint64_t age = 0;
 		int64_t estimated_bytes = 0;
+		double retained_at_seconds = 0.0;
 	};
 	HashMap<Vector3i, CachedChunk> cached_chunks;
 	int max_cached_chunks = 0; // Zero preserves legacy free-on-unload.
 	int64_t max_cached_chunk_bytes = 0;
 	int64_t cached_chunk_bytes = 0;
+	// Zero disables time-based reclamation of detached procedural roots.
+	real_t cached_chunk_retention_seconds = 0.0;
+	double cached_chunk_elapsed_seconds = 0.0;
 	uint64_t cache_clock = 0;
 	int cache_hits = 0;
 	int cache_evictions = 0;
+	int cache_expirations = 0;
 	HashMap<Vector3i, bool> simulation_active_cells;
 	int simulation_inactive_count = 0;
 	// Only chunk roots actually implementing the callback are tracked.
@@ -211,6 +216,7 @@ private:
 	void _unload_cell(const Vector3i &p_cell, bool p_allow_cache = true);
 	bool _restore_cached_chunk(const Vector3i &p_cell);
 	void _trim_cached_chunks();
+	void _expire_cached_chunks();
 	void _discard_cached_chunks();
 	void _reset_state();
 	void _record_failure(const Vector3i &p_cell, const String &p_reason);
@@ -351,6 +357,10 @@ public:
 	void set_max_cached_chunk_bytes(int64_t p_bytes);
 	int64_t get_max_cached_chunk_bytes() const { return max_cached_chunk_bytes; }
 	int64_t get_cached_chunk_bytes() const { return cached_chunk_bytes; }
+	void set_cached_chunk_retention_seconds(real_t p_seconds);
+	real_t get_cached_chunk_retention_seconds() const { return cached_chunk_retention_seconds; }
+	void advance_cached_chunk_retention(real_t p_delta_seconds);
+	int get_chunk_cache_expiration_count() const { return cache_expirations; }
 	int get_cached_chunk_count() const { return int(cached_chunks.size()); }
 	int get_chunk_cache_hit_count() const { return cache_hits; }
 	int get_chunk_cache_eviction_count() const { return cache_evictions; }

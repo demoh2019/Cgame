@@ -166,6 +166,74 @@ func run(t) -> void:
 	t.eq(lru.get_chunk_cache_eviction_count(), 0, "clear resets cache diagnostics")
 	lru.free()
 
+	t.current = "age-based idle cache reclamation is independent of streaming refresh"
+	generated.clear()
+	var retention := _streamer("_make_cacheable")
+	retention.max_cached_chunks = 2
+	retention.max_cached_chunk_bytes = 6 * 1048576
+	retention.cached_chunk_retention_seconds = 2.0
+	retention.refresh()
+	retention.focus_position = Vector3(40, 0, 8)
+	retention.refresh()
+	t.eq(retention.get_cached_chunk_count(), 1,
+		"recently unloaded chunk is still available for a quick backtrack")
+	t.eq(retention.get_cached_chunk_bytes(), 4 * 1048576,
+		"retained cache reports correct estimated byte cost")
+	retention.advance_cached_chunk_retention(1.0)
+	retention.advance_cached_chunk_retention(-2.0)
+	t.eq(retention.get_cached_chunk_count(), 1,
+		"invalid negative frame time cannot advance expiration")
+	retention.advance_cached_chunk_retention(0.99)
+	t.eq(retention.get_cached_chunk_count(), 1,
+		"scene remains cached until the configured time-to-live")
+	retention.advance_cached_chunk_retention(0.02)
+	t.eq(retention.get_cached_chunk_count(), 0,
+		"expired detached root is evicted without a refresh call")
+	t.eq(retention.get_cached_chunk_bytes(), 0,
+		"expired scene releases its estimated cost")
+	t.eq(retention.get_chunk_cache_expiration_count(), 1,
+		"one age-based expiration is recorded")
+	t.eq(retention.get_chunk_cache_eviction_count(), 0,
+		"time-based releases are separate from capacity evictions")
+	retention.focus_position = Vector3(8, 0, 8)
+	retention.refresh()
+	t.eq(generated.count(Vector3i.ZERO), 2,
+		"return after expiry regenerates scenery instead of reusing freed node")
+	retention.clear_cached_chunks()
+	t.eq(retention.get_chunk_cache_expiration_count(), 0,
+		"cache clear resets expiration telemetry")
+	retention.free()
+
+	t.current = "reducing retention releases already old cached scenes"
+	var shrink := _streamer("_make_cacheable")
+	shrink.max_cached_chunks = 2
+	shrink.cached_chunk_retention_seconds = 10.0
+	shrink.refresh()
+	shrink.focus_position = Vector3(40, 0, 8)
+	shrink.refresh()
+	shrink.advance_cached_chunk_retention(4.0)
+	t.eq(shrink.get_cached_chunk_count(), 1,
+		"long retention keeps chunk available after four seconds")
+	shrink.cached_chunk_retention_seconds = 3.0
+	t.eq(shrink.get_cached_chunk_count(), 0,
+		"shortening TTL evicts already expired scenes immediately")
+	t.eq(shrink.get_chunk_cache_expiration_count(), 1,
+		"shorter retention counts exactly one expiration")
+	shrink.free()
+
+	t.current = "legacy default zero retention never expires detached chunks"
+	var unbounded_age := _streamer("_make_cacheable")
+	unbounded_age.max_cached_chunks = 2
+	unbounded_age.refresh()
+	unbounded_age.focus_position = Vector3(40, 0, 8)
+	unbounded_age.refresh()
+	unbounded_age.advance_cached_chunk_retention(9999.0)
+	t.eq(unbounded_age.get_cached_chunk_count(), 1,
+		"disabled retention preserves the original count-based cache")
+	t.eq(unbounded_age.get_chunk_cache_expiration_count(), 0,
+		"opt-out worlds never report time-based cache expirations")
+	unbounded_age.free()
+
 	t.current = "estimated scene cache bytes trim roots beyond budget"
 	generated.clear()
 	var sized := _streamer("_make_cacheable")
@@ -266,14 +334,21 @@ func run(t) -> void:
 	t.check(view.is_processing(),
 		"restored near-field chunk resumes client-only updates")
 	view.free()
-	t.current = "graphics tiers and game profiler apply native cache byte budget"
+	t.current = "graphics tiers and game profiler apply native cache budgets"
 	for tier in 4:
+		var retention_seconds: float = GraphicsQuality.streamed_chunk_cache_retention_for_quality(tier)
+		t.check(retention_seconds > 0.0 and retention_seconds <= 120.0,
+			"each graphics tier selects a safe idle retention lifetime")
 		var budget: int = GraphicsQuality.streamed_chunk_cache_bytes_for_quality(tier)
 		t.check(budget > 0 and budget <= 268435456,
 			"each quality preset selects bounded positive cache bytes")
 	var graphics_source := FileAccess.get_file_as_string("res://scripts/client/graphics_quality.gd")
 	t.check(graphics_source.contains("set_max_cached_chunk_bytes"),
 		"graphics profile retunes engine estimated cache bytes")
+	t.check(graphics_source.contains("set_cached_chunk_retention_seconds"),
+		"quality changes also adjust the native cache TTL")
 	var online_source := FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
 	t.check(online_source.contains("Albion/StreamCacheEstimatedBytes"),
 		"game profiler exposes estimated cache occupancy")
+	t.check(online_source.contains("Albion/StreamCacheExpired"),
+		"game profiler exports age-based native cache releases")
