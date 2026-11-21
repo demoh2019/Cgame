@@ -36,7 +36,7 @@ TEST_CASE("[SnapshotRotationSmoothing3D] wrap-around, no overshoot and abrupt tu
 		}
 		last = yaw;
 	}
-	CHECK(Math::abs(p->interpolate_yaw(from, to, 0.0, 0.0, 0.1, 0.5) - Math_PI) < 0.00001);
+	CHECK(Math::abs(p->interpolate_yaw(from, to, 0.0, 0.0, 0.1, 0.5) - Math::PI) < 0.00001);
 	const double linear = p->interpolate_yaw(0.0, 3.0, 100.0, -100.0, 0.1, 0.5);
 	CHECK(Math::abs(linear - 1.5) < 0.000001); // Large turns preserve linear smoothing.
 	CHECK(Math::abs(p->interpolate_yaw(0.0, 1.0, 5.0, 0.0, 1.0, 0.5) - 0.5) < 0.000001);

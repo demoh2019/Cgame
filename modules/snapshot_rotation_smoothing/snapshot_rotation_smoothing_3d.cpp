@@ -11,7 +11,7 @@ constexpr double MAX_YAW_ABS = 10000.0;
 constexpr double MAX_ANGULAR_SPEED = 1000.0;
 
 double shortest_yaw(double p_a, double p_b) {
-	return Math::fposmod(p_b - p_a + Math_PI, Math_TAU) - Math_PI;
+	return Math::fposmod(p_b - p_a + Math::PI, Math::TAU) - Math::PI;
 }
 } // namespace
 
