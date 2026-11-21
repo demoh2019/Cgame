@@ -1088,6 +1088,74 @@ Dictionary Geometry2D::get_closest_point_on_segments(const Vector2 &p_point, con
 	return result;
 }
 
+
+PackedByteArray Geometry2D::distance_transform_8(const PackedByteArray &p_mask, const Vector2i &p_size, int p_max_distance) {
+	PackedByteArray result;
+	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2048 || p_size.y > 2048, result,
+			"Distance-transform dimensions must be between 1 and 2048 pixels per axis.");
+	ERR_FAIL_COND_V_MSG(p_max_distance < 0 || p_max_distance > 254, result,
+			"Distance-transform maximum radius must be between 0 and 254 pixels.");
+	const int width = p_size.x;
+	const int height = p_size.y;
+	const int count = width * height;
+	ERR_FAIL_COND_V_MSG(p_mask.size() != count, result, "Distance-transform mask size must equal width * height.");
+	ERR_FAIL_COND_V_MSG(result.resize(count) != OK, PackedByteArray(), "Could not allocate the distance field.");
+
+	const uint8_t *mask = p_mask.ptr();
+	uint8_t *distances = result.ptrw();
+	for (int i = 0; i < count; i++) {
+		distances[i] = mask[i] == 0 ? 255 : 0;
+	}
+	// Exact chessboard / Chebyshev distance on an 8-connected integer grid.
+	// Two raster passes propagate all possible shortest 8-neighbor paths.
+	// Value 255 is reserved for cells farther than p_max_distance.
+	const auto relax = [distances, p_max_distance](int p_index, int p_neighbor) {
+		if (distances[p_neighbor] < p_max_distance) {
+			const uint8_t candidate = distances[p_neighbor] + 1;
+			if (candidate < distances[p_index]) {
+				distances[p_index] = candidate;
+			}
+		}
+	};
+	for (int y = 0; y < height; y++) {
+		const int row = y * width;
+		for (int x = 0; x < width; x++) {
+			const int index = row + x;
+			if (x > 0) {
+				relax(index, index - 1);
+			}
+			if (y > 0) {
+				if (x > 0) {
+					relax(index, index - width - 1);
+				}
+				relax(index, index - width);
+				if (x + 1 < width) {
+					relax(index, index - width + 1);
+				}
+			}
+		}
+	}
+	for (int y = height - 1; y >= 0; y--) {
+		const int row = y * width;
+		for (int x = width - 1; x >= 0; x--) {
+			const int index = row + x;
+			if (x + 1 < width) {
+				relax(index, index + 1);
+			}
+			if (y + 1 < height) {
+				if (x + 1 < width) {
+					relax(index, index + width + 1);
+				}
+				relax(index, index + width);
+				if (x > 0) {
+					relax(index, index + width - 1);
+				}
+			}
+		}
+	}
+	return result;
+}
+
 PackedByteArray Geometry2D::rasterize_segments_mask(const PackedVector2Array &p_segment_endpoints, const Vector2i &p_size, real_t p_half_width, real_t p_softness) {
 	PackedByteArray result;
 	// Bound both memory and CPU work. The output is one row-major L8 mask.
@@ -1334,6 +1402,7 @@ void Geometry2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_closest_point_on_segments", "point", "segment_endpoints"), &Geometry2D::get_closest_point_on_segments);
 	ClassDB::bind_method(D_METHOD("get_nearest_neighbors", "points", "neighbor_count", "max_distance"), &Geometry2D::get_nearest_neighbors);
 	ClassDB::bind_method(D_METHOD("rasterize_segments_mask", "segment_endpoints", "size", "half_width", "softness"), &Geometry2D::rasterize_segments_mask);
+	ClassDB::bind_method(D_METHOD("distance_transform_8", "mask", "size", "max_distance"), &Geometry2D::distance_transform_8);
 
 	ClassDB::bind_method(D_METHOD("point_is_inside_triangle", "point", "a", "b", "c"), &Geometry2D::point_is_inside_triangle);
 

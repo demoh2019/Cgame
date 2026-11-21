@@ -37,6 +37,61 @@ TEST_FORCE_LINK(test_geometry_2d)
 
 namespace TestGeometry2D {
 
+
+TEST_CASE("[CoreBind] Geometry2D binary 8-connected distance transform") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+
+	PackedByteArray mask;
+	mask.resize(25);
+	mask.set(12, 255); // Single feature at the centre of a 5x5 grid.
+	PackedByteArray distances = api->distance_transform_8(mask, Vector2i(5, 5), 2);
+	REQUIRE(distances.size() == 25);
+	for (int y = 0; y < 5; y++) {
+		for (int x = 0; x < 5; x++) {
+			CHECK(distances[y * 5 + x] == MAX(ABS(x - 2), ABS(y - 2)));
+		}
+	}
+	CHECK(mask[12] == 255); // Input is never modified.
+	CHECK(mask[0] == 0);
+
+	distances = api->distance_transform_8(mask, Vector2i(5, 5), 1);
+	REQUIRE(distances.size() == 25);
+	CHECK(distances[0] == 255); // Beyond radius, not a saturated distance.
+	CHECK(distances[1 * 5 + 1] == 1);
+	CHECK(distances[2 * 5 + 2] == 0);
+	distances = api->distance_transform_8(mask, Vector2i(5, 5), 0);
+	REQUIRE(distances.size() == 25);
+	CHECK(distances[12] == 0);
+	CHECK(distances[11] == 255);
+
+	PackedByteArray empty_features;
+	empty_features.resize(6);
+	distances = api->distance_transform_8(empty_features, Vector2i(3, 2), 4);
+	REQUIRE(distances.size() == 6);
+	for (int i = 0; i < 6; i++) {
+		CHECK(distances[i] == 255);
+	}
+	PackedByteArray every_feature;
+	every_feature.resize(6);
+	for (int i = 0; i < 6; i++) {
+		every_feature.set(i, 1);
+	}
+	distances = api->distance_transform_8(every_feature, Vector2i(3, 2), 4);
+	REQUIRE(distances.size() == 6);
+	for (int i = 0; i < 6; i++) {
+		CHECK(distances[i] == 0);
+	}
+
+	ERR_PRINT_OFF;
+	CHECK(api->distance_transform_8(mask, Vector2i(4, 5), 2).is_empty());
+	CHECK(api->distance_transform_8(mask, Vector2i(0, 5), 2).is_empty());
+	CHECK(api->distance_transform_8(mask, Vector2i(2049, 5), 2).is_empty());
+	CHECK(api->distance_transform_8(mask, Vector2i(5, 5), -1).is_empty());
+	CHECK(api->distance_transform_8(mask, Vector2i(5, 5), 255).is_empty());
+	ERR_PRINT_ON;
+}
+
 TEST_CASE("[CoreBind] Geometry2D batched nearest neighbors are stable and bounded") {
 	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
 	REQUIRE(api != nullptr);
