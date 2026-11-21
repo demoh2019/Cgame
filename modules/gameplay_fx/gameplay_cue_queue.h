@@ -66,6 +66,11 @@ public:
 	// On a full queue, a higher-priority transient may evict the oldest
 	// lowest-priority transient; persistent status lifecycle events are safe.
 	bool emit_cue(const StringName &p_tag, double p_magnitude = 1.0, int p_priority = 0);
+	// Batched transient dispatch: prevalidate all entries and commit only
+	// when every one can be admitted. Existing lifecycle events are never
+	// evicted; a failure leaves the queue and diagnostics unchanged.
+	// Each dictionary requires tag, magnitude and priority; max 32 entries.
+	bool emit_cues_batch(const Array &p_events);
 	// 0 stacks stops an active cue; an unchanged value never emits another event.
 	bool set_active(const StringName &p_tag, int p_stacks, int p_priority = 0);
 	// Replace the active set transactionally, emitting started/updated/stopped

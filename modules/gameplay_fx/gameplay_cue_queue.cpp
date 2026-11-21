@@ -108,6 +108,59 @@ bool GameplayCueQueue::emit_cue(const StringName &p_tag, double p_magnitude, int
 	return true;
 }
 
+bool GameplayCueQueue::emit_cues_batch(const Array &p_events) {
+	// The whole batch must be well-formed before it can touch the queue.
+	// All entries use the single-event contract, with no implicit Variant
+	// coercion for tags, magnitudes or priorities.
+	if (p_events.size() > 32) {
+		return false;
+	}
+	for (const Variant &raw : p_events) {
+		if (raw.get_type() != Variant::DICTIONARY) {
+			return false;
+		}
+		const Dictionary event = raw;
+		if (!event.has("tag") || !event.has("magnitude") || !event.has("priority")) {
+			return false;
+		}
+		const Variant raw_tag = event["tag"];
+		const Variant raw_magnitude = event["magnitude"];
+		const Variant raw_priority = event["priority"];
+		if ((raw_tag.get_type() != Variant::STRING && raw_tag.get_type() != Variant::STRING_NAME) ||
+				(raw_magnitude.get_type() != Variant::INT && raw_magnitude.get_type() != Variant::FLOAT) ||
+				raw_priority.get_type() != Variant::INT) {
+			return false;
+		}
+		const StringName tag = raw_tag;
+		const double magnitude = double(raw_magnitude);
+		const int64_t priority = int64_t(raw_priority);
+		if (!_valid_tag(tag) || !Math::is_finite(magnitude) ||
+				magnitude < 0.0 || magnitude > 1000000.0 ||
+				priority < 0 || priority > MAX_PRIORITY) {
+			return false;
+		}
+	}
+	if (p_events.is_empty()) {
+		return true;
+	}
+	// The single-event path already implements bounded coalescing and
+	// significance-based eviction. Reuse it verbatim: a cheap 128-entry
+	// snapshot makes multi-event admission transactional, including counters.
+	const Vector<PendingCue> before = pending;
+	const int before_evicted = evicted_transient_count;
+	const int before_rejected = rejected_transient_count;
+	for (const Variant &raw : p_events) {
+		const Dictionary event = raw;
+		if (!emit_cue(StringName(event["tag"]), double(event["magnitude"]), int(event["priority"]))) {
+			pending = before;
+			evicted_transient_count = before_evicted;
+			rejected_transient_count = before_rejected;
+			return false;
+		}
+	}
+	return true;
+}
+
 bool GameplayCueQueue::set_active(const StringName &p_tag, int p_stacks, int p_priority) {
 	if (!_valid_tag(p_tag) || p_stacks < 0 || p_stacks > MAX_STACKS || !_valid_priority(p_priority)) {
 		return false;
@@ -224,6 +277,7 @@ void GameplayCueQueue::reset() {
 
 void GameplayCueQueue::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("emit_cue", "tag", "magnitude", "priority"), &GameplayCueQueue::emit_cue, DEFVAL(1.0), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("emit_cues_batch", "events"), &GameplayCueQueue::emit_cues_batch);
 	ClassDB::bind_method(D_METHOD("set_active", "tag", "stacks", "priority"), &GameplayCueQueue::set_active, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("replace_active", "snapshot", "priority"), &GameplayCueQueue::replace_active, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_active_snapshot"), &GameplayCueQueue::get_active_snapshot);
