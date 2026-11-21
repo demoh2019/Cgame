@@ -1,0 +1,87 @@
+#[compute]
+#version 450
+
+// Generated-from-template GPU particle update kernel for the VFX graph GPU backend.
+// Original implementation (project license). Credit: structure follows the public Godot 4
+// RenderingDevice compute tutorial pattern (godot-docs / godot-demo-projects compute_texture,
+// MIT); the atomic event append buffer mirrors the idea of Niagara GPU event routing (concepts only).
+// Double-brace placeholders are substituted by gpu_particle_backend.gd (generate_compute_source).
+
+layout(local_size_x = {{LOCAL_SIZE}}, local_size_y = 1, local_size_z = 1) in;
+
+struct Particle {
+	vec4 pos_age;   // xyz position, w age
+	vec4 vel_life;  // xyz velocity, w lifetime
+	vec4 col;
+	vec4 base_col;
+	vec4 size_info; // x size, y base size
+};
+
+layout(set = 0, binding = 0, std430) restrict buffer Particles {
+	Particle items[];
+} particles;
+
+struct GpuEvent {
+	vec4 pos_slot; // xyz position, w event slot (0 = death, n = collide module)
+	vec4 vel;
+};
+
+layout(set = 0, binding = 1, std430) restrict buffer Events {
+	uint count;
+	uint capacity;
+	uint pad0;
+	uint pad1;
+	GpuEvent items[];
+} events;
+
+layout(push_constant, std430) uniform Params {
+	float dt;
+	float time;
+	uint count;
+	uint pad;
+} params;
+
+const uint MAX_PARTICLES = {{MAX_PARTICLES}}u;
+const bool ROUTE_DEATH = {{ROUTE_DEATH}};
+
+void emit_event(uint slot, vec3 p, vec3 v) {
+	uint idx = atomicAdd(events.count, 1u);
+	if (idx < events.capacity) {
+		events.items[idx].pos_slot = vec4(p, float(slot));
+		events.items[idx].vel = vec4(v, 0.0);
+	}
+}
+
+{{HELPERS}}
+
+void main() {
+	uint i = gl_GlobalInvocationID.x;
+	if (i >= params.count) {
+		return;
+	}
+	Particle pt = particles.items[i];
+	vec3 p = pt.pos_age.xyz;
+	float age = pt.pos_age.w;
+	vec3 v = pt.vel_life.xyz;
+	float life = pt.vel_life.w;
+	vec4 col = pt.col;
+	vec4 base_col = pt.base_col;
+	float size = pt.size_info.x;
+	float base_size = pt.size_info.y;
+	float dt = params.dt;
+
+	age += dt;
+	// ---- update modules ----
+{{UPDATE_CODE}}
+	p += v * dt;
+	// ---- post modules (collide / kill) ----
+{{POST_CODE}}
+	if (ROUTE_DEATH && age >= life) {
+		emit_event(0u, p, v);
+	}
+
+	particles.items[i].pos_age = vec4(p, age);
+	particles.items[i].vel_life = vec4(v, life);
+	particles.items[i].col = col;
+	particles.items[i].size_info = vec4(size, base_size, 0.0, 0.0);
+}
