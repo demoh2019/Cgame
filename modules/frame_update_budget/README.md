@@ -72,3 +72,30 @@ make them visible in Godot's profiler.
 Older custom engine builds without this API automatically use the updated
 GDScript fallback; native CI tests cover rejection of malformed cost reports,
 overload deferral and force-update bypass.
+
+## Significance-aware per-lane update frequencies
+
+The optional native methods `set_lane_rate_scale(lane, scale)` and
+`get_lane_rate_scale(lane)` allow each registered lane to adapt its frequency
+to current scene conditions without increasing the frame's slot or CPU budget.
+Multipliers must be finite and between **0.75 and 2.0**; default is **1.0**.
+Unknown lanes and invalid values are rejected without changing state.
+
+The fair scheduler now compares each lane's *overdue time* (accumulated elapsed
+minus its per-lane interval). This preserves a stable rotating tie breaker and
+lets relevant effects become due sooner without preventing less relevant ones
+from eventually running. Rate changes do not force work immediately; quality
+tier transitions and explicit `force=true` continue to override budgets.
+
+In Albion After, `game/scripts/client/ambient_rate_profile.gd` computes a
+four-bit visibility signature from time of day, plains biome, wind, storm and
+underground state. Sunlit dragonflies, dry/windy dust devils, rolling
+tumbleweeds and nighttime bats use **1.5×** the tier rate when relevant;
+invisible effects use **0.75×**. The game only updates the per-lane profile
+when the signature changes, after sampling the current wind and atmosphere.
+This applies to the already existing online gameplay scene. Older custom
+engines ignore the feature; stock Godot gets identical GDScript semantics.
+
+The native tests verify both valid/invalid updates and non-starving rates.
+`game/tests/test_ambient_tick_budget.gd` checks world-profile signatures,
+240-frame behavior and exact native/script per-lane parity.
