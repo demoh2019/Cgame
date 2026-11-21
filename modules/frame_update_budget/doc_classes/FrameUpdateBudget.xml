@@ -16,6 +16,17 @@
 			<param index="0" name="lane" type="StringName" />
 			<description>Removes a lane and its accumulated elapsed time.</description>
 		</method>
+		<method name="set_lane_enabled">
+			<return type="bool" />
+			<param index="0" name="lane" type="StringName" />
+			<param index="1" name="enabled" type="bool" />
+			<description>Pauses or resumes a registered lane. Disabling immediately invalidates reservations and clears its accumulated time and starvation age. Both normal updates and initial quality refreshes skip it; explicit [code]force=true[/code] calls can still hide visuals immediately. Re-enabling starts with zero time debt. The setting survives [method reset]. Returns false for unknown lanes.</description>
+		</method>
+		<method name="is_lane_enabled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="lane" type="StringName" />
+			<description>True for a registered, enabled lane; false for disabled or unknown lanes. New lanes default to enabled.</description>
+		</method>
 		<method name="get_lane_count" qualifiers="const">
 			<return type="int" />
 		</method>

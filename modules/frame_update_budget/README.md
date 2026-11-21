@@ -130,3 +130,21 @@ C++ unit tests cover invalid input, reset, independent importance and
 frequency, non-starvation, and frame-slot limits. The headless game suite
 compares the native and scripted schedulers for 241 frames, with the
 same significance and rate configuration.
+
+## Suspend irrelevant lanes (world relevance gates)
+
+`set_lane_enabled(lane, enabled)` and `is_lane_enabled(lane)` allow a caller
+ to remove an optional system from frame planning without unregistering its
+ learned CPU estimate or importance. Disabled lanes never consume reserved
+ slots, accumulate elapsed time, age toward starvation, or run a quality-tier
+ refresh. Explicit `consume(lane, delta, true)` still runs a visibility cleanup.
+ Toggling a lane invalidates pending reservations, clears elapsed/debt and keeps
+ the enabled setting across `reset()`; reactivation cannot cause a burst of
+ deferred updates.
+
+ Albion After suspends all four outdoor ambient lanes while underground, only
+ after scheduling a one-time forced hide on the transition frame. Returning to
+ the surface re-enables the lanes and forces an immediate visible refresh.
+ Older custom builds without these methods keep their earlier low-significance
+ behavior; stock Godot uses the same API through the GDScript fallback.
+ This is a cosmetic-only optimization, not Unreal's full Significance Manager.

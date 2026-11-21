@@ -11,6 +11,8 @@
 void FrameUpdateBudget::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("register_lane", "lane"), &FrameUpdateBudget::register_lane);
 	ClassDB::bind_method(D_METHOD("unregister_lane", "lane"), &FrameUpdateBudget::unregister_lane);
+	ClassDB::bind_method(D_METHOD("set_lane_enabled", "lane", "enabled"), &FrameUpdateBudget::set_lane_enabled);
+	ClassDB::bind_method(D_METHOD("is_lane_enabled", "lane"), &FrameUpdateBudget::is_lane_enabled);
 	ClassDB::bind_method(D_METHOD("get_lane_count"), &FrameUpdateBudget::get_lane_count);
 	ClassDB::bind_method(D_METHOD("configure", "quality_rates", "quality_slots"), &FrameUpdateBudget::configure);
 	ClassDB::bind_method(D_METHOD("begin_frame", "delta", "quality"), &FrameUpdateBudget::begin_frame);
@@ -55,6 +57,35 @@ bool FrameUpdateBudget::unregister_lane(const StringName &p_lane) {
 			lanes.remove_at(i);
 			reserved_lanes.clear(); // Indices shifted; never reuse a stale reservation.
 			return true;
+		}
+	}
+	return false;
+}
+
+bool FrameUpdateBudget::set_lane_enabled(const StringName &p_lane, bool p_enabled) {
+	for (int i = 0; i < lanes.size(); i++) {
+		Lane &lane = lanes.write[i];
+		if (lane.name != p_lane) {
+			continue;
+		}
+		if (lane.enabled == p_enabled) {
+			return true;
+		}
+		lane.enabled = p_enabled;
+		lane.elapsed = 0.0;
+		lane.overdue_frames = 0;
+		// A transition may occur after begin_frame; invalidate stale reservations.
+		reserved_lanes.clear();
+		reserved_estimated_cost_us = 0;
+		return true;
+	}
+	return false;
+}
+
+bool FrameUpdateBudget::is_lane_enabled(const StringName &p_lane) const {
+	for (int i = 0; i < lanes.size(); i++) {
+		if (lanes[i].name == p_lane) {
+			return lanes[i].enabled;
 		}
 	}
 	return false;
@@ -211,6 +242,9 @@ void FrameUpdateBudget::begin_frame(double p_delta, int p_quality) {
 					continue;
 				}
 				const Lane &lane = lanes[index];
+				if (!lane.enabled) {
+					continue;
+				}
 				const double interval = 1.0 / (rates[quality] * lane.rate_scale);
 				const double elapsed = MIN(lane.elapsed + p_delta, max_step);
 				if (elapsed + 0.000001 < interval) {
@@ -241,6 +275,9 @@ void FrameUpdateBudget::begin_frame(double p_delta, int p_quality) {
 				reserved_estimated_cost_us + lanes[best].estimated_cost_us);
 	}
 	for (int i = 0; i < lanes.size(); i++) {
+		if (!lanes[i].enabled) {
+			continue;
+		}
 		const double interval = 1.0 / (rates[quality] * lanes[i].rate_scale);
 		const double elapsed = MIN(lanes[i].elapsed + p_delta, max_step);
 		if (elapsed + 0.000001 >= interval && !reserved_lanes.has(i)) {
@@ -264,6 +301,9 @@ double FrameUpdateBudget::consume(const StringName &p_lane, double p_delta, bool
 		return 0.0;
 	}
 	Lane &lane = lanes.write[index];
+	if (!lane.enabled && !p_force) {
+		return 0.0; // Paused work is deliberately not counted as budget pressure.
+	}
 	const double elapsed = MIN(lane.elapsed + p_delta, max_step);
 	// Critical world visibility and profile transitions bypass the budget.
 	if (p_force || quality_changed) {
