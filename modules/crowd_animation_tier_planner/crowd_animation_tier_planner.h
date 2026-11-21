@@ -41,4 +41,14 @@ public:
 			const PackedByteArray &p_priority_flags, const PackedByteArray &p_visible_flags,
 			const PackedByteArray &p_retained_full_flags, int p_full_budget,
 			int p_priority_budget, double p_hysteresis = 1.5) const;
+
+	// Estimated CPU cost is bounded per visible full-IK owner, not for
+	// combat-priority poses, animation mixer updates, or server gameplay.
+	// Zero total budget disables time pressure; zero individual sample uses
+	// the conservative 100-us initial estimate.
+	PackedInt32Array plan_visible_tiers_costed(const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_priority_flags, const PackedByteArray &p_visible_flags,
+			const PackedByteArray &p_retained_full_flags, const PackedInt32Array &p_full_pose_cost_us,
+			int p_full_budget, int p_priority_budget, int p_full_pose_budget_us,
+			double p_hysteresis = 1.5) const;
 };
