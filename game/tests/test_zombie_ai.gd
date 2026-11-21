@@ -212,8 +212,12 @@ func run(t) -> void:
 		var first_count: int = int(sliced._flank_query.call("get_incremental_processed_count"))
 		t.check(first_count >= 1 and first_count <= 3,
 			"first timed work grant processes at least one and no more than three candidates")
-		t.check(sliced.flank_last_step_us >= 0 and sliced.flank_last_step_candidates == first_count,
-			"native microsecond profiling reports exactly the scored candidate count")
+		if sliced._flank_query.has_method("step_incremental_top_positions_timed"):
+			t.check(sliced.flank_last_step_us >= 0 and sliced.flank_last_step_candidates == first_count,
+				"native microsecond profiling reports exactly the scored candidate count")
+		else:
+			t.eq(sliced.flank_last_step_candidates, 0,
+				"older native builds without measured steps keep their original count-only API")
 		sliced.flank_replan_allowed = false
 		t.eq(sliced._flank_goal(Vector2.ZERO, sliced_goal), sliced_goal,
 			"deferred EQS slot still pursues the survivor directly")
