@@ -87,6 +87,7 @@ const GraphicsVramBudget = preload("res://scripts/client/graphics_vram_budget.gd
 const ShaderWarmup = preload("res://scripts/client/shader_warmup.gd")
 const FrameHitchAnalyzer = preload("res://scripts/client/frame_hitch_analyzer.gd")
 const SeaFftDetail = preload("res://scripts/client/sea_fft_detail.gd")
+const BarricadeDebris = preload("res://scripts/client/barricade_debris.gd")
 const GraphicsDynamicResolution = preload("res://scripts/client/graphics_dynamic_resolution.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
 const WorldMap = preload("res://scripts/client/world_map.gd")
@@ -1225,6 +1226,8 @@ func _spawn_effects(event: Dictionary) -> void:
 			effects.burst(at - Vector3(0, 0.6, 0), Color(0.5, 0.38, 0.22), 14, 2.0, 0.5, 0.1)
 		"barricade_broken":
 			effects.burst(at, Color(0.55, 0.38, 0.2), 34, 5.0, 0.9, 0.16, 9.0)
+			# Physical Voronoi debris near the camera; far walls keep only the burst.
+			BarricadeDebris.spawn(self, at, here)
 			CombatCameraFeedback.apply(camera, "barricade_broken", at, here, UiSettings.shake_scale())
 		"outpost_taken", "siege_contract_result":
 			if at.distance_to(here) < 60.0:
