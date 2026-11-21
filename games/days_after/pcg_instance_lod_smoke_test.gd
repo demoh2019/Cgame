@@ -65,7 +65,7 @@ func _initialize() -> void:
                     failures.append("out-of-bounds source index in LOD group")
                 else:
                     visits[source_index] += 1
-                    _check(variants[source_index] == group_index / 2 and
+                    _check(variants[source_index] == floori(float(group_index) / 2.0) and
                         tiers[source_index] == group_index % 2,
                         "wrong variant or tier for source", failures)
         for count in visits:
@@ -97,7 +97,7 @@ func _initialize() -> void:
         "invalid hysteresis not rejected", failures)
     var too_many := PackedVector3Array()
     too_many.resize(16385)
-    _check(LODPlan.plan_instance_lods(too_many, Vector3()).is_empty(),
+    _check(LODPlan.plan_instance_lods(too_many, Vector3(), PackedInt32Array()).is_empty(),
         "native point cap not enforced", failures)
 
     for failure in failures:
