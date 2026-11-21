@@ -157,4 +157,69 @@ TEST_CASE("[CullDistanceProfile3D] independent configured quality presets") {
 }
 
 
+
+TEST_CASE("[CullDistanceProfile3D] bulk cached profile equals scalar selection with stable ordering") {
+	Ref<CullDistanceProfile3D> policy;
+	policy.instantiate();
+	const PackedFloat32Array pairs = { 1.0f, 4.0f, 10.0f, 24.0f, 64.0f };
+	const PackedFloat32Array ranges = { 45.0f, 75.0f, 105.0f, 160.0f, 0.0f };
+	CHECK(policy->configure(pairs, ranges));
+	PackedVector3Array positions;
+	PackedVector3Array sizes;
+	PackedFloat64Array authored;
+	for (int i = 0; i < 256; ++i) {
+		positions.push_back(Vector3(-100.0 + i, 0.0, -12.0));
+		sizes.push_back(Vector3(0.5 + i * 0.33, 2.0, 1.0));
+		authored.push_back(i % 3 == 0 ? 0.0 : 60.0 + i);
+	}
+	const PackedFloat64Array output = policy->get_cached_cull_distances(positions, sizes, authored);
+	REQUIRE(output.size() == positions.size());
+	for (int i = 0; i < output.size(); ++i) {
+		CHECK(output[i] == policy->get_cached_cull_distance(AABB(positions[i], sizes[i]), authored[i]));
+		CHECK(output[i] == policy->get_cull_distance(AABB(positions[i], sizes[i]), pairs, ranges, authored[i]));
+	}
+	CHECK(output[0] == 45.0); // Zero authored cap does not mean "always cull".
+	CHECK(output[255] == 0.0); // Largest size-pair is unlimited when authored=0.
+}
+
+TEST_CASE("[CullDistanceProfile3D] bulk malformed request fails atomically and is bounded") {
+	Ref<CullDistanceProfile3D> policy;
+	policy.instantiate();
+	PackedVector3Array positions;
+	PackedVector3Array sizes;
+	PackedFloat64Array caps;
+	positions.push_back(Vector3());
+	sizes.push_back(Vector3(1, 1, 1));
+	caps.push_back(75.0);
+	CHECK(policy->get_cached_cull_distances(positions, sizes, caps).is_empty()); // Unconfigured.
+	CHECK(policy->configure({ 1.0f }, { 45.0f }));
+	CHECK(policy->get_cached_cull_distances(positions, sizes, PackedFloat64Array()).is_empty());
+	CHECK(policy->get_cached_cull_distances(positions, PackedVector3Array(), caps).is_empty());
+	positions.push_back(Vector3(0, 0, 0));
+	sizes.push_back(Vector3(2, 2, 2));
+	caps.push_back(Math::NaN); // A late error invalidates the whole batch.
+	CHECK(policy->get_cached_cull_distances(positions, sizes, caps).is_empty());
+	caps.set(1, 100.0);
+	CHECK(policy->get_cached_cull_distances(positions, sizes, caps).size() == 2);
+	positions.set(1, Vector3(Math::INF, 0, 0));
+	CHECK(policy->get_cached_cull_distances(positions, sizes, caps).is_empty());
+	positions.set(1, Vector3(0, 0, 0));
+	sizes.set(1, Vector3(-1, 1, 1));
+	CHECK(policy->get_cached_cull_distances(positions, sizes, caps).is_empty());
+	sizes.set(1, Vector3(2, 2, 2));
+	for (int i = 2; i < CullDistanceProfile3D::MAX_BATCH; ++i) {
+		positions.push_back(Vector3());
+		sizes.push_back(Vector3(1, 1, 1));
+		caps.push_back(80.0);
+	}
+	CHECK(policy->get_cached_cull_distances(positions, sizes, caps).size() ==
+			CullDistanceProfile3D::MAX_BATCH);
+	positions.push_back(Vector3());
+	sizes.push_back(Vector3(1, 1, 1));
+	caps.push_back(80.0);
+	CHECK(policy->get_cached_cull_distances(positions, sizes, caps).is_empty());
+	policy->clear_profile();
+	CHECK(policy->get_cached_cull_distances(positions, sizes, caps).is_empty());
+}
+
 } // namespace TestCullDistanceProfile3D
