@@ -54,6 +54,8 @@ TEST_CASE("[SpatialPointGrid2D] Empty, strict and inclusive radius boundaries") 
 	CHECK_FALSE(grid->any_within(Vector2(Math::NaN, 0), 12.0));
 	CHECK_FALSE(grid->any_within(Vector2(), Math::NaN));
 	CHECK_FALSE(grid->any_within(Vector2(), -1.0));
+	CHECK(grid->any_within(Vector2(66.0, -1.0), 130.0));
+	CHECK_FALSE(grid->any_within(Vector2(66.0, -1.0), 130.0, false));
 	CHECK(grid->snapshot()["queries"] == 7);
 	CHECK(grid->snapshot()["bucket_lookups"] == 0);
 }
