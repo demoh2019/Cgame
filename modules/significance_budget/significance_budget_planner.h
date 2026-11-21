@@ -34,6 +34,13 @@ public:
 			const PackedByteArray &p_priorities, const PackedByteArray &p_categories,
 			const PackedInt32Array &p_category_caps, int p_budget, double p_max_distance) const;
 
+	// Priority-tier ranking with stable ID retention: only peers in the same
+	// priority tier compete via distance hysteresis, never bosses vs normals.
+	PackedInt32Array select_top_priority_stable(const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_priorities, const PackedInt64Array &p_ids,
+			const PackedInt64Array &p_retained_ids, int p_budget,
+			double p_max_distance, double p_hysteresis = 0.0) const;
+
 	PackedInt32Array select_top_stable(const PackedFloat64Array &p_distances,
 			const PackedInt64Array &p_ids, const PackedInt64Array &p_retained_ids,
 			int p_budget, double p_max_distance, double p_hysteresis = 0.0) const;

@@ -203,7 +203,81 @@ static bool stable_better(const StableCandidate &p_a, const StableCandidate &p_b
 	return p_a.index < p_b.index;
 }
 
+// Reuse the stable-ID distance and deterministic tie comparator.
+struct PriorityStableCandidate {
+	int priority = 0;
+	StableCandidate candidate;
+};
+static bool priority_stable_better(const PriorityStableCandidate &p_a, const PriorityStableCandidate &p_b) {
+	return p_a.priority != p_b.priority ? p_a.priority > p_b.priority :
+			stable_better(p_a.candidate, p_b.candidate);
+}
+
 } // namespace
+
+PackedInt32Array SignificanceBudgetPlanner::select_top_priority_stable(
+		const PackedFloat64Array &p_distances, const PackedByteArray &p_priorities,
+		const PackedInt64Array &p_ids, const PackedInt64Array &p_retained_ids,
+		int p_budget, double p_max_distance, double p_hysteresis) const {
+	PackedInt32Array empty;
+	const int count = p_distances.size();
+	ERR_FAIL_COND_V_MSG(count != p_priorities.size() || count != p_ids.size() ||
+			count > MAX_CANDIDATES || p_retained_ids.size() > MAX_BUDGET ||
+			!valid_budget(p_budget) || !Math::is_finite(p_max_distance) ||
+			p_max_distance < 0.0 || p_max_distance > MAX_RANGE ||
+			!Math::is_finite(p_hysteresis) || p_hysteresis < 0.0 ||
+			p_hysteresis > p_max_distance,
+			empty, "Invalid priority-stable significance arrays or bounds.");
+
+	HashSet<int64_t> ids;
+	for (int i = 0; i < count; ++i) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(p_distances[i]) || p_distances[i] < 0.0 ||
+				!valid_priority(p_priorities[i]) || p_ids[i] <= 0 || ids.has(p_ids[i]),
+				empty, "Priority-stable significance requires finite distance, valid priority, and unique positive IDs.");
+		ids.insert(p_ids[i]);
+	}
+	HashSet<int64_t> retained;
+	for (int i = 0; i < p_retained_ids.size(); ++i) {
+		const int64_t id = p_retained_ids[i];
+		ERR_FAIL_COND_V_MSG(id <= 0 || retained.has(id), empty,
+				"Retained significance IDs must be unique and positive.");
+		retained.insert(id);
+	}
+	if (p_budget == 0) {
+		return empty;
+	}
+
+	// Bounded insertion O(N*K), scratch O(K) plus O(N) ID-validation hash.
+	Vector<PriorityStableCandidate> best;
+	for (int i = 0; i < count; ++i) {
+		if (p_distances[i] > p_max_distance) {
+			continue; // Never extend the hard visual radius by hysteresis.
+		}
+		PriorityStableCandidate candidate;
+		candidate.priority = p_priorities[i];
+		candidate.candidate.adjusted_distance =
+			MAX(0.0, p_distances[i] - (retained.has(p_ids[i]) ? p_hysteresis : 0.0));
+		candidate.candidate.raw_distance = p_distances[i];
+		candidate.candidate.id = p_ids[i];
+		candidate.candidate.index = i;
+		if (best.size() == p_budget && !priority_stable_better(candidate, best[best.size() - 1])) {
+			continue;
+		}
+		int at = 0;
+		while (at < best.size() && !priority_stable_better(candidate, best[at])) {
+			++at;
+		}
+		best.insert(at, candidate);
+		if (best.size() > p_budget) {
+			best.resize(p_budget);
+		}
+	}
+	PackedInt32Array result;
+	for (const PriorityStableCandidate &entry : best) {
+		result.push_back(entry.candidate.index);
+	}
+	return result;
+}
 
 PackedInt32Array SignificanceBudgetPlanner::select_top_stable(
 		const PackedFloat64Array &p_distances, const PackedInt64Array &p_ids,
@@ -270,6 +344,8 @@ void SignificanceBudgetPlanner::_bind_methods() {
 			&SignificanceBudgetPlanner::select_top);
 	ClassDB::bind_method(D_METHOD("select_effects", "distances", "priorities", "categories", "category_caps", "budget", "max_distance"),
 			&SignificanceBudgetPlanner::select_effects);
+	ClassDB::bind_method(D_METHOD("select_top_priority_stable", "distances", "priorities", "ids", "retained_ids", "budget", "max_distance", "hysteresis"),
+			&SignificanceBudgetPlanner::select_top_priority_stable, DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("select_top_stable", "distances", "ids", "retained_ids", "budget", "max_distance", "hysteresis"),
 			&SignificanceBudgetPlanner::select_top_stable, DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("select_world", "positions", "viewers", "priorities", "budget", "max_distance"),
