@@ -561,6 +561,7 @@ Array AIProximityGrid2D::query_cross_variable_radius_batch(
 	Array result;
 	constexpr int MAX_VARIABLE_SOURCES = 4096;
 	constexpr int MAX_VARIABLE_HITS = 32768;
+	constexpr int MAX_VARIABLE_TESTS = 262144; // Bound false-positive cell work.
 	if (p_sources.is_empty() || p_sources.size() != p_radii.size() ||
 			p_sources.size() > MAX_VARIABLE_SOURCES || p_targets.size() > MAX_POINTS) {
 		return result;
@@ -608,6 +609,7 @@ Array AIProximityGrid2D::query_cross_variable_radius_batch(
 		}
 	}
 	int total_hits = 0;
+	int total_tests = 0;
 	for (int i = 0; i < p_sources.size(); i++) {
 		const Vector2 center = p_sources[i];
 		const Vector2i origin(int(Math::floor(center.x / cell_size)),
@@ -622,6 +624,9 @@ Array AIProximityGrid2D::query_cross_variable_radius_batch(
 					continue;
 				}
 				for (int j = 0; j < bucket->size(); j++) {
+					if (++total_tests > MAX_VARIABLE_TESTS) {
+						return Array(); // Never stall a server tick on dense cells.
+					}
 					const int target_index = (*bucket)[j];
 					const Vector2 target = p_targets[target_index];
 					const double x = double(center.x) - double(target.x);
