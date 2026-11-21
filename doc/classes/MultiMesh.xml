@@ -100,6 +100,15 @@
 				When the order of instances is coherent, the simpler alternative of setting [member buffer] can still be used with interpolation.
 			</description>
 		</method>
+		<method name="set_instance_colors_batch">
+			<return type="bool" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<param index="1" name="colors" type="PackedColorArray" />
+			<description>
+				Sets colors for selected MultiMesh instances using one scripting call. [member use_colors] must be enabled. The arrays must be equally sized, indices must be unique and within [member instance_count], and all RGBA components must be finite. Unsorted and hidden indices are allowed. The complete input is checked before any changes; invalid input returns [code]false[/code] without modifying any instance, and a valid empty input returns [code]true[/code].
+				Updates neither [member instance_count] nor [member visible_instance_count], transforms, custom shader data, or collision. This reduces script-to-engine overhead for sparse updates and initial chunk tint population. Internally each instance still requires a RenderingServer color update; it is not a GPU batch command. For full-buffer updates use [member buffer].
+			</description>
+		</method>
 		<method name="set_instance_color">
 			<return type="void" />
 			<param index="0" name="instance" type="int" />
