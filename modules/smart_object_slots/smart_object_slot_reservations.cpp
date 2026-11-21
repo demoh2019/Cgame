@@ -125,6 +125,28 @@ int64_t SmartObjectSlotReservations::try_claim_first_priority(
 	return 0;
 }
 
+bool SmartObjectSlotReservations::refresh_claim(int64_t p_slot_id, int64_t p_actor_id,
+		double p_lease_seconds, bool p_occupied) {
+	if (p_slot_id <= 0 || p_actor_id <= 0 ||
+			!Math::is_finite(p_lease_seconds) || p_lease_seconds <= 0.0 ||
+			p_lease_seconds > MAX_LEASE_SECONDS) {
+		return false;
+	}
+	// Require both indices to agree. A stale/preempted cached handle cannot
+	// overwrite a new owner's occupancy or revive an expired reservation.
+	const int by_slot = _find_slot(p_slot_id);
+	const int by_actor = _find_actor(p_actor_id);
+	if (by_slot < 0 || by_slot != by_actor ||
+			claims[by_slot].actor_id != p_actor_id ||
+			claims[by_slot].slot_id != p_slot_id) {
+		return false;
+	}
+	Claim &claim = claims.write[by_slot];
+	claim.remaining = p_lease_seconds;
+	claim.occupied = p_occupied;
+	return true;
+}
+
 bool SmartObjectSlotReservations::set_slot_occupied(
 		int64_t p_slot_id, int64_t p_actor_id, bool p_occupied) {
 	if (p_slot_id <= 0 || p_actor_id <= 0) {
@@ -201,6 +223,8 @@ void SmartObjectSlotReservations::_bind_methods() {
 			&SmartObjectSlotReservations::try_claim_first);
 	ClassDB::bind_method(D_METHOD("try_claim_first_priority", "slot_ids", "actor_id", "lease_seconds", "priority"),
 			&SmartObjectSlotReservations::try_claim_first_priority);
+	ClassDB::bind_method(D_METHOD("refresh_claim", "slot_id", "actor_id", "lease_seconds", "occupied"),
+			&SmartObjectSlotReservations::refresh_claim);
 	ClassDB::bind_method(D_METHOD("set_slot_occupied", "slot_id", "actor_id", "occupied"),
 			&SmartObjectSlotReservations::set_slot_occupied);
 	ClassDB::bind_method(D_METHOD("is_slot_occupied", "slot_id"),

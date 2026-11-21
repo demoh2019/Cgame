@@ -56,6 +56,24 @@ func try_claim_first_priority(slot_ids: PackedInt64Array, actor_id: int,
 	return 0
 
 
+## One indexed heartbeat for an already-owned flank slot. No candidate
+## scan, priority change, lease resurrection or cross-actor occupancy writes.
+## Matches native SmartObjectSlotReservations.refresh_claim() exactly.
+func refresh_claim(slot_id: int, actor_id: int, lease_seconds: float,
+		occupied: bool) -> bool:
+	if slot_id <= 0 or actor_id <= 0 or not is_finite(lease_seconds) \
+			or lease_seconds <= 0.0 or lease_seconds > MAX_LEASE_SECONDS:
+		return false
+	if int(_actor_slots.get(actor_id, 0)) != slot_id:
+		return false
+	if not _claims.has(slot_id) or int(_claims[slot_id]["actor"]) != actor_id:
+		return false
+	var claim: Dictionary = _claims[slot_id]
+	claim["remaining"] = lease_seconds
+	claim["occupied"] = occupied
+	return true
+
+
 func set_slot_occupied(slot_id: int, actor_id: int, occupied: bool) -> bool:
 	if slot_id <= 0 or actor_id <= 0 or get_owner(slot_id) != actor_id:
 		return false

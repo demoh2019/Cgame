@@ -22,6 +22,14 @@
 			<param index="3" name="priority" type="int" />
 			<description>Attempts to renew an actor-owned slot, then a free slot, then preempts a strictly lower-priority (0 to 3) CLAIMED but not OCCUPIED candidate. Occupied slots and equal or higher priorities cannot be preempted. Returns zero if all candidates are blocked or any input is invalid, without losing an actor's existing claim.</description>
 		</method>
+		<method name="refresh_claim">
+			<return type="bool" />
+			<param index="0" name="slot_id" type="int" />
+			<param index="1" name="actor_id" type="int" />
+			<param index="2" name="lease_seconds" type="float" />
+			<param index="3" name="occupied" type="bool" />
+			<description>O(1) cached Smart Object lease heartbeat using indexed slot and actor lookup. Atomically validates both positive IDs, current exact owner/slot identity, and a finite lease in (0, 5] seconds; only on success renews the lease and marks the slot occupied or unoccupied. Returns false without changing anything when a cached claim has expired, been preempted, released or is owned by someone else, or if any argument is invalid. A true occupied slot cannot be preempted by any priority; clearing occupation allows the existing strict priority rule again. Repeated heartbeats prevent expiry only when actively issued by the authoritative server; abandoned slots still expire through [method advance_time], even if previously marked occupied. Does not move agents, perform collision queries, or change slot priority. Designed for Unreal-style claim/use lifecycle where a tactical AI reuses an already planned destination without re-running EQS.</description>
+		</method>
 		<method name="set_slot_occupied">
 			<return type="bool" />
 			<param index="0" name="slot_id" type="int" />

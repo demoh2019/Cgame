@@ -75,6 +75,60 @@ TEST_CASE("[SmartObjects] invalid arguments fail without partial reservation cha
 	CHECK(pool->get_claim_count() == 0);
 }
 
+TEST_CASE("[SmartObjects] atomic heartbeat renews a cached claim and protects occupied flanks") {
+	Ref<SmartObjectSlotReservations> pool;
+	pool.instantiate();
+	CHECK(pool->try_claim_first_priority({ 101 }, 1, 1.0, 0) == 101);
+	pool->advance_time(0.8);
+	CHECK(pool->refresh_claim(101, 1, 1.5, true));
+	CHECK(pool->get_owner(101) == 1);
+	CHECK(pool->is_slot_occupied(101));
+	CHECK(pool->try_claim_first_priority({ 101 }, 2, 1.5, 3) == 0); // Occupied cannot be stolen.
+	pool->advance_time(1.0);
+	CHECK(pool->get_owner(101) == 1); // Heartbeat extends the original 1s lease.
+	CHECK_FALSE(pool->refresh_claim(101, 2, 1.0, false)); // Wrong actor cannot unlock it.
+	CHECK(pool->is_slot_occupied(101));
+	CHECK_FALSE(pool->refresh_claim(102, 1, 1.0, false)); // Incorrect slot is not a handle.
+	CHECK(pool->refresh_claim(101, 1, 0.75, false)); // Moved away from position.
+	CHECK_FALSE(pool->is_slot_occupied(101));
+	CHECK(pool->try_claim_first_priority({ 101 }, 2, 1.5, 3) == 101);
+	CHECK(pool->get_actor_slot(1) == 0);
+	CHECK(pool->get_actor_slot(2) == 101);
+	CHECK_FALSE(pool->refresh_claim(101, 1, 1.5, true)); // Old owner may not revive stolen slot.
+	CHECK(pool->get_owner(101) == 2);
+	CHECK_FALSE(pool->is_slot_occupied(101));
+	CHECK(pool->refresh_claim(101, 2, 1.0, true));
+	CHECK(pool->is_slot_occupied(101));
+	pool->advance_time(1.0);
+	CHECK(pool->get_owner(101) == 0); // Expired even if last state was occupied.
+	CHECK_FALSE(pool->refresh_claim(101, 2, 1.0, true));
+	CHECK(pool->get_claim_count() == 0);
+}
+
+TEST_CASE("[SmartObjects] heartbeat invalid requests never renew or mutate a live claim") {
+	Ref<SmartObjectSlotReservations> pool;
+	pool.instantiate();
+	CHECK(pool->try_claim_first({ 55 }, 5, 0.5) == 55);
+	CHECK_FALSE(pool->refresh_claim(0, 5, 1.0, true));
+	CHECK_FALSE(pool->refresh_claim(-1, 5, 1.0, true));
+	CHECK_FALSE(pool->refresh_claim(55, 0, 1.0, true));
+	CHECK_FALSE(pool->refresh_claim(55, -1, 1.0, true));
+	CHECK_FALSE(pool->refresh_claim(55, 5, 0.0, true));
+	CHECK_FALSE(pool->refresh_claim(55, 5, -1.0, true));
+	CHECK_FALSE(pool->refresh_claim(55, 5, Math::NaN, true));
+	CHECK_FALSE(pool->refresh_claim(55, 5, Math::INF, true));
+	CHECK_FALSE(pool->refresh_claim(55, 5, 5.001, true));
+	CHECK(pool->get_claim_count() == 1);
+	CHECK_FALSE(pool->is_slot_occupied(55));
+	pool->advance_time(0.5);
+	CHECK(pool->get_owner(55) == 0); // Invalid heartbeat did not prolong lease.
+	CHECK_FALSE(pool->refresh_claim(55, 5, 1.0, true));
+	CHECK(pool->try_claim_first({ 55 }, 6, 0.5) == 55);
+	CHECK_FALSE(pool->refresh_claim(55, 5, 1.0, true));
+	CHECK(pool->release_actor(6) == 1);
+	CHECK_FALSE(pool->refresh_claim(55, 6, 1.0, false));
+}
+
 TEST_CASE("[SmartObjects] bounded table rejects overflow and retains atomic reclaims") {
 	Ref<SmartObjectSlotReservations> pool;
 	pool.instantiate();

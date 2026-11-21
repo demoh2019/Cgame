@@ -65,3 +65,39 @@ engine is unavailable; existing combat, targeting and network authority
 are unchanged.
 
 Reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/smart-objects-in-unreal-engine---overview
+
+## Cached Smart Object claim heartbeat and occupancy (new)
+
+`refresh_claim(slot_id, actor_id, lease_seconds, occupied)` combines lease
+renewal, strict owner validation and live Claimed/Occupied state in **one
+O(1) indexed native operation**. Both actor and slot indices must agree with
+the requested IDs; stale, expired and preempted handles return `false` with
+no state change. The caller supplies a finite lease duration in (0, 5] seconds.
+A valid heartbeat preserves slot identity, claim count, priority and position.
+
+This closes a practical gap between planning and using a Smart Object:
+Albion After's infected AI caches an EQS flank goal for 300ms. While it
+reuses the cached goal, it now renews its 1.5s lease and updates occupied
+state according to **its actual distance to the flank spot** (within 1m).
+That means an elite cannot preempt a spot another zombie has reached
+between tactical replans. Once that zombie walks away, the reservation
+becomes safely preemptible. If a zombie's claim expired or was stolen,
+the heartbeat fails and its cached goal is invalidated; throttled AI
+can continue directly toward the target instead of visiting a stolen
+position. No additional EQS query or physics ray is issued.
+
+The new API is implemented identically in the portable
+`game/scripts/shared/flank_slot_reservations.gd` fallback, and older native
+binaries still use the previous `get_actor_slot` guard. A forgotten
+lease **still expires**, even while marked occupied: this is not an
+indefinite lock, and server cleanup on death/despawn remains the owner.
+All mutation stays inside the server-owned manager, never client RPCs.
+
+C++ and game tests cover owner mismatch, invalid TTL, expiry, priority
+preemption, occupancy transitions, and the real infected cached-EQS
+path. This is a reduction in repeated lease work and an AI correctness
+improvement; no FPS/TPS speedup is claimed without benchmarking.
+
+Inspired by Unreal's Smart Objects lifecycle (Claimed → Occupied → Released),
+rather than directly porting its implementation:
+https://dev.epicgames.com/documentation/en-us/unreal-engine/smart-objects-in-unreal-engine---overview

@@ -55,6 +55,11 @@ public:
 	// lower-priority slots when no free candidate exists.
 	int64_t try_claim_first_priority(const PackedInt64Array &p_slot_ids,
 			int64_t p_actor_id, double p_lease_seconds, int p_priority);
+	// Atomically refresh an existing owner/slot lease and its occupancy.
+	// O(1) indexed lookup avoids another tactical search on cached AI ticks;
+	// wrong-owner or expired handles never mutate the pool.
+	bool refresh_claim(int64_t p_slot_id, int64_t p_actor_id,
+			double p_lease_seconds, bool p_occupied);
 	bool set_slot_occupied(int64_t p_slot_id, int64_t p_actor_id, bool p_occupied);
 	bool is_slot_occupied(int64_t p_slot_id) const;
 	// A release with a wrong actor ID cannot steal another actor's claim.
