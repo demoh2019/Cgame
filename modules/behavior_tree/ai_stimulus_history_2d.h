@@ -87,6 +87,10 @@ public:
 	Dictionary get_best_in_radius(int p_sense, const Vector2 &p_center, real_t p_radius) const;
 	// Newest events first. A detached Array of plain-data Dictionaries.
 	Array get_recent(int p_limit = 8) const;
+	// Forget one known source, optionally limited to one sense; returns the
+	// number of deleted events without touching other source lifetimes.
+	// -1 for p_sense means all senses. Anonymous source -1 cannot be forgotten.
+	int forget_source(int64_t p_source_id, int p_sense = -1);
 	void reset();
 };
 
