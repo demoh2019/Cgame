@@ -130,6 +130,57 @@ bool GameplayTagStackContainer::replace_stacks(const Dictionary &p_stacks) {
 	return true;
 }
 
+bool GameplayTagStackContainer::replace_stack_branch(const StringName &p_query, const Dictionary &p_replacements) {
+	if (!_valid_tag(p_query)) {
+		return false;
+	}
+
+	// Validate the entire incoming branch before touching the current state.
+	// Normalize String keys to StringName so mixed-key aliases cannot silently
+	// overwrite one another (important for snapshots received over the network).
+	Dictionary validated;
+	for (const Variant &key : p_replacements) {
+		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
+			return false;
+		}
+		const StringName tag = key;
+		if (!_valid_tag(tag) || !GameplayTagContainer::tag_matches(tag, p_query) || validated.has(tag)) {
+			return false;
+		}
+		const Variant count = p_replacements[key];
+		if (count.get_type() != Variant::INT || int64_t(count) <= 0 || int64_t(count) > MAX_STACKS_PER_TAG) {
+			return false;
+		}
+		validated[tag] = count;
+	}
+
+	Dictionary next;
+	for (const Variant &key : stacks) {
+		const StringName tag = key;
+		if (!GameplayTagContainer::tag_matches(tag, p_query)) {
+			next[tag] = stacks[key];
+		}
+	}
+	for (const Variant &key : validated) {
+		next[key] = validated[key];
+	}
+
+	bool modified = stacks.size() != next.size();
+	if (!modified) {
+		for (const Variant &key : next) {
+			if (!stacks.has(key) || stacks[key] != next[key]) {
+				modified = true;
+				break;
+			}
+		}
+	}
+	if (modified) {
+		stacks = next;
+		emit_changed();
+	}
+	return true;
+}
+
 void GameplayTagStackContainer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_stacks", "tag", "count"), &GameplayTagStackContainer::add_stacks, DEFVAL(1));
 	ClassDB::bind_method(D_METHOD("remove_stacks", "tag", "count"), &GameplayTagStackContainer::remove_stacks, DEFVAL(1));
@@ -139,6 +190,7 @@ void GameplayTagStackContainer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_empty"), &GameplayTagStackContainer::is_empty);
 	ClassDB::bind_method(D_METHOD("clear"), &GameplayTagStackContainer::clear);
 	ClassDB::bind_method(D_METHOD("replace_stacks", "stacks"), &GameplayTagStackContainer::replace_stacks);
+	ClassDB::bind_method(D_METHOD("replace_stack_branch", "query", "replacements"), &GameplayTagStackContainer::replace_stack_branch);
 	ClassDB::bind_method(D_METHOD("set_stacks", "stacks"), &GameplayTagStackContainer::set_stacks);
 	ClassDB::bind_method(D_METHOD("get_stacks"), &GameplayTagStackContainer::get_stacks);
 
