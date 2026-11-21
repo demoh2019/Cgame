@@ -2938,9 +2938,19 @@ func _wound_on_zombie(event: Dictionary) -> void:
 		origin = Vector3(float(attacker.get("x", chest.x + 1.0)), chest.y + 0.2, float(attacker.get("z", chest.z)))
 		var aim: Vector3 = chest + Vector3(randf_range(-0.25, 0.25), randf_range(-0.6, 0.45), randf_range(-0.25, 0.25))
 		direction = (aim - origin).normalized()
-	_wound_fx.on_hit(model, origin, direction, float(event.get("damage", 0.0)),
+	var spectacular: bool = _wound_fx.on_hit(model, origin, direction, float(event.get("damage", 0.0)),
 		bool(event.get("ranged", false)), bool(event.get("fatal", false)), true, str(event.get("weapon", "")),
 		float(_last_charge.get(by, 0.0)))
+	if spectacular and by == client.peer_id and camera_fx != null:
+		camera_fx._start_stop(Vector2(0.32, 0.3)) # A beat of slow motion on a brutal blow.
+	if bool(event.get("fatal", false)) and _blood_decals != null \
+			and BloodDecals.enabled(GraphicsQuality.level(), str(RenderingServer.get_current_rendering_method())):
+		# The pool spreads under the body over a few seconds.
+		var spot: Vector3 = model.global_position
+		for step in 3:
+			get_tree().create_timer(0.8 + step * 1.4).timeout.connect(func() -> void:
+				if _blood_decals != null:
+					_blood_decals.splat(client.world, spot.x + randf_range(-0.2, 0.2), spot.z + randf_range(-0.2, 0.2), false, 25.0 + step * 20.0))
 
 
 ## How far the current melee wind-up has charged, 0..1.
