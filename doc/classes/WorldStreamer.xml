@@ -102,6 +102,11 @@
 			<param index="0" name="require_visual_details" type="bool" default="false" />
 			<description>Count of source cells that are neither settled nor failed. When [param require_visual_details] is true, loaded chunks with pending staged visuals also count as pending. Queries return zero for disabled or remote sources.</description>
 		</method>
+		<method name="get_focus_streaming_status" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="require_visual_details" type="bool" default="false" />
+			<description>Read-only World Partition-style completion snapshot for the main observer's current [member load_radius]. Returns [code]total[/code], [code]completed[/code], [code]pending[/code], [code]failed[/code], [code]progress[/code] (fraction 0–1), [code]ready[/code] and [code]truncated[/code]. Loaded chunks and intentionally absent cells count as complete; failed cells do not. With [param require_visual_details] enabled, a generated chunk remains pending until [method mark_visual_details_ready] is called. The count uses the same bounded main streaming grid (maximum 16,384 cells), excluding the auxiliary waypoint source. A disabled streamer or invalid input yields no eligible cells and [code]ready = false[/code]. Truncated grids never report ready or full progress. This method never starts generation, requests resources, activates physics, or changes world state. For a separate waypoint, use [method get_auxiliary_source_progress].</description>
+		</method>
 		<method name="get_auxiliary_source_progress" qualifiers="const">
 			<return type="float" />
 			<param index="0" name="require_visual_details" type="bool" default="false" />

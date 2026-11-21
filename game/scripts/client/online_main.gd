@@ -107,6 +107,7 @@ var streamer: WorldStreamer
 # corrected player motion and resets on teleport/network resync.
 var _stream_previous_position := Vector3.ZERO
 var _stream_has_previous_position := false
+var _world_streaming_status_elapsed := 0.0
 var _stream_velocity := Vector3.ZERO
 var chunk_root: Node3D
 var entities: Node3D
@@ -1614,6 +1615,13 @@ func _process(delta: float) -> void:
 		streamer.velocity_hint = _stream_velocity
 		# Longer forward streaming on the bike; idle/teleport uses exact nearby cells.
 		WorldStreamingPolicy.apply(streamer, bool(client.you.get("mounted", false)), _stream_velocity)
+		# A single bounded native grid query twice per second, not once per frame.
+		# Terrain remains server-independent; this is a client visual readiness cue.
+		_world_streaming_status_elapsed += maxf(delta, 0.0)
+		if _world_streaming_status_elapsed >= 0.5:
+			_world_streaming_status_elapsed = fmod(_world_streaming_status_elapsed, 0.5)
+			if hud != null:
+				hud.world_streaming_notice = WorldStreamingPolicy.focus_loading_notice(streamer)
 		# The private map marker only prefetches when near the player; the
 		# native engine keeps extra cells bounded and never streams distant
 		# objectives. No network RPC or simulation change is involved.
