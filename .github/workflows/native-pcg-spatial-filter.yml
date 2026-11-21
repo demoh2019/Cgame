@@ -52,11 +52,11 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 240s "$BIN" --headless --test --test-case="*PCGSurfaceFilter3D*" --no-colors 2>&1 | tee pcg-surface-native.log
-      - name: Native attribute PCG density remap and stable-ID tests
+      - name: Native PCG path falloff tests
         run: |
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
-          timeout 240s "$BIN" --headless --test --test-case="*PCGDensitySelector*" --no-colors 2>&1 | tee pcg-density-native.log
+          timeout 240s "$BIN" --headless --test --test-case="*PCGPathFalloff*" --no-colors 2>&1 | tee pcg-path-falloff-native.log
       - name: Import Albion After game
         run: |
           set -euo pipefail
@@ -76,35 +76,6 @@ jobs:
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 180s "$BIN" --headless --path games/days_after --editor --import --quit 2>&1 | tee pcg-days-after-import.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' pcg-days-after-import.log; then exit 1; fi
-      - name: Days After generic density remap native/fallback parity
-        run: |
-          set -euo pipefail
-          BIN=./bin/godot.linuxbsd.editor.x86_64
-          timeout 180s "$BIN" --headless --path games/days_after --script res://pcg_density_smoke_test.gd 2>&1 | tee pcg-density-game.log
-          grep -E '^PCG DENSITY TOTAL: 0 failures
-        run: |
-          set -euo pipefail
-          BIN=./bin/godot.linuxbsd.editor.x86_64
-          timeout 180s "$BIN" --headless --path games/days_after --script res://smoke_test.gd 2>&1 | tee pcg-days-after-smoke.log
-          grep -F 'PASS: scene, bounded visual LOD, exclusion-safe PCG foliage,' pcg-days-after-smoke.log
-          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-days-after-smoke.log; then exit 1; fi
-      - name: Upload PCG logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-pcg-spatial-filter
-          if-no-files-found: ignore
-          path: |
-            pcg-native.log
-            pcg-density-native.log
-            pcg-density-game.log
-            pcg-surface-native.log
-            pcg-import.log
-            pcg-game.log
-            pcg-days-after-import.log
-            pcg-days-after-smoke.log
- pcg-density-game.log
-          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-density-game.log; then exit 1; fi
       - name: Run native exclusion-volume gameplay smoke
         run: |
           set -euo pipefail
@@ -120,6 +91,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             pcg-native.log
+            pcg-path-falloff-native.log
             pcg-surface-native.log
             pcg-import.log
             pcg-game.log

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PCGPathFalloff3D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Deterministic, bounded density falloff around a polyline in the horizontal XZ plane.
+	</brief_description>
+	<description>
+		Returns per-candidate multipliers in the range 0 to 1 based on the shortest horizontal distance to a piecewise-linear path. Candidates inside or on the inner radius get 0 (clear corridor); candidates at or beyond the outer radius get 1 (unchanged density). Between these radii, smoothstep produces a soft transition without hard edges. A single path point produces a circular mask, repeated/degenerate control points are supported, and equal radii produce a hard threshold. The source positions and polyline are not modified. The calculation is entirely data-only: no scene nodes, physics queries, global random state or allocations proportional to the world size.
+		Both input arrays must contain finite coordinates within +/- 10,000,000 on every axis, with at most 16,384 candidates and 1 to 256 control points. Radii must be finite, ordered (0 to 10,000). Invalid input causes atomic rejection with an empty array, not a partial result. Complexity is O(candidates * path_segments), bounded by the input limits.
+	</description>
+	<methods>
+		<method name="sample_factors" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="1" name="path_points" type="PackedVector3Array" />
+			<param index="2" name="inner_radius" type="float" />
+			<param index="3" name="outer_radius" type="float" />
+			<description>
+				Calculates a smoothstep density multiplier from the minimum distance between each position (XZ) and the given polyline (XZ). The Y axis is ignored for distance, but must contain finite bounded coordinates. A factor of 0 suppresses a point, 1 preserves its original density, and values in between create soft edges for trails, roads and biome boundaries. Multiply original per-point densities by the returned factors before calling [method PCGSpatialFilter3D.filter_indices_density].
+			</description>
+		</method>
+	</methods>
+</class>

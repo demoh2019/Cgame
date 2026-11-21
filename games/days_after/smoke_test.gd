@@ -60,6 +60,37 @@ func _smoke() -> void:
         if int(foliage.call("get_box_only_candidate_count")) < 1:
             push_error("Rectangular exclusion volumes are not covering any additional grass candidates")
             ok = false
+        var trail: PackedVector3Array = foliage.call("get_trail_points")
+        var trail_factors: PackedFloat32Array = foliage.call("get_trail_factors")
+        if trail.size() != 5 or trail_factors.size() != 625:
+            push_error("PCG native trail falloff mask is missing or has invalid dimensions")
+            ok = false
+        else:
+            var cleared: int = 0
+            var transition: int = 0
+            var untouched: int = 0
+            for factor in trail_factors:
+                if factor < -0.00001 or factor > 1.00001:
+                    push_error("PCG trail mask generated a factor outside [0,1]")
+                    ok = false
+                elif factor == 0.0:
+                    cleared += 1
+                elif factor < 1.0:
+                    transition += 1
+                else:
+                    untouched += 1
+            if cleared < 20 or transition < 40 or untouched < 250:
+                push_error("PCG trail did not create a cleared path and smooth biome transition")
+                ok = false
+        if not bool(foliage.call("verify_trail_native_fallback_parity")):
+            push_error("Native PCG path falloff disagrees with GDScript reference")
+            ok = false
+        var sampled_foliage_factors: PackedFloat32Array = foliage.call("_sample_trail_fallback", positions)
+        for factor in sampled_foliage_factors:
+            if factor <= 0.0:
+                push_error("PCG grass was placed in the fully cleared trail corridor")
+                ok = false
+                break
         var densities: PackedFloat32Array = foliage.call("get_density_values")
         var sampled_count: int = int(foliage.call("get_density_sampled_count"))
         if densities.size() != 625 or sampled_count < 250 or sampled_count > 500:
@@ -104,35 +135,6 @@ func _smoke() -> void:
         foliage.call("regenerate")
         if positions != foliage.call("get_selected_positions"):
             push_error("PCG foliage placement was not deterministic")
-            ok = false
-        # The native density-remap policy must preserve the authored biome
-        # mask at default quality and react to game-side runtime quality.
-        if bool(foliage.call("set_density_ceiling", 1.5)) or \
-                bool(foliage.call("set_density_ceiling", NAN)):
-            push_error("PCG density cap accepted invalid quality input")
-            ok = false
-        if not bool(foliage.call("set_density_ceiling", 0.5)):
-            push_error("PCG runtime foliage density cap could not change")
-            ok = false
-        var low_quality: PackedFloat32Array = foliage.call("get_density_values")
-        if low_quality.size() != densities.size():
-            push_error("PCG density remap changed the number of source points")
-            ok = false
-        else:
-            for sample_index in range(densities.size()):
-                if absf(low_quality[sample_index] - densities[sample_index] * 0.5) > 0.00001:
-                    push_error("PCG runtime density remap diverged from the authored biome mask")
-                    ok = false
-                    break
-        if int(foliage.call("get_density_sampled_count")) > sampled_count:
-            push_error("Lowered PCG density cap admitted more source points")
-            ok = false
-        if not bool(foliage.call("verify_native_fallback_parity")):
-            push_error("Runtime density cap broke native/fallback placement parity")
-            ok = false
-        if not bool(foliage.call("set_density_ceiling", 1.0)) or \
-                positions != foliage.call("get_selected_positions"):
-            push_error("Restored PCG density cap did not restore stable vegetation")
             ok = false
 
     var state = game.get("state")
@@ -228,5 +230,5 @@ func _smoke() -> void:
     game.queue_free()
     await process_frame
     if ok:
-        print("PASS: scene, bounded visual LOD, exclusion-safe PCG foliage, scavenging, gathering, XP, crafting, gear, combat and survival")
+        print("PASS: scene, bounded visual LOD, exclusion-safe PCG foliage, path-density falloff, scavenging, gathering, XP, crafting, gear, combat and survival")
     quit(0 if ok else 1)

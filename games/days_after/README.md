@@ -110,31 +110,25 @@ networking changes. The GDScript fallback matches the 31-bit native
 integer hash and is smoke-tested for output parity and regeneration.
 
 The density and performance benefits should be measured in a custom
-Cgame build before claiming an FPS increase. 
+Cgame build before claiming an FPS increase.
 
+## Curved trail with PCG distance falloff
 
-## Runtime foliage density scaling (native PCG Density Remap)
+`FoliageScatter` uses native `PCGPathFalloff3D.sample_factors()`
+to evaluate a multi-segment path from the outskirts past the survivor
+spawn and ruined buildings. The route has a 1.8 m fully cleared
+center and a 6 m soft outer margin: the sampled smoothstep factors
+multiply existing deterministic biome densities *before* seeded
+selection, exclusion volumes and 2.1 m instance spacing.
 
-`FoliageScatter.set_density_ceiling(value)` accepts a validated [0,1]
-cosmetic density ceiling and regenerates only the collision-free grass
-`MultiMesh`. The default 1.0 preserves the existing four native
-biome density zones and stable seeded placement exactly. For a
-low-detail setting, `set_density_ceiling(0.5)` linearly scales the
-probability mask before the existing spatial density selector. Returning
-to 1.0 restores the same positions, because no shared random state is
-consumed. NaN/out-of-range values are rejected without changing the scene.
+This is a native engine feature immediately exercised in the game.
+Grass remains purely decorative and renders in a single
+`MultiMeshInstance3D`; collision, enemy AI, gathering and networking
+are not changed. The stock-Godot GDScript fallback implements the
+same point-to-polyline distance mask and the smoke suite checks
+native/fallback parity, corridor clearance, density blending,
+placement bounds and reproducibility.
 
-This new stage uses Cgame's generic
-`PCGDensitySelector.remap_densities()`; older builds and stock Godot
-run the matching pure GDScript fallback. The original native
-`PCGSpatialFilter3D.filter_indices_density()` and sphere/box
-spacing/exclusion behavior remain unchanged.
-
-```bash
-godot --headless --path games/days_after --script res://pcg_density_smoke_test.gd
-godot --headless --path games/days_after --script res://smoke_test.gd
-```
-
-Native C++ test: `[PCGDensitySelector]`. CI runs both under
-`.github/workflows/native-pcg-spatial-filter.yml`.
-No FPS/VRAM benefit is claimed before hardware measurement.
+The path is currently a bounded XZ polyline mask, **not** an editor
+spline tool or a navigation mesh. Performance gains are not claimed
+without building and profiling Cgame.
