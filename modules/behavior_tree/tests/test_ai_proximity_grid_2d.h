@@ -635,6 +635,17 @@ TEST_CASE("[AIProximityGrid2D] Variable-radius rejects invalid inputs atomically
 	PackedVector2Array many_targets;
 	many_targets.resize(9); // 36,864 hits exceed the 32,768-pair cap.
 	CHECK(grid->query_cross_variable_radius_batch(dense, dense_radii, many_targets).is_empty());
+	// Empty result sets may still be pathological when every target shares
+	// a grid cell; the 262,144 distance-test budget must reject them too.
+	for (int i = 0; i < dense_radii.size(); i++) {
+		dense_radii.set(i, 0.0f);
+	}
+	PackedVector2Array dense_near_misses;
+	dense_near_misses.resize(65);
+	for (int i = 0; i < dense_near_misses.size(); i++) {
+		dense_near_misses.set(i, Vector2(0.5, 0.5));
+	}
+	CHECK(grid->query_cross_variable_radius_batch(dense, dense_radii, dense_near_misses).is_empty());
 	CHECK(grid->query_cross_variable_radius_batch(sources, radii, targets).size() == 1);
 }
 
