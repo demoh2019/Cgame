@@ -37,6 +37,30 @@ func run(t) -> void:
 	t.eq(RaidReinforcements.next_phase(NAN, 600.0, 0), 0, "NaN cannot summon")
 	t.eq(RaidReinforcements.kinds(2).size(), 2, "final wave is bounded")
 
+
+	t.current = "bounded deterministic spread ranking"
+	var candidates: Array[Vector2] = [
+		Vector2(8, 0), Vector2(8, 1), Vector2(16, 0),
+		Vector2(16, 1), Vector2(25, 0)]
+	var threats: Array[Vector2] = [Vector2(0, 0), Vector2(3, 0)]
+	var scripted: Array[Vector2] = RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, false)
+	t.eq(scripted.size(), 2, "two locations are selected")
+	t.eq(scripted[0], Vector2(25, 0), "safest candidate is first")
+	t.eq(scripted[1], Vector2(16, 0), "spread finds next distinct candidate")
+	t.check(scripted[0].distance_to(scripted[1]) >= 4.0, "raid sites keep minimum spacing")
+	var actual: Array[Vector2] = RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true)
+	t.eq(actual, scripted, "native and stock Godot must select the same sites")
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 0, 4.0).size(), 0, "invalid count rejected")
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, NAN).size(), 0, "nonfinite spacing rejected")
+	var no_threats: Array[Vector2] = RaidReinforcements.spread_sites(
+		candidates, Array[Vector2](), Vector2.ZERO, 2, 4.0)
+	t.eq(no_threats[0], Vector2(8, 0), "no threats preserves source order")
+	t.eq(no_threats[1], Vector2(16, 0), "empty threats still respects spacing")
+
 	t.current = "server only, genuine infected, safe coordinates"
 	var world := FlatWorld.new()
 	var server := GameServer.new(world, 721)
@@ -58,6 +82,9 @@ func run(t) -> void:
 	var sites := RaidReinforcements.sites(world, server.players,
 		server.zombies, boss.position, 1, 2)
 	t.eq(sites.size(), 2, "clear dangerous terrain permits two adds")
+	if sites.size() >= 2:
+		t.check(sites[0].distance_to(sites[1]) >= RaidReinforcements.MIN_BETWEEN_ADDS,
+			"live raid wave positions maintain separation")
 	for site in sites:
 		t.eq(world.zone_at(site.x, site.y), 2, "adds stay in encounter zone")
 		t.check(site.distance_to(Vector2(fighter.position.x, fighter.position.z))
