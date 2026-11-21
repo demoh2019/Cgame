@@ -17,6 +17,14 @@ class FlatWorld:
 		return []
 
 
+class CoverWorld:
+	extends FlatWorld
+	func blockers_near(x: float, z: float, r: float) -> Array:
+		if absf(x - 17.0) < r + 1.0 and absf(z) < r + 1.0:
+			return [{"x": 17.0, "z": 0.0, "radius": 0.6}]
+		return []
+
+
 class Survivor:
 	extends RefCounted
 	var alive: bool = true
@@ -92,7 +100,39 @@ func run(t) -> void:
 	else:
 		t.check(true, "stock Godot uses portable deterministic GDScript")
 
+	t.current = "server-vetted per-candidate tactical bonuses have native/script parity"
+	var biased: Array[Vector2] = [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 2)]
+	var bonuses: Array[float] = [0.0, 0.25, 0.0]
+	var biased_order: Array[Vector2] = [Vector2(-1, 0), Vector2(0, 2), Vector2(1, 0)]
+	t.eq(Reinforcements.rank_sites(biased, [Vector2.ZERO], Vector2.ZERO, true, bonuses),
+		biased_order, "tactical bonus can reorder safe EQS candidates")
+	t.eq(Reinforcements.rank_sites(biased, [Vector2.ZERO], Vector2.ZERO, false, bonuses),
+		biased_order, "portable GDScript uses identical bonus ordering")
+	t.eq(Reinforcements.spread_sites(biased, [Vector2.ZERO], Vector2.ZERO,
+		2, 1.0, true, [], 0.0, bonuses),
+		[Vector2(-1, 0), Vector2(0, 2)],
+		"native spread selects two separated and biased positions")
+	t.eq(Reinforcements.spread_sites(biased, [Vector2.ZERO], Vector2.ZERO,
+		2, 1.0, false, [], 0.0, bonuses),
+		[Vector2(-1, 0), Vector2(0, 2)],
+		"portable spread selects identical separated positions")
+	t.eq(Reinforcements.rank_sites(biased, [], Vector2.ZERO, true, bonuses),
+		[Vector2(-1, 0), Vector2(1, 0), Vector2(0, 2)],
+		"cover ranking still works when no players are nearby")
+	t.eq(Reinforcements.rank_sites(biased, [Vector2.ZERO], Vector2.ZERO, true, [INF]),
+		[Vector2(0, 2), Vector2(1, 0), Vector2(-1, 0)],
+		"malformed bonus arrays cannot enter the authoritative query")
+	var denied: Array[Vector2] = [Vector2(-1, 0)]
+	t.eq(Reinforcements.spread_sites(biased, [Vector2.ZERO], Vector2.ZERO,
+		2, 1.0, true, denied, 0.5, bonuses),
+		[Vector2(0, 2), Vector2(1, 0)],
+		"bonuses never override occupancy clearance")
+
 	t.current = "real server raid reinforcement spawn sites remain safe and bounded"
+	var cover_world := CoverWorld.new()
+	var covered := Reinforcements.sites(cover_world, {}, {}, Vector3.ZERO, 1, 2)
+	t.check(not covered.is_empty() and covered[0].distance_to(Vector2(15, 0)) < 0.01,
+		"real encounter spawn selection prefers vetted cover-adjacent positions")
 	var world := FlatWorld.new()
 	var near_players: Dictionary = {
 		7: Player.new(Vector3(212, 3, 198)),

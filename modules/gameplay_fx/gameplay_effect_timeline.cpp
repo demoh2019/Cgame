@@ -33,6 +33,13 @@ bool GameplayEffectTimeline::_valid_stacks(int p_stacks) {
 	return p_stacks > 0 && p_stacks <= MAX_STACKS;
 }
 
+bool GameplayEffectTimeline::_tag_matches(const String &p_active, const String &p_requirement) {
+	// Match exact or a dot-delimited child, never a lookalike string prefix.
+	return p_active == p_requirement ||
+			(p_active.length() > p_requirement.length() && p_active.begins_with(p_requirement) &&
+					p_active[p_requirement.length()] == '.');
+}
+
 bool GameplayEffectTimeline::set_effect(const StringName &p_tag, double p_seconds, int p_stacks) {
 	if (!_valid_tag(p_tag) || !_valid_duration(p_seconds) || !_valid_stacks(p_stacks)) {
 		return false;
@@ -88,6 +95,48 @@ bool GameplayEffectTimeline::apply_effect(const StringName &p_tag, double p_seco
 	return true;
 }
 
+bool GameplayEffectTimeline::apply_effect_with_tag_requirements(const StringName &p_tag, double p_seconds,
+		const PackedStringArray &p_active_tags, const PackedStringArray &p_required_tags,
+		const PackedStringArray &p_blocked_tags, int p_stacks, int p_stack_limit, ReapplyPolicy p_policy) {
+	// All checks occur before any modification (including periodic pulse phase).
+	// Bounded cardinalities guard against untrusted giant query inputs.
+	if (p_active_tags.size() > MAX_ACTIVE_TAG_CONTEXTS ||
+			p_required_tags.size() > MAX_TAG_REQUIREMENTS || p_blocked_tags.size() > MAX_TAG_REQUIREMENTS) {
+		return false;
+	}
+	for (const String &active : p_active_tags) {
+		if (!_valid_tag(StringName(active))) {
+			return false;
+		}
+	}
+	for (const String &required : p_required_tags) {
+		if (!_valid_tag(StringName(required))) {
+			return false;
+		}
+		bool found = false;
+		for (const String &active : p_active_tags) {
+			if (_tag_matches(active, required)) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			return false; // All required tags must be present.
+		}
+	}
+	for (const String &blocked : p_blocked_tags) {
+		if (!_valid_tag(StringName(blocked))) {
+			return false;
+		}
+		for (const String &active : p_active_tags) {
+			if (_tag_matches(active, blocked)) {
+				return false; // Any blocked tag prevents application.
+			}
+		}
+	}
+	return apply_effect(p_tag, p_seconds, p_stacks, p_stack_limit, p_policy);
+}
+
 bool GameplayEffectTimeline::set_periodic(const StringName &p_tag, double p_period, bool p_reset_on_reapply) {
 	const int index = _find(p_tag);
 	if (index < 0 || !Math::is_finite(p_period) || p_period < 0.0 ||
@@ -134,7 +183,7 @@ bool GameplayEffectTimeline::replace_snapshot(const Dictionary &p_effects) {
 		return false;
 	}
 	Vector<Effect> validated;
-	for (const Variant &key : p_effects) {
+	for (const Variant &key : p_effects.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
@@ -231,7 +280,7 @@ static bool _timeline_effect_in_branch(const StringName &p_tag, const StringName
 	return tag == branch || (tag.length() > branch.length() && tag.begins_with(branch) && tag[branch.length()] == '.');
 }
 
-bool GameplayEffectTimeline::replace_effect_branch(const StringName &p_branch, const Dictionary &p_effects) {
+bool GameplayEffectTimeline::_replace_effect_branch(const StringName &p_branch, const Dictionary &p_effects, bool p_preserve_pending) {
 	if (!_valid_tag(p_branch) || p_effects.size() > MAX_EFFECTS) {
 		return false;
 	}
@@ -240,7 +289,7 @@ bool GameplayEffectTimeline::replace_effect_branch(const StringName &p_branch, c
 	// optional periodic phase and normalization collisions, before any commit.
 	Vector<Effect> validated;
 	Vector<StringName> seen;
-	for (const Variant &key : p_effects) {
+	for (const Variant &key : p_effects.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
@@ -345,15 +394,31 @@ bool GameplayEffectTimeline::replace_effect_branch(const StringName &p_branch, c
 			}
 		}
 	}
+	// Remember only the matching, still-live effects whose periodic interval
+	// has not changed. A fresh tag or a rephased period must never inherit
+	// another effect instance's pending pulses. This is bounded by MAX_EFFECTS.
+	Vector<StringName> continuing_pulses;
+	if (p_preserve_pending) {
+		for (const Effect &effect : validated) {
+			const int prior = _find(effect.tag);
+			if (prior >= 0 && effect.period > 0.0 &&
+					effects[prior].period == effect.period &&
+					effects[prior].next_period == effect.next_period) {
+				continuing_pulses.push_back(effect.tag);
+			}
+		}
+	}
 	if (!unchanged) {
 		effects = next;
 	}
-	// A Runtime update may supersede its pending pulses, but must never erase
-	// unrelated local cosmetic pulse events queued for the game's next frame.
+	// The original replace_effect_branch still discards every in-branch pulse.
+	// Replication reconciliation retains pending pulses for continuing tags,
+	// even when authoritative remaining time or stack counts change.
 	Vector<StringName> expired_pulses;
-	for (const Variant &key : pending_pulses) {
+	for (const Variant &key : pending_pulses.keys()) {
 		const StringName tag = key;
-		if (_timeline_effect_in_branch(tag, p_branch)) {
+		if (_timeline_effect_in_branch(tag, p_branch) &&
+				(!p_preserve_pending || !continuing_pulses.has(tag))) {
 			expired_pulses.push_back(tag);
 		}
 	}
@@ -361,6 +426,14 @@ bool GameplayEffectTimeline::replace_effect_branch(const StringName &p_branch, c
 		pending_pulses.erase(tag);
 	}
 	return true;
+}
+
+bool GameplayEffectTimeline::replace_effect_branch(const StringName &p_branch, const Dictionary &p_effects) {
+	return _replace_effect_branch(p_branch, p_effects, false);
+}
+
+bool GameplayEffectTimeline::reconcile_effect_branch(const StringName &p_branch, const Dictionary &p_effects) {
+	return _replace_effect_branch(p_branch, p_effects, true);
 }
 
 Dictionary GameplayEffectTimeline::get_snapshot() const {
@@ -379,10 +452,9 @@ Dictionary GameplayEffectTimeline::get_snapshot() const {
 	return result;
 }
 
-PackedStringArray GameplayEffectTimeline::tick(double p_delta) {
-	PackedStringArray expired;
+void GameplayEffectTimeline::_advance(double p_delta, PackedStringArray *r_expired) {
 	if (!Math::is_finite(p_delta) || p_delta <= 0.0) {
-		return expired;
+		return;
 	}
 	int i = 0;
 	while (i < effects.size()) {
@@ -401,14 +473,29 @@ PackedStringArray GameplayEffectTimeline::tick(double p_delta) {
 			effect.next_period -= elapsed;
 		}
 		if (p_delta >= effect.remaining) {
-			expired.push_back(String(effect.tag));
+			if (r_expired != nullptr) {
+				r_expired->push_back(String(effect.tag));
+			}
 			effects.remove_at(i);
 		} else {
 			effect.remaining -= p_delta;
 			i++;
 		}
 	}
+	return;
+}
+
+PackedStringArray GameplayEffectTimeline::tick(double p_delta) {
+	PackedStringArray expired;
+	_advance(p_delta, &expired);
 	return expired;
+}
+
+Dictionary GameplayEffectTimeline::tick_and_take_periodic_pulses(double p_delta) {
+	// Cosmetic rendering never uses the expired tag array. Skip that output,
+	// but preserve the exact phase, expiry and bounded pulse accumulation.
+	_advance(p_delta, nullptr);
+	return take_periodic_pulses();
 }
 
 double GameplayEffectTimeline::get_remaining(const StringName &p_tag) const {
@@ -428,13 +515,18 @@ bool GameplayEffectTimeline::has_effect(const StringName &p_tag) const {
 void GameplayEffectTimeline::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_effect", "tag", "seconds", "stacks"), &GameplayEffectTimeline::set_effect, DEFVAL(1));
 	ClassDB::bind_method(D_METHOD("apply_effect", "tag", "seconds", "stacks", "stack_limit", "policy"), &GameplayEffectTimeline::apply_effect, DEFVAL(1), DEFVAL(MAX_STACKS), DEFVAL(REAPPLY_REFRESH));
+	ClassDB::bind_method(D_METHOD("apply_effect_with_tag_requirements", "tag", "seconds", "active_tags", "required_tags", "blocked_tags", "stacks", "stack_limit", "policy"),
+			&GameplayEffectTimeline::apply_effect_with_tag_requirements, DEFVAL(PackedStringArray()), DEFVAL(PackedStringArray()),
+			DEFVAL(1), DEFVAL(MAX_STACKS), DEFVAL(REAPPLY_REFRESH));
 	ClassDB::bind_method(D_METHOD("set_periodic", "tag", "period", "reset_on_reapply"), &GameplayEffectTimeline::set_periodic, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("get_periodic", "tag"), &GameplayEffectTimeline::get_periodic);
 	ClassDB::bind_method(D_METHOD("take_periodic_pulses"), &GameplayEffectTimeline::take_periodic_pulses);
+	ClassDB::bind_method(D_METHOD("tick_and_take_periodic_pulses", "delta"), &GameplayEffectTimeline::tick_and_take_periodic_pulses);
 	ClassDB::bind_method(D_METHOD("remove_effect", "tag"), &GameplayEffectTimeline::remove_effect);
 	ClassDB::bind_method(D_METHOD("clear"), &GameplayEffectTimeline::clear);
 	ClassDB::bind_method(D_METHOD("replace_snapshot", "effects"), &GameplayEffectTimeline::replace_snapshot);
 	ClassDB::bind_method(D_METHOD("replace_effect_branch", "branch", "effects"), &GameplayEffectTimeline::replace_effect_branch);
+	ClassDB::bind_method(D_METHOD("reconcile_effect_branch", "branch", "effects"), &GameplayEffectTimeline::reconcile_effect_branch);
 	ClassDB::bind_method(D_METHOD("get_snapshot"), &GameplayEffectTimeline::get_snapshot);
 	ClassDB::bind_method(D_METHOD("tick", "delta"), &GameplayEffectTimeline::tick);
 	ClassDB::bind_method(D_METHOD("get_remaining", "tag"), &GameplayEffectTimeline::get_remaining);

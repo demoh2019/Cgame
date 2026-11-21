@@ -40,13 +40,26 @@ def effective_cpu(configured, pressure):
     return configured
 
 
+def effective_unloads(configured, pressure):
+    configured = max(0, min(configured, 64))
+    if configured == 0:
+        return 0
+    pressure = max(0.0, min(pressure if math.isfinite(pressure) else 0.0, 1.0))
+    if pressure >= .8:
+        return max(1, (configured + 1) // 2)
+    if pressure >= .4:
+        return max(1, (configured * 3 + 3) // 4)
+    return configured
+
+
 class TestWorldStreamerPressureContracts(unittest.TestCase):
     def test_native_pressure_and_frame_work_contract(self):
         header = HEADER.read_text()
         cpp = CPP.read_text()
         for method in (
             "advance_chunk_pressure", "calculate_adaptive_instantiation_slots",
-            "calculate_adaptive_chunk_work_usec", "get_last_frame_chunk_work_usec",
+            "calculate_adaptive_chunk_work_usec", "calculate_adaptive_unload_slots",
+            "get_effective_unloads_per_update", "get_last_frame_chunk_work_usec",
             "get_last_frame_chunk_attempt_count", "set_adaptive_chunk_budget_enabled",
         ):
             self.assertIn(method, header)
@@ -73,6 +86,7 @@ class TestWorldStreamerPressureContracts(unittest.TestCase):
         for n in (
             "adaptive_chunk_budget_enabled", "advance_chunk_pressure",
             "calculate_adaptive_instantiation_slots", "calculate_adaptive_chunk_work_usec",
+            "calculate_adaptive_unload_slots", "get_effective_unloads_per_update",
             "get_last_frame_chunk_work_usec", "get_last_frame_chunk_attempt_count",
         ):
             self.assertIn(n, names)
@@ -83,7 +97,7 @@ class TestWorldStreamerPressureContracts(unittest.TestCase):
         for name in (
             "Albion/StreamChunkCPUus", "Albion/StreamChunkAttempts",
             "Albion/StreamPressurePct", "Albion/StreamEffectiveSlots",
-            "Albion/StreamEffectiveCPUus",
+            "Albion/StreamEffectiveCPUus", "Albion/StreamEffectiveUnloads",
         ):
             self.assertIn(name, game)
         self.assertIn("streamer.refresh()", test)
@@ -104,6 +118,20 @@ class TestWorldStreamerPressureContracts(unittest.TestCase):
         self.assertEqual(effective_cpu(2500, pressure), 2500)
         self.assertEqual(pressure_step(.5, float("nan")), .5)
         self.assertEqual(pressure_step(float("nan"), .025), 0.0)
+
+    def test_adaptive_unloads_are_bounded_and_recover(self):
+        self.assertEqual(effective_unloads(0, 1.0), 0)
+        self.assertEqual(effective_unloads(12, .4), 9)
+        self.assertEqual(effective_unloads(12, .8), 6)
+        self.assertEqual(effective_unloads(48, .8), 24)
+        self.assertEqual(effective_unloads(200, .8), 32)
+        self.assertEqual(effective_unloads(12, float("nan")), 12)
+        for configured in range(1, 65):
+            for pressure in (0, .39, .4, .79, .8, 1.0):
+                self.assertTrue(1 <= effective_unloads(configured, pressure) <= configured)
+        cpp = CPP.read_text()
+        self.assertIn("MIN(count, get_effective_unloads_per_update())", cpp)
+        self.assertIn("if (max_unloads_per_update == 0)", cpp)
 
     def test_soft_budget_preserves_progress_and_off_mode(self):
         for slots in range(1, 8):

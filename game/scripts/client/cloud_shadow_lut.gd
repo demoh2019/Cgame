@@ -3,6 +3,7 @@ extends RefCounted
 ## This replaces repeated multi-octave hash/sine noise at every rendered pixel.
 ## A deterministic CPU build runs once; the texture stays cached across chunks.
 const ImageBatch = preload("res://scripts/client/image_batch.gd")
+const ScalarGridSampler = preload("res://scripts/client/scalar_grid_sampler.gd")
 const SIZE := 128
 const TILE_METERS := 1024.0
 const MAX_CLOUD_SPEED := 7.5 # m/s at full regional wind; clouds move over the existing large texture.
@@ -31,35 +32,47 @@ static func _sample(grid: PackedFloat32Array, cells: int, u: float, v: float) ->
 	return lerpf(a, b, fy)
 
 
-static func build_image() -> Image:
-	if _image != null:
+static func build_image(force_scalar: bool = false) -> Image:
+	# Forced scalar generation is only for test parity; production stays
+	# cached and only uploads the shared cloud texture once.
+	if not force_scalar and _image != null:
 		return _image
 	var rng := RandomNumberGenerator.new()
 	rng.seed = SEED
-	var layers: Array[PackedFloat32Array] = []
-	for cells in PERIODS:
+	var uvs := PackedVector2Array()
+	uvs.resize(SIZE * SIZE)
+	for y in SIZE:
+		for x in SIZE:
+			# Pixel centres match the existing periodic cloud lookup.
+			uvs[y * SIZE + x] = Vector2((float(x) + 0.5) / float(SIZE),
+					(float(y) + 0.5) / float(SIZE))
+	var accumulated := PackedFloat64Array()
+	accumulated.resize(SIZE * SIZE)
+	for layer in PERIODS.size():
+		var cells: int = PERIODS[layer]
 		var grid := PackedFloat32Array()
 		grid.resize(cells * cells)
 		for index in grid.size():
 			grid[index] = rng.randf()
-		layers.append(grid)
+		# Formerly each of the 16K cloud pixels called the scalar sampler
+		# separately for all 3 octaves. Each octave now uses one CPU batch.
+		var samples: PackedFloat32Array = ScalarGridSampler.sample_wrapped(
+				grid, Vector2i(cells, cells), uvs, true, force_scalar)
+		if samples.size() != SIZE * SIZE:
+			return null
+		for i in samples.size():
+			accumulated[i] += float(WEIGHTS[layer]) * samples[i]
 	var result := Image.create(SIZE, SIZE, false, Image.FORMAT_L8)
 	for y in SIZE:
 		var row_colors := PackedColorArray()
 		row_colors.resize(SIZE)
 		for x in SIZE:
-			# Pixel centres are consistent with bilinear texture sampling. Each
-			# source octave wraps, so adjacent cloud tiles have no hard seams.
-			var u: float = (float(x) + 0.5) / float(SIZE)
-			var v: float = (float(y) + 0.5) / float(SIZE)
-			var value: float = 0.0
-			for layer in PERIODS.size():
-				value += WEIGHTS[layer] * _sample(layers[layer], PERIODS[layer], u, v)
-			var shadow: float = smoothstep(0.46, 0.70, value)
+			var shadow: float = smoothstep(0.46, 0.70, accumulated[y * SIZE + x])
 			row_colors[x] = Color(shadow, shadow, shadow)
 		ImageBatch.set_row(result, y, row_colors)
-	_image = result
-	return _image
+	if not force_scalar:
+		_image = result
+	return result
 
 
 static func texture() -> ImageTexture:

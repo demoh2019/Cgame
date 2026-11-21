@@ -8,6 +8,8 @@ on:
       - 'tests/scene/test_scene_node_pool.cpp'
       - 'game/addons/runtime_pool/**'
       - 'game/scripts/client/effects.gd'
+      - 'game/scripts/client/fx_scalability_policy.gd'
+      - 'game/tests/test_fx_scalability_budget.gd'
       - 'game/scripts/client/pooled_burst.*'
       - 'game/tests/test_runtime_node_pool.gd'
       - '.github/workflows/native-scene-node-pool.yml'
@@ -18,6 +20,8 @@ on:
       - 'scene/register_scene_types.cpp'
       - 'tests/scene/test_scene_node_pool.cpp'
       - 'game/scripts/client/effects.gd'
+      - 'game/scripts/client/fx_scalability_policy.gd'
+      - 'game/tests/test_fx_scalability_budget.gd'
       - 'game/tests/test_runtime_node_pool.gd'
       - '.github/workflows/native-scene-node-pool.yml'
   workflow_dispatch:

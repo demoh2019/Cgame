@@ -39,7 +39,7 @@ namespace TestAdaptiveTickGovernor {
 TEST_CASE("[AdaptiveTickGovernor] Bounded samples and nearest-rank telemetry") {
 	Ref<AdaptiveTickGovernor> governor;
 	governor.instantiate();
-	CHECK(governor->snapshot()["sample_count"] == 0);
+	CHECK(governor->snapshot()["sample_count"] == Variant(0));
 	for (int i = 0; i < 202; i++) {
 		governor->observe_tick(int64_t(i) * 1000, 1);
 	}
@@ -51,7 +51,7 @@ TEST_CASE("[AdaptiveTickGovernor] Bounded samples and nearest-rank telemetry") {
 	CHECK(ordered[199] == doctest::Approx(201.0));
 	CHECK(double(governor->snapshot()["tick_max_ms"]) == doctest::Approx(201.0));
 	CHECK(double(governor->snapshot()["tick_p95_ms"]) == doctest::Approx(191.0));
-	CHECK(governor->snapshot()["native_backend"] == true);
+	CHECK(governor->snapshot()["native_backend"] == Variant(true));
 	governor->reset();
 	CHECK(governor->get_history_count() == 0);
 	CHECK(governor->get_total_ticks() == 0);

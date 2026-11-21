@@ -48,6 +48,8 @@ private:
 
 	Vector<ActiveCue> active;
 	Vector<PendingCue> pending;
+	int evicted_transient_count = 0;
+	int rejected_transient_count = 0;
 
 	static bool _valid_tag(const StringName &p_tag);
 	static bool _valid_priority(int p_priority);
@@ -61,12 +63,23 @@ protected:
 public:
 	// Immediate, nonpersistent cue (particles, sound, HUD, etc.). Repeats
 	// coalesce by tag, capped at MAX_DUPLICATES per undrained cue.
+	// On a full queue, a higher-priority transient may evict the oldest
+	// lowest-priority transient; persistent status lifecycle events are safe.
 	bool emit_cue(const StringName &p_tag, double p_magnitude = 1.0, int p_priority = 0);
+	// Batched transient dispatch: prevalidate all entries and commit only
+	// when every one can be admitted. Existing lifecycle events are never
+	// evicted; a failure leaves the queue and diagnostics unchanged.
+	// Each dictionary requires tag, magnitude and priority; max 32 entries.
+	bool emit_cues_batch(const Array &p_events);
 	// 0 stacks stops an active cue; an unchanged value never emits another event.
 	bool set_active(const StringName &p_tag, int p_stacks, int p_priority = 0);
 	// Replace the active set transactionally, emitting started/updated/stopped
 	// events only for changed tags. Invalid input preserves state and events.
 	bool replace_active(const Dictionary &p_snapshot, int p_priority = 0);
+	// Update only exact/dotted descendants of a replicated cue namespace.
+	// Preserve active local/FX cues and their pending lifecycle. Validate first,
+	// skip identical snapshots, and roll back if event capacity is exhausted.
+	bool replace_active_branch(const StringName &p_branch, const Dictionary &p_snapshot, int p_priority = 0);
 	Dictionary get_active_snapshot() const;
 	int get_active_stacks(const StringName &p_tag) const;
 	bool is_active(const StringName &p_tag) const { return get_active_stacks(p_tag) > 0; }
@@ -75,5 +88,8 @@ public:
 	Array take_events(int p_max_events = 32);
 	int get_active_count() const { return active.size(); }
 	int get_pending_count() const { return pending.size(); }
+	// Diagnostic counters since the last reset. Lifecycle cues are never evicted.
+	int get_evicted_transient_count() const { return evicted_transient_count; }
+	int get_rejected_transient_count() const { return rejected_transient_count; }
 	void reset();
 };

@@ -1,0 +1,73 @@
+/**************************************************************************/
+/*  pcg_spatial_filter_3d.h                                                 */
+/*                         This file is part of: GODOT ENGINE              */
+/* SPDX-License-Identifier: MIT                                            */
+/**************************************************************************/
+#pragma once
+
+#include "core/object/ref_counted.h"
+#include "core/variant/variant.h"
+
+// Stable bounded 3D thinning for procedural points. No RNG or scene access.
+class PCGSpatialFilter3D : public RefCounted {
+	GDCLASS(PCGSpatialFilter3D, RefCounted);
+
+protected:
+	static void _bind_methods();
+
+public:
+	static constexpr int MAX_CANDIDATES = 16384;
+	static constexpr int MAX_SELECTED = 4096;
+	static constexpr int MAX_EXCLUSION_ZONES = 128;
+	static constexpr double MAX_COORDINATE = 10000000.0;
+	static constexpr double MIN_SPACING = 0.05;
+	static constexpr double MAX_SPACING = 10000.0;
+
+	// Variable-footprint 3D PCG thinning, stable original-index output.
+	// Scales are validated in [0.5, 2.0]; the caller owns scene changes.
+	PackedInt32Array filter_indices_scaled(const PackedVector3Array &p_candidates,
+			const PackedFloat32Array &p_scales, double p_min_spacing,
+			int p_max_selected = MAX_SELECTED, bool p_largest_first = true) const;
+
+	PackedInt32Array filter_indices(const PackedVector3Array &p_candidates,
+			double p_min_spacing, int p_max_selected = MAX_SELECTED) const;
+	// Exclude points in inclusive spheres before spacing, so rejected points
+	// never occupy a spatial-hash cell. All input is validated atomically.
+	PackedInt32Array filter_indices_excluding(const PackedVector3Array &p_candidates,
+			const PackedVector3Array &p_exclusion_centers,
+			const PackedFloat64Array &p_exclusion_radii, double p_min_spacing,
+			int p_max_selected = MAX_SELECTED) const;
+
+	// Combined spherical and axis-aligned 3D exclusion volumes. Both kinds
+	// are applied before spacing; source indices are preserved and all
+	// inputs (including eventually excluded points) are validated.
+	PackedInt32Array filter_indices_excluding_volumes(
+			const PackedVector3Array &p_candidates,
+			const PackedVector3Array &p_exclusion_centers,
+			const PackedFloat64Array &p_exclusion_radii,
+			const PackedVector3Array &p_box_mins,
+			const PackedVector3Array &p_box_maxs,
+			double p_min_spacing, int p_max_selected = MAX_SELECTED) const;
+	// Unreal PCG-style yaw-rotated exclusion volumes. Combines the existing
+	// sphere/AABB selectors with oriented Y-axis boxes before spatial thinning.
+	// Extents are local half-sizes; yaw rotates the box around world Y in radians.
+	// Stable original indices, inclusive boundaries, no scene or RNG changes.
+	PackedInt32Array filter_indices_excluding_oriented_volumes(
+			const PackedVector3Array &p_candidates,
+			const PackedVector3Array &p_exclusion_centers,
+			const PackedFloat64Array &p_exclusion_radii,
+			const PackedVector3Array &p_box_mins,
+			const PackedVector3Array &p_box_maxs,
+			const PackedVector3Array &p_oriented_centers,
+			const PackedVector3Array &p_oriented_half_extents,
+			const PackedFloat64Array &p_oriented_yaws,
+			double p_min_spacing, int p_max_selected = MAX_SELECTED) const;
+
+	// PCG-style per-point density sampling with stable IDs. Every point is
+	// admitted independently of its input-array position; no global RNG.
+	// IDs and seed: [0, 2147483646], densities: finite [0, 1].
+	PackedInt32Array filter_indices_density(const PackedVector3Array &p_candidates,
+			const PackedFloat32Array &p_densities,
+			const PackedInt32Array &p_stable_ids, int64_t p_seed,
+			int p_max_selected = MAX_SELECTED) const;
+};

@@ -48,3 +48,97 @@ func run(t) -> void:
 			"stock Godot reads authoritative weapon cooldown")
 		t.eq(Cooldowns.display_remaining("head", you), 1.25,
 			"stock Godot retains gear cooldown UI")
+
+	t.current = "scoped authoritative updates preserve independent UI effects"
+	if tracker != null and tracker.has_method("replace_cooldown_branch"):
+		var fresh := {
+			"skill_cd": 2.0, "ultimate_cd": 0.0,
+			"gear_cd": {"armor": 0.5}, "ability_global_cd": 0.0
+		}
+		t.check(Cooldowns.record_activation_feedback(tracker, "weapon"),
+			"native visual press feedback starts independently")
+		t.check(Cooldowns.activation_feedback_active(tracker, "weapon"),
+			"UI press feedback is visible")
+		t.check(Cooldowns.reconcile_native(tracker, fresh),
+			"authoritative cooldown branch reconciles")
+		t.near(float(tracker.call("get_remaining", &"Ability.Weapon")), 2.0, 0.0001,
+			"new server ability cooldown replaces old value")
+		t.near(float(tracker.call("get_remaining", &"Local.UI.Activation.weapon")), 0.22, 0.0001,
+			"server snapshot leaves local visual pulse untouched")
+		tracker.call("tick", 0.12)
+		t.check(Cooldowns.reconcile_native(tracker, fresh),
+			"later server packet is independent of cosmetic clock")
+		t.near(float(tracker.call("get_remaining", &"Local.UI.Activation.weapon")), 0.10, 0.0001,
+			"local feedback keeps its elapsed phase")
+		tracker.call("tick", 0.11)
+		t.check(not Cooldowns.activation_feedback_active(tracker, "weapon"),
+			"local visual pulse expires on the native tick")
+		t.check(not Cooldowns.record_activation_feedback(tracker, "unknown"),
+			"invalid slot never creates an effect")
+		t.check(Cooldowns.reconcile_native(tracker, {}),
+			"empty authoritative snapshot clears only ability tags")
+		t.eq(float(tracker.call("get_remaining", &"Ability.Weapon")), 0.0,
+			"missing server cooldown is removed")
+	else:
+		t.check(not Cooldowns.record_activation_feedback(tracker, "weapon"),
+			"older builds retain prior cooldown-only UI behavior")
+
+
+	t.current = "five-slot gameplay HUD batch query and authoritative group lock"
+	var slot_order := PackedStringArray(["weapon", "ultimate", "armor", "head", "feet"])
+	var batch_you: Dictionary = {
+		"skill_cd": 3.5, "ultimate_cd": 0.0,
+		"gear_cd": {"head": 1.25, "armor": 0.0, "feet": 0.0},
+		"ability_global_cd": 0.4
+	}
+	var expected_batch := PackedFloat64Array([3.5, 0.4, 0.4, 1.25, 0.4])
+	t.eq(Cooldowns.display_many(slot_order, batch_you), expected_batch,
+		"stock Godot reports every individual cooldown plus global lock in original order")
+	t.eq(Cooldowns.display_many(PackedStringArray(["head", "weapon", "head"]), batch_you),
+		PackedFloat64Array([1.25, 3.5, 1.25]),
+		"duplicate or reordered known slots return matching values")
+	t.eq(Cooldowns.display_many(PackedStringArray(["weapon", "unknown"]), batch_you).size(), 0,
+		"unknown slot rejects the batch atomically")
+	var large_slots := PackedStringArray()
+	large_slots.resize(65)
+	t.eq(Cooldowns.display_many(large_slots, batch_you).size(), 0,
+		"unbounded client query is rejected")
+	var batch_tracker: Object = Cooldowns.make_native()
+	if batch_tracker != null:
+		t.check(bool(batch_tracker.call("replace_snapshot", Cooldowns.snapshot(batch_you))),
+			"live native tracker stores authoritative per-skill and group cooldowns")
+		t.eq(Cooldowns.display_many(slot_order, batch_you, batch_tracker), expected_batch,
+			"native batch and portable fallback return identical five-slot order")
+		batch_tracker.call("tick", 0.25)
+		var after_tick := PackedFloat64Array([3.25, 0.15, 0.15, 1.0, 0.15])
+		var batch_result: PackedFloat64Array = Cooldowns.display_many(
+			slot_order, batch_you, batch_tracker)
+		for i in slot_order.size():
+			t.near(batch_result[i], after_tick[i], 0.0001,
+				"the entire bar advances from a single explicit native clock tick")
+			var slot: String = slot_order[i]
+			t.near(batch_result[i], Cooldowns.display_remaining(slot, batch_you, batch_tracker),
+				0.0001, "batch entry matches existing per-slot native method")
+		batch_tracker.call("tick", 0.2)
+		t.eq(Cooldowns.display_many(slot_order, batch_you, batch_tracker),
+			PackedFloat64Array([3.05, 0.0, 0.0, 0.8, 0.0]),
+			"group lock expires without changing the remaining individual cooldowns")
+		if batch_tracker.has_method("get_effective_remaining_batch"):
+			var raw: PackedFloat64Array = batch_tracker.call(
+				"get_effective_remaining_batch",
+				PackedStringArray(["Ability.Head", "Ability.Weapon", "Ability.Head"]),
+				&"Ability.Global")
+			t.eq(raw, PackedFloat64Array([0.8, 3.05, 0.8]),
+				"native batch accepts repeated exact tags and preserves ordering")
+			t.eq(batch_tracker.call("get_effective_remaining_batch",
+				PackedStringArray(["Ability.Head", ".invalid"]), &"Ability.Global").size(),
+				0, "native API rejects invalid tag batches without partial results")
+	else:
+		t.eq(Cooldowns.display_many(slot_order, batch_you), expected_batch,
+			"older engines still draw all five cooldown labels from server state")
+
+	t.current = "actual ability bar consumes batch without granting actions"
+	var bar_source: String = FileAccess.get_file_as_string("res://scripts/client/ability_bar.gd")
+	t.check(bar_source.contains("AbilityCooldowns.display_many(") and
+		bar_source.contains("_buttons[i].disabled = remaining > 0.05"),
+		"real Albion After HUD uses batch display while keeping server-owned action checks")

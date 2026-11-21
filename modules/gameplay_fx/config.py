@@ -16,6 +16,8 @@ def get_doc_classes():
         "GameplayAttributeSet",
         "GameplayCooldownTracker",
         "GameplayCueQueue",
+        "GameplayEffectApplicationGate",
+        "GameplayEffectStackPolicy",
         "AudioDuckMix",
         "AudioMixSnapshotController",
     ]

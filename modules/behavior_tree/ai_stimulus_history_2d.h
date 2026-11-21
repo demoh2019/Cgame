@@ -35,6 +35,7 @@
 #include "core/templates/vector.h"
 #include "core/variant/array.h"
 #include "core/variant/dictionary.h"
+#include "core/variant/binder_common.h"
 
 /**
  * Bounded, source-aware event memory for already-authorized AI perceptions.
@@ -65,6 +66,8 @@ private:
 	Vector<Stimulus> events; // Oldest to newest; stable bounded storage.
 
 	static Dictionary make_snapshot(const Stimulus &p_event);
+	Dictionary get_best_filtered(int p_sense, const Vector2 *p_center, real_t p_radius_squared,
+			const int64_t *p_source_id = nullptr) const;
 
 protected:
 	static void _bind_methods();
@@ -81,8 +84,24 @@ public:
 	int get_event_count() const { return events.size(); }
 	// Highest decayed strength in the selected sense; ties are deterministic.
 	Dictionary get_best(int p_sense) const;
+	// Select a confirmed memory only within an inclusive, finite local radius.
+	// The spatial filter is applied before stimulus ranking; no state is changed.
+	Dictionary get_best_in_radius(int p_sense, const Vector2 &p_center, real_t p_radius) const;
+	// Query the latest authorized memory for a specific identified actor.
+	// A source may have a different record in each sense. This does not
+	// inspect the world or grant the source visibility, sound or targeting.
+	Dictionary get_best_for_source(int p_sense, int64_t p_source_id) const;
+	Dictionary get_best_for_source_in_radius(int p_sense, int64_t p_source_id,
+			const Vector2 &p_center, real_t p_radius) const;
 	// Newest events first. A detached Array of plain-data Dictionaries.
 	Array get_recent(int p_limit = 8) const;
+	// Highest decayed confidence first; stable source-id/position ties.
+	// Results are detached snapshots, not mutable views into agent memory.
+	Array get_ranked(int p_sense, int p_limit = 8) const;
+	// Forget one known source, optionally limited to one sense; returns the
+	// number of deleted events without touching other source lifetimes.
+	// -1 for p_sense means all senses. Anonymous source -1 cannot be forgotten.
+	int forget_source(int64_t p_source_id, int p_sense = -1);
 	void reset();
 };
 

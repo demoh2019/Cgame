@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="SpatialPointGrid3D" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>Exact, capped 3D point-count queries accelerated by a deterministic spatial hash.</brief_description>
+	<description>
+		An opt-in data-only broadphase for server-authoritative proximity and PvE crowd pressure. This is a **3D** query: X, Y and Z contribute to exact squared distance, so actors above/below a cave or platform do not count as adjacent. Up to 8192 finite points are retained. At most 1024 probes may be submitted in one batch. For small crowds, outlier positions, very large radii or more than 4096 candidate buckets the engine falls back to an exact linear scan, never dropping valid points. Invalid queries return -1, invalid batch arguments return an empty array, invalid individual batch probe positions return zero, and count limits must be between 1 and 8192. A limit is an early-exit maximum; no actor IDs, scene nodes, network packets or authoritative state are owned by this class.
+	</description>
+	<methods>
+		<method name="set_cell_size"><return type="bool" /><param index="0" name="size" type="float" /><description>Sets the spatial hash cell edge in the range 1–4096 and rebuilds existing buckets. Rejects invalid values without changing the index.</description></method>
+		<method name="get_cell_size" qualifiers="const"><return type="float" /><description>Gets the spatial hash cell edge (default 64).</description></method>
+		<method name="rebuild"><return type="bool" /><param index="0" name="positions" type="Array[Vector3]" /><description>Atomically replaces the indexed points. Nonfinite positions are ignored. More than 8192 supplied elements cause a false result without changing the existing index. Rebuild resets diagnostic counters.</description></method>
+		<method name="count_within"><return type="int" /><param index="0" name="center" type="Vector3" /><param index="1" name="radius" type="float" /><param index="2" name="limit" type="int" default="20" /><description>Counts exact 3D neighbors, including the radius boundary, stopping at the given limit. Returns -1 for invalid queries. This is a numeric hint, not a gameplay authorization or collision response.</description></method>
+		<method name="count_within_batch"><return type="PackedInt32Array" /><param index="0" name="centers" type="PackedVector3Array" /><param index="1" name="radius" type="float" /><param index="2" name="limit" type="int" default="20" /><description>Ordered, limited count for up to 1024 centers. Invalid global arguments return an empty result; invalid individual centers return zero.</description></method>
+		<method name="get_point_count" qualifiers="const"><return type="int" /><description>Returns the count of indexed, finite points.</description></method>
+		<method name="get_stats" qualifiers="const"><return type="Dictionary" /><description>Returns point, bucket, query and candidate-check counters for performance instrumentation. It does not expose game object IDs.</description></method>
+		<method name="clear"><return type="void" /><description>Resets the point index and all counters.</description></method>
+	</methods>
+	<members><member name="cell_size" type="float" setter="set_cell_size" getter="get_cell_size" default="64.0">Cell size for 3D hash buckets. Smaller cells can accelerate sparse queries, but large query radii automatically fall back to exact scanning.</member></members>
+</class>

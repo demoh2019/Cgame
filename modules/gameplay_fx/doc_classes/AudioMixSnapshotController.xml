@@ -14,6 +14,17 @@
 			<param index="2" name="fade_seconds" type="float" default="1.0" />
 			<description>Creates or reactivates a named mix. Keys must be valid nonempty bus names; values must be numeric, finite attenuation in [-30, 0]. A fade in the range [0, 15] seconds is accepted. Re-activation of a fading mix resumes from its current weight.</description>
 		</method>
+		<method name="activate_timed_mix">
+			<return type="bool" />
+			<param index="0" name="source" type="StringName" />
+			<param index="1" name="bus_offsets_db" type="Dictionary" />
+			<param index="2" name="attack_seconds" type="float" default="0.2" />
+			<param index="3" name="hold_seconds" type="float" default="3.0" />
+			<param index="4" name="release_seconds" type="float" default="1.0" />
+			<description>
+				Activates a Control Bus Mix-style timed stage, which automatically fades out after its duration. Attack and release are independent values in the range [0, 15] seconds; hold duration is 0 through 120 seconds, counted from activation (including the attack). Repeated activation refreshes the full duration and fades toward the new target from the current weight rather than snapping to zero. Expiry is advanced piecewise: a frame crossing the expiry boundary spends only its remaining time in release. This operation validates all arguments before changing an existing mix. [method activate_mix] or [method deactivate_mix] with the same name cancels the automatic timer and takes manual control. The stage is removed when its release reaches zero. Engine work is data-only; the caller applies the resulting bus attenuation separately.
+			</description>
+		</method>
 		<method name="deactivate_mix">
 			<return type="bool" />
 			<param index="0" name="source" type="StringName" />
@@ -38,6 +49,11 @@
 			<return type="float" />
 			<param index="0" name="source" type="StringName" />
 			<description>Returns the current fade weight (0 to 1) of a named mix, or 0 when absent.</description>
+		</method>
+		<method name="get_mix_remaining_seconds" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="source" type="StringName" />
+			<description>Returns the remaining hold time for an active timed mix. Returns -1 for absent, manually controlled, or already releasing mixes. All queries are passive and do not advance any timer.</description>
 		</method>
 		<method name="has_mix" qualifiers="const">
 			<return type="bool" />

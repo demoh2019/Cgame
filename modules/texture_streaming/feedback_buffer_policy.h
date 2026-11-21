@@ -76,6 +76,40 @@ constexpr uint8_t prefetch_mip(uint8_t p_requested, uint8_t p_detail_prefetch_mi
 	return p_detail_prefetch_mips >= p_requested ? 0 : uint8_t(p_requested - p_detail_prefetch_mips);
 }
 
+// Opt-in prefetch control driven by actual resident streamed-texture memory.
+// Recovery has a lower threshold than restriction: 95% -> 0, 85% -> at most 1;
+// below 78% recover one mip, below 70% recover the full user-requested tier.
+// Integer threshold arithmetic avoids overflow at uint64_t budget extremes.
+// Zero budget or disabled adaptive mode leaves legacy behavior unchanged.
+constexpr uint8_t adaptive_prefetch_mips(uint8_t p_requested, uint8_t p_previous,
+		uint64_t p_used_bytes, uint64_t p_budget_bytes, bool p_enabled) {
+	const uint8_t requested = p_requested > 2 ? 2 : p_requested;
+	if (!p_enabled || p_budget_bytes == 0) {
+		return requested;
+	}
+	uint8_t current = p_previous > requested ? requested : p_previous;
+	const uint64_t hard = p_budget_bytes - p_budget_bytes / 20; // 95%.
+	const uint64_t soft = p_budget_bytes - p_budget_bytes / 10 - p_budget_bytes / 20; // 85%.
+	const uint64_t recover_one = p_budget_bytes - p_budget_bytes / 5 - p_budget_bytes / 50; // 78%.
+	const uint64_t recover_all = p_budget_bytes - p_budget_bytes / 5 - p_budget_bytes / 10; // 70%.
+	if (p_used_bytes >= hard) {
+		return 0;
+	}
+	if (p_used_bytes >= soft) {
+		return current > 1 ? 1 : current;
+	}
+	if (p_used_bytes <= recover_all) {
+		return requested;
+	}
+	if (p_used_bytes <= recover_one) {
+		if (current == 0 && requested > 0) {
+			return 1;
+		}
+		return current;
+	}
+	return current;
+}
+
 // Pick the next physical texture reload toward the memory-fitted target.
 // High/Ultra skip one intermediate blurry upload on detail recovery, but
 // under VRAM pressure sharpness still decays conservatively one mip at a time.

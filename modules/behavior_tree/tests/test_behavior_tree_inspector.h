@@ -61,18 +61,18 @@ TEST_CASE("[BehaviorTreeInspector] Untraced tree includes every native child") {
 	const Array nodes = snapshot["nodes"];
 	REQUIRE(nodes.size() == 5);
 	const Dictionary root_node = nodes[0], branch_node = nodes[1], guard_node = nodes[2], wait_node = nodes[3], fallback_node = nodes[4];
-	CHECK(root_node["path"] == "root");
+	CHECK(root_node["path"] == Variant("root"));
 	CHECK(int(root_node["depth"]) == 0);
-	CHECK(root_node["task_class"] == "BehaviorTreeReactiveSelector");
-	CHECK(branch_node["path"] == "root/0");
-	CHECK(guard_node["path"] == "root/0/0");
-	CHECK(wait_node["path"] == "root/0/1");
-	CHECK(fallback_node["path"] == "root/1");
+	CHECK(root_node["task_class"] == Variant("BehaviorTreeReactiveSelector"));
+	CHECK(branch_node["path"] == Variant("root/0"));
+	CHECK(guard_node["path"] == Variant("root/0/0"));
+	CHECK(wait_node["path"] == Variant("root/0/1"));
+	CHECK(fallback_node["path"] == Variant("root/1"));
 	CHECK(int(wait_node["depth"]) == 2);
-	CHECK(wait_node["executed"] == false);
+	CHECK(wait_node["executed"] == Variant(false));
 	CHECK(int(wait_node["status"]) == -1);
-	CHECK(snapshot["trace_enabled"] == false);
-	CHECK(snapshot["truncated"] == false);
+	CHECK(snapshot["trace_enabled"] == Variant(false));
+	CHECK(snapshot["truncated"] == Variant(false));
 	memdelete(runner);
 }
 
@@ -100,16 +100,16 @@ TEST_CASE("[BehaviorTreeInspector] Opt-in trace identifies visited and unvisited
 	const Array nodes = snapshot["nodes"];
 	REQUIRE(nodes.size() == 4);
 	const Dictionary root_node = nodes[0], rejected = nodes[1], running = nodes[2], untouched = nodes[3];
-	CHECK(root_node["executed"] == true);
+	CHECK(root_node["executed"] == Variant(true));
 	CHECK(int(root_node["status"]) == BehaviorTreeTask::RUNNING);
-	CHECK(rejected["executed"] == true);
+	CHECK(rejected["executed"] == Variant(true));
 	CHECK(int(rejected["status"]) == BehaviorTreeTask::FAILURE);
-	CHECK(running["executed"] == true);
+	CHECK(running["executed"] == Variant(true));
 	CHECK(int(running["status"]) == BehaviorTreeTask::RUNNING);
 	CHECK(int64_t(running["duration_usec"]) >= 0);
-	CHECK(untouched["executed"] == false);
+	CHECK(untouched["executed"] == Variant(false));
 	CHECK(int(untouched["status"]) == -1);
-	CHECK(snapshot["trace_enabled"] == true);
+	CHECK(snapshot["trace_enabled"] == Variant(true));
 	CHECK(int64_t(snapshot["tick_index"]) == 1);
 	CHECK(int(snapshot["trace_truncated"]) == 0);
 	memdelete(runner);
@@ -132,10 +132,10 @@ TEST_CASE("[BehaviorTreeInspector] Shared task resource renders at different pat
 	const Array nodes = snapshot["nodes"];
 	REQUIRE(nodes.size() == 3);
 	const Dictionary left = nodes[1], right = nodes[2];
-	CHECK(left["path"] == "root/0");
-	CHECK(right["path"] == "root/1");
-	CHECK(left["executed"] == true);
-	CHECK(right["executed"] == true);
+	CHECK(left["path"] == Variant("root/0"));
+	CHECK(right["path"] == Variant("root/1"));
+	CHECK(left["executed"] == Variant(true));
+	CHECK(right["executed"] == Variant(true));
 	CHECK(int(right["status"]) == BehaviorTreeTask::SUCCESS);
 	memdelete(runner);
 }
@@ -155,10 +155,10 @@ TEST_CASE("[BehaviorTreeInspector] Inverter and decorator children are visible")
 	const Array nodes = snapshot["nodes"];
 	REQUIRE(nodes.size() == 3);
 	const Dictionary a = nodes[0], b = nodes[1], c = nodes[2];
-	CHECK(a["task_class"] == "BehaviorTreeInverter");
-	CHECK(b["task_class"] == "BehaviorTreeTimeout");
-	CHECK(c["task_class"] == "BehaviorTreeWait");
-	CHECK(c["path"] == "root/0/0");
+	CHECK(a["task_class"] == Variant("BehaviorTreeInverter"));
+	CHECK(b["task_class"] == Variant("BehaviorTreeTimeout"));
+	CHECK(c["task_class"] == Variant("BehaviorTreeWait"));
+	CHECK(c["path"] == Variant("root/0/0"));
 	memdelete(runner);
 }
 
@@ -176,7 +176,7 @@ TEST_CASE("[BehaviorTreeInspector] Graph size is capped and reports truncation")
 	const Array nodes = snapshot["nodes"];
 	CHECK(nodes.size() == 256);
 	CHECK(int(snapshot["node_count"]) == 256);
-	CHECK(snapshot["truncated"] == true);
+	CHECK(snapshot["truncated"] == Variant(true));
 	memdelete(runner);
 }
 
@@ -212,9 +212,9 @@ TEST_CASE("[BehaviorTreeInspector] Clearing tracing preserves visible graph") {
 	const Array nodes = snapshot["nodes"];
 	REQUIRE(nodes.size() == 1);
 	const Dictionary only = nodes[0];
-	CHECK(only["executed"] == false);
+	CHECK(only["executed"] == Variant(false));
 	CHECK(int(only["status"]) == -1);
-	CHECK(snapshot["trace_enabled"] == false);
+	CHECK(snapshot["trace_enabled"] == Variant(false));
 	memdelete(runner);
 }
 
@@ -224,7 +224,7 @@ TEST_CASE("[BehaviorTreeInspector] Null root returns a safe empty graph") {
 	const Array nodes = snapshot["nodes"];
 	CHECK(nodes.is_empty());
 	CHECK(int(snapshot["node_count"]) == 0);
-	CHECK(snapshot["truncated"] == false);
+	CHECK(snapshot["truncated"] == Variant(false));
 	memdelete(runner);
 }
 

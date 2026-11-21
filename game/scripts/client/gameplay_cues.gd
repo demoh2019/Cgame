@@ -11,6 +11,12 @@ const PULSE_TAGS := {
 	"Runtime.Status.Sundered": "GameplayCue.Status.Sundered",
 	"Runtime.Status.Resolve": "GameplayCue.Status.Resolve",
 }
+## Niagara-style effect priority: visible Resolve stacks beat ambient debuff
+## pulses during cue queue saturation; no combat or status value changes.
+const PULSE_PRIORITY := {
+	"Runtime.Status.Sundered": 4,
+	"Runtime.Status.Resolve": 6,
+}
 
 
 static func attach(node: Node) -> void:
@@ -44,7 +50,14 @@ static func sync(node: Node, kind: String, state: Dictionary) -> void:
 		return
 	var cues: Object = node.get_meta("gameplay_cues", null) as Object
 	if cues != null and cues.has_method("replace_active"):
-		cues.call("replace_active", active_snapshot(kind, state), 2)
+		var server_status: Dictionary = active_snapshot(kind, state)
+		# Only server-owned Status.* may be replaced from replication.
+		# Persistent Local.* / FX.* cues have independent lifetimes.
+		if cues.has_method("replace_active_branch"):
+			cues.call("replace_active_branch", &"GameplayCue.Status", server_status, 2)
+		else:
+			# Older Cgame binaries retain the original whole-snapshot path.
+			cues.call("replace_active", server_status, 2)
 
 
 ## Bridge repeated native EffectTimeline pulse counts to one cue per tag.
@@ -54,6 +67,9 @@ static func frame_events(node: Node, periodic: Dictionary) -> Array:
 	if node != null:
 		cues = node.get_meta("gameplay_cues", null) as Object
 	if cues != null and cues.has_method("emit_cue") and cues.has_method("take_events"):
+		# Build one bounded cosmetic batch from the native effect timeline.
+		# Server-authoritative statuses are not changed by cue admission.
+		var batch: Array[Dictionary] = []
 		for status in periodic:
 			var cue_tag: String = str(PULSE_TAGS.get(str(status), ""))
 			if cue_tag.is_empty():
@@ -61,8 +77,19 @@ static func frame_events(node: Node, periodic: Dictionary) -> Array:
 			var raw = periodic[status]
 			if not (raw is int or raw is float) or not is_finite(float(raw)) or float(raw) <= 0.0:
 				continue
-			cues.call("emit_cue", StringName(cue_tag),
-				clampf(float(raw), 0.0, 32.0), 4)
+			batch.append({
+				"tag": StringName(cue_tag),
+				"magnitude": clampf(float(raw), 0.0, 32.0),
+				"priority": int(PULSE_PRIORITY.get(str(status), 4))
+			})
+		if not batch.is_empty():
+			if cues.has_method("emit_cues_batch"):
+				# Atomic admission: do not fall back to partial individual submits
+				# if a validated batch cannot fit the existing visual queue.
+				cues.call("emit_cues_batch", batch)
+			else:
+				for pulse in batch:
+					cues.call("emit_cue", pulse["tag"], pulse["magnitude"], pulse["priority"])
 		if cues.has_method("get_pending_count") and int(cues.call("get_pending_count")) == 0:
 			return []
 		return cues.call("take_events", 8) as Array
@@ -77,10 +104,9 @@ static func frame_events(node: Node, periodic: Dictionary) -> Array:
 		events.append({
 			"tag": StringName(cue_tag), "event": "executed",
 			"stacks": 0, "magnitude": float(periodic[status]),
-			"priority": 4, "count": 1
+			"priority": int(PULSE_PRIORITY.get(str(status), 4)), "count": 1
 		})
 	return events
-
 
 static func pulse_color(cue_tag: String) -> Color:
 	match cue_tag:

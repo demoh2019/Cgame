@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="SceneNodePool" inherits="Node" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../doc/class.xsd">
+	<brief_description>Reusable native PackedScene nodes with bounded idle residency and per-frame maintenance.</brief_description>
+	<description>
+		Stores detached idle scene instances and weak ObjectID references to active leases. Instances may define on_pool_created(), on_pool_acquired(pool), and on_pool_released() callbacks. This pool is intended for presentation objects such as one-shot particles; game-authoritative state must not be recycled without an explicit gameplay reset.
+		Use [method maintain_residency] from a client frame loop to grow or shrink the idle cache in small steps, instead of instantiating many scenes during one ready callback. Optional soft main-thread CPU-time slicing complements the count cap. Only detached idle instances are retired, never active leases. This behavior is inspired by actor reuse and incremental work budgeting in larger game engines.
+	</description>
+	<methods>
+		<method name="prewarm"><return type="int" /><param index="0" name="count" type="int" /><description>Creates detached idle nodes up to the smaller of count and [member max_idle]. This is synchronous, so prefer [method maintain_residency] for large pools.</description></method>
+		<method name="maintain_residency">
+			<return type="int" />
+			<param index="0" name="target_total" type="int" />
+			<param index="1" name="max_changes" type="int" default="2" />
+			<param index="2" name="max_work_usec" type="int" default="0" />
+			<description>Incrementally grows or shrinks total residency, including live active leases. Returns positive created count, negative detached idle disposals, or zero. Target must be 0–4096, max_changes 1–64, and the optional soft CPU-time budget max_work_usec 0–1000000 microseconds; invalid values perform no work. With max_work_usec 0, behavior is the legacy count-only policy. Positive limits are checked between scene operations: one indivisible instance creation or deletion is always allowed, so a single operation may exceed the soft limit. Active checked-out nodes are never evicted. [method get_last_maintenance_work_usec], [method get_last_maintenance_change_count] and [method get_last_maintenance_pending_count] expose maintenance diagnostics.</description>
+		</method>
+		<method name="should_stop_maintenance" qualifiers="static">
+			<return type="bool" /><param index="0" name="work_usec" type="int" /><param index="1" name="completed_changes" type="int" /><param index="2" name="elapsed_usec" type="int" />
+			<description>Pure helper for testing the soft time budget. Returns false for the first operation or a zero budget, and true after at least one completed operation and the deadline has been reached.</description>
+		</method>
+		<method name="get_last_maintenance_work_usec" qualifiers="const"><return type="int" /><description>Measured main-thread microseconds spent in the latest valid maintenance call, including weak-reference pruning. Zero after an invalid request. This is not GPU time.</description></method>
+		<method name="get_last_maintenance_change_count" qualifiers="const"><return type="int" /><description>Signed number of instances created or disposed by the last maintain call.</description></method>
+		<method name="get_last_maintenance_pending_count" qualifiers="const"><return type="int" /><description>Number of eligible additional idle scene creations or disposals required to reach the target after the most recent maintenance call. Checked-out instances cannot be retired, and never count as pending deletions.</description></method>
+		<method name="acquire"><return type="Node" /><param index="0" name="parent" type="Node" /><description>Checks out a cached or new instance, attaches it to parent and invokes on_pool_acquired() if present; returns null on invalid parent or active cap.</description></method>
+		<method name="release"><return type="bool" /><param index="0" name="instance" type="Node" /><description>Returns an active instance to detached idle cache or frees it if the cache is full. Rejects foreign or double returns.</description></method>
+		<method name="release_deferred"><return type="void" /><param index="0" name="instance" type="Node" /><description>Schedules return for a later safe scene-tree callback, useful during physics notifications.</description></method>
+		<method name="clear_idle"><return type="void" /><description>Immediately frees all detached idle nodes, preserving active leases.</description></method>
+		<method name="get_active_count"><return type="int" /><description>Current active lease count after pruning invalid references.</description></method>
+		<method name="get_idle_count"><return type="int" /><description>Current detached cached instance count after pruning invalid references.</description></method>
+		<method name="get_stats"><return type="Dictionary" /><description>Lifetime counters and current residency, including maintenance_work_usec, maintenance_changes and maintenance_pending.</description></method>
+	</methods>
+	<members>
+		<member name="template" type="PackedScene" setter="set_template_scene" getter="get_template_scene"><description>Scene template for new instances. Cannot change while instances are checked out.</description></member>
+		<member name="prewarm_count" type="int" setter="set_prewarm_count" getter="get_prewarm_count" default="0"><description>Target cached objects to create immediately on ready, when enabled.</description></member>
+		<member name="prewarm_on_ready" type="bool" setter="set_prewarm_on_ready" getter="is_prewarm_on_ready" default="true"><description>Whether to run synchronous prewarm on ready. Disable for frame-sliced maintenance.</description></member>
+		<member name="max_idle" type="int" setter="set_max_idle" getter="get_max_idle" default="32"><description>Idle cache capacity, 0–4096.</description></member>
+		<member name="max_active" type="int" setter="set_max_active" getter="get_max_active" default="0"><description>Maximum simultaneous checkouts, 0 for unlimited.</description></member>
+	</members>
+	<signals>
+		<signal name="capacity_exhausted"><description>Emitted when acquire() is rejected by the active limit.</description></signal>
+		<signal name="instance_acquired"><param index="0" name="instance" type="Node" /><description>Emitted when an instance is acquired.</description></signal>
+		<signal name="instance_released"><param index="0" name="instance" type="Node" /><description>Emitted after a lease is released.</description></signal>
+	</signals>
+</class>

@@ -222,6 +222,7 @@ func run(t) -> void:
 	victim.inventory.add("club_1", 1)
 	victim.inventory.equip("club_1")
 	for i in 20:
+		server.zombies.clear() # A duel, not a horde: wandering infected must not steal the kill.
 		_run_ticks(server, 1.0)
 		if not victim.survival.alive:
 			break

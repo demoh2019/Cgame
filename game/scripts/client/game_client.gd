@@ -12,6 +12,7 @@ const Survival = preload("res://scripts/shared/survival.gd")
 const WadingTravel = preload("res://scripts/shared/wading_travel.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 const PartySupplyBeacon = preload("res://scripts/client/party_supply_beacon.gd")
+const PcgSpawns = preload("res://scripts/server/pcg_spawns.gd")
 
 signal snapshot_received
 signal event_received(event: Dictionary)
@@ -71,6 +72,7 @@ func _init(p_net) -> void:
 
 func on_welcome(world_seed: int, _tick_rate: int) -> void:
 	world = WorldGen.new(world_seed)
+	PcgSpawns.attach(world) # Same deterministic crate list as the server; only presentation (the server stays authoritative).
 	welcomed = true
 	peer_id = net.multiplayer.get_unique_id()
 	predicted_stamina = Defs.MAX_STAMINA
@@ -197,6 +199,7 @@ func _reconcile(snapshot: Dictionary) -> void:
 		var duration: float = float(entry["dt"])
 		var moving := Vector2(float(replay_input["x"]), float(replay_input["z"])).length_squared() > 0.00001
 		replay_input["mounted"] = bool(you.get("mounted", false))
+		replay_input["raft"] = inventory.count("raft") > 0
 		replay_input["bike_integrity"] = float(you.get("bike_integrity", 100.0))
 		replay_input["tire_grip_seconds"] = float(you.get("tire_grip_seconds", 0.0))
 		replay_input["cargo_factor"] = BikeCargo.movement_factor(inventory,
@@ -239,6 +242,7 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float, crou
 	running = running and float(you.get("fracture", 0.0)) <= 0.0
 	running = running and WadingTravel.can_sprint(world, predicted)
 	var input := {"x": move.x, "z": move.y, "sprint": running, "mounted": mounted, "crouch": crouch,
+		"raft": inventory.count("raft") > 0,
 		"cargo_factor": factor, "speed_bonus": float(you.get("speed_bonus", 0.0)),
 		"injury_factor": Survival.fracture_speed_factor(float(you.get("fracture", 0.0))),
 		"tire_grip_seconds": float(you.get("tire_grip_seconds", 0.0)),

@@ -89,3 +89,39 @@ func run(t) -> void:
 			var valid_ids := PackedInt64Array([10, 12])
 			t.check((native.call("select_top_stable", invalid, valid_ids, PackedInt64Array(),
 				2, 10.0, 2.0) as PackedInt32Array).is_empty(), "native rejects malformed batch")
+
+	t.current = "multiple local observers share ID-stable cosmetic torch slots"
+	var world_candidates: Array = [
+		{"id": 9, "position": Vector3(9, 0, 0)},
+		{"id": 5, "position": Vector3(98, 0, 0)},
+		{"id": 4, "position": Vector3(-9, 0, 0)},
+		{"id": 12, "position": Vector3(50, 0, 0)},
+	]
+	var eyes := PackedVector3Array([Vector3.ZERO, Vector3(100, 0, 0)])
+	var world_base: Array = DungeonLightBudget.stable_world(world_candidates, eyes, 2, 10.0)
+	t.eq(world_base.size(), 2, "global cap applies across both local observers")
+	t.eq(int(world_base[0]["id"]), 5, "second observer contributes nearby light")
+	t.eq(int(world_base[1]["id"]), 4, "stable ID resolves equal world distances")
+	t.eq(float(world_base[0]["distance_sq"]), 4.0, "nearest observer owns distance")
+	var world_retained: Array = DungeonLightBudget.stable_world(
+		world_candidates, eyes, 2, 10.0, [9], 8.0)
+	t.eq(int(world_retained[0]["id"]), 9, "retention avoids camera seam flicker")
+	t.eq(int(world_retained[1]["id"]), 5, "second observer still gets light slot")
+	t.eq(int(DungeonLightBudget.stable_world(
+		world_candidates, eyes, 2, 10.0, [12], 10.0)[0]["id"]), 5,
+		"out of range torch cannot be retained")
+	t.eq(DungeonLightBudget.stable_world(world_candidates, PackedVector3Array(),
+		2, 10.0).size(), 0, "zero viewers rejects light admission")
+	t.eq(DungeonLightBudget.stable_world(world_candidates, eyes, 0, 10.0).size(),
+		0, "zero budget disables cosmetic torches")
+	t.check(not world_candidates[0].has("distance_sq"), "input descriptors remain immutable")
+	if ClassDB.class_exists("SignificanceBudgetPlanner"):
+		var native_world: Object = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if native_world != null and native_world.has_method("select_world_priority_stable"):
+			for previous in [[], [9], [12], [4, 5]]:
+				var fallback: Array = DungeonLightBudget.stable_world(
+					world_candidates, eyes, 2, 10.0, previous, 8.0)
+				var optimized: Array = DungeonLightBudget.stable_world(
+					world_candidates, eyes, 2, 10.0, previous, 8.0, native_world)
+				t.eq(optimized, fallback,
+					"native multi-viewer and stock Godot fallback parity %s" % [previous])

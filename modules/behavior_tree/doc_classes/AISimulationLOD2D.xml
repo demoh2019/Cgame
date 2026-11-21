@@ -32,6 +32,20 @@
 			<param index="3" name="urgent" type="bool" default="false" />
 			<description>Returns near, medium or far update interval. Thresholds are inclusive: distance equal to near_distance uses near cadence, and distance equal to far_distance uses medium cadence. Invalid thresholds, negative distance or NaN conservatively return near interval. Positive infinity means no eligible viewer and uses far interval. urgent always returns near interval.</description>
 		</method>
+		<method name="plan_passive_scan" qualifiers="const">
+			<return type="Vector2" />
+			<param index="0" name="agent_id" type="int" />
+			<param index="1" name="distance" type="float" />
+			<param index="2" name="near_distance" type="float" />
+			<param index="3" name="far_distance" type="float" />
+			<param index="4" name="previous_interval" type="float" />
+			<param index="5" name="hysteresis" type="float" />
+			<param index="6" name="already_staggered" type="bool" />
+			<param index="7" name="urgent" type="bool" default="false" />
+			<description>
+				Combines distance-based interval selection, one-time deterministic startup staggering and per-agent hysteresis into a single native call. Returns [code]Vector2(nominal_interval, next_scan_delay)[/code]. The caller must store the nominal interval and remember whether the initial distant scan has been staggered. This class holds no per-agent state. Urgent decisions return near cadence without staggering. This is only for optional passive target acquisition; never delay attacks, movement, damage or authority. Calls with invalid distance or thresholds retain existing conservative scalar policy.
+			</description>
+		</method>
 		<method name="get_staggered_interval" qualifiers="const">
 			<return type="float" />
 			<param index="0" name="agent_id" type="int" />
