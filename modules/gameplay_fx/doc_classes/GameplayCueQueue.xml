@@ -32,6 +32,13 @@
 			<param index="1" name="priority" type="int" default="0" />
 			<description>Transactionally applies a snapshot of tag to integer stack count, emitting only changes. Malformed input or insufficient pending capacity leaves both active and pending state unchanged.</description>
 		</method>
+		<method name="replace_active_branch">
+			<return type="bool" />
+			<param index="0" name="branch" type="StringName" />
+			<param index="1" name="snapshot" type="Dictionary" />
+			<param index="2" name="priority" type="int" default="0" />
+			<description>Atomically reconciles only exact tags under a dotted GameplayCue branch (for example [code]GameplayCue.Status[/code] includes [code]GameplayCue.Status.Resolve[/code], but not [code]GameplayCue.StatusExtra[/code]). Accepts an authoritative mapping of in-branch tag names to integer stack counts, with zero removing that cue; missing in-branch cues stop, while unrelated active local or FX cues and transient events remain untouched. Rejects out-of-branch tags, String/StringName aliases, malformed branch names, invalid priorities or stack values, and active/pending capacity overflow without changing state. Uses the same persistent started/updated/stopped semantics as [method replace_active]. A byte-for-byte equivalent active tag set with the same stacks returns true without new pending events, copies, or notifications, even when the pending queue is full. No network authority or gameplay actions are performed; callers provide trustworthy replicated state.</description>
+		</method>
 		<method name="get_active_snapshot" qualifiers="const">
 			<return type="Dictionary" />
 			<description>Returns an independent mapping of active cue tags to stack counts.</description>

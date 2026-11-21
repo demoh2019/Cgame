@@ -228,6 +228,74 @@ bool GameplayCueQueue::replace_active(const Dictionary &p_snapshot, int p_priori
 	return true;
 }
 
+bool GameplayCueQueue::replace_active_branch(const StringName &p_branch, const Dictionary &p_snapshot, int p_priority) {
+	if (!_valid_tag(p_branch) || !_valid_priority(p_priority) || p_snapshot.size() > MAX_ACTIVE) {
+		return false;
+	}
+	const String branch = p_branch;
+	const String prefix = branch + ".";
+	const auto belongs_to_branch = [&](const StringName &p_tag) {
+		const String tag = p_tag;
+		return tag == branch || tag.begins_with(prefix);
+	};
+	// Validate every incoming key, type, value and normalized identity *before*
+	// we modify live state. String and StringName aliases may not duplicate.
+	Vector<StringName> seen;
+	int wanted = 0;
+	bool unchanged = true;
+	for (const Variant &key : p_snapshot) {
+		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
+			return false;
+		}
+		const StringName tag = key;
+		if (!_valid_tag(tag) || !belongs_to_branch(tag) || seen.has(tag)) {
+			return false;
+		}
+		seen.push_back(tag);
+		const Variant value = p_snapshot[key];
+		if (value.get_type() != Variant::INT) {
+			return false;
+		}
+		const int64_t stacks = int64_t(value);
+		if (stacks < 0 || stacks > MAX_STACKS) {
+			return false;
+		}
+		if (stacks > 0) {
+			++wanted;
+			const int previous = _find_active(active, tag);
+			if (previous < 0 || active[previous].stacks != stacks) {
+				unchanged = false;
+			}
+		}
+	}
+	int current = 0;
+	for (const ActiveCue &cue : active) {
+		if (belongs_to_branch(cue.tag)) {
+			++current;
+		}
+	}
+	// Server replication often repeats an identical snapshot. No dictionary
+	// copy, pending event allocation or lifecycle notification in that case.
+	if (unchanged && current == wanted) {
+		return true;
+	}
+	Dictionary combined = get_active_snapshot();
+	for (const ActiveCue &cue : active) {
+		if (belongs_to_branch(cue.tag)) {
+			combined.erase(cue.tag);
+		}
+	}
+	for (const Variant &key : p_snapshot) {
+		const int64_t stacks = int64_t(p_snapshot[key]);
+		if (stacks > 0) {
+			combined[StringName(key)] = stacks;
+		}
+	}
+	// Existing all-or-nothing snapshot preflight handles active limits,
+	// coalesced started/updated/stopped queue capacity, and rollback.
+	return replace_active(combined, p_priority);
+}
+
 Dictionary GameplayCueQueue::get_active_snapshot() const {
 	Dictionary snapshot;
 	for (const ActiveCue &cue : active) {
@@ -280,6 +348,7 @@ void GameplayCueQueue::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("emit_cues_batch", "events"), &GameplayCueQueue::emit_cues_batch);
 	ClassDB::bind_method(D_METHOD("set_active", "tag", "stacks", "priority"), &GameplayCueQueue::set_active, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("replace_active", "snapshot", "priority"), &GameplayCueQueue::replace_active, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("replace_active_branch", "branch", "snapshot", "priority"), &GameplayCueQueue::replace_active_branch, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_active_snapshot"), &GameplayCueQueue::get_active_snapshot);
 	ClassDB::bind_method(D_METHOD("get_active_stacks", "tag"), &GameplayCueQueue::get_active_stacks);
 	ClassDB::bind_method(D_METHOD("is_active", "tag"), &GameplayCueQueue::is_active);
