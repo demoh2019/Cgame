@@ -6,6 +6,7 @@ extends MultiMeshInstance3D
 const GRID_SIZE: int = 25
 const MAX_INSTANCES: int = 160
 const MIN_SPACING: float = 2.1
+const DensityRemap = preload("res://pcg_density_policy.gd")
 const DENSITY_SEED: int = 90421
 const DENSITY_MODULUS: int = 2147483647
 const ZONE_CENTERS = [
@@ -41,6 +42,25 @@ const BOX_MAXS = [
 ]
 
 var _selected_positions := PackedVector3Array()
+var _density_ceiling: float = 1.0
+
+
+## Presentation-only density cap for low-detail runtime foliage.
+## Native PCG spatial filtering and 31-bit stable-ID sampling remain
+## authoritative for the actual placement. The remap affects values only.
+func set_density_ceiling(value: float) -> bool:
+    if not is_finite(value) or value < 0.0 or value > 1.0:
+        return false
+    if _density_ceiling == value:
+        return true
+    _density_ceiling = value
+    if is_inside_tree():
+        regenerate()
+    return true
+
+
+func get_density_ceiling() -> float:
+    return _density_ceiling
 
 
 func _ready() -> void:
@@ -91,7 +111,12 @@ func _make_densities() -> PackedFloat32Array:
         elif x < 8:
             density = 0.74
         densities.push_back(density)
-    return densities
+    # Unreal PCG Density Remap-inspired quality control: the authored
+    # 0.13/0.46/0.74/0.94 regional mask stays unchanged at the default 1.0.
+    # This pass runs before the existing PCGSpatialFilter3D stable-ID sampler.
+    var remapped: PackedFloat32Array = DensityRemap.remap_densities(
+        densities, 0.0, 1.0, 0.0, _density_ceiling)
+    return remapped if remapped.size() == densities.size() else densities
 
 
 func get_density_values() -> PackedFloat32Array:

@@ -112,3 +112,29 @@ integer hash and is smoke-tested for output parity and regeneration.
 The density and performance benefits should be measured in a custom
 Cgame build before claiming an FPS increase. 
 
+
+## Runtime foliage density scaling (native PCG Density Remap)
+
+`FoliageScatter.set_density_ceiling(value)` accepts a validated [0,1]
+cosmetic density ceiling and regenerates only the collision-free grass
+`MultiMesh`. The default 1.0 preserves the existing four native
+biome density zones and stable seeded placement exactly. For a
+low-detail setting, `set_density_ceiling(0.5)` linearly scales the
+probability mask before the existing spatial density selector. Returning
+to 1.0 restores the same positions, because no shared random state is
+consumed. NaN/out-of-range values are rejected without changing the scene.
+
+This new stage uses Cgame's generic
+`PCGDensitySelector.remap_densities()`; older builds and stock Godot
+run the matching pure GDScript fallback. The original native
+`PCGSpatialFilter3D.filter_indices_density()` and sphere/box
+spacing/exclusion behavior remain unchanged.
+
+```bash
+godot --headless --path games/days_after --script res://pcg_density_smoke_test.gd
+godot --headless --path games/days_after --script res://smoke_test.gd
+```
+
+Native C++ test: `[PCGDensitySelector]`. CI runs both under
+`.github/workflows/native-pcg-spatial-filter.yml`.
+No FPS/VRAM benefit is claimed before hardware measurement.
