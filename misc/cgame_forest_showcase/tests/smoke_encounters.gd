@@ -32,7 +32,7 @@ func _wait_for_cell(stream: WorldPartition3D, present: bool) -> bool:
 
 func _wait_for_activation(stream: WorldPartition3D) -> bool:
     for i in range(MAX_FRAMES):
-        if stream.is_cell_activation_ready(CELL):
+        if stream.is_cell_activation_ready(CELL) and stream.is_cell_navigation_ready(CELL):
             return true
         await process_frame
     return false
