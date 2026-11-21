@@ -62,8 +62,8 @@ func run(t) -> void:
 	streamer.refresh()
 	var count: int = streamer.get_loaded_count()
 	t.check(count > 4, "multiple chunks are ready before teleport")
-	var events: Array[Vector3i] = []
-	streamer.chunk_unloaded.connect(func(cell: Vector3i) -> void: events.append(cell))
+	_unload_events.clear()
+	streamer.chunk_unloaded.connect(Callable(self, "_record_unload"))
 	var destination := Vector3(512, 0, 512)
 	streamer.focus_position = destination
 	streamer.refresh()
