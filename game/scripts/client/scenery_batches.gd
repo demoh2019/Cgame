@@ -241,13 +241,18 @@ static func pcg_surface_filter_indices(positions: PackedVector3Array,
 ## Fail open on malformed inputs; real empty matches intentionally stay empty.
 static func filter_cosmetic_transforms_surface(transforms: Array[Transform3D],
 		normals: PackedVector3Array, min_slope_deg: float, max_slope_deg: float,
+		min_height: float = -PCG_SURFACE_COORD_LIMIT,
+		max_height: float = PCG_SURFACE_COORD_LIMIT,
 		prefer_native: bool = true) -> Array[Transform3D]:
 	if transforms.is_empty():
 		return []
 	if transforms.size() != normals.size() or transforms.size() > PCG_SURFACE_MAX_SELECTED:
 		return transforms
 	if not is_finite(min_slope_deg) or not is_finite(max_slope_deg) or \
-			min_slope_deg < 0.0 or max_slope_deg > 90.0 or min_slope_deg > max_slope_deg:
+			min_slope_deg < 0.0 or max_slope_deg > 90.0 or min_slope_deg > max_slope_deg or \
+			not is_finite(min_height) or not is_finite(max_height) or \
+			min_height < -PCG_SURFACE_COORD_LIMIT or max_height > PCG_SURFACE_COORD_LIMIT or \
+			min_height > max_height:
 		return transforms
 	var points := PackedVector3Array()
 	for i in transforms.size():
@@ -262,8 +267,7 @@ static func filter_cosmetic_transforms_surface(transforms: Array[Transform3D],
 		points.append(p)
 	var indices: PackedInt32Array = pcg_surface_filter_indices(
 		points, normals, min_slope_deg, max_slope_deg,
-		-PCG_SURFACE_COORD_LIMIT, PCG_SURFACE_COORD_LIMIT,
-		PCG_SURFACE_MAX_SELECTED, prefer_native)
+		min_height, max_height, PCG_SURFACE_MAX_SELECTED, prefer_native)
 	var selected: Array[Transform3D] = []
 	for index in indices:
 		selected.append(transforms[index])
