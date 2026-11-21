@@ -6,6 +6,13 @@ extends MultiMeshInstance3D
 const GRID_SIZE: int = 25
 const MAX_INSTANCES: int = 160
 const MIN_SPACING: float = 2.1
+const Density = preload("res://pcg_density_policy.gd")
+# Open western undergrowth remains lush; exposed eastern rubble has sparser
+# grass. Biome density remap is independent of obstacle/exclusion volumes.
+const DENSITY_SEED := 27419
+const DENSITY_WEST := 0.92
+const DENSITY_EAST := 0.35
+
 const ZONE_CENTERS = [
     Vector3(0.0, 0.0, 3.0),    # Player spawn
     Vector3(-2.0, 0.0, -3.0),  # Water scavenging cluster
@@ -78,6 +85,37 @@ func _make_candidates() -> PackedVector3Array:
         candidates.push_back(Vector3(-28.8 + float(x) * 2.4 + jitter_x,
             0.22, -28.8 + float(z) * 2.4 + jitter_z))
     return candidates
+
+
+## Dedicated Unreal PCG-inspired density stage before collision-free spacing.
+## Stable IDs are grid cell IDs, not compressed indices of the current batch.
+## Repeated regeneration and input shuffles cannot reroll individual cells.
+func _density_candidates(candidates: PackedVector3Array,
+        prefer_native: bool = true) -> PackedVector3Array:
+    var raw := PackedFloat32Array()
+    var stable_ids := PackedInt64Array()
+    raw.resize(candidates.size())
+    stable_ids.resize(candidates.size())
+    for index in range(candidates.size()):
+        var point: Vector3 = candidates[index]
+        # Raw density 1.0 at the west edge, 0.0 to the east.
+        raw[index] = clampf((30.0 - point.x) / 60.0, 0.0, 1.0)
+        stable_ids[index] = (index * 137) % (GRID_SIZE * GRID_SIZE)
+    var remapped: PackedFloat32Array = Density.remap_densities(raw,
+        0.0, 1.0, DENSITY_EAST, DENSITY_WEST, true, prefer_native)
+    if remapped.size() != candidates.size():
+        return candidates # Fail open for decorative geometry on bad policy data.
+    var accepted: PackedInt32Array = Density.select_indices(remapped,
+        stable_ids, DENSITY_SEED, MAX_INSTANCES * 4, prefer_native)
+    var chosen := PackedVector3Array()
+    for index in accepted:
+        chosen.push_back(candidates[index])
+    return chosen
+
+
+## Exposed for regression testing; no gameplay or collision logic uses it.
+func get_density_candidate_count() -> int:
+    return _density_candidates(_make_candidates()).size()
 
 
 func _in_any_box(point: Vector3,
@@ -157,12 +195,16 @@ func verify_native_fallback_parity() -> bool:
     var radii := get_exclusion_radii()
     var box_mins := get_exclusion_box_mins()
     var box_maxs := get_exclusion_box_maxs()
-    return (_select_indices(candidates, centers, radii, box_mins, box_maxs)
-        == _filter_fallback(candidates, centers, radii, box_mins, box_maxs))
+    var native_candidates: PackedVector3Array = _density_candidates(candidates, true)
+    var fallback_candidates: PackedVector3Array = _density_candidates(candidates, false)
+    if native_candidates != fallback_candidates:
+        return false
+    return (_select_indices(native_candidates, centers, radii, box_mins, box_maxs)
+        == _filter_fallback(fallback_candidates, centers, radii, box_mins, box_maxs))
 
 
 func regenerate() -> void:
-    var candidates := _make_candidates()
+    var candidates := _density_candidates(_make_candidates())
     var selected := _select_indices(candidates,
         get_exclusion_centers(), get_exclusion_radii(),
         get_exclusion_box_mins(), get_exclusion_box_maxs())
