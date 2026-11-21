@@ -9,6 +9,14 @@ The authoritative `GameServer` reduces or delays additional waves when an
 area is overcrowded; its tests run in `game/tests/run_all.gd`. See
 [Server Encounter Director](docs/SERVER_ENCOUNTER_DIRECTOR.md).
 
+**New server engine functionality — tick profiler and adaptive workloads:**
+the dedicated server records a bounded history of simulation tick durations
+and CPU-side p95; sustained overload temporarily limits *new random incident*
+reinforcements without skipping AI, attacks or network ticks. Every 10 seconds
+the server logs p95 and current incident cap. Start with
+`--fixed-incidents` to disable automatic backpressure. See
+[Server Tick Profiler](docs/SERVER_TICK_PROFILER.md).
+
 An original post-apocalyptic survival sandbox RPG: infected enemies,
 scavenging, hunger/thirst, safe hub and dangerous zones, tiered resource
 gathering, crafting/refining, equipment-based combat, full-loot risks outside
