@@ -37,6 +37,13 @@
 				Atomically acquires one independent lease per cell in a four-connected route from [param from_cell] to [param to_cell], including both endpoints. Returns an [Array] of positive lease tokens in traversal order, or an empty Array when the route is too long, intersects an inactive Data Layer, or exceeds remaining token capacity. No partial leases are retained on failure. The maximum route length is 64 cells and every lease uses the normal streaming budgets. Route cells are a streaming corridor, not an obstacle-aware navigation path.
 			</description>
 		</method>
+		<method name="capture_cell_object_states">
+			<return type="Dictionary" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Captures only the currently loaded cell's opted-in child objects and returns its cached state dictionary. Objects must be in the streaming_stateful group and implement capture_streaming_object_state(). If the cell is unloaded, returns the cached copy unchanged. Emits cell_object_state_changed only when a captured value actually changes.
+			</description>
+		</method>
 		<method name="cell_to_local_position" qualifiers="const">
 			<return type="Vector3" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -55,6 +62,12 @@
 			<return type="void" />
 			<description>
 				Releases all independent runtime lease tokens without touching [member pinned_cells], scene registrations or saved gameplay progress. Any formerly retained scenes become eligible for normal budgeted unloading.
+			</description>
+		</method>
+		<method name="clear_cell_object_states">
+			<return type="void" />
+			<description>
+				Clears cached interactive-object records for every cell, without changing already loaded objects. Subsequent captures or unloads populate the cache again if persist_streaming_objects is enabled.
 			</description>
 		</method>
 		<method name="clear_cell_physics_states">
@@ -125,6 +138,19 @@
 			<return type="int" />
 			<description>
 				Returns the total number of independent active lease tokens in this WorldPartition3D, limited to 256.
+			</description>
+		</method>
+		<method name="get_cell_object_state_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of cells currently holding at least one saved interactive-object record.
+			</description>
+		</method>
+		<method name="get_cell_object_states" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns a deep copy of the saved dictionary for a cell. Keys are scene-relative node paths as Strings. Each value is a small, value-only Dictionary from the object's capture_streaming_object_state() method. Returns an empty Dictionary if no object records exist.
 			</description>
 		</method>
 		<method name="get_cell_physics_state" qualifiers="const">
@@ -266,6 +292,19 @@
 				Returns whether [member persist_rigid_bodies] is enabled.
 			</description>
 		</method>
+		<method name="is_persisting_streaming_objects" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns whether persist_streaming_objects is enabled for this streamer.
+			</description>
+		</method>
+		<method name="load_cell_object_states">
+			<return type="void" />
+			<param index="0" name="states" type="Dictionary" />
+			<description>
+				Replaces cached interactive-object states from a Vector2i-to-Dictionary map, filtering unsafe paths, object references, unsupported types, nonfinite numbers and excess entries. Maximum 128 child object records per cell and 32 fields per record; accepted values include bool, int, finite float, short String, Vector2/Vector3 and integer vector variants. When enabled, existing loaded objects receive restore_streaming_object_state(state) immediately; missing records receive an empty Dictionary to reset to authored defaults.
+			</description>
+		</method>
 		<method name="load_cell_physics_states">
 			<return type="void" />
 			<param index="0" name="states" type="Dictionary" />
@@ -375,11 +414,24 @@
 				Enables/disables automatic physics capture on cell unloading and restoration on cell instantiation. Only [RigidBody3D] descendants with [code]set_meta(&quot;streaming_persistent&quot;, true)[/code] are included. Existing physics cache is not cleared when disabled. No physics state is written to disk unless the game calls [method snapshot_cell_physics_states] and saves it.
 			</description>
 		</method>
+		<method name="set_persist_streaming_objects">
+			<return type="void" />
+			<param index="0" name="enabled" type="bool" />
+			<description>
+				Enables or disables automated per-child object capture and restore. Nodes must be descendants of a loaded cell root, belong to group streaming_stateful, and implement capture_streaming_object_state() and restore_streaming_object_state(Dictionary). Default is false. Scene root gameplay state and RigidBody3D physics persistence remain independent.
+			</description>
+		</method>
 		<method name="set_pinned_cells">
 			<return type="void" />
 			<param index="0" name="cells" type="Array" />
 			<description>
 				Replaces the pinned cell coordinates, preserving the first occurrence of each [Vector2i]. Unsupported array entries are skipped. Arrays with more than 128 entries are rejected without changing existing pins. The normalized result is returned by [method get_pinned_cells].
+			</description>
+		</method>
+		<method name="snapshot_cell_object_states">
+			<return type="Dictionary" />
+			<description>
+				Captures the states of opted-in objects in all currently loaded cells (if enabled) and returns a deep copy of the object-state cache, including previously unloaded cells. Call before saving a checkpoint so still-resident objects are included. The engine does not write a file automatically.
 			</description>
 		</method>
 		<method name="snapshot_cell_physics_states">
@@ -445,6 +497,9 @@
 		<member name="persist_rigid_bodies" type="bool" setter="set_persist_rigid_bodies" getter="is_persisting_rigid_bodies" default="false">
 			If enabled, the streamer automatically saves and restores local transforms, linear/angular velocities, sleeping and freeze state for [RigidBody3D] descendants marked with [code]streaming_persistent = true[/code] metadata. Bodies without the explicit flag are not captured. The cache survives unloads but is not written to disk automatically. [method snapshot_cell_physics_states] exports it for a game's checkpoint system.
 		</member>
+		<member name="persist_streaming_objects" type="bool" setter="set_persist_streaming_objects" getter="is_persisting_streaming_objects" default="false">
+			When enabled, descendants in group streaming_stateful can save independent interactive state through capture_streaming_object_state() and restore_streaming_object_state(Dictionary). Value-only records are cached by cell and scene-relative NodePath, while snapshot_cell_object_states() exports them to a save game. Objects not in the group are ignored.
+		</member>
 		<member name="pinned_cells" type="Array" setter="set_pinned_cells" getter="get_pinned_cells" default="[]">
 			List of up to 128 pinned [Vector2i] cell coordinates, editable in the inspector and stored in the scene. Invalid non-[Vector2i] values and duplicates are omitted. Pinned registered scenes are kept loaded independently of observer distance, using the normal async request and scene instantiation budgets. Use [method pin_cell], [method unpin_cell] and [method clear_pinned_cells] to modify them at runtime.
 		</member>
@@ -472,6 +527,13 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Emitted after a [PackedScene] is instantiated as a child of this node.
+			</description>
+		</signal>
+		<signal name="cell_object_state_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="states" type="Dictionary" />
+			<description>
+				Emitted after a cell captures a genuinely changed set of interactive-object records, either on unload, explicit capture_cell_object_states() or snapshot_cell_object_states(). The dictionary is a defensive copy. Bulk load_cell_object_states() does not emit per-cell notifications.
 			</description>
 		</signal>
 		<signal name="cell_state_changed">
