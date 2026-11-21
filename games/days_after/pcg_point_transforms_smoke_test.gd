@@ -82,7 +82,8 @@ func _initialize() -> void:
         positions, ids, 42019, 0.0, 1.0, 1.0, 1.0, 1.0)
     _check(forced.size() == 512, "fixed transformation options failed", failures)
     for transform in forced:
-        if not (transform as Transform3D).basis.is_equal_approx(Basis()):
+        var fixed: Transform3D = transform
+        if not fixed.basis.is_equal_approx(Basis()):
             failures.append("fixed rotation/scale options were not identity")
             break
 
