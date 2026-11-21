@@ -147,6 +147,8 @@ func run(t) -> void:
 			"graphics tier %d has a bounded resident target" % quality)
 		t.check(FxPolicy.pool_changes_per_frame(quality) <= 2,
 			"graphics tier %d never performs more than two operations per frame" % quality)
+		t.check(FxPolicy.pool_work_usec(quality) >= 100 and FxPolicy.pool_work_usec(quality) <= 1000,
+			"graphics tier %d has a conservative CPU slice for pool maintenance" % quality)
 	t.eq(FxPolicy.pool_resident_target(-1), 2, "Performance target clamps")
 	t.eq(FxPolicy.pool_resident_target(99), 12, "Ultra target clamps")
 	t.eq(FxPolicy.pool_changes_per_frame(0), 1, "Performance spreads allocations one per frame")

@@ -155,3 +155,70 @@ static func _check_budgeted_residency(t, resident, packed: PackedScene, mode: St
 	t.eq(int(resident.get_stats()["disposed_total"]), 6,
 		mode + " native/script cache retire accounting matches")
 	host.free()
+
+	t.current = "CPU-time-sliced native and script VFX pool residency"
+	t.check(not PoolScript.should_stop_maintenance(0, 2, 400),
+		"zero time budget retains legacy count-only behavior")
+	t.check(not PoolScript.should_stop_maintenance(1, 0, 999),
+		"first indivisible allocation is never skipped")
+	t.check(PoolScript.should_stop_maintenance(100, 1, 100),
+		"positive CPU deadline prevents starting another scene operation")
+	for mode in ["stock", "native"]:
+		if mode == "native" and not ClassDB.class_exists("SceneNodePool"):
+			continue
+		var limited = ClassDB.instantiate("SceneNodePool") if mode == "native" else PoolScript.new()
+		if limited == null or not limited.has_method("get_last_maintenance_pending_count"):
+			if limited != null:
+				limited.free()
+			continue
+		limited.template = packed
+		limited.max_idle = 6
+		limited.prewarm_on_ready = false
+		t.eq(limited.maintain_residency(6, 2, -1), 0,
+			mode + " rejects negative CPU limit atomically")
+		t.eq(limited.maintain_residency(6, 2, 1000001), 0,
+			mode + " rejects unbounded CPU budget atomically")
+		t.eq(limited.get_idle_count(), 0, mode + " validation prevents creation")
+		var created: int = limited.maintain_residency(6, 2, 1)
+		t.check(created >= 1 and created <= 2,
+			mode + " always creates one item but respects count limit")
+		t.eq(limited.get_last_maintenance_change_count(), created,
+			mode + " reports real signed creation work")
+		t.eq(limited.get_last_maintenance_pending_count(), 6 - created,
+			mode + " reports remaining possible idle creations")
+		t.check(limited.get_last_maintenance_work_usec() >= 0,
+			mode + " exposes elapsed CPU microseconds")
+		while limited.get_idle_count() < 6:
+			t.check(limited.maintain_residency(6, 2, 0) > 0,
+				mode + " unbounded time drains capped work")
+		t.eq(limited.get_last_maintenance_pending_count(), 0,
+			mode + " completed residency has no pending work")
+		var live_host := Node.new()
+		var leased: Node = limited.acquire(live_host)
+		t.check(leased != null, mode + " checked-out effect is live")
+		var retired: int = limited.maintain_residency(0, 2, 1)
+		t.check(retired <= -1 and retired >= -2,
+			mode + " reclamation always frees at least one idle root")
+		t.eq(limited.get_active_count(), 1,
+			mode + " active visual effect is never removed")
+		t.eq(limited.get_last_maintenance_pending_count(), limited.get_idle_count(),
+			mode + " pending count excludes checked-out effects")
+		t.check(limited.release(leased), mode + " live effect returns safely")
+		while limited.get_idle_count() > 0:
+			t.check(limited.maintain_residency(0, 2, 0) < 0,
+				mode + " remaining idle effects eventually retired")
+		t.eq(limited.get_last_maintenance_pending_count(), 0,
+			mode + " fully drained pool has no deferred cleanup")
+		live_host.free()
+		limited.free()
+	var effects_source: String = (load("res://scripts/client/effects.gd") as Script).source_code
+	t.check(effects_source.contains("FxPolicy.pool_work_usec(level)"),
+		"Albion particle emitter pool uses the quality-scaled CPU budget")
+	t.check(effects_source.contains("get_last_maintenance_work_usec"),
+		"Albion supports older native engines without the timed API")
+	var online_source: String = FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
+	t.check(online_source.contains("Albion/VFXPoolMaintenanceCPUus"),
+		"game profiler exposes measured pool maintenance work")
+	t.check(online_source.contains("Albion/VFXPoolMaintenancePending"),
+		"game profiler tracks pending resident pool changes")
+
