@@ -121,6 +121,25 @@ func run(t) -> void:
 		"server population maintenance built exact active player snapshot")
 	t.check(server.last_population_query_stats["queries"] >= 2,
 		"server uses index in real unload decisions")
+
+	t.current = "batched zombie retention respects protected guardians and active hordes"
+	var guarded := Zombie.new(9003, "walker", Vector3(-1000.0, 0.0, -1000.0))
+	guarded.supply_cache_id = 811
+	server.bags[811] = {"items": []}
+	var horde_member := Zombie.new(9004, "walker", Vector3(-1300.0, 0.0, -1300.0))
+	server.night_horde = {"ids": [horde_member.id]}
+	server.zombies[guarded.id] = guarded
+	server.zombies[horde_member.id] = horde_member
+	server._manage_zombie_population()
+	t.check(server.zombies.has(guarded.id), "loot guardian cannot unload while bag exists")
+	t.check(server.zombies.has(horde_member.id), "night-horde member cannot unload")
+	t.eq(server.last_population_query_stats["batch_calls"], 1,
+		"protected entities do not cause additional batch invocations")
+	server.bags.erase(guarded.supply_cache_id)
+	server.night_horde = {}
+	server._manage_zombie_population()
+	t.check(not server.zombies.has(guarded.id), "expired loot protection allows unload")
+	t.check(not server.zombies.has(horde_member.id), "ended horde allows unload")
 	survivor.position = Vector3(700.0, 0.0, 700.0)
 	server._manage_zombie_population()
 	t.check(not server.zombies.has(near.id), "next pass reflects player relocation")
