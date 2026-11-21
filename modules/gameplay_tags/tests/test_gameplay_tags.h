@@ -263,6 +263,65 @@ TEST_CASE("[GameplayTags] query all/any/none") {
 	CHECK_FALSE(q->matches(Ref<GameplayTagContainer>())); // Null behaves as empty.
 }
 
+TEST_CASE("[GameplayTags] query supports counted thresholds, hierarchy and negative gates") {
+	Ref<GameplayTagStackContainer> stacks;
+	stacks.instantiate();
+	CHECK(stacks->add_stacks("Runtime.Status.Resolve.Strong", 1));
+	CHECK(stacks->add_stacks("Runtime.Status.Resolve.Weak", 1));
+	CHECK(stacks->add_stacks("Runtime.Status.Snared", 1));
+	CHECK(stacks->add_stacks("Enemy.Infected.Elite", 1));
+
+	Ref<GameplayTagQuery> query;
+	query.instantiate();
+	PackedStringArray all;
+	all.push_back("Runtime.Status.Resolve");
+	query->set_all_tags(all);
+	query->set_min_stack_count(2);
+	CHECK(query->matches_stacks(stacks)); // Parent aggregate: 1 + 1.
+	CHECK_FALSE(query->matches_stacks(Ref<GameplayTagStackContainer>()));
+	Ref<GameplayTagStackContainer> empty_stacks;
+	empty_stacks.instantiate();
+	CHECK_FALSE(query->matches_stacks(empty_stacks));
+	CHECK(query->get_min_stack_count() == 2);
+
+	PackedStringArray any;
+	any.push_back("Missing.Status");
+	any.push_back("Runtime.Status");
+	query->set_any_tags(any);
+	CHECK(query->matches_stacks(stacks));
+	any.remove_at(1);
+	query->set_any_tags(any);
+	CHECK_FALSE(query->matches_stacks(stacks));
+	query->set_any_tags(PackedStringArray());
+
+	PackedStringArray none;
+	none.push_back("Runtime.Status.Snared"); // 1 is below the 2-stack threshold.
+	query->set_none_tags(none);
+	CHECK(query->matches_stacks(stacks));
+	CHECK(stacks->add_stacks("Runtime.Status.Snared", 1));
+	CHECK_FALSE(query->matches_stacks(stacks));
+	query->set_none_tags(PackedStringArray());
+
+	query->set_exact(true);
+	CHECK_FALSE(query->matches_stacks(stacks)); // No exact "Runtime.Status.Resolve".
+	all.clear();
+	all.push_back("Runtime.Status.Snared");
+	query->set_all_tags(all);
+	CHECK(query->matches_stacks(stacks));
+	query->set_min_stack_count(0);
+	CHECK(query->get_min_stack_count() == 1);
+	query->set_min_stack_count(70000);
+	CHECK(query->get_min_stack_count() == 65535);
+	CHECK_FALSE(query->matches_stacks(stacks));
+	query->set_min_stack_count(2);
+
+	Ref<GameplayTagContainer> boolean_tags;
+	boolean_tags.instantiate();
+	boolean_tags->add_tag("Runtime.Status.Snared");
+	CHECK(query->matches(boolean_tags)); // Threshold only applies to counted matching.
+	CHECK(stacks->get_stack_count("Runtime.Status.Resolve") == 2); // Query is read-only.
+}
+
 TEST_CASE("[AnimationLODController] update_interval") {
 	CHECK(AnimationLODController::update_interval(5, true, 15, 35, 70) == 1);
 	CHECK(AnimationLODController::update_interval(15, true, 15, 35, 70) == 2);
