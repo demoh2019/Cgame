@@ -92,9 +92,9 @@ horizon)` adds a **short forward prediction** to the previous static
 nearest-neighbor separation. It builds the same bounded 3×3 spatial
 grid on the desired position `position + velocity * horizon` and scores
 only the closest `max_neighbors` future neighbors. When two future
-positions coincide because of opposing velocities, deterministic
-perpendicular steering guides agents to opposite sides instead of
-pushing them backward. Stationary exact overlaps still use stable
+positions coincide or pass very closely because of opposing velocities,
+deterministic perpendicular steering guides agents to opposite sides
+instead of pushing them backward. Stationary exact overlaps still use stable
 index-based tie breaking.
 
 The horizon is limited to **0..2 seconds**, velocities to 50 m/s and
