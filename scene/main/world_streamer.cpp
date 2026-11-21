@@ -906,7 +906,7 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 	if (have_focus) {
 		WorldStreamingGrid::prioritize_cells_for_motion_and_view(ready_cells, position,
 				velocity_hint, lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
-				view_direction, view_priority, cell_size, _grid_axes());
+				view_direction, view_priority, cell_size, _grid_axes(), view_cone_half_angle_degrees);
 	}
 	for (const Vector3i &cell : ready_cells) {
 		const String path = loading[cell];
@@ -1037,7 +1037,7 @@ void WorldStreamer::_update_streaming() {
 
 	WorldStreamingGrid::prioritize_cells_for_motion_and_view(wanted, position,
 			velocity_hint, lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
-			view_direction, view_priority, cell_size, _grid_axes());
+			view_direction, view_priority, cell_size, _grid_axes(), view_cone_half_angle_degrees);
 	// Route hints only REORDER cells already selected for player residency.
 	// Route pathfinding is performed by gameplay (AStarGrid2D), not by
 	// this per-frame engine scheduler. The player's own cell stays first.
@@ -1424,6 +1424,13 @@ void WorldStreamer::set_view_priority(real_t p_weight) {
 	view_priority = safe;
 }
 
+void WorldStreamer::set_view_cone_half_angle_degrees(real_t p_degrees) {
+	if (!Math::is_finite(p_degrees)) {
+		return;
+	}
+	view_cone_half_angle_degrees = CLAMP(p_degrees, real_t(1.0), real_t(180.0));
+}
+
 void WorldStreamer::set_fast_view_refresh_degrees(real_t p_degrees) {
 	if (!Math::is_finite(p_degrees)) {
 		return;
@@ -1650,6 +1657,8 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_view_direction"), &WorldStreamer::get_view_direction);
 	ClassDB::bind_method(D_METHOD("set_view_priority", "weight"), &WorldStreamer::set_view_priority);
 	ClassDB::bind_method(D_METHOD("get_view_priority"), &WorldStreamer::get_view_priority);
+	ClassDB::bind_method(D_METHOD("set_view_cone_half_angle_degrees", "degrees"), &WorldStreamer::set_view_cone_half_angle_degrees);
+	ClassDB::bind_method(D_METHOD("get_view_cone_half_angle_degrees"), &WorldStreamer::get_view_cone_half_angle_degrees);
 	ClassDB::bind_method(D_METHOD("set_auxiliary_source", "position", "radius"), &WorldStreamer::set_auxiliary_source);
 	ClassDB::bind_method(D_METHOD("clear_auxiliary_source"), &WorldStreamer::clear_auxiliary_source);
 	ClassDB::bind_method(D_METHOD("has_auxiliary_source"), &WorldStreamer::has_auxiliary_source);
@@ -1761,6 +1770,7 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lookahead_seconds", PROPERTY_HINT_RANGE, "0,4,0.1,suffix:s"), "set_lookahead_seconds", "get_lookahead_seconds");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "view_direction", PROPERTY_HINT_NONE), "set_view_direction", "get_view_direction");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "view_priority", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_view_priority", "get_view_priority");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "view_cone_half_angle_degrees", PROPERTY_HINT_RANGE, "1,180,1,suffix:°"), "set_view_cone_half_angle_degrees", "get_view_cone_half_angle_degrees");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fast_view_refresh_degrees", PROPERTY_HINT_RANGE, "0,180,1,suffix:°"), "set_fast_view_refresh_degrees", "get_fast_view_refresh_degrees");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "chunk_path_template", PROPERTY_HINT_NONE, ""), "set_chunk_path_template", "get_chunk_path_template");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "chunk_parent", PROPERTY_HINT_NONE, ""), "set_chunk_parent", "get_chunk_parent");

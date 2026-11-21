@@ -403,6 +403,67 @@ TEST_CASE("[SignificanceBudget] HLOD shadow cap returns stable 128 of 512 groups
 }
 
 
+TEST_CASE("[SignificanceBudget] stable multi-viewer priority, hard range and retention") {
+	Ref<SignificanceBudgetPlanner> p;
+	p.instantiate();
+	const PackedVector3Array positions = { Vector3(7, 0, 0), Vector3(94, 0, 0),
+			Vector3(300, 0, 0), Vector3(9, 0, 0) };
+	const PackedVector3Array viewers = { Vector3(0, 0, 0), Vector3(100, 0, 0) };
+	const PackedByteArray priorities = { 1, 1, 3, 2 };
+	const PackedInt64Array ids = { 11, 22, 33, 44 };
+	const PackedInt32Array retained_order = { 3, 0, 1 };
+	const PackedInt32Array nearest_order = { 3, 1, 0 };
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids,
+			{ 11 }, 3, 10.0, 3.0) == retained_order);
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids,
+			{}, 3, 10.0, 3.0) == nearest_order);
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids,
+			{ 33 }, 3, 10.0, 3.0) == nearest_order);
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids,
+			{}, 0, 10.0).is_empty());
+	CHECK(positions[0] == Vector3(7, 0, 0));
+	const PackedInt32Array tie_order = { 1, 0 };
+	CHECK(p->select_world_priority_stable({ Vector3(5, 0, 0), Vector3(95, 0, 0) },
+			viewers, { 1, 1 }, { 30, 3 }, {}, 2, 10.0) == tie_order);
+}
+
+TEST_CASE("[SignificanceBudget] stable multi-viewer inputs reject atomically") {
+	Ref<SignificanceBudgetPlanner> p;
+	p.instantiate();
+	const PackedVector3Array positions = { Vector3(1, 0, 0), Vector3(2, 0, 0) };
+	const PackedVector3Array viewers = { Vector3(0, 0, 0) };
+	const PackedByteArray priorities = { 1, 2 };
+	const PackedInt64Array ids = { 1, 2 };
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids,
+			{}, 2, 10.0).size() == 2);
+	CHECK(p->select_world_priority_stable(positions, {}, priorities, ids,
+			{}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, { 1 }, ids,
+			{}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, { 1, 1 },
+			{}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids,
+			{ 1, 1 }, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, { 4, 2 }, ids,
+			{}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids,
+			{}, 129, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids,
+			{}, 2, Math::INF).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids,
+			{}, 2, 10.0, 11.0).is_empty());
+	CHECK(p->select_world_priority_stable({ Vector3(Math::INF, 0, 0) },
+			viewers, { 1 }, { 1 }, {}, 1, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, { Vector3(Math::NaN, 0, 0) },
+			priorities, ids, {}, 2, 10.0).is_empty());
+	PackedVector3Array too_many_viewers;
+	for (int i = 0; i < 17; ++i) {
+		too_many_viewers.push_back(Vector3(i, 0, 0));
+	}
+	CHECK(p->select_world_priority_stable(positions, too_many_viewers,
+			priorities, ids, {}, 2, 10.0).is_empty());
+}
+
 TEST_CASE("[SignificanceBudget] multi-viewer stable selection keeps peers without hiding bosses") {
 	Ref<SignificanceBudgetPlanner> p;
 	p.instantiate();

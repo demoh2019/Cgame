@@ -66,9 +66,9 @@
 			<param index="3" name="ids" type="PackedInt64Array" />
 			<param index="4" name="retained_ids" type="PackedInt64Array" />
 			<param index="5" name="budget" type="int" />
-			<param index="6" name="max_distance" type="float" />
+			<param index="6" name="max_distance" type="float" default="1000.0" />
 			<param index="7" name="hysteresis" type="float" default="0.0" />
-			<description>Ranks by priority (3 to 0), then nearest distance to any viewer. Previously retained positive stable IDs receive a distance discount only within the same priority, but never outside the inclusive hard radius. Ties use actual distance, ID, then input index. Supports up to 16,384 positions, 16 viewers, 128 selected and 128 retained IDs. Requires finite positions/viewers, unique positive candidate/retained IDs, valid priorities, and bounded finite range/hysteresis. Invalid input returns an empty array without changing state. Pure data operation; it does not change rendering, physics, or authoritative simulation.</description>
+			<description>Ranks nearest-of-1-to-16 viewers with strict priorities 0 to 3 and retained positive unique IDs. A within-priority distance bonus reduces presentation flicker without extending the inclusive hard range. Ties use raw distance, ID and input order. At most 16,384 candidates, 128 retained IDs and 128 selection slots are supported. Invalid inputs fail closed, without mutating scene nodes or authoritative simulation.</description>
 		</method>
 		<method name="select_world" qualifiers="const">
 			<return type="PackedInt32Array" />

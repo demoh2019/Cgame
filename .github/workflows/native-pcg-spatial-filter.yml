@@ -42,7 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
-          timeout 240s "$BIN" --headless --test --test-case="*PCGSpatialFilter2D*" --no-colors 2>&1 | tee pcg-native.log
+          timeout 240s "$BIN" --headless --test --test-case="*PCGSpatialFilter*" --no-colors 2>&1 | tee pcg-native.log
       - name: Import Albion After game
         run: |
           set -euo pipefail

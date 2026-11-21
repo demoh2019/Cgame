@@ -1823,9 +1823,12 @@ func _build_nature_decor_entry(entry: Dictionary) -> void:
 	# Transform generation (including seeded RNG draws) happens above, before
 	# thinning, so streamed chunks keep all later seeded categories unchanged.
 	# Gatherables, collisions, landmarks and server zombie spawns are untouched.
-	if file.begins_with("Bush") or file.begins_with("Pebble"):
-		var spacing: float = 1.6 if file.begins_with("Bush") else 0.75
-		transforms = SceneryBatches.thin_cosmetic_transforms(transforms, spacing)
+	if file.begins_with("Bush"):
+		# Cliff ledges need full 3D spacing, not XZ-only pruning.
+		transforms = SceneryBatches.thin_cosmetic_transforms_3d(transforms, 1.6)
+	elif file.begins_with("Pebble"):
+		# Surface debris keeps planar spacing to avoid horizontal overlaps.
+		transforms = SceneryBatches.thin_cosmetic_transforms(transforms, 0.75)
 	# Dense vegetation is split into camera-cullable cells, sparse props remain one draw call.
 	for decor_batch in SceneryBatches.add(self, mesh, transforms,
 			float(entry["range"]), file.begins_with("Bush"), 8.0,

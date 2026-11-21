@@ -7,6 +7,7 @@ const PICKUP_SCRIPT = preload("res://pickup.gd")
 const STATE_SCRIPT = preload("res://survival_state.gd")
 const RESOURCE_SCRIPT = preload("res://resource_node.gd")
 const ENEMY_SCRIPT = preload("res://enemy.gd")
+const DEBRIS_LOD_SCRIPT = preload("res://debris_lod.gd")
 
 var state = STATE_SCRIPT.new()
 var player
@@ -21,6 +22,10 @@ func _ready() -> void:
     _build_world()
     _spawn_player()
     _spawn_infected("InfectedScavenger", Vector3(4, 0.15, -12))
+    var debris_lod = DEBRIS_LOD_SCRIPT.new()
+    debris_lod.name = "DebrisLOD"
+    add_child(debris_lod)
+    debris_lod.set_viewer(player)
     _build_hud()
 
 

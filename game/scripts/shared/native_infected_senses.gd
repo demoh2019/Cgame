@@ -117,6 +117,40 @@ func best_confirmed_stimulus(sense: int) -> Dictionary:
     return _history.get_best(sense)
 
 
+## Unreal-style perception range query over *previously approved* stimuli.
+## This filters stale remote locations during chase recovery without sensing
+## any new player, changing target selection, or exposing server-only memory.
+func best_confirmed_stimulus_in_radius(sense: int, center: Vector2, radius: float) -> Dictionary:
+    if _history == null or not center.is_finite() or not is_finite(radius) or radius < 0.0:
+        return {}
+    if _history.has_method("get_best_in_radius"):
+        return _history.get_best_in_radius(sense, center, radius)
+    # Older Cgame binaries: preserve correct filtering with a bounded, rare
+    # GDScript fallback. Stock Godot still returns an empty Dictionary.
+    var selected: Dictionary = {}
+    var best_score := -1.0
+    for entry_data in _history.get_recent(64):
+        var entry: Dictionary = entry_data
+        if int(entry.get("sense", -1)) != sense:
+            continue
+        var position: Vector2 = entry.get("position", Vector2.INF)
+        if not position.is_finite() or position.distance_squared_to(center) > radius * radius:
+            continue
+        var score: float = float(entry.get("score", -1.0))
+        if score > best_score:
+            best_score = score
+            selected = entry
+        elif score == best_score and not selected.is_empty():
+            var source_id: int = int(entry.get("source_id", -1))
+            var previous_id: int = int(selected.get("source_id", -1))
+            var previous_position: Vector2 = selected.get("position", Vector2.INF)
+            if source_id < previous_id or (source_id == previous_id and (
+                    position.x < previous_position.x or (
+                    position.x == previous_position.x and position.y < previous_position.y))):
+                selected = entry
+    return selected
+
+
 func get_recent_confirmed_stimuli(limit: int = 8) -> Array:
     if _history == null:
         return []

@@ -65,6 +65,7 @@ private:
 	Vector<Stimulus> events; // Oldest to newest; stable bounded storage.
 
 	static Dictionary make_snapshot(const Stimulus &p_event);
+	Dictionary get_best_filtered(int p_sense, const Vector2 *p_center, real_t p_radius_squared) const;
 
 protected:
 	static void _bind_methods();
@@ -81,6 +82,9 @@ public:
 	int get_event_count() const { return events.size(); }
 	// Highest decayed strength in the selected sense; ties are deterministic.
 	Dictionary get_best(int p_sense) const;
+	// Select a confirmed memory only within an inclusive, finite local radius.
+	// The spatial filter is applied before stimulus ranking; no state is changed.
+	Dictionary get_best_in_radius(int p_sense, const Vector2 &p_center, real_t p_radius) const;
 	// Newest events first. A detached Array of plain-data Dictionaries.
 	Array get_recent(int p_limit = 8) const;
 	void reset();

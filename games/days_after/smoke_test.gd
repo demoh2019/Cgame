@@ -22,6 +22,28 @@ func _smoke() -> void:
             push_error("Missing scene node: " + path)
             ok = false
 
+    var lod: Node = game.get_node_or_null("DebrisLOD")
+    if lod == null or lod.get_child_count() != 96:
+        push_error("Expected 96 deterministic decorative LOD fragments")
+        ok = false
+    else:
+        var shown: int = int(lod.call("get_visible_count"))
+        if shown <= 0 or shown > 18:
+            push_error("Visual LOD failed to select a bounded nearby fragment set")
+            ok = false
+        var survivor: Node3D = game.get_node("Survivor")
+        var original_position: Vector3 = survivor.global_position
+        survivor.global_position = Vector3(200, 0.15, 200)
+        lod.call("force_refresh")
+        if int(lod.call("get_visible_count")) != 0:
+            push_error("Visual LOD kept fragments outside its hard range")
+            ok = false
+        survivor.global_position = original_position
+        lod.call("force_refresh")
+        if int(lod.call("get_visible_count")) <= 0:
+            push_error("Visual LOD did not restore nearby fragments")
+            ok = false
+
     var state = game.get("state")
     var pickups := get_nodes_in_group("days_after_pickup")
     if pickups.size() < 4:
@@ -115,5 +137,5 @@ func _smoke() -> void:
     game.queue_free()
     await process_frame
     if ok:
-        print("PASS: scene, scavenging, finite gathering, XP, crafting, gear, infected combat and survival")
+        print("PASS: scene, bounded visual LOD, scavenging, gathering, XP, crafting, gear, combat and survival")
     quit(0 if ok else 1)

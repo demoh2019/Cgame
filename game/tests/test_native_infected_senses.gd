@@ -122,6 +122,25 @@ func run(t) -> void:
         t.eq(history_senses.get_recent_confirmed_stimuli().size(), 0,
             "stock Godot has no additional native stimulus data")
 
+    t.current = "Spatial perception queries never pick a stronger sound outside the leash"
+    var bounded := NativeSenses.new()
+    # The far sound is closer to its own validated listener and therefore
+    # scores higher globally; spatial filtering must consider the near event.
+    bounded.record_confirmed_sound(Vector2(70, 0), Vector2(70, 0), 100.0, 12)
+    bounded.record_confirmed_sound(Vector2.ZERO, Vector2(4, 0), 100.0, 11)
+    if bounded.has_native_history() and bounded.has_native_hearing():
+        t.eq(bounded.best_confirmed_stimulus(1).get("source_id"), 12,
+            "global ranking still prefers the strongest accepted noise")
+        t.eq(bounded.best_confirmed_stimulus_in_radius(1, Vector2.ZERO, 15.0).get("source_id"), 11,
+            "only the confirmed noise inside the NPC leash is eligible")
+        t.check(bounded.best_confirmed_stimulus_in_radius(1, Vector2.ZERO, 3.9).is_empty(),
+            "out-of-range sounds are never used as investigation goals")
+        t.eq(bounded.get_recent_confirmed_stimuli().size(), 2,
+            "bounded read-only query does not remove or age history")
+    else:
+        t.check(bounded.best_confirmed_stimulus_in_radius(1, Vector2.ZERO, 15.0).is_empty(),
+            "stock Godot continues without optional native stimulus memory")
+
     t.current = "Existing authoritative zombie hearing populates native memory"
     var height: float = WorldGen.HUB_HEIGHT
     var world := WorldGen.new(42)
