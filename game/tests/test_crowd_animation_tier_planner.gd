@@ -199,3 +199,95 @@ func run(t) -> void:
 						t.eq(native_tiers, script_tiers,
 							"stable native/script parity sample %d slots %d bonus %.1f" % [
 								sample, budget, hysteresis])
+
+
+	t.current = "measured procedural-IK budget conserves time and combat poses"
+	var cpu_distances := PackedFloat64Array([2.0, 4.0, 10.0, 18.0, 55.0])
+	var cpu_priority := PackedByteArray([0, 0, 0, 1, 1])
+	var cpu_visible := PackedByteArray([1, 1, 1, 1, 1])
+	var cpu_retained := PackedByteArray([0, 0, 0, 0, 0])
+	var cpu_costs := PackedInt32Array([500, 100, 100, 100, 0])
+	var cpu_expected := PackedInt32Array([1, 0, 0, 1, 2])
+	t.eq(CharacterAnim.plan_crowd_tiers_costed(cpu_distances, cpu_priority,
+		cpu_visible, cpu_retained, cpu_costs, 3, 1, 250, 1.5, false),
+		cpu_expected, "expensive IK owner defers; two cheaper visible owners fit")
+	t.eq(CharacterAnim.plan_crowd_tiers_costed(cpu_distances, cpu_priority,
+		cpu_visible, cpu_retained, cpu_costs, 3, 1, 0, 1.5, false),
+		CharacterAnim.plan_crowd_tiers(cpu_distances, cpu_priority, 3, 1,
+			false, cpu_visible, cpu_retained, 1.5),
+		"disabling the microsecond budget restores the previous tier planner")
+	var small_distances := PackedFloat64Array([10.0, 10.4, 21.0, 22.0])
+	var small_priority := PackedByteArray([0, 0, 0, 1])
+	var small_visible := PackedByteArray([1, 1, 1, 1])
+	var small_retained := PackedByteArray([0, 1, 1, 1])
+	var small_cost := PackedInt32Array([1000, 75, 100, 0])
+	t.eq(CharacterAnim.plan_crowd_tiers_costed(small_distances, small_priority,
+		small_visible, small_retained, small_cost, 2, 1, 80, 1.5, false),
+		PackedInt32Array([1, 0, 1, 1]),
+		"previous retained IK winner remains selected when its cost fits")
+	t.eq(CharacterAnim.plan_crowd_tiers_costed(small_distances, small_priority,
+		small_visible, small_retained, PackedInt32Array([0, 0, 0, 0]),
+		2, 1, 100, 1.5, false),
+		PackedInt32Array([1, 0, 1, 1]),
+		"unknown costs use the bounded 100us initial estimate")
+	t.eq(CharacterAnim.plan_crowd_tiers_costed(small_distances, small_priority,
+		PackedByteArray([1, 0, 1, 1]), small_retained, small_cost,
+		2, 1, 80, 1.5, false)[1], 2,
+		"no hysteresis keeps an invisible IK owner active")
+	t.eq(CharacterAnim.plan_crowd_tiers_costed(small_distances, small_priority,
+		small_visible, small_retained, PackedInt32Array([100]), 2, 1, 80,
+		1.5, false).size(), 0, "mismatched costs fail atomically")
+	t.eq(CharacterAnim.plan_crowd_tiers_costed(small_distances, small_priority,
+		small_visible, small_retained, PackedInt32Array([1, -1, 1, 1]),
+		2, 1, 80, 1.5, false).size(), 0,
+		"negative measured CPU cost rejected")
+	t.eq(CharacterAnim.plan_crowd_tiers_costed(small_distances, small_priority,
+		small_visible, small_retained, small_cost, 2, 1, 1000001,
+		1.5, false).size(), 0, "unbounded CPU budget rejected")
+	t.eq(CharacterAnim.plan_crowd_tiers_costed(small_distances, small_priority,
+		small_visible, small_retained, small_cost, 2, 1, 80,
+		NAN, false).size(), 0, "invalid hysteresis rejected before planning")
+	var anim_source_cpu := FileAccess.get_file_as_string("res://scripts/client/character_anim.gd")
+	var modifier_source_cpu := FileAccess.get_file_as_string(
+		"res://scripts/client/character_anim_modifier.gd")
+	t.check(anim_source_cpu.contains("full_pose_cost_us.append(") and
+		anim_source_cpu.contains("FULL_POSE_CPU_BUDGET_US[clampi(quality, 0, 3)]"),
+		"real Albion crowd pass supplies a quality-based measured CPU budget")
+	t.check(modifier_source_cpu.contains("Time.get_ticks_usec()") and
+		modifier_source_cpu.contains("estimated_full_pose_us"),
+		"actual procedural skeleton modifier records bounded runtime measurements")
+
+	t.current = "native and script CPU-cost crowd tier parity"
+	t.eq(CharacterAnim.plan_crowd_tiers_costed(cpu_distances, cpu_priority,
+		cpu_visible, cpu_retained, cpu_costs, 3, 1, 250),
+		cpu_expected, "native preferred call matches expected work-unit admission")
+	if ClassDB.class_exists("CrowdAnimationTierPlanner"):
+		var native_costed: Object = ClassDB.instantiate("CrowdAnimationTierPlanner")
+		if native_costed != null and native_costed.has_method("plan_visible_tiers_costed"):
+			t.eq(native_costed.call("plan_visible_tiers_costed", cpu_distances,
+				cpu_priority, cpu_visible, cpu_retained, cpu_costs, 3, 1, 250),
+				cpu_expected, "native Cgame exposes cost-bounded crowd API")
+			var cpu_rng := RandomNumberGenerator.new()
+			cpu_rng.seed = 341288
+			for sample in 16:
+				var ds := PackedFloat64Array()
+				var pr := PackedByteArray()
+				var vis := PackedByteArray()
+				var held := PackedByteArray()
+				var costs := PackedInt32Array()
+				for i in 120:
+					ds.append(float(cpu_rng.randi_range(0, 1050)) * 0.1)
+					pr.append(1 if cpu_rng.randi_range(0, 4) == 0 else 0)
+					vis.append(1 if cpu_rng.randi_range(0, 4) > 0 else 0)
+					held.append(1 if cpu_rng.randi_range(0, 9) == 0 else 0)
+					costs.append(cpu_rng.randi_range(0, 750))
+				for slots in [0, 1, 4, 12]:
+					for microseconds in [0, 100, 750, 2000]:
+						var fallback := CharacterAnim.plan_crowd_tiers_costed(
+							ds, pr, vis, held, costs, slots, 3, microseconds, 1.5, false)
+						var native_result: PackedInt32Array = native_costed.call(
+							"plan_visible_tiers_costed", ds, pr, vis, held, costs,
+							slots, 3, microseconds, 1.5)
+						t.eq(native_result, fallback,
+							"native/script CPU budget parity %d slots %d cap %d" % [
+								sample, slots, microseconds])
