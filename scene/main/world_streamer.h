@@ -111,6 +111,7 @@ private:
 
 	HashMap<Vector3i, ObjectID> loaded;
 	HashMap<Vector3i, bool> simulation_active_cells;
+	int simulation_inactive_count = 0;
 	// Optional cosmetic work is tracked separately from playable chunk residency.
 	HashSet<Vector3i> pending_visual_details;
 	HashMap<Vector3i, String> loading;
