@@ -405,10 +405,10 @@ TEST_CASE("[PCGSpatialFilter3D] yaw-oriented boxes combine with spheres and AABB
 	CHECK(filter->filter_indices_excluding_oriented_volumes(
 			points, spheres, radii, box_mins, box_maxs,
 			obb_centers, obb_extents, obb_yaws, 2.1) == expected);
+	const PackedInt32Array first_only = { 2 };
 	CHECK(filter->filter_indices_excluding_oriented_volumes(
 			points, spheres, radii, box_mins, box_maxs,
-			obb_centers, obb_extents, obb_yaws, 0.0, 1) ==
-			PackedInt32Array({ 2 }));
+			obb_centers, obb_extents, obb_yaws, 0.0, 1) == first_only);
 	// Empty oriented-volume input is exactly the existing mixed selector.
 	CHECK(filter->filter_indices_excluding_oriented_volumes(
 			points, spheres, radii, box_mins, box_maxs, {}, {}, {}, 0.0) ==
@@ -438,11 +438,25 @@ TEST_CASE("[PCGSpatialFilter3D] rotated boxes exclude inclusive faces before spa
 	CHECK(selected[0] == 1);
 	CHECK(selected[1] == 2);
 	// Vertical face and exact zero extents count as an inclusive surface.
+	const PackedInt32Array above_plane = { 1 };
 	CHECK(filter->filter_indices_excluding_oriented_volumes(
 			{ Vector3(0, 0, 0), Vector3(0, 0.01, 0) },
 			{}, {}, {}, {}, centers,
-			{ Vector3(0, 0, 0) }, yaws, 0.0) ==
-			PackedInt32Array({ 1 }));
+			{ Vector3(0, 0, 0) }, yaws, 0.0) == above_plane);
+}
+
+TEST_CASE("[PCGSpatialFilter3D] negative yaw rotates footprint opposite direction") {
+	Ref<PCGSpatialFilter3D> filter;
+	filter.instantiate();
+	const PackedVector3Array candidates = {
+		Vector3(1.4142135, 0, 1.4142135), // Inside -45-degree long axis.
+		Vector3(1.4142135, 0, -1.4142135), // Outside short axis.
+	};
+	const PackedInt32Array expected = { 1 };
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			candidates, {}, {}, {}, {},
+			{ Vector3() }, { Vector3(3, 1, 0.5) },
+			{ Math::deg_to_rad(-45.0) }, 0.0) == expected);
 }
 
 TEST_CASE("[PCGSpatialFilter3D] invalid rotated volumes fail closed atomically") {
