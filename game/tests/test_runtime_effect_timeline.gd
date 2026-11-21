@@ -34,6 +34,26 @@ func run(t) -> void:
 		zombie["sunder_seconds"] = 0.0
 		Features.sync_runtime_tags(actor, "zombie", zombie)
 		t.eq(Features.runtime_effect_remaining(actor, "Runtime.Status.Sundered"), 0.0, "snapshot removes effect")
+		var timeline: Object = actor.get_meta("effect_timeline", null) as Object
+		if timeline != null and timeline.has_method("replace_effect_branch"):
+			t.current = "native scoped timer snapshots preserve local visual effects"
+			t.check(bool(timeline.call("apply_effect", StringName("Local.Visual.Hit"), 2.0)),
+				"client visual effect starts independently")
+			zombie["stagger_seconds"] = 1.0
+			Features.sync_runtime_tags(actor, "zombie", zombie)
+			t.near(Features.runtime_effect_remaining(actor, "Runtime.Status.Staggered"),
+				1.0, 0.001, "runtime branch still refreshes")
+			t.near(Features.runtime_effect_remaining(actor, "Local.Visual.Hit"),
+				2.0, 0.001, "local visual countdown survives refresh")
+			Features.tick_runtime_effects(actor, 0.4)
+			t.near(Features.runtime_effect_remaining(actor, "Local.Visual.Hit"),
+				1.6, 0.001, "local effect advances on frame tick")
+			zombie["stagger_seconds"] = 0.0
+			Features.sync_runtime_tags(actor, "zombie", zombie)
+			t.eq(Features.runtime_effect_remaining(actor, "Runtime.Status.Staggered"), 0.0,
+				"runtime expiry removed on subsequent snapshot")
+			t.near(Features.runtime_effect_remaining(actor, "Local.Visual.Hit"),
+				1.6, 0.001, "runtime expiry does not wipe client effect")
 	else:
 		t.eq(Features.runtime_effect_remaining(actor, "Runtime.Status.Staggered", 1.5), 1.5, "stock Godot fallback")
 	actor.free()
