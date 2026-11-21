@@ -896,6 +896,15 @@ static func add(parent: Node3D, mesh: Mesh, transforms: Array[Transform3D], draw
 		instance.custom_aabb = bounds_for_instance(multimesh, mesh, ordered)
 		if density_scalable:
 			instance.set_meta("aa_density_scalable", true)
+			# Cache a representative mesh diameter only once, including authored
+			# instance scale. Projected LOD then needs no per-frame mesh queries.
+			var scale_sum := 0.0
+			for transform in ordered:
+				scale_sum += (transform.basis.x.length() +
+					transform.basis.y.length() + transform.basis.z.length()) / 3.0
+			var average_scale: float = scale_sum / float(ordered.size())
+			instance.set_meta("aa_density_mesh_diameter",
+				mesh.get_aabb().size.length() * average_scale)
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast_shadows else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		instance.visibility_range_end = draw_distance
 		instance.visibility_range_end_margin = fade_margin
