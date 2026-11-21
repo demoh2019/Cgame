@@ -649,6 +649,10 @@ func take_damage(amount: float, attacker_id: int = -1) -> bool:
 		sunder_until = 0.0
 		threat.clear()
 		return true
+	# Damage-derived threat must interrupt a distant passive LOD timer.
+	# The selector rechecks attacker validity and safe zones next tick.
+	if attacker_id > 0:
+		think_timer = 0.0
 	if state == State.IDLE or state == State.WANDER:
 		state = State.CHASE
 	return false
