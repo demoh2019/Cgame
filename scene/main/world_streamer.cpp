@@ -816,6 +816,8 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 }
 
 void WorldStreamer::_update_streaming() {
+	last_unload_count = 0;
+	last_deferred_unload_count = 0;
 	_forget_dead_chunks();
 
 	Vector3 position;
@@ -831,15 +833,57 @@ void WorldStreamer::_update_streaming() {
 		loaded_cells.insert(entry.key);
 	}
 	WorldStreamingGrid::cells_to_unload(position, keep_radius, cell_size, _grid_axes(), loaded_cells, to_unload);
+	LocalVector<Vector3i> expired;
+	const bool auxiliary_near = _auxiliary_is_near_focus(position);
 	for (const Vector3i &cell : to_unload) {
 		// Keep explicitly prefetched cells while their source stays nearby,
 		// even when they are just beyond the ordinary player unload radius.
-		if (_auxiliary_is_near_focus(position) &&
+		if (auxiliary_near &&
 				WorldStreamingGrid::distance_to_cell(auxiliary_source_position, cell, cell_size, _grid_axes()) <= _auxiliary_effective_radius()) {
 			continue;
 		}
-		_unload_cell(cell);
+		expired.push_back(cell);
 	}
+	const int count = int(expired.size());
+	const int grant = max_unloads_per_update == 0 ? count : MIN(count, max_unloads_per_update);
+	last_unload_count = grant;
+	last_deferred_unload_count = count - grant;
+	if (grant == count) {
+		// Default/unlimited path: retain the previous fast O(N) release.
+		for (const Vector3i &cell : expired) {
+			_unload_cell(cell);
+		}
+	} else {
+		// With a budget, unload farthest first. Avoid sorting the entire
+		// resident grid after teleports: only select up to 64 farthest cells,
+		// in O(expired * grant) comparisons and O(grant) selected metadata.
+		// Stable lexicographic ties make tests/replays deterministic.
+		HashSet<Vector3i> selected;
+		for (int i = 0; i < grant; ++i) {
+			bool found = false;
+			Vector3i best;
+			real_t best_distance = 0.0;
+			for (const Vector3i &cell : expired) {
+				if (selected.has(cell)) {
+					continue;
+				}
+				const real_t distance = WorldStreamingGrid::distance_to_cell(position, cell, cell_size, _grid_axes());
+				const bool tie_before = cell.x < best.x ||
+						(cell.x == best.x && (cell.y < best.y || (cell.y == best.y && cell.z < best.z)));
+				if (!found || distance > best_distance || (distance == best_distance && tie_before)) {
+					best = cell;
+					best_distance = distance;
+					found = true;
+				}
+			}
+			if (!found) {
+				break;
+			}
+			selected.insert(best);
+			_unload_cell(best);
+		}
+	}
+
 	_update_simulation(position);
 
 	LocalVector<Vector3i> wanted;
@@ -994,6 +1038,8 @@ void WorldStreamer::_reset_state() {
 	pending_visual_details.clear();
 	simulation_active_cells.clear();
 	cache_ineligible_nodes.clear();
+	last_unload_count = 0;
+	last_deferred_unload_count = 0;
 	simulation_inactive_count = 0;
 	last_queued_view_direction = Vector3();
 	truncated_warned = false;
@@ -1021,6 +1067,8 @@ void WorldStreamer::_notification(int p_what) {
 			if (chunk_parent.is_empty()) {
 				// Chunks are our children and go away with us; just forget them.
 				loaded.clear();
+				last_unload_count = 0;
+				last_deferred_unload_count = 0;
 				cache_ineligible_nodes.clear();
 				simulation_active_cells.clear();
 				simulation_inactive_count = 0;
@@ -1244,6 +1292,13 @@ void WorldStreamer::set_max_instantiations_per_frame(int p_count) {
 	max_instantiations_per_frame = MAX(p_count, 1);
 }
 
+void WorldStreamer::set_max_unloads_per_update(int p_count) {
+	max_unloads_per_update = CLAMP(p_count, 0, 64);
+	// Removing a restrictive budget should flush obsolete cells at the next
+	// scheduler pass without requiring an explicit refresh from gameplay.
+	time_since_update = MAX(time_since_update, update_interval);
+}
+
 void WorldStreamer::set_max_chunk_work_usec(int p_usec) {
 	// 0 disables the wall-clock cap; the per-frame count still applies.
 	max_chunk_work_usec = CLAMP(p_usec, 0, 1000000);
@@ -1368,6 +1423,8 @@ void WorldStreamer::refresh(bool p_retry) {
 }
 
 void WorldStreamer::unload_all() {
+	last_unload_count = 0;
+	last_deferred_unload_count = 0;
 	clear_cached_chunks(); // Manual reset always releases memory, not just scene residency.
 	LocalVector<Vector3i> cells;
 	for (const KeyValue<Vector3i, ObjectID> &entry : loaded) {
@@ -1418,6 +1475,10 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_concurrent_loads"), &WorldStreamer::get_max_concurrent_loads);
 	ClassDB::bind_method(D_METHOD("set_max_instantiations_per_frame", "count"), &WorldStreamer::set_max_instantiations_per_frame);
 	ClassDB::bind_method(D_METHOD("get_max_instantiations_per_frame"), &WorldStreamer::get_max_instantiations_per_frame);
+	ClassDB::bind_method(D_METHOD("set_max_unloads_per_update", "count"), &WorldStreamer::set_max_unloads_per_update);
+	ClassDB::bind_method(D_METHOD("get_max_unloads_per_update"), &WorldStreamer::get_max_unloads_per_update);
+	ClassDB::bind_method(D_METHOD("get_last_unload_count"), &WorldStreamer::get_last_unload_count);
+	ClassDB::bind_method(D_METHOD("get_last_deferred_unload_count"), &WorldStreamer::get_last_deferred_unload_count);
 	ClassDB::bind_method(D_METHOD("set_max_chunk_work_usec", "microseconds"), &WorldStreamer::set_max_chunk_work_usec);
 	ClassDB::bind_method(D_METHOD("set_simulation_radius", "radius"), &WorldStreamer::set_simulation_radius);
 	ClassDB::bind_method(D_METHOD("get_simulation_radius"), &WorldStreamer::get_simulation_radius);
@@ -1503,6 +1564,7 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_concurrent_loads", PROPERTY_HINT_RANGE, "1,64,1,or_greater"), "set_max_concurrent_loads", "get_max_concurrent_loads");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cached_chunks", PROPERTY_HINT_RANGE, "0,16,1"), "set_max_cached_chunks", "get_max_cached_chunks");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_instantiations_per_frame", PROPERTY_HINT_RANGE, "1,16,1,or_greater"), "set_max_instantiations_per_frame", "get_max_instantiations_per_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_unloads_per_update", PROPERTY_HINT_RANGE, "0,64,1"), "set_max_unloads_per_update", "get_max_unloads_per_update");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_chunk_work_usec", PROPERTY_HINT_RANGE, "0,1000000,100,suffix:us"), "set_max_chunk_work_usec", "get_max_chunk_work_usec");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "update_interval", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater,suffix:s"), "set_update_interval", "get_update_interval");
 	ADD_GROUP("Recovery", "");
