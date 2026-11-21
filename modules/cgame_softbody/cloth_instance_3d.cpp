@@ -48,15 +48,15 @@ void ClothInstance3D::set_cloth(const Ref<CgameXPBDCloth> &p_cloth) {
 	}
 }
 
-void ClothInstance3D::set_skeleton_path(const NodePath &p_path) {
-	skeleton_path = p_path;
+void ClothInstance3D::set_cloth_skeleton_path(const NodePath &p_path) {
+	cloth_skeleton_path = p_path;
 }
 
 Skeleton3D *ClothInstance3D::_get_skeleton() const {
-	if (skeleton_path.is_empty() || !is_inside_tree()) {
+	if (cloth_skeleton_path.is_empty() || !is_inside_tree()) {
 		return nullptr;
 	}
-	return Object::cast_to<Skeleton3D>(get_node_or_null(skeleton_path));
+	return Object::cast_to<Skeleton3D>(get_node_or_null(cloth_skeleton_path));
 }
 
 void ClothInstance3D::attach_particle_to_bone(int p_particle, const StringName &p_bone, const Vector3 &p_offset) {
@@ -244,8 +244,8 @@ void ClothInstance3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_substeps"), &ClothInstance3D::get_substeps);
 	ClassDB::bind_method(D_METHOD("set_simulating", "simulating"), &ClothInstance3D::set_simulating);
 	ClassDB::bind_method(D_METHOD("is_simulating"), &ClothInstance3D::is_simulating);
-	ClassDB::bind_method(D_METHOD("set_skeleton_path", "path"), &ClothInstance3D::set_skeleton_path);
-	ClassDB::bind_method(D_METHOD("get_skeleton_path"), &ClothInstance3D::get_skeleton_path);
+	ClassDB::bind_method(D_METHOD("set_cloth_skeleton_path", "path"), &ClothInstance3D::set_cloth_skeleton_path);
+	ClassDB::bind_method(D_METHOD("get_cloth_skeleton_path"), &ClothInstance3D::get_cloth_skeleton_path);
 
 	ClassDB::bind_method(D_METHOD("attach_particle_to_bone", "particle", "bone", "offset"), &ClothInstance3D::attach_particle_to_bone, DEFVAL(Vector3()));
 	ClassDB::bind_method(D_METHOD("detach_particle_from_bone", "particle"), &ClothInstance3D::detach_particle_from_bone);
@@ -259,5 +259,5 @@ void ClothInstance3D::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "substeps", PROPERTY_HINT_RANGE, "1,64,1"), "set_substeps", "get_substeps");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "simulating"), "set_simulating", "is_simulating");
-	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "skeleton_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Skeleton3D"), "set_skeleton_path", "get_skeleton_path");
+	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "cloth_skeleton_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Skeleton3D"), "set_cloth_skeleton_path", "get_cloth_skeleton_path");
 }

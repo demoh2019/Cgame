@@ -63,7 +63,7 @@ static func make_cloth_node(cloth: RefCounted, skeleton: Skeleton3D = null, bone
 static func bind_skeleton(node: Node3D, skeleton: Skeleton3D) -> void:
 	if node == null or skeleton == null or not node.is_inside_tree():
 		return
-	node.set("skeleton_path", node.get_path_to(skeleton))
+	node.set("cloth_skeleton_path", node.get_path_to(skeleton))
 
 
 ## Pure-GDScript fallback: rebuilds `mesh_instance.mesh` from the cloth. Use only when

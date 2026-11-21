@@ -51,7 +51,7 @@ class ClothInstance3D : public MeshInstance3D {
 	Ref<CgameXPBDCloth> cloth;
 	int substeps = 8;
 	bool simulating = true;
-	NodePath skeleton_path;
+	NodePath cloth_skeleton_path;
 	HashMap<int, BoneAttachment> bone_attachments;
 
 	Ref<ArrayMesh> array_mesh;
@@ -79,8 +79,8 @@ public:
 	int get_substeps() const { return substeps; }
 	void set_simulating(bool p_simulating) { simulating = p_simulating; }
 	bool is_simulating() const { return simulating; }
-	void set_skeleton_path(const NodePath &p_path);
-	NodePath get_skeleton_path() const { return skeleton_path; }
+	void set_cloth_skeleton_path(const NodePath &p_path);
+	NodePath get_cloth_skeleton_path() const { return cloth_skeleton_path; }
 
 	// Pins cloth particle `p_particle` to the named bone, offset in bone-local space.
 	void attach_particle_to_bone(int p_particle, const StringName &p_bone, const Vector3 &p_offset = Vector3());

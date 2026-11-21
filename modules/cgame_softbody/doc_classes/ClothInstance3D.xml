@@ -12,7 +12,7 @@
 		var node := ClothInstance3D.new()
 		add_child(node)
 		node.set_cloth(cloth)
-		node.skeleton_path = ^"../Skeleton3D"
+		node.cloth_skeleton_path = ^"../Skeleton3D"
 		for i in range(cloth.columns()):
 		    node.attach_particle_to_bone(cloth.index_of(i, 0), "Spine2")
 		[/codeblock]
@@ -26,7 +26,7 @@
 			<param index="1" name="bone" type="StringName" />
 			<param index="2" name="offset" type="Vector3" default="Vector3(0, 0, 0)" />
 			<description>
-				Pins cloth particle [param particle] to the bone named [param bone] of the skeleton at [member skeleton_path], at [param offset] in bone-local space. Does nothing and prints an error if no cloth is set or the index is out of range. Bones that cannot be found are skipped at runtime.
+				Pins cloth particle [param particle] to the bone named [param bone] of the skeleton at [member cloth_skeleton_path], at [param offset] in bone-local space. Does nothing and prints an error if no cloth is set or the index is out of range. Bones that cannot be found are skipped at runtime.
 			</description>
 		</method>
 		<method name="clear_bone_attachments">
@@ -92,7 +92,7 @@
 		<member name="simulating" type="bool" setter="set_simulating" getter="is_simulating" default="true">
 			If [code]true[/code], the cloth is stepped every physics frame. The simulation never runs automatically in the editor.
 		</member>
-		<member name="skeleton_path" type="NodePath" setter="set_skeleton_path" getter="get_skeleton_path" default="NodePath(&quot;&quot;)">
+		<member name="cloth_skeleton_path" type="NodePath" setter="set_cloth_skeleton_path" getter="get_cloth_skeleton_path" default="NodePath(&quot;&quot;)">
 			Path to the [Skeleton3D] that provides the bone transforms for bone attachments.
 		</member>
 		<member name="substeps" type="int" setter="set_substeps" getter="get_substeps" default="8">
