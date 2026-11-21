@@ -1227,8 +1227,11 @@ func _setup_chat() -> void:
 	chat_edit = LineEdit.new()
 	chat_edit.placeholder_text = "Enter to chat. /g guild text, /guild name, /guilds, /join name, /leave"
 	chat_edit.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	chat_edit.position = Vector2(320, -44)
-	chat_edit.size = Vector2(640, 32)
+	# Offsets, not size: bottom-wide anchors would override size after _ready().
+	chat_edit.offset_left = 320.0
+	chat_edit.offset_right = -320.0
+	chat_edit.offset_top = -44.0
+	chat_edit.offset_bottom = -12.0
 	chat_edit.visible = false
 	chat_edit.text_submitted.connect(_on_chat_submitted)
 	hud.add_child(chat_edit)
@@ -1314,9 +1317,11 @@ func _on_welcomed() -> void:
 	streamer.update_interval = 0.15
 	# Recover from transient generator/resource failures without an unbounded retry loop.
 	# A null chunk remains an intentionally empty world cell.
-	streamer.max_auto_retries = 2
-	streamer.retry_initial_delay = 0.5
-	streamer.retry_max_delay = 3.0
+	# Older engine builds lack the retry API; skip it instead of erroring.
+	if "max_auto_retries" in streamer:
+		streamer.max_auto_retries = 2
+		streamer.retry_initial_delay = 0.5
+		streamer.retry_max_delay = 3.0
 	# Prioritize content ahead of actual movement while keeping the same
 	# resident-world radius and unload hysteresis.
 	streamer.lookahead_seconds = 2.0
