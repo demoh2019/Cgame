@@ -48,4 +48,11 @@ public:
 			const PackedVector3Array &p_box_mins,
 			const PackedVector3Array &p_box_maxs,
 			double p_min_spacing, int p_max_selected = MAX_SELECTED) const;
+	// PCG-style per-point density sampling with stable IDs. Every point is
+	// admitted independently of its input-array position; no global RNG.
+	// IDs and seed: [0, 2147483646], densities: finite [0, 1].
+	PackedInt32Array filter_indices_density(const PackedVector3Array &p_candidates,
+			const PackedFloat32Array &p_densities,
+			const PackedInt32Array &p_stable_ids, int64_t p_seed,
+			int p_max_selected = MAX_SELECTED) const;
 };
