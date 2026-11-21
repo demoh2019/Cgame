@@ -200,6 +200,7 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query"), &EnvironmentQuery3D::query);
 	ClassDB::bind_method(D_METHOD("query_positions"), &EnvironmentQuery3D::query_positions);
 	ClassDB::bind_method(D_METHOD("query_top_positions", "count"), &EnvironmentQuery3D::query_top_positions);
+	ClassDB::bind_method(D_METHOD("query_top_indices", "count"), &EnvironmentQuery3D::query_top_indices);
 	ClassDB::bind_method(D_METHOD("query_spread_positions", "count", "min_separation"), &EnvironmentQuery3D::query_spread_positions);
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_ring", "center", "radius", "count", "phase"), &EnvironmentQuery3D::sample_ring, DEFVAL(0.0));
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_donut", "center", "inner_radius", "outer_radius", "ring_count", "points_per_ring", "phase", "spiral"), &EnvironmentQuery3D::sample_donut, DEFVAL(0.0), DEFVAL(false));
@@ -432,6 +433,49 @@ PackedVector3Array EnvironmentQuery3D::query_top_positions(int p_count) const {
 	Vector3 *write = output.ptrw();
 	for (int i = 0; i < best.size(); i++) {
 		write[i] = best[i].position;
+	}
+	return output;
+}
+
+// Item identity is part of an EQS query result. Geometry alone cannot
+// reliably map a ranked position back to a unique gameplay slot, especially
+// when two source candidates have identical coordinates. Keep exactly the
+// same bounded scorer, stable tie break and max_results cap as top positions.
+PackedInt32Array EnvironmentQuery3D::query_top_indices(int p_count) const {
+	PackedInt32Array output;
+	ERR_FAIL_COND_V_MSG(p_count < 1 || p_count > 64, output, "Top-K count must be between 1 and 64.");
+	if (!origin.is_finite() || (use_threat && !threat_position.is_finite()) || min_distance > max_distance) {
+		return output;
+	}
+	const int limit = max_results == 0 ? p_count : MIN(p_count, max_results);
+	Vector<QueryHit> best;
+	HitComparator better;
+	for (int i = 0; i < candidates.size(); i++) {
+		QueryHit hit;
+		if (!score_candidate(candidates[i], i, origin, threat_position, threat_positions,
+					exclusion_positions, min_exclusion_distance,
+					use_direction, direction_origin, direction_axis, min_direction_dot, max_direction_dot,
+					use_threat, horizontal_only, min_distance, max_distance,
+					max_vertical_difference, desired_distance, distance_weight, safety_weight,
+					min_threat_distance, hit)) {
+			continue;
+		}
+		if (best.size() == limit && !better(hit, best[best.size() - 1])) {
+			continue;
+		}
+		int at = 0;
+		while (at < best.size() && !better(hit, best[at])) {
+			at++;
+		}
+		best.insert(at, hit);
+		if (best.size() > limit) {
+			best.resize(limit);
+		}
+	}
+	output.resize(best.size());
+	int32_t *write = output.ptrw();
+	for (int i = 0; i < best.size(); i++) {
+		write[i] = best[i].index;
 	}
 	return output;
 }

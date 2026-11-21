@@ -167,6 +167,42 @@ detection, line of sight, or navigation validation. Albion After's authoritative
 raid reinforcements supply living infected positions and preserve deterministic
 stock-Godot fallback when more than 128 contexts are present.
 
+## Stable top-K candidate identities (Unreal EQS-style item handles)
+
+`EnvironmentQuery3D.query_top_indices(count)` returns a
+`PackedInt32Array` of the original candidate **indices**, sorted by the same
+deterministic score (descending), with original-index tie breaking as
+`query_top_positions(count)`. Both use the identical distance, threat,
+direction, clearance, and terrain-height tests. The integer result avoids
+allocating metadata dictionaries or copying candidate coordinates, and
+preserves two distinct candidate slots even if their positions coincide.
+Counts must be in 1..64, and `max_results` still applies. Invalid requests
+return an empty packed array.
+
+```gdscript
+var indices: PackedInt32Array = eqs.query_top_indices(8)
+for index in indices:
+    var location: Vector3 = eqs.candidates[index]
+    # Stable index identifies the associated Smart Object slot.
+```
+
+Albion After's actual zombie flanking logic now consumes source indices
+directly when constructing authoritative per-target Smart Object slot IDs.
+Previously it reidentified each ranked point with a nested floating-point
+distance comparison to the eight ring positions. The new engine feature
+removes this fragile O(K²) coordinate matching and retains the exact
+ranked order and lease rules. Older Cgame builds use the previous position
+query, while stock Godot still uses direct pursuit. No target selection,
+damage, navigation, safe zones or network authority changes are made.
+
+The native module tests cover duplicate candidate positions, deterministic
+ordering, max-results caps, invalid limits and parity with the legacy
+position query. The main game regression exercises two real infected
+claiming distinct physical ring slots.
+
+Reference: Unreal EQS scoring and item tests
+https://dev.epicgames.com/documentation/unreal-engine/eqs-node-reference-tests-in-unreal-engine
+
 ## Inclusive directional dot band (Unreal EQS-style Dot Test)
 
 The directional prefilter now accepts both `min_direction_dot` (default -1) and

@@ -744,21 +744,38 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 		Vector3(target.x, 0.0, target.y), FLANK_RING, 8,
 		0.0 if use_smart_slots else float(posmod(id, 8)) * 0.4)
 	_flank_query.set("candidates", ring)
-	var ranked: PackedVector3Array = _flank_query.call(
-		"query_top_positions", 8 if use_smart_slots else 3)
-	if ranked.is_empty():
+	# Preserve EQS item identities throughout ranking and exclusive leasing.
+	# The previous position-only path must rediscover original ring indices by
+	# fuzzy coordinate comparisons and cannot distinguish overlapping items.
+	# Old Cgame builds without the new API keep their previous fallback.
+	var ranked_indices := PackedInt32Array()
+	var ranked := PackedVector3Array()
+	var top_count: int = 8 if use_smart_slots else 3
+	if _flank_query.has_method("query_top_indices"):
+		ranked_indices = _flank_query.call("query_top_indices", top_count)
+		for ring_index in ranked_indices:
+			if ring_index < 0 or ring_index >= ring.size():
+				return target
+	else:
+		ranked = _flank_query.call("query_top_positions", top_count)
+	if ranked_indices.is_empty() and ranked.is_empty():
 		return target
-	var spot: Vector3 = ranked[posmod(id, ranked.size())]
+	var spot: Vector3 = ring[ranked_indices[posmod(id, ranked_indices.size())]] \
+		if not ranked_indices.is_empty() else ranked[posmod(id, ranked.size())]
 	var claimed_slot: int = 0
 	if use_smart_slots:
 		var slot_ids := PackedInt64Array()
-		for candidate in ranked:
-			for slot_index in ring.size():
-				if ring[slot_index].distance_squared_to(candidate) < 0.0001:
-					# Exclusive server slot ID, keyed by player target and ring
-					# index, not an ephemeral ranked-array position.
-					slot_ids.append(target_id * 16 + slot_index + 1)
-					break
+		if not ranked_indices.is_empty():
+			for ring_index in ranked_indices:
+				# Stable original candidate identity: no position matching.
+				slot_ids.append(target_id * 16 + ring_index + 1)
+		else:
+			for candidate in ranked:
+				for ring_index in ring.size():
+					if ring[ring_index].distance_squared_to(candidate) < 0.0001:
+						# Backwards compatibility with older position-only EQS.
+						slot_ids.append(target_id * 16 + ring_index + 1)
+						break
 		if slot_ids.is_empty():
 			return target
 		# Elite AI may preempt ordinary pending claims, not occupied slots.
