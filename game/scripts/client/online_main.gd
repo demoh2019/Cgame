@@ -61,6 +61,7 @@ const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const AmbientTickBudget = preload("res://scripts/client/ambient_tick_budget.gd")
+const AmbientRateProfile = preload("res://scripts/client/ambient_rate_profile.gd")
 const AMBIENT_CPU_BUDGET_US := [900, 1500, 2500, 4000] # Quality tiers, main-thread cosmetics only.
 const GraphicsCinematicDof = preload("res://scripts/client/graphics_cinematic_dof.gd")
 const RainGear = preload("res://scripts/client/character_rain_gear.gd")
@@ -137,6 +138,8 @@ var atmosphere
 var _ambient_motes
 var _ambient_budget: Variant = AmbientTickBudget.new()
 var _ambient_was_underground := false
+var _ambient_rate_flags: int = -1
+var _ambient_rates_supported: bool = false
 var _ambient_monitors: Array[StringName] = []
 var _ambient_birds
 var _fish_shoals
@@ -261,6 +264,8 @@ func _ready() -> void:
 					registered_all = false
 			if registered_all:
 				_ambient_budget = native_budget
+	# The game also runs on older Cgame builds without per-lane rates.
+	_ambient_rates_supported = _ambient_budget.has_method("set_lane_rate_scale")
 	# Client-side cosmetic update budget, exposed to Godot's built-in profiler.
 	for monitor in [
 		[&"Albion/AmbientUpdates", Callable(_ambient_budget, "updated_total")],
@@ -1664,6 +1669,23 @@ func _track_places(delta: float) -> void:
 			hud.banner(area, Color(0.8, 0.9, 1.0))
 
 
+## Configure significance on state changes only, not on every rendered frame.
+## If the native engine predates this API, its previous fair frame budget
+## remains in use without breaking the gameplay client.
+func _update_ambient_significance(level: int, biome: String, wind: Vector2,
+		daylight: float, storm: float, underground: bool) -> void:
+	if not _ambient_rates_supported:
+		return
+	var flags: int = AmbientRateProfile.active_flags(level, biome, wind, daylight, storm, underground)
+	if flags == _ambient_rate_flags:
+		return
+	var rates: Dictionary = AmbientRateProfile.scales_for_flags(flags)
+	for lane in AmbientTickBudget.LANES:
+		if not bool(_ambient_budget.call("set_lane_rate_scale", lane, float(rates[lane]))):
+			return
+	_ambient_rate_flags = flags
+
+
 func _update_time_of_day(delta: float) -> void:
 	var weather: Dictionary = client.you.get("weather", {})
 	# No rain under the settlement roofs, where the server also treats the player as sheltered.
@@ -1673,8 +1695,6 @@ func _update_time_of_day(delta: float) -> void:
 	# Only cosmetic ambience is time-sliced; network interpolation and combat
 	# still update every frame. Force an immediate refresh across dungeon edges.
 	var ambient_quality: int = GraphicsQuality.level()
-	_ambient_budget.set_frame_time_budget_us(AMBIENT_CPU_BUDGET_US[ambient_quality])
-	_ambient_budget.begin_frame(delta, ambient_quality)
 	var ambient_force: bool = underground != _ambient_was_underground
 	_ambient_was_underground = underground
 	# Occlusion has a CPU cost: enable it only when enclosed dungeon walls
@@ -1706,6 +1726,12 @@ func _update_time_of_day(delta: float) -> void:
 		storming = false
 	else:
 		atmosphere.update(WorldCycle.daylight(clock), WorldCycle.sun_height(clock), WorldCycle.phase(clock), storming, delta, _visual_weather_wind, _visual_biome, MoonVisuals.phase_at(clock))
+	# Wind/biome and smoothed storm are now current, so visibility-significance
+	# is based on the actual scene before frame slots are reserved.
+	_update_ambient_significance(ambient_quality, _visual_biome, _visual_weather_wind,
+		WorldCycle.daylight(clock), atmosphere.storm, underground)
+	_ambient_budget.set_frame_time_budget_us(AMBIENT_CPU_BUDGET_US[ambient_quality])
+	_ambient_budget.begin_frame(delta, ambient_quality)
 	# One native lit froxel mist volume follows the player near the ground.
 	# No extra fullscreen pass or extra nodes per chunk.
 	if _ground_mist != null:
