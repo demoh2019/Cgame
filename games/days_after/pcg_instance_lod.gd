@@ -61,7 +61,7 @@ static func _plan_fallback(positions: PackedVector3Array, viewer: Vector3,
 
 
 static func plan_instance_lods(positions: PackedVector3Array, viewer: Vector3,
-        previous_tiers: PackedInt32Array = PackedInt32Array(),
+        previous_tiers: PackedInt32Array,
         switch_distance: float = 24.0, hysteresis: float = 3.0,
         prefer_native: bool = true) -> PackedInt32Array:
     if prefer_native:
@@ -83,7 +83,7 @@ static func _partition_fallback(variants: PackedInt32Array,
         if variants[i] < 0 or variants[i] >= variant_count or \
                 lod_tiers[i] < 0 or lod_tiers[i] > 1:
             return result
-    for i in variant_count * 2:
+    for i in range(variant_count * 2):
         result.append(PackedInt32Array())
     for source_index in variants.size():
         var group_index: int = variants[source_index] * 2 + lod_tiers[source_index]
