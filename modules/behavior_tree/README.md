@@ -5,6 +5,14 @@ behavior tree system for gameplay AI. It is not a visual graph editor yet.
 When enabled, all resources are available in the scene inspector and in
 GDScript. The module has no third-party runtime dependencies.
 
+## Visual BehaviorTree Inspector: editor dock and runtime tree
+
+The native `BehaviorTreeRunner.get_tree_snapshot()` now returns the **full task hierarchy** even for branches that were not run on the last tick. It merges on-demand `AIBehaviorTrace` statuses into stable Resource paths, distinguishes `NOT RUN` from `SUCCESS`, `FAILURE` and `RUNNING`, and includes inclusive CPU time per visited node. Maximum 256 task nodes, with a graph-truncation flag; no per-frame tree walk when unused.
+
+Two editor-ready addon copies live at `game/addons/cgame_bt_debugger/` and `modules/behavior_tree/demo_reactive_ai/addons/cgame_bt_debugger/`, enabled in both Godot project files. The **Cgame AI** right-hand editor dock inspects a selected `BehaviorTreeRunner` in the edited scene (or the first runner under the scene root), with Refresh, colored statuses and resource paths. It safely reports a missing native class on stock Godot. This editor view **does not attach to the remote running game's process**; live per-tick behavior appears in the demo's runtime inspector panel.
+
+The playable sandbox now includes a live `Tree` UI with status colors, execution times and nested Resource tasks, shown only when **T** enables tracing. The canonical game uses a GDScript zombie state machine rather than a BehaviorTree, and exposes compatible **server-only** `Zombie.get_ai_state_visual_snapshot()` data showing its actual active state and last traced target-selection phase. These debug APIs are not network RPCs and must not be forwarded to multiplayer clients.
+
 ## Opt-in per-node AI execution tracing
 
 `AIBehaviorTrace` brings a bounded per-task execution history to Cgame's native Resource behavior trees. This implements a practical part of the debugging workflows seen in Unreal's Behavior Tree debugger and LimboAI's runtime inspector: each executed task records its **path, class, returned status, tree depth and inclusive CPU time** in start order. It retains only the latest tick (128 steps by default, up to 256), with an explicit `truncated` count for oversized trees.
