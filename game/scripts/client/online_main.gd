@@ -63,6 +63,7 @@ const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const GraphicsTextureStreaming = preload("res://scripts/client/graphics_texture_streaming.gd")
+const ObjectPopulationProfiler = preload("res://scripts/client/object_population_profiler.gd")
 const AmbientTickBudget = preload("res://scripts/client/ambient_tick_budget.gd")
 const AMBIENT_CPU_BUDGET_US := [900, 1500, 2500, 4000] # Quality tiers, main-thread cosmetics only.
 const GraphicsCinematicDof = preload("res://scripts/client/graphics_cinematic_dof.gd")
@@ -146,6 +147,7 @@ var _ambient_deadline_supported: bool = false
 var _ambient_deadline_cache: Dictionary = {}
 var _ambient_was_underground := false
 var _ambient_monitors: Array[StringName] = []
+var _object_population_profiler: RefCounted = null # Only created on the debug hotkey.
 var _ambient_birds
 var _fish_shoals
 var _dusk_bats
@@ -2407,6 +2409,22 @@ func _update_first_person_mouse() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Unreal MemReport-style on-demand inspection of streamed visual objects.
+	# Debug builds only; one ObjectDB scan per explicit keystroke and ZERO
+	# scanning in normal gameplay. Ctrl+Shift+F10 cannot trigger the ordinary
+	# F10 fish-trap action, because it is intercepted here and consumed.
+	if OS.is_debug_build() and event is InputEventKey and event.pressed and \
+			not event.echo and event.ctrl_pressed and event.shift_pressed and \
+			event.keycode == KEY_F10:
+		if _object_population_profiler == null:
+			_object_population_profiler = ObjectPopulationProfiler.new()
+		var object_sample: Dictionary = _object_population_profiler.sample()
+		var census_text: String = ObjectPopulationProfiler.format_report(object_sample)
+		print(census_text)
+		if hud != null:
+			hud.say(census_text)
+		get_viewport().set_input_as_handled()
+		return
 	if _first_person and event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var look: Vector2 = FirstPersonView.apply_look_scaled(_fp_yaw, _fp_pitch, event.relative,
 			FirstPersonView.look_sensitivity(float(UiSettings.get_value("mouse_sensitivity")), bool(UiSettings.get_value("invert_y"))))
