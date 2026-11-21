@@ -29,7 +29,8 @@ func _run() -> void:
     var start: Vector3 = Vector3(1, 0, 1)
     var goal: Vector3 = Vector3(70, 0, 1)
     var route: Array = QuestNavigation.cell_route(stream, start, goal)
-    if route.size() != 5 or route[0] != Vector2i.ZERO             or route[1] != Vector2i(0, 1) or route[4] != Vector2i(2, 0):
+    if (route.size() != 5 or route[0] != Vector2i.ZERO
+            or route[1] != Vector2i(0, 1) or route[4] != Vector2i(2, 0)):
         _fail("native shortest path did not route around an unregistered gap")
         return
     var waypoint: Vector3 = QuestNavigation.next_cell_waypoint(stream, route)
