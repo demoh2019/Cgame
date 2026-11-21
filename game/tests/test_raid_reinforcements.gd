@@ -79,11 +79,12 @@ func run(t) -> void:
 		candidates, threats, Vector2.ZERO, 2, 4.0, true, blocked, INF),
 		[], "nonfinite exclusion radius cannot return server-owned spawn sites")
 	var many_occupied: Array[Vector2] = []
-	for i in 129:
+	for i in 128:
 		many_occupied.append(Vector2(1000.0 + float(i), 0.0))
+	many_occupied.append(Vector2(25, 0)) # The 129th context must never be truncated.
 	t.eq(RaidReinforcements.spread_sites(
 		candidates, threats, Vector2.ZERO, 2, 4.0, true, many_occupied, 4.0),
-		actual, "large exclusion lists fall back without ignoring extra infected")
+		script_filtered, "large exclusion lists check the final infected through fallback")
 
 	t.current = "server only, genuine infected, safe coordinates"
 	var world := FlatWorld.new()
