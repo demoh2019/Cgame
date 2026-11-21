@@ -383,7 +383,8 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 						# A separately confirmed, more recent sound can remain valid
 						# after the strongest ranked sound has expired. This never
 						# changes target_id, creates LOS or overrides safe-zone rules.
-						var remembered_sound: Dictionary = _native_senses.best_confirmed_stimulus(1)
+						var remembered_sound: Dictionary = _native_senses.best_confirmed_stimulus_in_radius(
+							1, here, float(data["lose"]))
 						if not remembered_sound.is_empty():
 							last_known_target = remembered_sound["position"]
 				investigate_time = HUNTER_SEARCH_SECONDS if behavior == "hunter" else INVESTIGATE_SECONDS
