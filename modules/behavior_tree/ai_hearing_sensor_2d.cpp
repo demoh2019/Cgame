@@ -98,7 +98,8 @@ bool AIHearingSensor2D::report_noise_ranked(const Vector2 &p_listener, const Vec
 			(strength == last_heard_strength && (same_source || lexicographically_before))) {
 		last_heard_position = p_source;
 		last_heard_loudness = p_loudness;
-		last_heard_strength = strength;
+		// Zero-duration memories never have a current ranked stimulus.
+		last_heard_strength = memory_duration > 0.0 ? strength : real_t(0.0);
 		memory_remaining = memory_duration;
 	}
 	return true;
