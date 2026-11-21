@@ -71,6 +71,13 @@ private:
 	bool auxiliary_source_active = false;
 	Vector3 auxiliary_source_position;
 	real_t auxiliary_source_radius = 0.0;
+	struct AuxiliaryCompletion {
+		int total = 0;
+		int completed = 0;
+		int failed = 0;
+	};
+	// Query only; does not request resources, instantiate scenes or alter residency.
+	AuxiliaryCompletion _get_auxiliary_completion(bool p_require_visual_details) const;
 	// Optional route plan from AStarGrid2D or another game planner.
 	// Only reorders already-eligible player-radius chunks: it never adds
 	// residency, skips streaming budgets or loads a distant island.
@@ -195,6 +202,12 @@ public:
 	bool has_auxiliary_source() const { return auxiliary_source_active; }
 	Vector3 get_auxiliary_source_position() const { return auxiliary_source_position; }
 	real_t get_auxiliary_source_radius() const { return auxiliary_source_active ? _auxiliary_effective_radius() : real_t(0.0); }
+	// Optional World Partition-style completion/readiness for the bounded
+	// auxiliary source. Missing (empty) cells are settled; failed ones are not.
+	real_t get_auxiliary_source_progress(bool p_require_visual_details = false) const;
+	bool is_auxiliary_source_ready(bool p_require_visual_details = false) const;
+	int get_auxiliary_source_pending_count(bool p_require_visual_details = false) const;
+	int get_auxiliary_source_failed_count() const;
 	void set_max_concurrent_loads(int p_count);
 	int get_max_concurrent_loads() const { return max_concurrent_loads; }
 	void set_max_instantiations_per_frame(int p_count);

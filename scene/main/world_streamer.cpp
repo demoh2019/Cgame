@@ -133,6 +133,58 @@ bool WorldStreamer::_auxiliary_is_near_focus(const Vector3 &p_focus) const {
 	return offset.length() <= load_radius + cell_size;
 }
 
+WorldStreamer::AuxiliaryCompletion WorldStreamer::_get_auxiliary_completion(bool p_require_visual_details) const {
+	AuxiliaryCompletion result;
+	Vector3 focus_position_local;
+	// An inactive or remote source must never report false-positive readiness.
+	if (!enabled || !_get_focus_position(focus_position_local) ||
+			!_auxiliary_is_near_focus(focus_position_local)) {
+		return result;
+	}
+	// Use exactly the same 64-cell cap and radius as auxiliary queue building.
+	// The query is a snapshot: no scene work, resource requests or mutations.
+	LocalVector<Vector3i> cells;
+	WorldStreamingGrid::cells_in_radius(auxiliary_source_position,
+			_auxiliary_effective_radius(), cell_size, _grid_axes(), cells, 64);
+	for (const Vector3i &cell : cells) {
+		++result.total;
+		if (failed.has(cell)) {
+			++result.failed;
+			continue;
+		}
+		const ObjectID *id = loaded.getptr(cell);
+		if (id != nullptr && ObjectDB::get_instance(*id) != nullptr) {
+			if (!p_require_visual_details || !pending_visual_details.has(cell)) {
+				++result.completed;
+			}
+		} else if (missing.has(cell)) {
+			// Null from a procedural generator or absent scene is an intentional
+			// empty cell, not something the game should wait for forever.
+			++result.completed;
+		}
+	}
+	return result;
+}
+
+real_t WorldStreamer::get_auxiliary_source_progress(bool p_require_visual_details) const {
+	const AuxiliaryCompletion status = _get_auxiliary_completion(p_require_visual_details);
+	return status.total > 0 ? real_t(status.completed) / real_t(status.total) : real_t(0.0);
+}
+
+bool WorldStreamer::is_auxiliary_source_ready(bool p_require_visual_details) const {
+	const AuxiliaryCompletion status = _get_auxiliary_completion(p_require_visual_details);
+	return status.total > 0 && status.failed == 0 && status.completed == status.total;
+}
+
+int WorldStreamer::get_auxiliary_source_pending_count(bool p_require_visual_details) const {
+	const AuxiliaryCompletion status = _get_auxiliary_completion(p_require_visual_details);
+	return status.total - status.completed - status.failed;
+}
+
+int WorldStreamer::get_auxiliary_source_failed_count() const {
+	return _get_auxiliary_completion(false).failed;
+}
+
 bool WorldStreamer::_cell_requested(const Vector3 &p_focus, const Vector3i &p_cell) const {
 	if (WorldStreamingGrid::distance_to_cell(p_focus, p_cell, cell_size, _grid_axes()) <= load_radius) {
 		return true;
@@ -1150,6 +1202,10 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_auxiliary_source"), &WorldStreamer::has_auxiliary_source);
 	ClassDB::bind_method(D_METHOD("get_auxiliary_source_position"), &WorldStreamer::get_auxiliary_source_position);
 	ClassDB::bind_method(D_METHOD("get_auxiliary_source_radius"), &WorldStreamer::get_auxiliary_source_radius);
+	ClassDB::bind_method(D_METHOD("get_auxiliary_source_progress", "require_visual_details"), &WorldStreamer::get_auxiliary_source_progress, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("is_auxiliary_source_ready", "require_visual_details"), &WorldStreamer::is_auxiliary_source_ready, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("get_auxiliary_source_pending_count", "require_visual_details"), &WorldStreamer::get_auxiliary_source_pending_count, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("get_auxiliary_source_failed_count"), &WorldStreamer::get_auxiliary_source_failed_count);
 	ClassDB::bind_method(D_METHOD("set_route_cells", "cells"), &WorldStreamer::set_route_cells);
 	ClassDB::bind_method(D_METHOD("get_route_cells"), &WorldStreamer::get_route_cells);
 	ClassDB::bind_method(D_METHOD("clear_route_cells"), &WorldStreamer::clear_route_cells);

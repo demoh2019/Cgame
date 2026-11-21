@@ -83,6 +83,7 @@ const SUITES := [
 	"res://tests/test_world_streamer_backpressure.gd",
 	"res://tests/test_world_streamer_simulation_tiers.gd",
 	"res://tests/test_waypoint_streaming_source.gd",
+	"res://tests/test_auxiliary_streaming_readiness.gd",
 	"res://tests/test_world_streamer_retry.gd",
 	"res://tests/test_postprocess_sharpen.gd",
 	"res://tests/test_graphics_lens_rain.gd",

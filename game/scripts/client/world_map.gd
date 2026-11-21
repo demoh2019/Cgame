@@ -51,6 +51,9 @@ const RING_COLORS := [Color("#d9b44a"), Color("#d98a3a"), Color("#c0503a")]
 const RING_NAMES := ["SAFE LANDS", "BORDERLANDS", "WILDS"]
 
 var client
+## Assigned by online_main after the native streamer exists. Optional on
+## stock Godot/older Cgame binaries, so map markers remain fully usable.
+var world_streamer: WorldStreamer
 var _image: Image
 var _water_gradient: Gradient
 var _texture: ImageTexture
@@ -505,6 +508,33 @@ func _draw_navigation(objectives: Array[Dictionary], font: Font) -> void:
 
 
 ## The expedition atlas: this player's goals as clickable rows, and how far the waypoint is.
+## World Partition-style source completion is read-only: do not request
+## chunks from map draw or display distant pins as loaded.
+static func waypoint_streaming_caption(p_streamer: WorldStreamer,
+		p_waypoint: Vector2, p_player: Vector2) -> String:
+	if p_streamer == null or not p_waypoint.is_finite() or not p_player.is_finite():
+		return ""
+	if not p_streamer.has_method("is_auxiliary_source_ready") or \
+			not p_streamer.has_method("get_auxiliary_source_progress") or \
+			not p_streamer.has_method("get_auxiliary_source_failed_count"):
+		return ""
+	if not p_streamer.has_auxiliary_source():
+		return ""
+	if p_player.distance_to(p_waypoint) > p_streamer.load_radius + p_streamer.cell_size:
+		return ""
+	var source: Vector3 = p_streamer.get_auxiliary_source_position()
+	if Vector2(source.x, source.z).distance_to(p_waypoint) > 0.05:
+		return "" # Stale source from the previous private waypoint.
+	if p_streamer.get_auxiliary_source_failed_count() > 0:
+		return "Scenery prefetch: retrying"
+	if p_streamer.is_auxiliary_source_ready(true):
+		return "Scenery prefetch: ready"
+	if p_streamer.is_auxiliary_source_ready():
+		return "Terrain ready; details finish on approach"
+	return "Scenery prefetch: %d%%" % floori(
+		clampf(p_streamer.get_auxiliary_source_progress(true), 0.0, 1.0) * 100.0)
+
+
 func _draw_atlas(objectives: Array[Dictionary], font: Font, view: Vector2) -> void:
 	_objective_hitboxes.clear()
 	var top: float = 76.0 + 46.0 + float(KIND_COLORS.size()) * 24.0 + 92.0 + 16.0
@@ -549,6 +579,13 @@ func _draw_atlas(objectives: Array[Dictionary], font: Font, view: Vector2) -> vo
 				hint = "Following %s: %d m %s   (Right click: clear)" % [str(tracked["label"]), distance, bearing]
 	var width: float = font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
 	_halo_text(font, Vector2(_frame.get_center().x - width * 0.5, view.y - 16.0), hint, 14, Color("#e8c46a"), Color(0.07, 0.06, 0.05), 4)
+	if waypoint.is_finite() and client.you.has("x") and client.you.has("z"):
+		var caption: String = waypoint_streaming_caption(world_streamer, waypoint,
+			Vector2(float(client.you["x"]), float(client.you["z"])))
+		if not caption.is_empty():
+			var caption_width: float = font.get_string_size(caption, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+			_halo_text(font, Vector2(_frame.get_center().x - caption_width * 0.5, view.y - 38.0),
+				caption, 12, Color("#9cd8cd"), Color(0.07, 0.06, 0.05), 3)
 
 
 func _draw_vignette() -> void:

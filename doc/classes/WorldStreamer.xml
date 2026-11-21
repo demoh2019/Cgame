@@ -93,6 +93,20 @@
 				Returns the active auxiliary source's effective radius, capped to twice [member cell_size]. Returns [code]0.0[/code] when disabled.
 			</description>
 		</method>
+		<method name="get_auxiliary_source_failed_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of failed cells currently intersecting the nearby auxiliary source. Failure prevents readiness, even when a source has no remaining queued work.</description>
+		</method>
+		<method name="get_auxiliary_source_pending_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="require_visual_details" type="bool" default="false" />
+			<description>Count of source cells that are neither settled nor failed. When [param require_visual_details] is true, loaded chunks with pending staged visuals also count as pending. Queries return zero for disabled or remote sources.</description>
+		</method>
+		<method name="get_auxiliary_source_progress" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="require_visual_details" type="bool" default="false" />
+			<description>Read-only 0–1 completion fraction for the active nearby secondary source, across at most 64 grid cells. Loaded scenes and intentionally empty (missing) cells count as settled. Failures never count as complete. If [param require_visual_details] is true, also waits for [method mark_visual_details_ready] on staged chunks. Returns zero when disabled, dormant, or no eligible cells are found. This does not request loads, allocate new chunks, change scheduling, or guarantee navigation/physics readiness.</description>
+		</method>
 		<method name="get_chunk" qualifiers="const">
 			<return type="Node" />
 			<param index="0" name="cell" type="Vector3i" />
@@ -222,6 +236,11 @@
 			<description>
 				Number of resident chunks currently assigned to the active simulation tier. The scene root must opt in to actually change its cosmetic processing.
 			</description>
+		</method>
+		<method name="is_auxiliary_source_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="require_visual_details" type="bool" default="false" />
+			<description>Whether all cells intersecting the currently active, nearby auxiliary source are settled and no cells have failed. Intentionally empty cells count as settled. With [param require_visual_details] true, waits for optional staged cosmetic completion. This is a visual streaming readiness snapshot, not a safe-teleport, physics, or server-authority barrier. Disabled or remote sources return false.</description>
 		</method>
 		<method name="is_cell_simulation_active" qualifiers="const">
 			<return type="bool" />

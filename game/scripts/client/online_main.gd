@@ -1367,6 +1367,9 @@ func _on_welcomed() -> void:
 		streamer.adaptive_chunk_budget_enabled = true
 	streamer.set_chunk_generator(_generate_chunk)
 	add_child(streamer)
+	# The map can now show native streaming-source readiness without any
+	# gameplay RPC, scene creation, or extra work when the map is closed.
+	world_map.world_streamer = streamer
 	# Read-only, engine-sourced telemetry: stream backpressure, real main-
 	# thread chunk work and the currently effective CPU/count limits.
 	if streamer.has_method("get_last_frame_chunk_work_usec"):
