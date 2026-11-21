@@ -152,6 +152,24 @@ Array AIStimulusHistory2D::get_recent(int p_limit) const {
 	return results;
 }
 
+int AIStimulusHistory2D::forget_source(int64_t p_source_id, int p_sense) {
+	// Invalid identifiers and senses must not clear unrelated observations.
+	if (p_source_id < 0 || (p_sense != -1 && (p_sense < SIGHT || p_sense > DAMAGE))) {
+		return 0;
+	}
+	int removed = 0;
+	// Reverse traversal keeps the remaining chronological order unchanged,
+	// and requires no additional allocations (the history is capped at 64).
+	for (int i = events.size() - 1; i >= 0; --i) {
+		if (events[i].source_id == p_source_id &&
+				(p_sense == -1 || events[i].sense == p_sense)) {
+			events.remove_at(i);
+			removed++;
+		}
+	}
+	return removed;
+}
+
 void AIStimulusHistory2D::reset() {
 	events.clear();
 }
@@ -165,6 +183,7 @@ void AIStimulusHistory2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_best", "sense"), &AIStimulusHistory2D::get_best);
 	ClassDB::bind_method(D_METHOD("get_best_in_radius", "sense", "center", "radius"), &AIStimulusHistory2D::get_best_in_radius);
 	ClassDB::bind_method(D_METHOD("get_recent", "limit"), &AIStimulusHistory2D::get_recent, DEFVAL(8));
+	ClassDB::bind_method(D_METHOD("forget_source", "source_id", "sense"), &AIStimulusHistory2D::forget_source, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("reset"), &AIStimulusHistory2D::reset);
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "capacity", PROPERTY_HINT_RANGE, "1,64,1"), "set_capacity", "get_capacity");
