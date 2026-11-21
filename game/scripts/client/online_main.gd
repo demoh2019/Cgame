@@ -90,6 +90,7 @@ const TraceCapture = preload("res://scripts/shared/trace_capture.gd")
 const SeaFftDetail = preload("res://scripts/client/sea_fft_detail.gd")
 const BarricadeDebris = preload("res://scripts/client/barricade_debris.gd")
 const PerfOverlay = preload("res://scripts/client/perf_overlay.gd")
+const RtEffects = preload("res://scripts/client/rt_effects.gd")
 const VfxPresets = preload("res://scripts/client/vfx_presets.gd")
 const GraphicsDynamicResolution = preload("res://scripts/client/graphics_dynamic_resolution.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
@@ -488,6 +489,15 @@ func _build_environment() -> void:
 	add_child(_perf)
 	_perf.set("trace", _trace)
 	_perf.set("loaded_cells_source", func() -> int: return streamer.get_loaded_count() if streamer != null else 0)
+	# Hardware ray-traced sun shadows + AO (ray query): Ultra only, and only where the GPU
+	# reports SUPPORTS_RAY_QUERY on Forward+. attach() is a no-op everywhere else.
+	if GraphicsQuality.level() >= 3:
+		var rt := RtEffects.new()
+		rt.name = "RayTracedEffects"
+		add_child(rt)
+		rt.quality = GraphicsQuality.level()
+		if not rt.attach(camera, self, sun, str(RenderingServer.get_current_rendering_method())):
+			rt.queue_free()
 	_make_party_rally_marker()
 	_make_party_supply_marker()
 	_raid_telegraph = RaidTelegraph.new()
