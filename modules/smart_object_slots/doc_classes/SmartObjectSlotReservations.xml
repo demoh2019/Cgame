@@ -35,6 +35,11 @@
 			<param index="0" name="slot_id" type="int" />
 			<description>Returns the owner actor ID, or zero if this slot is free.</description>
 		</method>
+		<method name="get_actor_slot" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="actor_id" type="int" />
+			<description>Returns an actor's currently claimed slot ID, or zero if absent. Uses the engine's indexed claim lookup. A cached AI goal may be reused only while its slot is still owned; this read does not claim or renew a slot.</description>
+		</method>
 		<method name="get_claim_count" qualifiers="const">
 			<return type="int" />
 			<description>Returns the active claim count (at most 2048).</description>
