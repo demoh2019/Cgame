@@ -91,6 +91,13 @@ func get_variant_batch_sizes() -> PackedInt32Array:
     return sizes
 
 
+func get_variant_source_indices(variant: int) -> PackedInt32Array:
+    if variant >= 0 and variant < _variant_batches.size():
+        var indices: PackedInt32Array = _variant_batches[variant]
+        return indices.duplicate()
+    return PackedInt32Array()
+
+
 func get_rendered_instance_count() -> int:
     var total := 0
     for variant in range(VARIANT_WEIGHTS.size()):
