@@ -51,6 +51,7 @@ func run(t) -> void:
 	t.current = "real field recipe, inventory debit, and duplicate-use protection"
 	var world := WorldGen.new(321)
 	var server := GameServer.new(world, 321)
+	server.craft_quality_enabled = false # This suite checks the item itself, not quality rolls.
 	var survivor = server.add_player(706, "Scout")
 	survivor.position = _at(world, 300.0, 0.0)
 	t.check(not world.is_safe(300.0, 0.0), "scout is in frontier away from hub")

@@ -66,6 +66,7 @@ func run(t) -> void:
 	t.current = "server denies undertrained and remote workbench crafting"
 	var world := WorldGen.new(781)
 	var server := GameServer.new(world, 781)
+	server.craft_quality_enabled = false # This suite checks the item itself, not quality rolls.
 	var player = server.add_player(719, "QuietHunter")
 	for item_id in recipe["inputs"]:
 		player.inventory.add(str(item_id), int(recipe["inputs"][item_id]))

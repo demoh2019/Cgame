@@ -425,6 +425,7 @@ var downed_until: Dictionary = {} # zombie id -> server time it gets back up (kn
 var market_payouts: Dictionary = {} # account -> silver owed from sales, collected at the hub.
 var market_bids: Dictionary = {} # id -> Albion-style buy order with escrowed silver.
 var farm_plots: Dictionary = {} # id -> homestead crop plot (persisted with the world).
+var craft_quality_enabled: bool = true # Crafted gear rolls Normal..Masterpiece; suites about other systems may turn it off.
 var guild_banks: Dictionary = {} # guild id -> {item id: count} (persisted with the world).
 var guild_ledgers: Dictionary = {} # guild id -> recent [{who, action, item, count, at}].
 var guild_alliances: Dictionary = {} # alliance id -> {"guilds": {guild id: guild name}} (persisted).
@@ -1474,7 +1475,7 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1,
 		# Quality: each crafted piece of gear rolls Normal..Masterpiece; higher crafting rank helps.
 		var output: String = String(recipe["output"])
 		var best: int = 1
-		if Defs.can_have_quality(output):
+		if craft_quality_enabled and Defs.can_have_quality(output):
 			var luck: float = 0.1 * float(maxi(0, player.progression.crafting_level() - recipe_tier))
 			for unit in times * int(recipe.get("count", 1)):
 				var q: int = Defs.roll_quality(rng, luck)
