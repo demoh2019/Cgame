@@ -18,3 +18,8 @@ static func description(zone: int) -> String:
 	if allows_pvp(zone):
 		return "PvP | Full loot"
 	return "Unknown risk"
+
+
+## Albion-style black zone: the outermost ring is lawless - player kills there cost no infamy.
+static func lawless(zone: int) -> bool:
+	return zone >= Defs.ZONE_NAMES.size() - 1

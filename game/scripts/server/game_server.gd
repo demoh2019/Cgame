@@ -6530,6 +6530,8 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 				attacker.defense_target, attacker.defense_until, victim.id, time)
 			if faction_fight:
 				lawful = "faction_war" # Faction warfare is sanctioned: no infamy.
+			elif ZoneRisk.lawless(world.zone_at(victim.position.x, victim.position.z)):
+				lawful = "black_zone" # Albion black zone: open full-loot PvP, no reputation loss.
 			if lawful != "":
 				events.append({"type": "justice", "peer": attacker.id, "reason": lawful})
 			else:
