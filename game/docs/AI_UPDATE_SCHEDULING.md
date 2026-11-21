@@ -18,6 +18,32 @@ The scheduler's tick index comes from the authoritative `GameServer.tick_count`.
 
 The concurrently developed `AISimulationLOD2D` remains active. It controls the passive target-scan interval (near, medium, or far) according to viewer distance. **AIUpdateScheduler** operates later: when a scan timer becomes eligible during a very large encounter, it assigns that scan to a deterministic frame phase. Thus these systems are complementary, not replacements. The first passive LOD delay and all existing urgent combat overrides are preserved.
 
+## Stable passive LOD with native hysteresis
+
+Inspired by [Unreal Significance Manager](https://dev.epicgames.com/documentation/en-us/unreal-engine/significance-manager-in-unreal-engine)
+and [Mass LOD](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Plugins/MassLOD).
+`AISimulationLOD2D.get_hysteretic_interval(distance, near_distance, far_distance,
+previous_interval, hysteresis, urgent=false)` keeps the per-agent scheduling
+decision stable when a viewer oscillates around a tier boundary.
+
+Albion After calls the shared **stateless** native policy for passive, unengaged
+infected only and remembers the nominal interval locally per zombie. The
+near boundary is **asymmetric for safety**: as soon as any eligible survivor
+enters the original pursuit leash, scanning reverts immediately to 0.25s.
+Leaving near can retain 0.25s for up to 4 extra metres. Medium-to-far and
+far-to-medium transitions require crossing a 4m margin. An urgent request
+always uses the near interval. The existing one-time 16-bin startup spread,
+4-slot large-crowd scheduler, movement, attacks, effects, and combat
+authoritative checks are untouched.
+
+The API rejects invalid/uninitialized previous intervals and oversized or
+nonfinite hysteresis margins by returning the ordinary interval. There is no
+native per-agent allocation, no random input, and no network payload.
+Older fork binaries fall back to their previous `get_interval()` API; stock
+Godot continues its original 0.25s passive AI scans. Native unit tests and
+`game/tests/test_ai_update_scheduler.gd` verify distance flapping, urgent
+overrides, startup phasing and real survivor reacquisition.
+
 ## Inspect the real server
 
 The diagnostic `GameServer.get_ai_schedule_stats()` method returns a detached Dictionary:
