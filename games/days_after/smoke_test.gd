@@ -97,6 +97,11 @@ func _smoke() -> void:
         var positions: PackedVector3Array = foliage.call("get_selected_positions")
         var weighted: PackedInt32Array = foliage.call("get_selected_variants")
         var stable_ids: PackedInt64Array = foliage.call("get_selected_stable_ids")
+        var point_transforms: Array = foliage.call("get_selected_transforms")
+        if point_transforms.size() != positions.size() or \
+                not bool(foliage.call("verify_point_transform_native_fallback_parity")):
+            push_error("PCG stable-ID native/fallback point transforms failed")
+            ok = false
         if weighted.size() != positions.size() or stable_ids.size() != positions.size():
             push_error("Native PCG weighted variants lost decorative point identities")
             ok = false
@@ -198,6 +203,16 @@ func _smoke() -> void:
                     if renderer.multimesh.get_instance_color(local_index).a < 0.99:
                         push_error("Foliage LOD lost its per-plant color")
                         ok = false
+                    if source_index < point_transforms.size():
+                        var point_transform: Transform3D = point_transforms[source_index]
+                        var width_scale: float = [0.8, 1.0, 1.15][variant]
+                        var height_scale: float = [0.90, 0.78, 0.63][variant]
+                        var expected_basis: Basis = point_transform.basis.scaled(
+                            Vector3(width_scale, height_scale, width_scale))
+                        if not renderer.multimesh.get_instance_transform(
+                                local_index).basis.is_equal_approx(expected_basis):
+                            push_error("PCG LOD altered native stable-ID rotation or scale")
+                            ok = false
         for visits in source_visits:
             if visits != 1:
                 push_error("PCG mesh grouping duplicated or dropped an instance")
@@ -327,6 +342,9 @@ func _smoke() -> void:
         if int(foliage.call("get_rendered_instance_count")) != positions.size():
             push_error("Far-view LOD dropped or duplicated visible plants")
             ok = false
+        if point_transforms != foliage.call("get_selected_transforms"):
+            push_error("Switching geometry LOD re-rolled stable plant transforms")
+            ok = false
         if not bool(foliage.call("verify_lod_native_fallback_parity")):
             push_error("Native LOD hysteresis diverged after changing camera distance")
             ok = false
@@ -336,6 +354,9 @@ func _smoke() -> void:
             ok = false
         if positions != foliage.call("get_selected_positions"):
             push_error("PCG foliage placement was not deterministic")
+            ok = false
+        if point_transforms != foliage.call("get_selected_transforms"):
+            push_error("PCG regenerate re-rolled stable rotation and scale")
             ok = false
         if weighted != foliage.call("get_selected_variants") or \
                 stable_ids != foliage.call("get_selected_stable_ids"):
