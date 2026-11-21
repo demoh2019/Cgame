@@ -135,6 +135,8 @@ func run(t) -> void:
 	var crowd_sim := GameServer.new(world, 4412)
 	var crowd_mage = crowd_sim.add_player(91, "TopKSurvivor")
 	crowd_mage.position = Vector3(site.x, world.height_at(site.x, site.y), site.y)
+	crowd_mage.combat_energy = 100.0
+	crowd_mage.attack_timer = 0.0
 	var crowd: Array[Zombie] = []
 	var pre_health: Array[float] = []
 	for i in 16:
