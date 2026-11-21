@@ -4,6 +4,8 @@ extends RefCounted
 ## reads snapshots out of it, so the whole game can be tested by calling it directly.
 
 const LagCompensation = preload("res://scripts/server/lag_compensation.gd")
+const HTNPlanner = preload("res://scripts/shared/htn_planner.gd")
+const InfectedRaidDomain = preload("res://scripts/shared/infected_raid_domain.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
@@ -7789,6 +7791,9 @@ func _tick_raid_encounter() -> void:
 				raid_pending_cone = {}
 				_resolve_raid_cone(strike)
 			return
+		if raid_next_cone_at > 0.0 and time >= raid_next_cone_at and _raid_boss_plan(boss) == "charge":
+			if _start_raid_cone(boss):
+				return
 		if time >= raid_next_slam_at and boss.target_id != -1:
 			raid_pending_slam = {"id": raid_boss_id,
 				"x": at.x, "z": at.y,
@@ -7801,21 +7806,7 @@ func _tick_raid_encounter() -> void:
 				"seconds": RaidEncounter.SLAM_WARNING})
 			return
 		if raid_next_cone_at > 0.0 and time >= raid_next_cone_at:
-			var target: Player = players.get(boss.target_id)
-			if target != null and _alive(target) and not _is_safe(target.position) and \
-					world.zone_at(target.position.x, target.position.z) >= RaidEncounter.MIN_ZONE and \
-					RaidCone.can_aim(boss.position, target.position):
-				var aim: Vector2 = RaidCone.direction(boss.position, target.position)
-				raid_pending_cone = {"id": raid_boss_id, "x": boss.position.x,
-					"y": boss.position.y, "z": boss.position.z,
-					"dx": aim.x, "dz": aim.y,
-					"at": time + RaidCone.WINDUP_SECONDS}
-				raid_next_cone_at = time + RaidCone.cooldown(boss)
-				events.append({"type": "raid_cone_warning", "id": raid_boss_id,
-					"x": boss.position.x, "z": boss.position.z,
-					"dx": aim.x, "dz": aim.y, "reach": RaidCone.REACH,
-					"half_angle": RaidCone.HALF_ANGLE_DEGREES,
-					"seconds": RaidCone.WINDUP_SECONDS})
+			_start_raid_cone(boss)
 		return
 
 	if time < RaidEncounter.START_DELAY or \
@@ -7851,6 +7842,43 @@ func _tick_raid_encounter() -> void:
 	events.append({"type": "raid_started", "id": spawn_id,
 		"x": site.x, "z": site.y, "zone": world.zone_at(site.x, site.y),
 		"health": boss.health})
+
+
+## Telegraphs the boss cone strike at its current target; false if it cannot aim.
+func _start_raid_cone(boss) -> bool:
+	var target: Player = players.get(boss.target_id)
+	if target != null and _alive(target) and not _is_safe(target.position) and \
+			world.zone_at(target.position.x, target.position.z) >= RaidEncounter.MIN_ZONE and \
+			RaidCone.can_aim(boss.position, target.position):
+		var aim: Vector2 = RaidCone.direction(boss.position, target.position)
+		raid_pending_cone = {"id": raid_boss_id, "x": boss.position.x,
+			"y": boss.position.y, "z": boss.position.z,
+			"dx": aim.x, "dz": aim.y,
+			"at": time + RaidCone.WINDUP_SECONDS}
+		raid_next_cone_at = time + RaidCone.cooldown(boss)
+		events.append({"type": "raid_cone_warning", "id": raid_boss_id,
+			"x": boss.position.x, "z": boss.position.z,
+			"dx": aim.x, "dz": aim.y, "reach": RaidCone.REACH,
+			"half_angle": RaidCone.HALF_ANGLE_DEGREES,
+			"seconds": RaidCone.WINDUP_SECONDS})
+		return true
+	return false
+
+
+## HTN decision layer (infected_raid_domain.gd): a target outside the slam
+## radius makes the boss open with its reaching cone strike instead of a
+## slam that cannot land. Enrage and reinforcements keep their own phases.
+func _raid_boss_plan(boss) -> String:
+	var target: Player = players.get(boss.target_id)
+	var far: bool = target != null and Vector2(target.position.x - boss.position.x,
+		target.position.z - boss.position.z).length() > RaidEncounter.SLAM_RADIUS
+	var steps: Array[String] = HTNPlanner.plan(InfectedRaidDomain.htn_domain(), "boss_turn",
+		{"low_health": false, "enraged": true, "surrounded": false, "adds_alive": true,
+		"target_far": far, "stamina_ok": true})
+	for step in steps:
+		if step == "charge" or step == "slam":
+			return step
+	return "slam"
 
 
 ## Two one-time health phases; no client command may create minions.

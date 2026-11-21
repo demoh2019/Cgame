@@ -56,6 +56,12 @@ varying float gerstner_crest;
 
 // Open-sea swell (Gerstner waves). Zero on rivers and lakes (their own material instances).
 uniform float gerstner_amplitude = 0.0;
+// Tessendorf FFT chop: two CPU-evaluated tiles cross-faded per frame (sea_fft_detail.gd).
+uniform sampler2D fft_height_a : filter_linear, repeat_enable;
+uniform sampler2D fft_height_b : filter_linear, repeat_enable;
+uniform float fft_blend = 0.0;
+uniform float fft_patch_size = 48.0;
+uniform float fft_strength = 0.0;
 // Island depth map (R = metres of water under the sea level, 0 on land), covering shore_map_rect:
 // waves shrink and steepen into surf where the sea gets shallow.
 uniform sampler2D shore_map : filter_linear, repeat_disable;
@@ -114,6 +120,16 @@ void vertex() {
 		gerstner(normalize(wind + vec2(0.45, -0.3)), 23.0, 0.28, power, p, TIME * 1.07, offset, slope);
 		gerstner(normalize(wind + vec2(-0.5, 0.35)), 13.0, 0.24, power, p, TIME * 0.93, offset, slope);
 		gerstner(normalize(vec2(-wind.y, wind.x) + wind), 7.0, 0.18, power, p, TIME * 1.11, offset, slope);
+		if (fft_strength > 0.001) {
+			vec2 fuv = p / fft_patch_size;
+			float texel = 1.0 / 32.0;
+			float h = mix(textureLod(fft_height_a, fuv, 0.0).r, textureLod(fft_height_b, fuv, 0.0).r, fft_blend);
+			float hx = mix(textureLod(fft_height_a, fuv + vec2(texel, 0.0), 0.0).r, textureLod(fft_height_b, fuv + vec2(texel, 0.0), 0.0).r, fft_blend);
+			float hz = mix(textureLod(fft_height_a, fuv + vec2(0.0, texel), 0.0).r, textureLod(fft_height_b, fuv + vec2(0.0, texel), 0.0).r, fft_blend);
+			float chop = fft_strength * power;
+			offset.y += h * chop;
+			slope += vec2(hx - h, hz - h) * chop / (fft_patch_size * texel);
+		}
 		VERTEX += (inverse(mat3(MODEL_MATRIX)) * offset);
 		world_position += offset;
 		gerstner_slope = slope;

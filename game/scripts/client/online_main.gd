@@ -86,6 +86,7 @@ const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.
 const GraphicsVramBudget = preload("res://scripts/client/graphics_vram_budget.gd")
 const ShaderWarmup = preload("res://scripts/client/shader_warmup.gd")
 const FrameHitchAnalyzer = preload("res://scripts/client/frame_hitch_analyzer.gd")
+const SeaFftDetail = preload("res://scripts/client/sea_fft_detail.gd")
 const GraphicsDynamicResolution = preload("res://scripts/client/graphics_dynamic_resolution.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
 const WorldMap = preload("res://scripts/client/world_map.gd")
@@ -533,6 +534,11 @@ func _build_environment() -> void:
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	water.position.y = Defs.WATER_LEVEL - 0.35
 	add_child(water)
+	# FFT chop on the swell (High/Ultra); follows quality presets on its own.
+	var sea_fft := SeaFftDetail.new()
+	sea_fft.name = "SeaFftDetail"
+	add_child(sea_fft)
+	sea_fft.setup(water_material, GraphicsQuality.level(), 1337)
 	effects = Effects.new()
 	add_child(effects)
 	# Report real main-thread PackedScene cache work separately from
