@@ -3,6 +3,7 @@ extends Node3D
 ## network state and what is drawn.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const WoundFx = preload("res://scripts/client/wound_fx.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
@@ -105,6 +106,7 @@ var _stream_velocity := Vector3.ZERO
 var chunk_root: Node3D
 var entities: Node3D
 var camera: Camera3D
+var _wound_fx: Node3D # Cuts, bullet wounds, blood spray and severed limbs on struck enemies.
 var sun: DirectionalLight3D
 var environment: Environment
 var water: MeshInstance3D
@@ -1030,6 +1032,8 @@ func _spawn_effects(event: Dictionary) -> void:
 			var source: Dictionary = client.players.get(by, {}) if by > 0 else client.zombies.get(-by, {})
 			if by != -1 and source.has("x"):
 				_damage_direction.on_hit(Vector3(float(source["x"]), 0.0, float(source["z"])), float(event.get("damage", 0.0)))
+	if _wound_fx != null and str(event.get("type", "")) == "hit" and str(event.get("kind", "")) == "zombie":
+		_wound_on_zombie(event)
 	physics_fx.on_event(event, at)
 	match event["type"]:
 		"hit":
@@ -1322,6 +1326,8 @@ func _on_welcomed() -> void:
 	add_child(_rain_splashes)
 	_damage_numbers = DamageNumbers.new()
 	add_child(_damage_numbers)
+	_wound_fx = WoundFx.new()
+	add_child(_wound_fx)
 	_blood_decals = BloodDecals.new()
 	add_child(_blood_decals)
 	_damage_direction = DamageDirection.new()
@@ -2708,3 +2714,27 @@ func _update_hover_outline(delta: float) -> void:
 		_hover_outline.set_target({})
 		return
 	_hover_outline.set_target(entities.call("nearest_hoverable", hit, HoverOutline.PICK_RADIUS))
+
+
+## Gore at the point of impact: your own strikes follow your aim, others' come from where the attacker stands.
+func _wound_on_zombie(event: Dictionary) -> void:
+	var model: Node3D = entities.model_of("zombie", int(event.get("id", -1)))
+	if model == null:
+		return
+	var chest: Vector3 = model.global_position + Vector3.UP * 1.25
+	var by: int = int(event.get("by", -1))
+	var origin: Vector3
+	var direction: Vector3
+	if by == client.peer_id and camera != null and camera.global_position.distance_to(chest) < 6.0:
+		origin = camera.global_position
+		direction = -camera.global_transform.basis.z
+		# Melee swings land near the crosshair, not exactly on it.
+		if not bool(event.get("ranged", false)):
+			direction = (direction + Vector3(randf_range(-0.08, 0.08), randf_range(-0.12, 0.08), randf_range(-0.08, 0.08))).normalized()
+	else:
+		var attacker: Dictionary = client.players.get(by, {})
+		origin = Vector3(float(attacker.get("x", chest.x + 1.0)), chest.y + 0.2, float(attacker.get("z", chest.z)))
+		var aim: Vector3 = chest + Vector3(randf_range(-0.25, 0.25), randf_range(-0.6, 0.45), randf_range(-0.25, 0.25))
+		direction = (aim - origin).normalized()
+	_wound_fx.on_hit(model, origin, direction, float(event.get("damage", 0.0)),
+		bool(event.get("ranged", false)), bool(event.get("fatal", false)), true)
