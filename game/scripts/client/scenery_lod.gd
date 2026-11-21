@@ -186,3 +186,83 @@ static func apply(instance: MultiMeshInstance3D, kind: String, quality: int,
 	# Hysteresis, not alpha transparency: avoiding a translucent overlap
 	# keeps fill rate low and helps reduce popping at LOD thresholds.
 	instance.visibility_range_end_margin = 12.0 if instance.visibility_range_end > 0.0 else 0.0
+
+
+## Change all existing streamed visual batches in one quality update. The
+## single-object apply() path still handles newly created chunks and props.
+## A native profile resolves up to 4096 decorative AABBs per script-to-C++
+## call, instead of issuing one native call per MultiMesh during quality swaps.
+const MAX_CULL_BATCH := 4096
+
+
+static func _apply_decor_cull_batch(instances: Array[MultiMeshInstance3D],
+		positions: PackedVector3Array, sizes: PackedVector3Array,
+		authored: PackedFloat64Array, quality: int) -> void:
+	if instances.is_empty():
+		return
+	var result := PackedFloat64Array()
+	var native: Object = _decor_native_profile(quality,
+		_decor_profile_sizes, _decor_ranges_for_quality(quality))
+	if native != null and native.has_method("get_cached_cull_distances"):
+		result = native.call("get_cached_cull_distances", positions, sizes, authored)
+	# An old native engine, invalid response, or stock Godot always takes
+	# the exact existing size/cap policy; no partial native results applied.
+	var use_native: bool = result.size() == instances.size()
+	for i in instances.size():
+		var end_distance: float = float(result[i]) if use_native else \
+			decor_range_for_bounds(AABB(positions[i], sizes[i]), quality,
+				float(authored[i]), false)
+		if end_distance < 0.0 or not is_finite(end_distance):
+			end_distance = float(authored[i])
+		instances[i].visibility_range_end = end_distance
+		instances[i].visibility_range_end_margin = 12.0 if end_distance > 0.0 else 0.0
+
+
+static func apply_many(nodes: Array, quality: int) -> void:
+	var safe_quality: int = clampi(quality, 0, 3)
+	var limits: Dictionary = PRESETS[safe_quality]
+	var pending: Array[MultiMeshInstance3D] = []
+	var positions := PackedVector3Array()
+	var sizes := PackedVector3Array()
+	var authored := PackedFloat64Array()
+	for node in nodes:
+		if not (node is MultiMeshInstance3D) or not node.has_meta("aa_scenery_kind"):
+			continue
+		var instance: MultiMeshInstance3D = node
+		var kind: String = str(instance.get_meta("aa_scenery_kind"))
+		var base_distance: float = float(instance.get_meta("aa_scenery_distance", 0.0))
+		var group: String = category(kind)
+		var end_distance: float = 0.0
+		if base_distance > 0.0:
+			end_distance = maxf(24.0, base_distance * float(limits["decor_scale"]))
+		elif limits.has(group):
+			end_distance = float(limits[group])
+		instance.lod_bias = float(limits["lod_bias"])
+		instance.visibility_range_end = end_distance
+		instance.visibility_range_end_margin = 12.0 if end_distance > 0.0 else 0.0
+		if group != "decor" or base_distance <= 0.0 or \
+				not is_finite(end_distance) or end_distance <= 0.0:
+			continue
+		var bounds: AABB = instance.custom_aabb
+		# Preserve the previous behavior for unconfigured and invalid AABBs.
+		# Invalid entries must not poison an otherwise valid native batch.
+		if not bounds.position.is_finite() or not bounds.size.is_finite() or \
+				bounds.size == Vector3.ZERO or bounds.size.x < 0.0 or \
+				bounds.size.y < 0.0 or bounds.size.z < 0.0 or \
+				absf(bounds.position.x) > 10000000.0 or \
+				absf(bounds.position.y) > 10000000.0 or \
+				absf(bounds.position.z) > 10000000.0 or \
+				bounds.size.x > 1000000.0 or bounds.size.y > 1000000.0 or \
+				bounds.size.z > 1000000.0 or end_distance > 1000000.0:
+			continue
+		pending.append(instance)
+		positions.append(bounds.position)
+		sizes.append(bounds.size)
+		authored.append(end_distance)
+		if pending.size() == MAX_CULL_BATCH:
+			_apply_decor_cull_batch(pending, positions, sizes, authored, safe_quality)
+			pending.clear()
+			positions.clear()
+			sizes.clear()
+			authored.clear()
+	_apply_decor_cull_batch(pending, positions, sizes, authored, safe_quality)
