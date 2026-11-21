@@ -682,6 +682,49 @@ TEST_CASE("[EnvironmentQuery3D] Donut rejects invalid geometry and respects hard
 	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 4.0, 16, 4096).size() == 65536);
 }
 
+TEST_CASE("[EnvironmentQuery3D] Cone produces deterministic oriented radial sectors") {
+	const Vector3 center(10, 3, 20);
+	const PackedVector3Array points = EnvironmentQuery3D::sample_cone(center, Vector3(1, 2, 0), 2.0, 4.0, 2, 3, 90.0);
+	REQUIRE(points.size() == 6);
+	CHECK(points[0].is_equal_approx(center + Vector3(Math::sqrt(2.0), 0, -Math::sqrt(2.0))));
+	CHECK(points[1].is_equal_approx(Vector3(12, 3, 20)));
+	CHECK(points[2].is_equal_approx(center + Vector3(Math::sqrt(2.0), 0, Math::sqrt(2.0))));
+	CHECK(points[4].is_equal_approx(Vector3(14, 3, 20)));
+	CHECK(EnvironmentQuery3D::sample_cone(center, Vector3(1, 2, 0), 2.0, 4.0, 2, 3, 90.0) == points);
+}
+
+TEST_CASE("[EnvironmentQuery3D] Cone supports centered single ray, one ring and optional center") {
+	const Vector3 center(10, 7, 20);
+	const PackedVector3Array points = EnvironmentQuery3D::sample_cone(center, Vector3(0, 0, 5), 2.0, 4.0, 1, 1, 120.0, true);
+	REQUIRE(points.size() == 2);
+	CHECK(points[0] == center);
+	CHECK(points[1].is_equal_approx(Vector3(10, 7, 24)));
+	const PackedVector3Array zero_angle = EnvironmentQuery3D::sample_cone(center, Vector3(0, 0, 1), 2.0, 4.0, 2, 3, 0.0);
+	REQUIRE(zero_angle.size() == 6);
+	CHECK(zero_angle[0].is_equal_approx(Vector3(10, 7, 22)));
+	CHECK(zero_angle[5].is_equal_approx(Vector3(10, 7, 24)));
+	CHECK(EnvironmentQuery3D::sample_cone(center, Vector3(0, 0, 1), 0.0, 0.0, 1, 1, 0.0, true).size() == 2);
+}
+
+TEST_CASE("[EnvironmentQuery3D] Cone invalid geometry fails closed before allocation") {
+	ERR_PRINT_OFF
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(), 1.0, 4.0, 2, 3).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(0, 1, 0), 1.0, 4.0, 2, 3).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(NaN, 0, 0), Vector3(1, 0, 0), 1.0, 4.0, 2, 3).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(INF, 0, 0), 1.0, 4.0, 2, 3).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), -1.0, 4.0, 2, 3).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 5.0, 4.0, 2, 3).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 2, 3, 361.0).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 2, 3, -0.1).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 2, 3, NaN).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 0, 3).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 2, 4097).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 17, 4096).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 16, 4096, 90.0, true).is_empty());
+	ERR_PRINT_ON
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 16, 4096).size() == 65536);
+}
+
 TEST_CASE("[EnvironmentQuery3D] Grid produces deterministic XZ lattice") {
 	PackedVector3Array p = EnvironmentQuery3D::sample_grid(Vector3(5, 7, 9), Vector2(1, 1), 1);
 	REQUIRE(p.size() == 9);

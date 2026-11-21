@@ -53,6 +53,18 @@
 			<param index="6" name="spiral" type="bool" default="false" />
 			<description>Produces deterministic, concentric candidate rings on the XZ plane from [param inner_radius] to [param outer_radius], inclusive. A single ring uses the outer radius. [param phase] rotates every ring; when [param spiral] is true, successive rings receive a small additional offset to avoid radial spokes. Points are emitted inner-to-outer, then angle order. Accepts 1–256 rings and 1–4096 points per ring, with at most 65536 points in total; invalid or nonfinite parameters return an empty array. Geometry generation alone does not project points onto a NavMesh, test collision, or validate terrain.</description>
 		</method>
+		<method name="sample_cone" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="direction" type="Vector3" />
+			<param index="2" name="inner_radius" type="float" />
+			<param index="3" name="outer_radius" type="float" />
+			<param index="4" name="ring_count" type="int" />
+			<param index="5" name="points_per_ring" type="int" />
+			<param index="6" name="cone_degrees" type="float" default="90.0" />
+			<param index="7" name="include_center" type="bool" default="false" />
+			<description>Generates concentric rays within an oriented XZ-plane sector, analogous to Unreal EQS Points: Cone. [param cone_degrees] is the [b]full[/b] aperture from 0 to 360 degrees. Each ring is generated from left edge to right edge; one ray is centered on [param direction], and a single ring uses the outer radius. [param include_center] prepends the context location once. Input direction requires a nonzero XZ projection, all positions and radii must be finite, radii must satisfy 0 &lt;= inner_radius &lt;= outer_radius, and counts must be 1–256 rings and 1–4096 rays per ring, at most 65536 total points. Invalid inputs return no points. This is geometric candidate generation, not visibility tracing, physics or navigation projection.</description>
+		</method>
 		<method name="sample_grid" qualifiers="static">
 			<return type="PackedVector3Array" />
 			<param index="0" name="center" type="Vector3" />
