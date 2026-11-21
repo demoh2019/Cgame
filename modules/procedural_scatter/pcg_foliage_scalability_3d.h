@@ -51,4 +51,15 @@ public:
 	// requires a particular combination of mesh and LOD tier.
 	Array partition_variant_lods(const PackedInt32Array &p_variants,
 			const PackedInt32Array &p_lod_tiers, int p_variant_count) const;
+
+	// Screen-space foliage density: approximate per-instance pixel diameter
+	// from camera depth and nominal world mesh size. Groups are selected in one
+	// native call, independent of viewport resolution, zoom, and scene traversal.
+	// For orthographic projection, focal_pixels is pixels per world unit.
+	PackedInt32Array plan_projected_visible_counts(const PackedInt32Array &p_counts,
+			const PackedVector3Array &p_centers,
+			const PackedFloat32Array &p_mesh_diameters,
+			const Vector3 &p_camera_position, const Vector3 &p_camera_forward,
+			double p_focal_pixels, bool p_orthographic, int p_quality,
+			double p_near_pixels = 20.0, double p_far_pixels = 2.0) const;
 };

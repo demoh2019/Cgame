@@ -1411,8 +1411,8 @@ func _update_decor_density_lods() -> void:
 	var camera: Camera3D = get_viewport().get_camera_3d()
 	if camera == null:
 		return
-	SceneryDensityLod.update_instances(_density_scenery_batches,
-		camera.global_position, scenery_quality)
+	SceneryDensityLod.update_instances_projected(_density_scenery_batches,
+		camera, scenery_quality)
 
 
 ## Weak-reference global queue. Newly near-camera chunks take precedence, and

@@ -5,6 +5,39 @@ and exclusion operations for biome decoration, dungeon dressing, resource-site
 visuals and level generation. It is inspired by the PCG point-filtering and
 exclusion-volume concepts in Unreal Engine, without using Unreal code.
 
+## Camera-aware screen-space foliage density
+
+`PCGFoliageScalability3D.plan_projected_visible_counts()` extends the earlier
+distance-only planner with **perspective and orthographic projected pixel size**.
+Foliage of the same world-space size will use the proper density at different
+FOVs, display resolutions, render scales and camera zoom levels.
+
+- Send the native API up to 4096 clusters of original instance counts,
+  world-space centers and representative *per-plant* mesh diameters, plus
+  camera origin/forward, focal pixels and quality. World-space size comes
+  from a mesh AABB diagonal multiplied by average authored instance scale;
+  this is an efficient approximation, not a per-triangle visibility metric.
+- Perspective focal pixels = rendered viewport height / (2 ×
+  tan(vertical FOV / 2)); for orthographic, focal pixels means rendered
+  viewport height / vertical world-space camera size. Pixel-diameter
+  thresholds default to near 20px and far 2px.
+- Existing density tiers and immutable source transforms remain unchanged.
+  The algorithm only updates `MultiMesh.visible_instance_count`; Ultra always
+  restores 100%. A behind-camera cluster is retained at full density rather
+  than being incorrectly hidden by a negative depth.
+- Game code calculates projection parameters *once per camera refresh*,
+  batches per-group geometry in C++ with no per-cluster camera helper calls,
+  and updates every 0.6 seconds. GDScript implements matching arithmetic for
+  stock Godot and older custom engine builds. Previous `plan_visible_counts`
+  and `update_instances` APIs remain available.
+- Bounded, atomic input validation prevents a bad late cluster from
+  partially altering visible count plans. This does **not** generate HLOD
+  proxy geometry and does not supersede renderer frustum/occlusion culling.
+
+Inspired by [Unreal Engine's screen-size LOD selection](https://dev.epicgames.com/documentation/en-us/unreal-engine/creating-and-using-lods-in-unreal-engine)
+and [foliage scalability](https://dev.epicgames.com/documentation/en-us/unreal-engine/foliage-mode-in-unreal-engine).
+Actual GPU/frame time impact must be measured on representative hardware.
+
 ## Runtime foliage density scalability (Unreal-inspired)
 
 `PCGFoliageScalability3D` exposes two deterministic, data-only methods for

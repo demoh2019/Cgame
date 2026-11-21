@@ -60,5 +60,23 @@
 				Partitions indices of point attributes into 2 * [param variant_count] arrays: variant zero detailed first, then variant zero proxy, followed by detailed/proxy pairs for each additional variant. Every input index is preserved exactly once in original source order. Empty combinations produce empty [PackedInt32Array] entries. At most 16384 points and 1 through 32 mesh variants are accepted. Both input arrays must match and all indices must be valid (variant in [0, variant_count - 1], tier 0 or 1). Malformed input returns an empty [Array] before producing any partial batch; valid empty inputs produce 2 * [param variant_count] empty groups. This function creates no nodes, meshes or renderer state. Call from a low-frequency visual refresh and build one [MultiMesh] per nonempty geometry/tier group.
 			</description>
 		</method>
+		<method name="plan_projected_visible_counts" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="counts" type="PackedInt32Array" />
+			<param index="1" name="centers" type="PackedVector3Array" />
+			<param index="2" name="mesh_diameters" type="PackedFloat32Array" />
+			<param index="3" name="camera_position" type="Vector3" />
+			<param index="4" name="camera_forward" type="Vector3" />
+			<param index="5" name="focal_pixels" type="float" />
+			<param index="6" name="orthographic" type="bool" />
+			<param index="7" name="quality" type="int" />
+			<param index="8" name="near_pixels" type="float" default="20.0" />
+			<param index="9" name="far_pixels" type="float" default="2.0" />
+			<description>
+				Returns the cosmetic visible-instance budget for each cluster based on the projected pixel diameter of a representative instance instead of a fixed world-space draw distance. This accounts for viewport render resolution, camera focal length/FOV and orthographic zoom, which the caller supplies as [param focal_pixels]. For perspective cameras, pass viewport height divided by twice the tangent of half the vertical FOV (in radians). For orthographic cameras pass rendered viewport height divided by vertical world-space view size, and set [param orthographic] to [code]true[/code]. [param camera_forward] is the world-space forward vector; its magnitude does not matter. Per-instance nominal diameters in world units should include authored scale and are not the diameter of the entire cluster.
+				Projected diameters at or above [param near_pixels] select the near density tier, diameters at or below [param far_pixels] select the far tier, with smoothstep between them. Density curves match [method plan_visible_counts]. Completely behind-camera clusters remain fully populated, leaving frustum culling to the renderer rather than predicting culling with a negative projected depth. Ultra always retains full source counts. This data-only method does not change scene nodes, GPU buffers, RNG, physics or gameplay authority; apply the result to [member MultiMesh.visible_instance_count] for cosmetic foliage.
+				Accepts matching arrays of at most 4096 clusters, counts 0 through 65536, nonnegative finite diameters through 10000 and finite camera/center coordinates within +/-10000000. Focal pixels must be positive and at most 10000000; pixel thresholds must be finite, ordered with far nonnegative, near strictly greater than far, near at most 1000000. Quality must be 0 through 3. Inputs are validated atomically before output; invalid data yields an empty array. Unlike the older [method plan_visible_counts], this method adapts to the camera's actual projected detail.
+			</description>
+		</method>
 	</methods>
 </class>

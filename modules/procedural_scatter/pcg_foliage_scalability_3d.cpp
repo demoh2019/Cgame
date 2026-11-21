@@ -24,6 +24,11 @@ void PCGFoliageScalability3D::_bind_methods() {
 			&PCGFoliageScalability3D::plan_instance_lods, DEFVAL(24.0), DEFVAL(3.0));
 	ClassDB::bind_method(D_METHOD("partition_variant_lods", "variants", "lod_tiers", "variant_count"),
 			&PCGFoliageScalability3D::partition_variant_lods);
+	ClassDB::bind_method(D_METHOD("plan_projected_visible_counts", "counts", "centers",
+					"mesh_diameters", "camera_position", "camera_forward",
+					"focal_pixels", "orthographic", "quality", "near_pixels", "far_pixels"),
+			&PCGFoliageScalability3D::plan_projected_visible_counts,
+			DEFVAL(20.0), DEFVAL(2.0));
 }
 
 PackedInt32Array PCGFoliageScalability3D::spread_indices(int p_count) const {
@@ -215,6 +220,75 @@ Array PCGFoliageScalability3D::partition_variant_lods(
 			indices.set(j, bucket[j]);
 		}
 		result.push_back(indices);
+	}
+	return result;
+}
+
+
+PackedInt32Array PCGFoliageScalability3D::plan_projected_visible_counts(
+		const PackedInt32Array &p_counts, const PackedVector3Array &p_centers,
+		const PackedFloat32Array &p_mesh_diameters,
+		const Vector3 &p_camera_position, const Vector3 &p_camera_forward,
+		double p_focal_pixels, bool p_orthographic, int p_quality,
+		double p_near_pixels, double p_far_pixels) const {
+	PackedInt32Array result;
+	const int cluster_count = p_counts.size();
+	if (cluster_count != p_centers.size() ||
+			cluster_count != p_mesh_diameters.size() ||
+			cluster_count > MAX_CLUSTERS || p_quality < 0 || p_quality > 3 ||
+			!p_camera_position.is_finite() || !p_camera_forward.is_finite() ||
+			Math::abs(double(p_camera_position.x)) > MAX_DISTANCE ||
+			Math::abs(double(p_camera_position.y)) > MAX_DISTANCE ||
+			Math::abs(double(p_camera_position.z)) > MAX_DISTANCE ||
+			p_camera_forward.length_squared() < 1.0e-8 ||
+			!Math::is_finite(p_focal_pixels) || p_focal_pixels <= 0.0 ||
+			p_focal_pixels > 10000000.0 ||
+			!Math::is_finite(p_near_pixels) || !Math::is_finite(p_far_pixels) ||
+			p_far_pixels < 0.0 || p_near_pixels <= p_far_pixels ||
+			p_near_pixels > 1000000.0) {
+		return result;
+	}
+	// Validate all clusters before producing any output; invalid faraway
+	// foliage must never partially adjust a scene's visible-instance count.
+	for (int i = 0; i < cluster_count; ++i) {
+		const Vector3 center = p_centers[i];
+		const double diameter = p_mesh_diameters[i];
+		if (p_counts[i] < 0 || p_counts[i] > MAX_INSTANCES_PER_CLUSTER ||
+				!center.is_finite() ||
+				Math::abs(double(center.x)) > MAX_DISTANCE ||
+				Math::abs(double(center.y)) > MAX_DISTANCE ||
+				Math::abs(double(center.z)) > MAX_DISTANCE ||
+				!Math::is_finite(diameter) || diameter < 0.0 ||
+				diameter > 10000.0) {
+			return PackedInt32Array();
+		}
+	}
+	static constexpr double NEAR_DENSITY[4] = { 0.42, 0.68, 0.88, 1.0 };
+	static constexpr double FAR_DENSITY[4] = { 0.20, 0.42, 0.70, 1.0 };
+	const Vector3 forward = p_camera_forward.normalized();
+	result.resize(cluster_count);
+	for (int i = 0; i < cluster_count; ++i) {
+		const int count = p_counts[i];
+		if (count == 0 || p_quality == 3) {
+			result.set(i, count);
+			continue;
+		}
+		const Vector3 delta = p_centers[i] - p_camera_position;
+		const double depth = double(delta.dot(forward));
+		if (depth <= 0.0) {
+			// Never downsample behind-eye batches based on invalid/negative
+			// projected size. Frustum culling remains the renderer's job.
+			result.set(i, count);
+			continue;
+		}
+		const double pixels = double(p_mesh_diameters[i]) * p_focal_pixels /
+				(p_orthographic ? 1.0 : MAX(depth, 0.1));
+		const double t = Math::clamp((p_near_pixels - pixels) /
+				(p_near_pixels - p_far_pixels), 0.0, 1.0);
+		const double smooth = t * t * (3.0 - 2.0 * t);
+		const double fraction = NEAR_DENSITY[p_quality] +
+				(FAR_DENSITY[p_quality] - NEAR_DENSITY[p_quality]) * smooth;
+		result.set(i, MAX(1, MIN(count, int(Math::round(double(count) * fraction)))));
 	}
 	return result;
 }

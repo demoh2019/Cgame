@@ -177,13 +177,29 @@ func run(t) -> void:
 			"temporal density filtering never rebuilds the MultiMesh")
 		t.eq(node.multimesh.get_instance_transform(1).origin.x, 8.0,
 			"reordered spatial prefixes remain unchanged by density history")
+		FoliageBudget._apply_projected_plan(only_node,
+			PackedInt32Array([10]), PackedVector3Array([Vector3(0, 0, -110)]),
+			PackedFloat32Array([1.0]), Vector3.ZERO, Vector3.FORWARD,
+			220.0, false, 0, false)
+		t.eq(node.multimesh.visible_instance_count, 2,
+			"screen-space distant foliage keeps a smaller reversible prefix")
+		FoliageBudget._apply_projected_plan(only_node,
+			PackedInt32Array([10]), PackedVector3Array([Vector3(0, 0, -110)]),
+			PackedFloat32Array([1.0]), Vector3.ZERO, Vector3.FORWARD,
+			220.0, false, 3, false)
+		t.eq(node.multimesh.visible_instance_count, 10,
+			"Ultra restores all GPU instances after screen-space budget")
+		t.eq(node.multimesh.instance_count, 10,
+			"screen-space changes do not modify the immutable instance buffer")
+		t.check(float(node.get_meta("aa_density_mesh_diameter", 0.0)) > 0.0,
+			"authored mesh size cached once for projection")
 	parent.free()
 	t.eq(sources, before, "game instancing never edits procedural positions")
 
 	t.current = "Albion streamed cosmetic foliage is wired to density planner"
 	var chunk_code := FileAccess.get_file_as_string(
 		"res://scripts/client/chunk_view.gd")
-	t.check(chunk_code.contains("SceneryDensityLod.update_instances("),
+	t.check(chunk_code.contains("SceneryDensityLod.update_instances_projected("),
 		"streaming chunks refresh GPU visible counts with native batch query")
 	t.check(chunk_code.contains("DENSITY_LOD_INTERVAL := 0.6"),
 		"visibility refresh is throttled independently of the render loop")
@@ -193,6 +209,58 @@ func run(t) -> void:
 	t.check(chunk_code.contains("origin, density_scalable"),
 		"Albion writes distributed static GPU instance buffer at placement time")
 
+	t.current = "screen-size density tracks projected pixels, not raw world distance"
+	var screen_counts := PackedInt32Array([100, 100, 100, 100, 0])
+	var screen_centers := PackedVector3Array([
+		Vector3(0, 0, -11), Vector3(0, 0, -20),
+		Vector3(0, 0, -110), Vector3(0, 0, 10), Vector3(0, 0, -20)])
+	var diameters := PackedFloat32Array([1, 1, 1, 1, 1])
+	var projected: PackedInt32Array = FoliageBudget.plan_projected_visible_counts(
+		screen_counts, screen_centers, diameters, Vector3.ZERO,
+		Vector3.FORWARD, 220.0, false, 0, 20.0, 2.0, false)
+	t.eq(projected, PackedInt32Array([42, 31, 20, 100, 0]),
+		"closer projected plants retain more foliage; behind camera stays full")
+	t.eq(FoliageBudget.plan_projected_visible_counts(screen_counts,
+		screen_centers, diameters, Vector3.ZERO, Vector3.FORWARD,
+		220.0, false, 1, 20.0, 2.0, false),
+		PackedInt32Array([68, 55, 42, 100, 0]),
+		"Balanced uses its own smooth projected-size density curve")
+	t.eq(FoliageBudget.plan_projected_visible_counts(screen_counts,
+		screen_centers, diameters, Vector3.ZERO, Vector3.FORWARD,
+		220.0, false, 3, 20.0, 2.0, false), screen_counts,
+		"Ultra retains every source even with tiny pixel footprint")
+	t.eq(FoliageBudget.plan_projected_visible_counts(screen_counts,
+		screen_centers, diameters, Vector3.ZERO, Vector3.FORWARD,
+		11.0, true, 0, 20.0, 2.0, false),
+		PackedInt32Array([31, 31, 31, 100, 0]),
+		"orthographic projected size does not change with camera depth")
+	var higher_resolution: PackedInt32Array = FoliageBudget.plan_projected_visible_counts(
+		screen_counts, screen_centers, diameters, Vector3.ZERO,
+		Vector3.FORWARD, 440.0, false, 0, 20.0, 2.0, false)
+	for i in 3:
+		t.check(higher_resolution[i] >= projected[i],
+			"higher resolution or tighter FOV preserves screen detail %d" % i)
+	t.eq(FoliageBudget.plan_projected_visible_counts(screen_counts,
+		screen_centers, PackedFloat32Array([1]), Vector3.ZERO,
+		Vector3.FORWARD, 220.0, false, 0, 20.0, 2.0, false).size(), 0,
+		"mismatched screen-projection arrays fail atomically")
+	var invalid_diameters: PackedFloat32Array = diameters.duplicate()
+	invalid_diameters[4] = NAN
+	t.eq(FoliageBudget.plan_projected_visible_counts(screen_counts,
+		screen_centers, invalid_diameters, Vector3.ZERO,
+		Vector3.FORWARD, 220.0, false, 0, 20.0, 2.0, false).size(), 0,
+		"invalid late mesh diameter must not yield a partial visibility plan")
+	var changed_source: String = FileAccess.get_file_as_string(
+		"res://scripts/client/chunk_view.gd")
+	t.check(changed_source.contains("SceneryDensityLod.update_instances_projected("),
+		"real Albion chunks now use screen-space rather than distance-only density")
+	var renderer_source: String = FileAccess.get_file_as_string(
+		"res://scripts/client/scenery_density_lod.gd")
+	t.check(renderer_source.contains("viewport.scaling_3d_scale") and
+		renderer_source.contains("Camera3D.KEEP_WIDTH") and
+		renderer_source.contains("Camera3D.PROJECTION_ORTHOGONAL"),
+		"screen density accounts for render scaling, camera aspect and ortho size")
+
 	t.current = "native C++ foliage scalability agrees with stock Godot fallback"
 	if ClassDB.class_exists("PCGFoliageScalability3D"):
 		var native: Object = ClassDB.instantiate("PCGFoliageScalability3D")
@@ -201,6 +269,36 @@ func run(t) -> void:
 		if native != null and native.has_method("plan_visible_counts"):
 			t.eq(native.call("spread_indices", 10), expected_order,
 				"native bit reversal matches the script")
+			if native.has_method("plan_projected_visible_counts"):
+				t.eq(native.call("plan_projected_visible_counts",
+					screen_counts, screen_centers, diameters, Vector3.ZERO,
+					Vector3.FORWARD, 220.0, false, 0, 20.0, 2.0),
+					projected, "native screen-size foliage matches deterministic fallback")
+				var pixel_rng := RandomNumberGenerator.new()
+				pixel_rng.seed = 382040
+				for sample in 12:
+					var random_counts := PackedInt32Array()
+					var random_centers := PackedVector3Array()
+					var random_diameters := PackedFloat32Array()
+					for j in 48:
+						random_counts.append(pixel_rng.randi_range(0, 500))
+						random_centers.append(Vector3(
+							pixel_rng.randf_range(-100, 100),
+							pixel_rng.randf_range(-30, 30),
+							pixel_rng.randf_range(-250, 60)))
+						random_diameters.append(pixel_rng.randf_range(0.15, 3.0))
+					for quality in 4:
+						for ortho in [false, true]:
+							t.eq(native.call("plan_projected_visible_counts",
+								random_counts, random_centers, random_diameters,
+								Vector3(0, 2, 0), Vector3.FORWARD,
+								350.0, ortho, quality, 20.0, 2.0),
+								FoliageBudget.plan_projected_visible_counts(
+									random_counts, random_centers, random_diameters,
+									Vector3(0, 2, 0), Vector3.FORWARD,
+									350.0, ortho, quality, 20.0, 2.0, false),
+								"screen-native parity sample %d tier %d ortho %s" %
+								[sample, quality, str(ortho)])
 			var rng := RandomNumberGenerator.new()
 			rng.seed = 910423
 			for sample in 20:
