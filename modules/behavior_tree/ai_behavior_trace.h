@@ -45,6 +45,10 @@ class AIBehaviorTrace : public RefCounted {
 	int64_t tick_index = 0;
 	int truncated = 0;
 	Array steps;
+	// History is opt-in and retains plain-data copies of completed ticks.
+	// Default 0 preserves the old zero-history allocation behavior.
+	int history_capacity = 0;
+	Array history_frames;
 	Vector<int64_t> started_usec;
 	Vector<uint8_t> completed;
 
@@ -65,5 +69,12 @@ public:
 	bool end_step(int p_token, int p_status);
 
 	Dictionary get_snapshot() const;
+	void set_history_capacity(int p_capacity);
+	int get_history_capacity() const { return history_capacity; }
+	// Oldest to newest, including the current tick. Each entry marks whether
+	// execution paths/statuses changed relative to the preceding recorded tick.
+	Array get_history_frames(bool p_changes_only = false) const;
+	// Highest inclusive CPU-duration tasks in the latest tick (max 32).
+	Array get_slowest_nodes(int p_limit = 8) const;
 	void reset();
 };

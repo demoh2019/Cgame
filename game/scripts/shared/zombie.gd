@@ -148,6 +148,10 @@ func enable_ai_trace(enabled: bool) -> bool:
 		if not ClassDB.class_exists("AIBehaviorTrace"):
 			return false
 		_ai_trace = ClassDB.instantiate("AIBehaviorTrace")
+		if _ai_trace != null:
+			# History belongs only to explicitly traced infected; normal
+			# server mobs keep the zero-allocation disabled path.
+			_ai_trace.set_history_capacity(8)
 	return _ai_trace != null
 
 
@@ -163,6 +167,20 @@ func get_ai_trace_snapshot() -> Dictionary:
 func reset_ai_trace() -> void:
 	if _ai_trace != null:
 		_ai_trace.reset()
+
+
+## Replay data is private to server operators; never replicate player-related
+## trace decisions in public multiplayer snapshots.
+func get_ai_trace_history_frames(changes_only: bool = false) -> Array:
+	if _ai_trace == null:
+		return []
+	return _ai_trace.get_history_frames(changes_only)
+
+
+func get_ai_slowest_trace_nodes(limit: int = 8) -> Array:
+	if _ai_trace == null:
+		return []
+	return _ai_trace.get_slowest_nodes(limit)
 
 
 ## On-demand server-only visualization of the actual GDScript state machine.
@@ -228,6 +246,8 @@ func get_ai_debug_snapshot() -> Dictionary:
 		"perception": _native_senses.get_debug_snapshot() if _native_senses != null else {},
 		"profiling": get_ai_profile_snapshot(),
 		"trace": get_ai_trace_snapshot(),
+		"trace_history": get_ai_trace_history_frames(true),
+		"slowest_ai_phases": get_ai_slowest_trace_nodes(4),
 		"visual_tree": get_ai_state_visual_snapshot(),
 		"pack_howl_cooldown_seconds": float(_native_howl_cooldowns.get_remaining(&"pack_howl")) if _native_howl_cooldowns != null else 0.0,
 		"native_simulation_lod": _ai_lod_scheduler != null,

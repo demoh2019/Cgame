@@ -48,6 +48,10 @@ var hud: Label
 var trace_panel: PanelContainer
 var trace_tree: Tree
 var trace_title: Label
+var trace_history_label: Label
+var trace_hotspots_label: Label
+var trace_replay_tick: int = -1 # -1 follows the latest live AI tick.
+var trace_changes_only: bool = false
 
 
 func _ready() -> void:
@@ -88,6 +92,7 @@ func _ready() -> void:
     brain.auto_tick = false
     brain.profiling_enabled = true  # Demo opt-in; gameplay uses disabled-by-default runners.
     brain.trace_enabled = true  # Per-node inspector, independently toggled with T.
+    brain.set_trace_history_capacity(16) # Explicitly opt into a bounded replay buffer.
     add_child(brain)
 
     hud = Label.new()
@@ -359,6 +364,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
         brain.reset_profile()
         last_profile_snapshot = brain.get_profile_snapshot()
     elif event.keycode == KEY_T:
+        trace_replay_tick = -1
         brain.trace_enabled = not brain.is_trace_enabled()
         last_trace_snapshot = brain.get_trace_snapshot()
         _refresh_trace_tree_panel()
@@ -377,6 +383,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
         brain.reset_profile()
         last_profile_snapshot = brain.get_profile_snapshot()
         brain.reset_trace()
+        trace_replay_tick = -1
         last_trace_snapshot = brain.get_trace_snapshot()
         _refresh_trace_tree_panel()
         ai_timer = 0.0
@@ -399,7 +406,7 @@ func _build_trace_tree_panel() -> void:
     # Debug-only UI: no extra tree walks on ordinary production game NPCs.
     trace_panel = PanelContainer.new()
     trace_panel.position = Vector2(575, 60)
-    trace_panel.size = Vector2(372, 400)
+    trace_panel.size = Vector2(372, 495)
     var background := StyleBoxFlat.new()
     background.bg_color = Color(0.065, 0.085, 0.14, 0.94)
     background.border_color = Color(0.43, 0.55, 0.72)
@@ -413,6 +420,29 @@ func _build_trace_tree_panel() -> void:
     trace_title.text = "LIVE BEHAVIOR TREE"
     trace_title.add_theme_font_size_override("font_size", 15)
     vertical.add_child(trace_title)
+
+    var replay_controls := HBoxContainer.new()
+    var prev_button := Button.new()
+    prev_button.text = "◀ Prev"
+    prev_button.pressed.connect(_replay_previous)
+    replay_controls.add_child(prev_button)
+    var next_button := Button.new()
+    next_button.text = "Next ▶"
+    next_button.pressed.connect(_replay_next)
+    replay_controls.add_child(next_button)
+    var live_button := Button.new()
+    live_button.text = "Live"
+    live_button.pressed.connect(_replay_live)
+    replay_controls.add_child(live_button)
+    vertical.add_child(replay_controls)
+
+    var changes_box := CheckBox.new()
+    changes_box.text = "Changed decisions only"
+    changes_box.toggled.connect(_set_replay_changes_only)
+    vertical.add_child(changes_box)
+
+    trace_history_label = Label.new()
+    vertical.add_child(trace_history_label)
 
     trace_tree = Tree.new()
     trace_tree.columns = 3
@@ -428,6 +458,52 @@ func _build_trace_tree_panel() -> void:
     trace_tree.set_column_custom_minimum_width(2, 49)
     trace_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
     vertical.add_child(trace_tree)
+    trace_hotspots_label = Label.new()
+    vertical.add_child(trace_hotspots_label)
+    _refresh_trace_tree_panel()
+
+
+func _replay_previous() -> void:
+    _move_trace_replay(-1)
+
+
+func _replay_next() -> void:
+    _move_trace_replay(1)
+
+
+func _replay_live() -> void:
+    trace_replay_tick = -1
+    _refresh_trace_tree_panel()
+
+
+func _set_replay_changes_only(enabled: bool) -> void:
+    trace_changes_only = enabled
+    trace_replay_tick = -1
+    _refresh_trace_tree_panel()
+
+
+func _move_trace_replay(direction: int) -> void:
+    var frames: Array = brain.get_trace_history_frames(trace_changes_only)
+    if frames.is_empty():
+        return
+    var index := frames.size() - 1
+    if trace_replay_tick >= 0:
+        var found := false
+        for i in frames.size():
+            var frame: Dictionary = frames[i]
+            if int(frame.get("tick_index", -1)) == trace_replay_tick:
+                index = i
+                found = true
+                break
+        if not found:
+            trace_replay_tick = -1
+    index += direction
+    if index >= frames.size():
+        trace_replay_tick = -1 # Step forward returns to live mode.
+    else:
+        index = maxi(0, index)
+        var chosen: Dictionary = frames[index]
+        trace_replay_tick = int(chosen.get("tick_index", -1))
     _refresh_trace_tree_panel()
 
 
@@ -439,8 +515,32 @@ func _refresh_trace_tree_panel() -> void:
         return
     var snapshot: Dictionary = brain.get_tree_snapshot()
     var nodes: Array = snapshot.get("nodes", [])
-    trace_title.text = "LIVE BEHAVIOR TREE  |  %d nodes  |  tick %d" % [
-        nodes.size(), int(snapshot.get("tick_index", 0))]
+    var frames: Array = brain.get_trace_history_frames(trace_changes_only)
+    var selected_frame: Dictionary = {}
+    if trace_replay_tick >= 0:
+        for raw_frame in frames:
+            var frame: Dictionary = raw_frame
+            if int(frame.get("tick_index", -1)) == trace_replay_tick:
+                selected_frame = frame
+                break
+        if selected_frame.is_empty():
+            trace_replay_tick = -1 # Old frame was evicted from ring buffer.
+
+    var replay_steps: Dictionary = {}
+    if trace_replay_tick >= 0:
+        for raw_step in selected_frame.get("steps", []):
+            var step: Dictionary = raw_step
+            replay_steps[str(step.get("path", ""))] = step
+
+    var displaying_tick := int(snapshot.get("tick_index", 0))
+    if trace_replay_tick >= 0:
+        displaying_tick = trace_replay_tick
+    trace_title.text = "AI TREE %s | tick %d | %d nodes" % [
+        "REPLAY" if trace_replay_tick >= 0 else "LIVE", displaying_tick, nodes.size()]
+    trace_history_label.text = "History: %d/%d ticks%s" % [
+        frames.size(), brain.get_trace_history_capacity(),
+        " | changed-only" if trace_changes_only else ""]
+
     trace_tree.clear()
     var invisible_root := trace_tree.create_item()
     var paths: Dictionary = {}
@@ -453,6 +553,13 @@ func _refresh_trace_tree_panel() -> void:
         item.set_metadata(0, path)
         item.set_text(0, str(node.get("task_class", "Task")).trim_prefix("BehaviorTree"))
         var status := int(node.get("status", -1))
+        var executed := bool(node.get("executed", false))
+        var usec := int(node.get("duration_usec", 0))
+        if trace_replay_tick >= 0:
+            var record: Dictionary = replay_steps.get(path, {})
+            status = int(record.get("status", -1))
+            executed = not record.is_empty()
+            usec = int(record.get("duration_usec", 0))
         match status:
             BehaviorTreeTask.SUCCESS:
                 item.set_text(1, "SUCCESS")
@@ -466,8 +573,16 @@ func _refresh_trace_tree_panel() -> void:
             _:
                 item.set_text(1, "NOT RUN")
                 item.set_custom_color(1, Color(0.59, 0.64, 0.72))
-        item.set_text(2, str(int(node.get("duration_usec", 0)))
-            if bool(node.get("executed", false)) else "—")
+        item.set_text(2, str(usec) if executed else "—")
+
+    var hotspots: Array = brain.get_slowest_trace_nodes(1)
+    if hotspots.is_empty():
+        trace_hotspots_label.text = "Latest CPU hotspot: no completed nodes"
+    else:
+        var hottest: Dictionary = hotspots[0]
+        trace_hotspots_label.text = "Latest CPU hotspot: %s | self %d μs / total %d μs" % [
+            str(hottest.get("path", "?")), int(hottest.get("self_usec", 0)),
+            int(hottest.get("duration_usec", 0))]
 
 
 func _update_hud() -> void:
