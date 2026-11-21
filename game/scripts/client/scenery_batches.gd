@@ -44,9 +44,9 @@ const PCG_MAX_SELECTED := 4096
 static func _pcg_filter_fallback(candidates: PackedVector2Array,
 		min_spacing: float, max_selected: int = PCG_MAX_SELECTED) -> PackedInt32Array:
 	var result := PackedInt32Array()
-	if candidates.size() > PCG_MAX_CANDIDATES or max_selected < 0 or
-			max_selected > PCG_MAX_SELECTED or not is_finite(min_spacing) or
-			min_spacing < 0.0 or min_spacing > 10000.0 or
+	if candidates.size() > PCG_MAX_CANDIDATES or max_selected < 0 or \
+			max_selected > PCG_MAX_SELECTED or not is_finite(min_spacing) or \
+			min_spacing < 0.0 or min_spacing > 10000.0 or \
 			(min_spacing > 0.0 and min_spacing < 0.05):
 		return result
 	for p in candidates:
