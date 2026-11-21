@@ -64,6 +64,9 @@ func setup(tint: Color, scale_factor: float, walk_speed: float = 1.0, model_name
 	_walk_speed = walk_speed
 	_zombie = zombie
 	# A reused character never inherits a freed skeleton or previous leg solver.
+	# Deactivate the old one before detaching its cached reference.
+	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier):
+		_native_foot_modifier.set("active", false)
 	_native_feet = false
 	_native_foot_modifier = null
 	# A pooled/reconfigured model must never inherit its predecessor's IK slot.
