@@ -47,6 +47,7 @@ func run(t) -> void:
 	t.check(not grid.any_within(Vector2.ZERO, -1.0), "negative radius fails closed")
 	t.eq(grid.snapshot()["alive_players"], 1, "single player index size")
 	t.check(not grid.snapshot()["indexed_mode"], "solo mode scans without hash overhead")
+	t.eq(grid.snapshot()["occupied_cells"], 0, "small mode allocates no spatial buckets")
 
 	t.current = "spatial broadphase matches brute-force distance under negative coordinates"
 	var many: Array[Vector2] = []
@@ -72,6 +73,11 @@ func run(t) -> void:
 	var snapshot: Dictionary = grid.snapshot()
 	t.check(snapshot["queries"] >= 900, "broadphase query accounting")
 	t.check(snapshot["bucket_lookups"] > 0, "large groups use cell lookup")
+	var lookups_before: int = grid.bucket_lookups
+	t.check(grid.any_within(Vector2.ZERO, 1000000.0),
+		"large-radius fallback still finds a real player")
+	t.eq(grid.bucket_lookups, lookups_before,
+		"oversized radius does not iterate millions of empty buckets")
 	t.check(snapshot["candidate_checks"] < snapshot["queries"] * many.size(),
 		"spatial candidates are pruned relative to full scans")
 
