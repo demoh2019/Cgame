@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AIUpdateScheduler" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Distributes noncritical AI work across deterministic simulation tick slots.</brief_description>
+	<description>
+		An allocation-free per-agent scheduler inspired by periodic Behavior Tree services. Each stable integer agent ID is assigned a reproducible slot in a cycle of [member slots_per_cycle] simulation ticks. An agent is due exactly once per cycle; this spreads expensive decisions across frames without changing update order or consuming the game's random number generator. The scheduler stores no per-agent timers or lists and therefore does not require cleanup when agents despawn.
+		Only postpone noncritical work such as periodic target rescanning or navigation repaths. Never gate physics, attacks, damage, critical perception, network reconciliation or mandatory state checks. [method is_due] supports an urgent flag that bypasses the phase gate; the caller should also preserve first-contact updates and avoid unbounded delays. Each game world should pass its authoritative monotonic tick index, not a wall clock time.
+		This is phase staggering rather than a hard CPU-microsecond budget, a GPU scheduler, or a worker-thread pool. Use [AIExecutionProfiler] to measure the resulting work. No general optimization gain is guaranteed without profiling.
+	</description>
+	<methods>
+		<method name="set_slots_per_cycle"><return type="void" /><param index="0" name="slots" type="int" /><description>Sets the cycle length from 1 to 64 slots. An invalid value is rejected without changing the previous configuration.</description></method>
+		<method name="get_slots_per_cycle" qualifiers="const"><return type="int" /><description>Returns the configured cycle length.</description></method>
+		<method name="get_agent_slot" qualifiers="const"><return type="int" /><param index="0" name="agent_id" type="int" /><description>Returns the agent's stable hashed slot, in [code][0, slots_per_cycle)[/code]. Supports positive and negative signed 64-bit IDs.</description></method>
+		<method name="is_due" qualifiers="const"><return type="bool" /><param index="0" name="agent_id" type="int" /><param index="1" name="tick_index" type="int" /><param index="2" name="urgent" type="bool" default="false" /><description>Returns true when the agent's slot matches a nonnegative authoritative tick index. Urgent work returns true for any nonnegative tick. Negative tick indices are rejected.</description></method>
+		<method name="ticks_until_due" qualifiers="const"><return type="int" /><param index="0" name="agent_id" type="int" /><param index="1" name="tick_index" type="int" /><description>Returns 0 when due now, otherwise the number of ticks before the agent's next slot, or -1 for a negative tick index.</description></method>
+	</methods>
+	<members>
+		<member name="slots_per_cycle" type="int" default="4">Number of simulation-tick phases (1-64). A single slot admits every agent on every tick.</member>
+	</members>
+</class>
