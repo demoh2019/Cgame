@@ -219,3 +219,37 @@ damage validation, safe-zone authority and network synchronization remain
 entirely game-owned. No native threat data is sent to ordinary clients.
 
 See `game/docs/NATIVE_AI_THREAT_TABLE.md`.
+
+## Bounded native 2D pack proximity grid
+
+`AIProximityGrid2D.query_radius_batch(positions, source_indices, radius, cell_size)`
+builds one temporary spatial hash for the supplied 2D point cohort and returns
+one `PackedInt32Array` of neighbor indices per source (ascending input index,
+excluding the source itself). Inputs may use negative coordinates, exact radius
+boundary hits are included, and repeated source IDs give repeated results.
+With `cell_size >= radius`, only nine cells need inspection per source.
+The native method performs the geometric broadphase only, never physics/LOS,
+combat authority, server targets, or autonomous movement.
+
+The method limits positions to **8192**, sources to **1024**, radius to
+**0–256** and cell size to **max(1,radius)–256**, with finite bounded world
+coordinates and valid indices. Invalid requests return an empty result
+without partially updated state.
+
+Albion After's `GameServer._alert_infected_pack()` uses this native
+broadphase for its established **18-metre** pack-awareness system. Only
+alive infected enter the snapshot; current server-authorized chase sources
+are frozen before delivering notices. `Zombie.receive_pack_alert()`
+continues enforcing valid player targets, safe zones, territory and pursuit
+leash. Newly awakened neighbors do not become senders in the same pass.
+The stock-Godot/older-Cgame path keeps the original 3×3 GDScript buckets,
+so **no game protocol or save format changes** are needed.
+
+Native tests cover negative cells, exact boundaries, deterministic order,
+duplicate sources and malformed input. Gameplay tests check native/brute
+force parity, one-pass alerts and old-fork fallback. As with all spatial
+broadphases, profile actual crowded worlds to confirm the allocation and
+CPU overhead justifies the reduction in script loops.
+
+References: spatial partitioning used in Unity-style entity proximity
+workflows and Unreal Engine Mass crowd processing; no code copied.
