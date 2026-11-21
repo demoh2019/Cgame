@@ -237,11 +237,11 @@ TEST_CASE("[AIBehaviorTrace] Disabled runners do not retain trace contexts") {
 	const Array last_steps = runner->get_trace_snapshot()["steps"];
 	CHECK(last_steps.size() == 1);
 	CHECK(runner->tick(0.5) == BehaviorTreeTask::SUCCESS); // cached result
-	const Array last_steps = runner->get_trace_snapshot()["steps"];
-	CHECK(last_steps.size() == 1);
+	const Array cached_steps = runner->get_trace_snapshot()["steps"];
+	CHECK(cached_steps.size() == 1);
 	runner->set_trace_enabled(false);
-	const Array no_steps = runner->get_trace_snapshot()["steps"];
-	CHECK(no_steps.is_empty());
+	const Array cleared_steps = runner->get_trace_snapshot()["steps"];
+	CHECK(cleared_steps.is_empty());
 	memdelete(runner);
 }
 
