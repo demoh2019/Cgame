@@ -7,6 +7,9 @@ const CombatAnimationPriority = preload("res://scripts/client/combat_animation_p
 static var _native_tier_planner: Object = null
 const NEAR_CAMERA_VISIBILITY_RADIUS := 3.0 # Matches the animation LOD close-camera safeguard.
 const IK_RETENTION_HYSTERESIS_METRES := 1.5 # Keeps a prior on-screen IK owner during small camera moves.
+# Optional script-only full-pose modifiers, NOT the animator/native mixer budget.
+# Unsampled actors use the engine's 100us initial estimate.
+const FULL_POSE_CPU_BUDGET_US := [0, 750, 1500, 2750]
 
 # --- Animation LOD / crowd budget (Unreal URO / Unity Animator Culling) --------------------------------------------------
 
@@ -154,6 +157,68 @@ static func _plan_crowd_tiers_fallback(distances: PackedFloat64Array,
 			continue
 		tiers[index] = mini(tiers[index], 1)
 		granted_priority += 1
+	return tiers
+
+
+
+## A second, measured-cost soft budget for expensive full-pose procedural IK.
+## It never demotes visible combat poses below tier 1 or skips core animation.
+## A zero budget disables the extra cap. The native and script paths both
+## first choose exactly the existing visible/retained full-IK winners, then
+## demote owners whose estimated cost cannot fit the remaining CPU allowance.
+static func plan_crowd_tiers_costed(distances: PackedFloat64Array,
+		priority_flags: PackedByteArray, visible_flags: PackedByteArray,
+		retained_full_flags: PackedByteArray, full_pose_cost_us: PackedInt32Array,
+		full_slots: int, priority_slots: int, full_pose_budget_us: int,
+		hysteresis: float = IK_RETENTION_HYSTERESIS_METRES,
+		prefer_native: bool = true) -> PackedInt32Array:
+	var count: int = distances.size()
+	if count != priority_flags.size() or count != visible_flags.size() or \
+			count != retained_full_flags.size() or count != full_pose_cost_us.size() or \
+			count > 16384 or full_pose_budget_us < 0 or full_pose_budget_us > 1000000 or \
+			not is_finite(hysteresis) or hysteresis < 0.0 or hysteresis > 8.0 or \
+			full_slots < 0 or full_slots > 256 or priority_slots < 0 or priority_slots > 256:
+		return PackedInt32Array()
+	for sample in full_pose_cost_us:
+		if sample < 0 or sample > 100000:
+			return PackedInt32Array()
+	# Old native builds do not understand this signature: fall back to
+	# script budget enforcement after the unchanged tier selection instead.
+	if prefer_native and ClassDB.class_exists("CrowdAnimationTierPlanner"):
+		if _native_tier_planner == null:
+			_native_tier_planner = ClassDB.instantiate("CrowdAnimationTierPlanner")
+		if _native_tier_planner != null and _native_tier_planner.has_method(
+				"plan_visible_tiers_costed"):
+			var native_tiers: PackedInt32Array = _native_tier_planner.call(
+				"plan_visible_tiers_costed", distances, priority_flags, visible_flags,
+				retained_full_flags, full_pose_cost_us, full_slots, priority_slots,
+				full_pose_budget_us, hysteresis)
+			if native_tiers.size() == count:
+				return native_tiers
+	var tiers: PackedInt32Array = plan_crowd_tiers(distances, priority_flags,
+		full_slots, priority_slots, false, visible_flags, retained_full_flags, hysteresis)
+	if tiers.size() != count or full_pose_budget_us == 0:
+		return tiers
+	var selected: Array[int] = []
+	for i in count:
+		if tiers[i] == 0:
+			selected.append(i)
+	selected.sort_custom(func(a: int, b: int) -> bool:
+		var a_score: float = maxf(0.0, distances[a] -
+			(hysteresis if retained_full_flags[a] != 0 else 0.0))
+		var b_score: float = maxf(0.0, distances[b] -
+			(hysteresis if retained_full_flags[b] != 0 else 0.0))
+		return a_score < b_score if a_score != b_score else a < b
+	)
+	var planned_us: int = 0
+	for index in selected:
+		var estimate_us: int = full_pose_cost_us[index]
+		if estimate_us == 0:
+			estimate_us = 100
+		if planned_us + estimate_us <= full_pose_budget_us:
+			planned_us += estimate_us
+		else:
+			tiers[index] = 1 # Full-rate locomotion/combat, but no extra IK.
 	return tiers
 
 
@@ -307,6 +372,7 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 	var priority_mask := PackedByteArray()
 	var visible_mask := PackedByteArray()
 	var retained_full_mask := PackedByteArray()
+	var full_pose_cost_us := PackedInt32Array()
 	for model in models:
 		var distance: float = model.global_position.distance_to(cam)
 		distances.append(distance)
@@ -316,15 +382,19 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 			camera.is_position_in_frustum(model.global_position + Vector3.UP))
 		visible_mask.append(1 if visible else 0)
 		retained_full_mask.append(1 if bool(model.get_meta("aa_full_ik_retained", false)) else 0)
+		var modifier: Object = model.get("_procedural")
+		full_pose_cost_us.append(int(modifier.get("estimated_full_pose_us")) if modifier != null else 0)
 		# Combat urgency is visual-only, and the native mixer controller
 		# already handles critical poses when external_anim_lod is enabled.
 		var critical: bool = not bool(model.get("external_anim_lod")) \
 			and bool(model.get_meta("aa_combat_animation_priority", false)) \
 			and distance < 90.0 and visible
 		priority_mask.append(1 if critical else 0)
-	var tiers: PackedInt32Array = plan_crowd_tiers(distances, priority_mask,
-		full_budget(quality), CombatAnimationPriority.slots(quality), true, visible_mask,
-		retained_full_mask, IK_RETENTION_HYSTERESIS_METRES)
+	var tiers: PackedInt32Array = plan_crowd_tiers_costed(distances, priority_mask,
+		visible_mask, retained_full_mask, full_pose_cost_us,
+		full_budget(quality), CombatAnimationPriority.slots(quality),
+		FULL_POSE_CPU_BUDGET_US[clampi(quality, 0, 3)],
+		IK_RETENTION_HYSTERESIS_METRES)
 	if tiers.size() != models.size():
 		return
 	for i in models.size():
