@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="SpatialRelevancyGrid2D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../doc/class.xsd">
+	<brief_description>Bounded spatial lookup of identified XZ-plane entities, including deterministic nearest-K queries.</brief_description>
+	<description>
+		A pure-data, rebuildable spatial hash for proximity queries using unique 64-bit entity IDs and finite 2D positions. It stores neither Nodes nor PhysicsServer objects, so callers own gameplay state and decide when to rebuild. For sparse/small populations and radii beyond the configured indexed range, it falls back to an exact linear scan.
+		[method query_ids] and [method query_many] preserve the original input order for stable network replication. [method query_nearest_ids] instead ranks by exact squared distance with entity ID as a deterministic tie-break, retaining at most K candidates in memory. This is useful for bounded combat target selection, spatial perception and other systems that need the closest entities rather than every in-range entity. It does not perform collision occlusion, predict motion or modify authoritative positions.
+	</description>
+	<methods>
+		<method name="rebuild">
+			<return type="bool" />
+			<param index="0" name="ids" type="PackedInt64Array" />
+			<param index="1" name="positions" type="PackedVector2Array" />
+			<description>Rebuilds from the full current entity snapshot, requiring equal array lengths, unique IDs, finite positions and no more than 65536 points. Failure clears partial data so callers may fall back to their authoritative scan. Rebuilding resets query telemetry and replaces the prior index.</description>
+		</method>
+		<method name="query_ids">
+			<return type="PackedInt64Array" />
+			<param index="0" name="center" type="Vector2" />
+			<param index="1" name="radius" type="float" />
+			<description>Returns all entities within the inclusive radius, preserving rebuild input order. NaN, infinity and negative radii return an empty array. Indexed and direct scan paths use exact squared distances.</description>
+		</method>
+		<method name="query_nearest_ids">
+			<return type="PackedInt64Array" />
+			<param index="0" name="center" type="Vector2" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="max_results" type="int" default="12" />
+			<description>Returns the nearest 1–128 entities within the given inclusive radius, sorted by ascending squared distance and then ascending unique entity ID for exact distance ties. The max_results bound is strict; the internal candidate list never exceeds max_results + 1 entries and does not sort/allocate the full nearby population. Invalid center, radius, zero/negative or over-128 max_results produce an empty array without touching query telemetry. A legitimate empty set is also an empty array; the caller owns permission and gameplay rules. The same nearest ordering applies in small direct-scan mode and when the query radius exceeds the hash-index limit. This order differs intentionally from [method query_ids].</description>
+		</method>
+		<method name="query_many">
+			<return type="Array" />
+			<param index="0" name="centers" type="PackedVector2Array" />
+			<param index="1" name="radius" type="float" />
+			<description>Returns one input-order-preserving PackedInt64Array for each viewer. Rejects more than 4096 viewers or viewer/entity combinations beyond the bounded 2097152 pair guard; callers must fall back rather than suppress actors on failure. Only [method query_ids] semantics apply, not nearest-K ranking.</description>
+		</method>
+		<method name="get_stats" qualifiers="const">
+			<return type="Dictionary" />
+			<description>Returns entities, cells, rebuilds, queries, nearest_queries, batch_calls, batch_viewers, candidates, buckets, fallback_scans and indexed_mode. Candidate checks include indexed or fallback top-K queries. Diagnostics never change gameplay state.</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>Discards all IDs, positions and buckets, resetting query telemetry. The cell size and indexed-radius settings are preserved.</description>
+		</method>
+		<method name="set_cell_size">
+			<return type="void" />
+			<param index="0" name="size" type="float" />
+			<description>Sets the spatial hash cell size between 8 and 1024 world units, reindexing existing points.</description>
+		</method>
+		<method name="get_cell_size" qualifiers="const">
+			<return type="float" />
+			<description>Spatial hash cell size in world units.</description>
+		</method>
+		<method name="set_max_indexed_radius">
+			<return type="void" />
+			<param index="0" name="radius" type="float" />
+			<description>Sets the indexed-query radius limit between 64 and 4096 world units, reindexing existing points.</description>
+		</method>
+		<method name="get_max_indexed_radius" qualifiers="const">
+			<return type="float" />
+			<description>Maximum radius for indexed queries. Larger radii use a full exact linear scan instead of traversing potentially huge empty cell ranges.</description>
+		</method>
+	</methods>
+	<members>
+		<member name="cell_size" type="float" setter="set_cell_size" getter="get_cell_size" default="64.0">
+			Hash cell size; changes rebuild the index.
+		</member>
+		<member name="max_indexed_radius" type="float" setter="set_max_indexed_radius" getter="get_max_indexed_radius" default="2048.0">
+			Maximum hashed-query radius; larger radii use an exact scan.
+		</member>
+	</members>
+</class>

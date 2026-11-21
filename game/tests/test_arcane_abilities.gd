@@ -94,9 +94,8 @@ func run(t) -> void:
 					var distance: float = origin.distance_squared_to(point_list[i])
 					if distance <= radius * radius:
 						brute.append({"id": id_list[i], "d": distance})
-				brute.sort_custom(func(a, b):
-					return float(a["d"]) < float(b["d"]) if a["d"] != b["d"]
-						else int(a["id"]) < int(b["id"]))
+				brute.sort_custom(func(a, b): return float(a["d"]) < float(b["d"]) \
+					if float(a["d"]) != float(b["d"]) else int(a["id"]) < int(b["id"]))
 				var expected := PackedInt64Array()
 				for i in mini(brute.size(), 5):
 					expected.append(int(brute[i]["id"]))
