@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameCrowdAvoidance" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Native ORCA (Optimal Reciprocal Collision Avoidance) velocity solver for large 2D crowds.
+	</brief_description>
+	<description>
+		Computes collision-free velocities for many agents at once using the ORCA algorithm from the RVO2 Library (van den Berg, Guy, Snape, Lin and Manocha; Apache-2.0, see [code]LICENSE-RVO2.txt[/code] in the module folder). Neighbours are found with a uniform spatial hash (average O(n)) instead of a k-d tree, each agent solves its half-plane constraints with a 2D linear program, and a 3D linear program minimises the maximum violation when no feasible velocity exists.
+		The work is spread over the [WorkerThreadPool] once there are at least 256 agents. Every agent reads only the immutable input arrays, so the result is bit-identical for any thread count and for repeated calls with the same input. Neighbours at equal distance are ordered by index.
+		This class has no instance state; call [method compute_velocities] directly on the class. It is the native counterpart of [code]scripts/shared/crowd_avoidance.gd[/code] and has the same signature.
+		[codeblock]
+		var new_velocities = CgameCrowdAvoidance.compute_velocities(
+		        positions, velocities, preferred, 0.5, 1.5, 3.0, 10.0, 16, delta)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="compute_velocities" qualifiers="static">
+			<return type="PackedVector2Array" />
+			<param index="0" name="positions" type="PackedVector2Array" />
+			<param index="1" name="velocities" type="PackedVector2Array" />
+			<param index="2" name="preferred" type="PackedVector2Array" />
+			<param index="3" name="radius" type="float" />
+			<param index="4" name="max_speed" type="float" />
+			<param index="5" name="time_horizon" type="float" />
+			<param index="6" name="neighbor_dist" type="float" />
+			<param index="7" name="max_neighbors" type="int" />
+			<param index="8" name="time_step" type="float" default="0.1" />
+			<description>
+				Returns new velocities, in the same order as the input, that avoid collisions with other agents within [param time_horizon] seconds. All three input arrays must have the same size; otherwise an error is printed and a zero-filled array is returned. An empty input returns an empty array.
+				[param radius] is the radius of every agent (two agents touch at [code]2 * radius[/code]). [param max_speed] bounds the result length and also clamps [param preferred]. [param neighbor_dist] is the search distance and [param max_neighbors] caps how many of the nearest agents are considered. [param time_step] is the simulation step used to resolve agents that already overlap.
+			</description>
+		</method>
+	</methods>
+</class>

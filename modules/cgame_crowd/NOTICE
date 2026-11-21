@@ -1,0 +1,20 @@
+Cgame crowd module
+==================
+
+cgame_crowd_avoidance.cpp/.h are a C++ port of the ORCA algorithm from the
+RVO2 Library (Agent::computeNewVelocity, linearProgram1/2/3):
+
+  RVO2 Library
+  Copyright 2008 University of North Carolina at Chapel Hill
+  Authors: Jur van den Berg, Stephen J. Guy, Jamie Snape, Ming C. Lin,
+           Dinesh Manocha
+  https://github.com/snape/RVO2
+  Licensed under the Apache License, Version 2.0 (see LICENSE-RVO2.txt).
+
+Changes from the original: 2D only, spatial-hash neighbour search instead of
+the k-d tree, no obstacles, parallel per-agent evaluation on the engine's
+WorkerThreadPool.
+
+The MassEntity runtime and the population LOD are original implementations
+(concept references only: Unreal Engine MassEntity, flecs/Unity DOTS archetype
+ECS, abstract-herd simulation talks); no third-party code was copied.

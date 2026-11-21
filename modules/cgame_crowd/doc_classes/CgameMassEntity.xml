@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameMassEntity" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Archetype-based, data-oriented entity storage with generational ids and ordered processors.
+	</brief_description>
+	<description>
+		A MassEntity-style runtime. Entities are rows in archetypes: one archetype per distinct set of fragment names, each fragment stored as a structure-of-arrays column. Supported fragment types are [constant TYPE_PACKED_VECTOR3_ARRAY] (value [Vector3]), [constant TYPE_PACKED_FLOAT32_ARRAY] (value [float]) and [constant TYPE_PACKED_INT32_ARRAY] (value [int]). Fragments must be defined with [method define_fragment] before use.
+		Entity ids are [int] values that pack a slot index (24 bits) and a generation, so an id of a destroyed entity never becomes valid again even when its slot is reused. Destroying swaps the last row into the freed row, keeping every archetype dense.
+		Processors run in dependency order from [method run]. A processor is either a [Callable] receiving [code](chunk: Dictionary, count: int, delta: float)[/code] for every non-empty archetype that has all required fragments, or a built-in native processor ([method add_integrate_processor], [method add_crowd_avoidance_processor]) that avoids per-entity script calls.
+		The chunk dictionary holds one packed array per fragment (keyed by fragment name), [code]"_ids"[/code] (slot per row) and [code]"_count"[/code]. Arrays a script processor replaces or modifies inside [code]chunk[/code] are written back after the call. Within [method run], entities cannot be created or destroyed and processors cannot be added or removed.
+		[codeblock]
+		var world = CgameMassEntity.new()
+		world.define_fragment("pos", TYPE_PACKED_VECTOR3_ARRAY)
+		world.define_fragment("vel", TYPE_PACKED_VECTOR3_ARRAY)
+		var id = world.create({"pos": Vector3.ZERO, "vel": Vector3(1, 0, 0)})
+		world.add_integrate_processor("move", "pos", "vel")
+		world.run(0.1)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_crowd_avoidance_processor">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="position_fragment" type="String" />
+			<param index="2" name="velocity_fragment" type="String" />
+			<param index="3" name="preferred_fragment" type="String" />
+			<param index="4" name="radius" type="float" />
+			<param index="5" name="max_speed" type="float" />
+			<param index="6" name="time_horizon" type="float" />
+			<param index="7" name="neighbor_dist" type="float" />
+			<param index="8" name="max_neighbors" type="int" />
+			<param index="9" name="depends_on" type="PackedStringArray" default="PackedStringArray()" />
+			<param index="10" name="ground_xz" type="bool" default="true" />
+			<description>
+				Adds a built-in native processor that runs [CgameCrowdAvoidance] over every entity having the three fragments, across all archetypes at once, and overwrites the velocity fragment with the avoidance result. All three fragments must be defined as [PackedVector3Array] fragments and be distinct. With [param ground_xz] the crowd moves in the X/Z plane and the Y component is left untouched; otherwise it uses the X/Y plane. The [code]delta[/code] passed to [method run] is used as the simulation time step.
+			</description>
+		</method>
+		<method name="add_integrate_processor">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="position_fragment" type="String" />
+			<param index="2" name="velocity_fragment" type="String" />
+			<param index="3" name="depends_on" type="PackedStringArray" default="PackedStringArray()" />
+			<description>
+				Adds a built-in native processor that does [code]position += velocity * delta[/code] for every entity having both fragments. Both fragments must be defined as [PackedVector3Array] fragments.
+			</description>
+		</method>
+		<method name="add_processor">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="required" type="PackedStringArray" />
+			<param index="2" name="callable" type="Callable" />
+			<param index="3" name="depends_on" type="PackedStringArray" default="PackedStringArray()" />
+			<param index="4" name="parallel" type="bool" default="false" />
+			<description>
+				Registers a script processor. [param callable] is invoked as [code]callable.call(chunk, count, delta)[/code] once per non-empty archetype that has every fragment in [param required]. Processors listed in [param depends_on] run first; unknown names are ignored and a dependency cycle prints an error and falls back to registration order. An empty or duplicate [param name] is rejected.
+				[param parallel] is accepted for compatibility with the GDScript implementation and is currently ignored: script callables always run on the calling thread.
+			</description>
+		</method>
+		<method name="archetype_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of archetypes created so far. Archetypes persist after their last entity is destroyed.
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Destroys every entity. Fragment definitions, archetypes and processors are kept, and all previously issued ids become invalid.
+			</description>
+		</method>
+		<method name="create">
+			<return type="int" />
+			<param index="0" name="fragments" type="Dictionary" />
+			<description>
+				Creates an entity whose fragments are the keys of [param fragments], with the given values, and returns its id. Returns [code]-1[/code] (and prints an error) if a key is not a defined fragment or a value has the wrong type. [Vector3] is required for vector fragments, [int] or [float] for float fragments and [int] for integer fragments. The order of keys does not matter.
+			</description>
+		</method>
+		<method name="create_many">
+			<return type="PackedInt64Array" />
+			<param index="0" name="fragments" type="Dictionary" />
+			<param index="1" name="count" type="int" />
+			<description>
+				Creates [param count] entities that all start with the same [param fragments] values and returns their ids. Much cheaper than calling [method create] in a loop. Returns an empty array on error.
+			</description>
+		</method>
+		<method name="define_fragment">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="type" type="int" />
+			<description>
+				Defines the fragment [param name]. [param type] must be [constant TYPE_PACKED_VECTOR3_ARRAY], [constant TYPE_PACKED_FLOAT32_ARRAY] or [constant TYPE_PACKED_INT32_ARRAY]. Redefining with the same type is a no-op; a different type is an error.
+			</description>
+		</method>
+		<method name="destroy">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Destroys the entity. Ids that are dead or stale are ignored, so destroying twice is safe. The last row of the archetype is moved into the freed row.
+			</description>
+		</method>
+		<method name="entity_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of living entities.
+			</description>
+		</method>
+		<method name="get_column" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="fragment" type="String" />
+			<description>
+				Returns a copy of one fragment concatenated over all archetypes that have it, as the matching packed array. The row order equals the order of [method get_entity_ids] called with just this fragment as the requirement. Returns [code]null[/code] for an undefined fragment.
+			</description>
+		</method>
+		<method name="get_entity_ids" qualifiers="const">
+			<return type="PackedInt64Array" />
+			<param index="0" name="required" type="PackedStringArray" />
+			<description>
+				Returns the ids of all entities that have every fragment in [param required], in archetype creation order and row order.
+			</description>
+		</method>
+		<method name="get_value" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="fragment" type="String" />
+			<description>
+				Returns the entity's value for [param fragment], or [code]null[/code] if the id is not alive or the entity lacks the fragment.
+			</description>
+		</method>
+		<method name="has_fragment" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="fragment" type="String" />
+			<description>
+				Returns [code]true[/code] if the entity is alive and has [param fragment].
+			</description>
+		</method>
+		<method name="is_alive" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns [code]true[/code] if [param id] refers to a living entity of the current generation.
+			</description>
+		</method>
+		<method name="processor_order">
+			<return type="PackedStringArray" />
+			<description>
+				Returns processor names in execution order (stable topological order by dependencies, then registration order).
+			</description>
+		</method>
+		<method name="query" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="required" type="PackedStringArray" />
+			<description>
+				Returns one chunk dictionary per non-empty archetype that has every fragment in [param required]. A chunk contains the fragment arrays by name plus [code]"_ids"[/code] and [code]"_count"[/code]. The arrays are snapshots: writing into them does not change the world. Use [method set_value] or a processor to modify data.
+			</description>
+		</method>
+		<method name="remove_processor">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Removes the processor with this name, if any.
+			</description>
+		</method>
+		<method name="run">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>
+				Runs all processors once in dependency order. Not re-entrant.
+			</description>
+		</method>
+		<method name="set_value">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="fragment" type="String" />
+			<param index="2" name="value" type="Variant" />
+			<description>
+				Sets the entity's value for [param fragment]. Does nothing if the id is not alive or the entity lacks the fragment; a value of the wrong type prints an error.
+			</description>
+		</method>
+	</methods>
+</class>

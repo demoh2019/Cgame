@@ -1,0 +1,311 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgamePopulationLOD" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Simulation level of detail for large populations: abstract herds on a region grid with promotion and demotion to concrete agents.
+	</brief_description>
+	<description>
+		Far from every player a crowd is not simulated agent by agent. It lives as abstract herds on a coarse grid of regions. A herd has a region, a total count, a composition by type, a heading and a state ([code]"idle"[/code] or [code]"moving"[/code]). Herds migrate along the gradient of attractors (noise, corpses, loot, night) plus a seeded random wander, merge when they meet, split when they grow beyond [member max_herd_size] and are reduced or replenished by decay rates and spawners. When a player gets close, [method promote] converts the herds of a region into concrete spawn specs (conserving counts, bounded by [member max_concrete_agents]) and [method demote] folds despawned agents back into a herd.
+		The simulation is fully deterministic: it uses one seeded random generator, visits herds in ascending id order and never reads the clock. The same seed and calls give the same world.
+		Regions are numbered row by row: [code]region = y * cols + x[/code].
+		This is the native counterpart of [code]scripts/shared/population_lod.gd[/code].
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="abstract_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of agents represented abstractly (inside herds).
+			</description>
+		</method>
+		<method name="add_attractor">
+			<return type="void" />
+			<param index="0" name="kind" type="String" />
+			<param index="1" name="pos" type="Vector2" />
+			<param index="2" name="strength" type="float" />
+			<param index="3" name="radius" type="float" />
+			<param index="4" name="ttl" type="float" default="-1.0" />
+			<description>
+				Adds an attractor of [param kind] (conventionally [code]"noise"[/code], [code]"corpse"[/code], [code]"loot"[/code] or [code]"night"[/code]). Its pull on a region falls off linearly to zero at [param radius] and is scaled by the kind's weight (see [method set_kind_weight]). [code]"night"[/code] attractors only act while [member night] is on. A negative [param ttl] means permanent; otherwise the attractor expires after that many seconds of [method tick] time.
+			</description>
+		</method>
+		<method name="add_herd">
+			<return type="int" />
+			<param index="0" name="region" type="int" />
+			<param index="1" name="composition" type="Dictionary" />
+			<param index="2" name="heading" type="Vector2" default="Vector2(1, 0)" />
+			<description>
+				Adds a herd in [param region]. [param composition] maps type names to counts; entries with a count of zero or less are ignored. Returns the new herd id, or [code]-1[/code] (and prints an error) for an invalid region or non-numeric count.
+			</description>
+		</method>
+		<method name="add_spawner">
+			<return type="void" />
+			<param index="0" name="region" type="int" />
+			<param index="1" name="type" type="String" />
+			<param index="2" name="rate" type="float" />
+			<param index="3" name="cap" type="int" />
+			<description>
+				Adds a nest: [param rate] agents of [param type] per second appear in [param region] while its abstract population stays below [param cap].
+			</description>
+		</method>
+		<method name="attraction">
+			<return type="float" />
+			<param index="0" name="region" type="int" />
+			<description>
+				Returns the combined attractor pull on [param region], refreshing the cached field first.
+			</description>
+		</method>
+		<method name="clear_attractors">
+			<return type="void" />
+			<description>
+				Removes all attractors.
+			</description>
+		</method>
+		<method name="composition_total" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="type" type="String" />
+			<description>
+				Returns how many agents of [param type] exist across all herds.
+			</description>
+		</method>
+		<method name="demote">
+			<return type="void" />
+			<param index="0" name="agents" type="Array" />
+			<param index="1" name="region" type="int" />
+			<description>
+				Folds concrete agents back into the abstract population of [param region]. Each entry is a [Dictionary] with a [code]"type"[/code] key or a plain type [String]. The concrete counter decreases by the number of agents but never below zero, so demoting foreign agents just adds them to the herds.
+			</description>
+		</method>
+		<method name="get_cell_size" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the region edge length set by [method setup].
+			</description>
+		</method>
+		<method name="get_cols" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of region columns.
+			</description>
+		</method>
+		<method name="get_concrete_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of agents currently promoted and not yet demoted.
+			</description>
+		</method>
+		<method name="get_herd" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns a snapshot of a herd with the keys [code]id[/code], [code]region[/code], [code]count[/code], [code]comp[/code] (type to count), [code]heading[/code], [code]state[/code], [code]pos[/code], [code]from[/code], [code]to[/code], [code]t[/code], [code]travel[/code] and [code]timer[/code]. Returns an empty dictionary for an unknown id. Modifying the snapshot does not change the herd.
+			</description>
+		</method>
+		<method name="get_kind_weight" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="kind" type="String" />
+			<description>
+				Returns the relative pull of an attractor kind. Unknown kinds weigh [code]1.0[/code]. Defaults are noise 1.0, corpse 0.6, loot 0.5 and night 0.3.
+			</description>
+		</method>
+		<method name="get_origin" qualifiers="const">
+			<return type="Vector2" />
+			<description>
+				Returns the world position of the grid's top-left corner.
+			</description>
+		</method>
+		<method name="get_rows" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of region rows.
+			</description>
+		</method>
+		<method name="has_herd" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns [code]true[/code] if a herd with this id exists.
+			</description>
+		</method>
+		<method name="herd_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of herds.
+			</description>
+		</method>
+		<method name="herd_ids" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>
+				Returns all herd ids in ascending order.
+			</description>
+		</method>
+		<method name="herd_region_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="region" type="int" />
+			<description>
+				Returns the number of agents in herds located in [param region].
+			</description>
+		</method>
+		<method name="is_blocked" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="region" type="int" />
+			<description>
+				Returns [code]true[/code] if herds may not migrate into [param region].
+			</description>
+		</method>
+		<method name="is_night" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns the night flag. See [member night].
+			</description>
+		</method>
+		<method name="promote">
+			<return type="Array" />
+			<param index="0" name="region" type="int" />
+			<param index="1" name="player_positions" type="PackedVector2Array" default="PackedVector2Array()" />
+			<description>
+				Converts herds of [param region] into an array of spawn specs, each a [Dictionary] with [code]type[/code], [code]position[/code] and [code]heading[/code]. Nothing is promoted unless a player is within [member promote_radius] (plus half a region) of the region centre; if [param player_positions] is empty the positions of the last [method tick] are used. At most [member max_concrete_agents] minus [method get_concrete_count] agents are produced; the rest stay in their herd, and a request with no budget left is counted in the [code]promote_denied[/code] statistic. The total population is conserved.
+			</description>
+		</method>
+		<method name="region_cell" qualifiers="const">
+			<return type="Vector2i" />
+			<param index="0" name="region" type="int" />
+			<description>
+				Returns the grid coordinates of [param region].
+			</description>
+		</method>
+		<method name="region_center" qualifiers="const">
+			<return type="Vector2" />
+			<param index="0" name="region" type="int" />
+			<description>
+				Returns the world position of the centre of [param region].
+			</description>
+		</method>
+		<method name="region_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns [code]cols * rows[/code].
+			</description>
+		</method>
+		<method name="region_of" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="pos" type="Vector2" />
+			<description>
+				Returns the region containing [param pos]. Positions outside the grid are clamped to the nearest region.
+			</description>
+		</method>
+		<method name="regions_near" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="positions" type="PackedVector2Array" />
+			<description>
+				Returns regions that contain at least one agent and whose centre is within the promote reach of any of [param positions].
+			</description>
+		</method>
+		<method name="set_blocked">
+			<return type="void" />
+			<param index="0" name="region" type="int" />
+			<param index="1" name="blocked" type="bool" />
+			<description>
+				Blocks or unblocks [param region] for herd migration.
+			</description>
+		</method>
+		<method name="set_decay">
+			<return type="void" />
+			<param index="0" name="region" type="int" />
+			<param index="1" name="rate" type="float" />
+			<description>
+				Herds inside [param region] lose [param rate] agents per second (fire, base defences). A rate of zero or less removes the hazard.
+			</description>
+		</method>
+		<method name="set_kind_weight">
+			<return type="void" />
+			<param index="0" name="kind" type="String" />
+			<param index="1" name="weight" type="float" />
+			<description>
+				Sets the relative pull of an attractor kind.
+			</description>
+		</method>
+		<method name="set_night">
+			<return type="void" />
+			<param index="0" name="night" type="bool" />
+			<description>
+				Sets the night flag. See [member night].
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="cols" type="int" />
+			<param index="1" name="rows" type="int" />
+			<param index="2" name="cell_size" type="float" />
+			<param index="3" name="seed" type="int" />
+			<param index="4" name="origin" type="Vector2" default="Vector2(0, 0)" />
+			<description>
+				(Re)initialises the grid ([param cols] and [param rows] are clamped to 1..16384, [param cell_size] to at least 1), seeds the random generator and clears all herds, attractors, hazards, spawners, statistics and the concrete counter. Tunable properties keep their values.
+			</description>
+		</method>
+		<method name="stats" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns counters: [code]migrations[/code], [code]merges[/code], [code]splits[/code], [code]promotions[/code], [code]demotions[/code], [code]spawned[/code], [code]decayed[/code], [code]promote_denied[/code], plus [code]herds[/code], [code]abstract[/code], [code]concrete[/code], [code]total[/code] and [code]budget_left[/code].
+			</description>
+		</method>
+		<method name="tick">
+			<return type="void" />
+			<param index="0" name="dt" type="float" />
+			<param index="1" name="player_positions" type="PackedVector2Array" default="PackedVector2Array()" />
+			<description>
+				Advances the simulation by [param dt] seconds: ages attractors, moves herds, then merges, splits and applies decay and spawner rules. [param player_positions] are remembered for later [method promote] calls.
+			</description>
+		</method>
+		<method name="total_population" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns abstract plus promoted agents.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="cell_size" type="float" setter="" getter="get_cell_size">
+			Region edge length in world units. Read-only; set by [method setup].
+		</member>
+		<member name="cols" type="int" setter="" getter="get_cols">
+			Number of region columns. Read-only; set by [method setup].
+		</member>
+		<member name="concrete_count" type="int" setter="" getter="get_concrete_count">
+			Agents currently promoted and not yet demoted. Read-only.
+		</member>
+		<member name="dwell_time" type="float" setter="set_dwell_time" getter="get_dwell_time" default="4.0">
+			Seconds a herd idles in a region before moving on (randomised by 0.5 to 1.5).
+		</member>
+		<member name="herd_speed" type="float" setter="set_herd_speed" getter="get_herd_speed" default="8.0">
+			Herd travel speed in world units per second during the day.
+		</member>
+		<member name="max_concrete_agents" type="int" setter="set_max_concrete_agents" getter="get_max_concrete_agents" default="128">
+			Budget of simultaneously promoted agents.
+		</member>
+		<member name="max_herd_size" type="int" setter="set_max_herd_size" getter="get_max_herd_size" default="40">
+			Herds merge only up to this size and split when they exceed it.
+		</member>
+		<member name="momentum" type="float" setter="set_momentum" getter="get_momentum" default="0.25">
+			Preference for keeping the current heading when choosing the next region.
+		</member>
+		<member name="night" type="bool" setter="set_night" getter="is_night" default="false">
+			Night mode: [code]"night"[/code] attractors become active, herds move faster by [member night_speed_mult] and wander half as much.
+		</member>
+		<member name="night_speed_mult" type="float" setter="set_night_speed_mult" getter="get_night_speed_mult" default="1.5">
+			Speed multiplier applied at night.
+		</member>
+		<member name="origin" type="Vector2" setter="" getter="get_origin">
+			World position of the grid's top-left corner. Read-only; set by [method setup].
+		</member>
+		<member name="promote_radius" type="float" setter="set_promote_radius" getter="get_promote_radius" default="120.0">
+			Distance from a player within which a region may be promoted.
+		</member>
+		<member name="randomness" type="float" setter="set_randomness" getter="get_randomness" default="0.6">
+			Weight of the random wander term when choosing the next region.
+		</member>
+		<member name="rows" type="int" setter="" getter="get_rows">
+			Number of region rows. Read-only; set by [method setup].
+		</member>
+	</members>
+</class>

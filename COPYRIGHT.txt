@@ -71,6 +71,14 @@ Comment: Betsy
 Copyright: 2020-2022, Matias N. Goldberg
 License: Expat
 
+Files: modules/cgame_crowd/cgame_crowd_avoidance.cpp
+ modules/cgame_crowd/cgame_crowd_avoidance.h
+Comment: RVO2 Library (ORCA collision avoidance), native port
+Copyright: 2008, University of North Carolina at Chapel Hill
+ 2014-present, Godot Engine contributors
+ 2007-2014, Juan Linietsky, Ariel Manzur
+License: Apache-2.0 and Expat
+
 Files: modules/godot_physics_2d/godot_joints_2d.cpp
 Comment: Chipmunk2D Joint Constraints
 Copyright: 2007, Scott Lembcke
