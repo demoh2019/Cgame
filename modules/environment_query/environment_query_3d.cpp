@@ -147,6 +147,7 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query_positions"), &EnvironmentQuery3D::query_positions);
 	ClassDB::bind_method(D_METHOD("query_top_positions", "count"), &EnvironmentQuery3D::query_top_positions);
 	ClassDB::bind_method(D_METHOD("query_spread_positions", "count", "min_separation"), &EnvironmentQuery3D::query_spread_positions);
+	ClassDB::bind_method(D_METHOD("query_spread_positions_avoiding", "count", "min_separation", "occupied_positions", "clearance"), &EnvironmentQuery3D::query_spread_positions_avoiding);
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_ring", "center", "radius", "count", "phase"), &EnvironmentQuery3D::sample_ring, DEFVAL(0.0));
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_grid", "center", "half_extents", "spacing", "max_points"), &EnvironmentQuery3D::sample_grid, DEFVAL(4096));
 
@@ -324,7 +325,19 @@ PackedVector3Array EnvironmentQuery3D::query_top_positions(int p_count) const {
 // candidates so a nearby runner-up cannot prevent a more distant safe pick.
 // Deterministic order: score descending, original candidate index on ties.
 PackedVector3Array EnvironmentQuery3D::query_spread_positions(int p_count, double p_min_separation) const {
+	return query_spread_positions_avoiding(p_count, p_min_separation, PackedVector3Array(), 0.0);
+}
+
+// Checks occupancy before ranking to avoid scoring a blocked candidate.
+// No scene tree, physics queries or extra per-candidate dictionaries.
+PackedVector3Array EnvironmentQuery3D::query_spread_positions_avoiding(int p_count, double p_min_separation,
+		const PackedVector3Array &p_occupied_positions, double p_clearance) const {
 	PackedVector3Array output;
+	ERR_FAIL_COND_V_MSG(p_occupied_positions.size() > 128, output, "At most 128 occupied positions can be supplied.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_clearance) || p_clearance < 0.0, output, "Clearance must be finite and nonnegative.");
+	for (int i = 0; i < p_occupied_positions.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!p_occupied_positions[i].is_finite(), output, "Occupied positions must contain finite coordinates.");
+	}
 	ERR_FAIL_COND_V_MSG(p_count < 1 || p_count > 64, output, "Spread count must be between 1 and 64.");
 	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_min_separation) || p_min_separation < 0.0, output, "Minimum separation must be finite and nonnegative.");
 	if (!origin.is_finite() || (use_threat && !threat_position.is_finite()) || min_distance > max_distance) {
@@ -334,8 +347,21 @@ PackedVector3Array EnvironmentQuery3D::query_spread_positions(int p_count, doubl
 	const int limit = max_results == 0 ? p_count : MIN(p_count, max_results);
 	Vector<QueryHit> hits;
 	for (int i = 0; i < candidates.size(); i++) {
+		const Vector3 &point = candidates[i];
+		bool occupied = false;
+		if (p_clearance > 0.0 && point.is_finite()) {
+			for (int j = 0; j < p_occupied_positions.size(); j++) {
+				if (point_distance(point, p_occupied_positions[j], horizontal_only) < p_clearance) {
+					occupied = true;
+					break;
+				}
+			}
+		}
+		if (occupied) {
+			continue;
+		}
 		QueryHit hit;
-		if (score_candidate(candidates[i], i, origin, threat_position, threat_positions,
+		if (score_candidate(point, i, origin, threat_position, threat_positions,
 					use_threat, horizontal_only, min_distance, max_distance,
 					desired_distance, distance_weight, safety_weight,
 					min_threat_distance, hit)) {
