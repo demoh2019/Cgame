@@ -176,6 +176,48 @@ func run(t) -> void:
         t.eq(searching.last_known_target, Vector2(16, 0),
             "search uses the remaining authoritative secondary sound location")
 
+    t.current = "Optional per-infected native decision trace captures real authoritative scans"
+    var traced := Zombie.new(975, "walker", Vector3(0.0, height, 0.0))
+    var untraced := Zombie.new(976, "walker", Vector3(0.0, height, 0.0))
+    t.check(not bool(traced.get_ai_trace_snapshot().get("enabled", false)),
+        "ordinary zombies do not allocate or enable tracing")
+    var native_trace: bool = ClassDB.class_exists("AIBehaviorTrace")
+    t.eq(traced.enable_ai_trace(true), native_trace,
+        "native server trace can be opted in only when class exists")
+    var trace_players := {41: {"position": Vector3(12.0, height, 0.0),
+        "alive": true, "safe": false, "noise": Defs.SPRINT_NOISE_RADIUS}}
+    traced.think(world, trace_players, 0.1, rng)
+    untraced.think(world, trace_players, 0.1, rng)
+    t.eq(traced.target_id, untraced.target_id,
+        "enabling diagnostics never changes target selection")
+    if native_trace:
+        var trace_debug: Dictionary = traced.get_ai_debug_snapshot()
+        var trace_snapshot: Dictionary = trace_debug.get("trace", {})
+        t.check(bool(trace_snapshot.get("enabled", false)),
+            "native server diagnostic exposes opt-in execution trace")
+        var steps: Array = trace_snapshot.get("steps", [])
+        t.eq(steps.size(), 1, "the actual target-selection pass records one stage")
+        if steps.size() == 1:
+            var stage: Dictionary = steps[0]
+            t.eq(stage.get("path"), "target_selection",
+                "trace identifies the exact server AI phase")
+            t.eq(stage.get("task_class"), "ZombieTargetSelection",
+                "trace names the authoritative implementation")
+            t.eq(int(stage.get("status", -1)), 0,
+                "successful authorized target selection records success")
+            t.check(int(stage.get("duration_usec", -1)) >= 0,
+                "server trace reports nonnegative decision CPU microseconds")
+        t.check(not bool(untraced.get_ai_trace_snapshot().get("enabled", false)),
+            "other NPCs remain untraced independently")
+        t.check(traced.enable_ai_trace(false), "server can disable and release tracing")
+        traced.think_timer = 0.0
+        traced.think(world, trace_players, 0.1, rng)
+        t.check(not bool(traced.get_ai_trace_snapshot().get("enabled", false)),
+            "disabled server traces remain empty")
+    else:
+        t.check(traced.get_ai_trace_snapshot().get("steps", []).is_empty(),
+            "stock Godot has a safe empty trace fallback")
+
     t.current = "Optional per-infected AI profiling is disabled by default"
     t.check(not bool(infected.get_ai_profile_snapshot().get("enabled", false)),
         "ordinary infected do not allocate native timing counters")

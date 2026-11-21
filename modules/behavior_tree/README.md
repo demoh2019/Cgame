@@ -5,6 +5,28 @@ behavior tree system for gameplay AI. It is not a visual graph editor yet.
 When enabled, all resources are available in the scene inspector and in
 GDScript. The module has no third-party runtime dependencies.
 
+## Opt-in per-node AI execution tracing
+
+`AIBehaviorTrace` brings a bounded per-task execution history to Cgame's native Resource behavior trees. This implements a practical part of the debugging workflows seen in Unreal's Behavior Tree debugger and LimboAI's runtime inspector: each executed task records its **path, class, returned status, tree depth and inclusive CPU time** in start order. It retains only the latest tick (128 steps by default, up to 256), with an explicit `truncated` count for oversized trees.
+
+```gdscript
+var brain: BehaviorTreeRunner = $BehaviorTreeRunner
+brain.trace_enabled = true                  # Opt-in; default is false.
+brain.tick(0.2)
+var trace: Dictionary = brain.get_trace_snapshot()
+for entry in trace.get("steps", []):
+    print(entry["path"], " | ", entry["task_class"],
+          " | result=", entry["status"], " | usec=", entry["duration_usec"])
+brain.reset_trace()
+brain.trace_enabled = false
+```
+
+Only the selected runner allocates trace storage and calls the CPU clock for individual tasks. Tracing is independent of `profiling_enabled`, which tracks aggregate execution time. Shared task Resources do not share trace data; each agent has its own memory. The runner's `get_debug_snapshot()` now includes a detached `trace` record alongside the Blackboard and execution memory. **Do not forward internal AI decision traces or Blackboard data to ordinary multiplayer clients.**
+
+The playable AI demo enables trace initially and uses **T** to toggle per-node recording. Albion After also integrates the underlying `AIBehaviorTrace` with its authoritative zombie state machine for optional timing of real target selection, through `Zombie.enable_ai_trace(true)` and server-side `get_ai_trace_snapshot()`. No gameplay logic or random-number generation is changed by enabling traces.
+
+This is a bounded inspection API, not yet a graphical dock in the Godot editor or an offline history of every past tick. Scripted task internals are opaque; each scripted task is shown as one node when executed through native composites.
+
 ## Native timed decorators and action cooldowns
 
 Cgame now provides `BehaviorTreeDecorator` as the cycle-safe single-child Resource foundation, plus two reusable task decorators familiar from Unreal Engine Behavior Trees and Godot LimboAI.
