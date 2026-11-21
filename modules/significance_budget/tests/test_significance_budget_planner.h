@@ -191,6 +191,66 @@ TEST_CASE("[SignificanceBudget] frustum-aware effects honor strict priority and 
 			caps, 1, 10.0).is_empty());
 }
 
+TEST_CASE("[SignificanceBudget] ranged effect categories protect distant milestones") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distances = { 40.0, 40.01, 80.0, 80.01, 120.0, 120.01, 140.0, 140.01 };
+	const PackedByteArray priorities = { 0, 0, 1, 1, 2, 2, 3, 3 };
+	const PackedByteArray categories = { 0, 0, 1, 1, 2, 2, 3, 3 };
+	const PackedByteArray visible = { 1, 1, 1, 1, 1, 1, 1, 1 };
+	const PackedInt32Array caps = { 4, 4, 4, 4 };
+	const PackedFloat64Array ranges = { 40.0, 80.0, 120.0, 140.0 };
+	CHECK(planner->select_effects_visible_ranged(distances, priorities, categories,
+			visible, caps, ranges, 8) == PackedInt32Array({ 6, 4, 2, 0 }));
+	CHECK(planner->select_effects_visible_ranged(distances, priorities, categories,
+			visible, caps, ranges, 2) == PackedInt32Array({ 6, 4 }));
+	CHECK(planner->select_effects_visible_ranged(distances, priorities, categories,
+			visible, caps, ranges, 0).is_empty());
+	CHECK(distances[0] == 40.0);
+	// Off-screen critical effect outranks visible nearby dust.
+	CHECK(planner->select_effects_visible_ranged({ 1.0, 20.0 }, { 0, 3 },
+			{ 0, 3 }, { 1, 0 }, caps, ranges, 2) == PackedInt32Array({ 1, 0 }));
+	// Zero range admits only exact-zero distance.
+	CHECK(planner->select_effects_visible_ranged({ 0.0, 0.01 }, { 0, 0 },
+			{ 0, 0 }, { 1, 1 }, caps, { 0.0, 80.0, 120.0, 140.0 }, 2)
+			== PackedInt32Array({ 0 }));
+	CHECK(planner->select_effects_visible_ranged(distances, priorities, categories,
+			visible, { 0, 0, 0, 1 }, ranges, 8) == PackedInt32Array({ 6 }));
+}
+
+TEST_CASE("[SignificanceBudget] ranged effect inputs fail closed") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distances = { 1.0 };
+	const PackedByteArray priorities = { 1 };
+	const PackedByteArray categories = { 0 };
+	const PackedByteArray visible = { 1 };
+	const PackedInt32Array caps = { 1, 1, 1, 1 };
+	const PackedFloat64Array ranges = { 40.0, 80.0, 120.0, 140.0 };
+	CHECK(planner->select_effects_visible_ranged(distances, priorities, categories,
+			visible, caps, ranges, 1).size() == 1);
+	CHECK(planner->select_effects_visible_ranged({ Math::NaN }, priorities, categories,
+			visible, caps, ranges, 1).is_empty());
+	CHECK(planner->select_effects_visible_ranged(distances, { 4 }, categories,
+			visible, caps, ranges, 1).is_empty());
+	CHECK(planner->select_effects_visible_ranged(distances, priorities, { 4 },
+			visible, caps, ranges, 1).is_empty());
+	CHECK(planner->select_effects_visible_ranged(distances, priorities, categories,
+			{ 2 }, caps, ranges, 1).is_empty());
+	CHECK(planner->select_effects_visible_ranged(distances, priorities, categories,
+			{}, caps, ranges, 1).is_empty());
+	CHECK(planner->select_effects_visible_ranged(distances, priorities, categories,
+			visible, caps, { 10.0, 20.0 }, 1).is_empty());
+	CHECK(planner->select_effects_visible_ranged(distances, priorities, categories,
+			visible, caps, { 10.0, Math::INF, 20.0, 30.0 }, 1).is_empty());
+	CHECK(planner->select_effects_visible_ranged(distances, priorities, categories,
+			visible, caps, { -1.0, 20.0, 30.0, 40.0 }, 1).is_empty());
+	CHECK(planner->select_effects_visible_ranged(distances, priorities, categories,
+			visible, { 129, 1, 1, 1 }, ranges, 1).is_empty());
+	CHECK(planner->select_effects_visible_ranged(distances, priorities, categories,
+			visible, caps, ranges, 129).is_empty());
+}
+
 TEST_CASE("[SignificanceBudget] invalid category input is rejected atomically") {
 	Ref<SignificanceBudgetPlanner> planner;
 	planner.instantiate();
