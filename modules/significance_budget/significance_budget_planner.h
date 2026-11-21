@@ -48,6 +48,16 @@ public:
 			const PackedByteArray &p_visible, const PackedInt32Array &p_category_caps,
 			const PackedFloat64Array &p_category_ranges, int p_budget) const;
 
+	// Niagara-style soft minimum reservations for category diversity. Priority
+	// 3 emergency effects are always admitted first, then minimum category
+	// slots, then remaining globally significant effects. Hard caps, ranges
+	// and exact overall budget remain binding; empty categories are not padded.
+	PackedInt32Array select_effects_visible_fair(const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_priorities, const PackedByteArray &p_categories,
+			const PackedByteArray &p_visible, const PackedInt32Array &p_category_caps,
+			const PackedFloat64Array &p_category_ranges, const PackedInt32Array &p_category_minimums,
+			int p_budget) const;
+
 	// Priority-tier ranking with stable ID retention: only peers in the same
 	// priority tier compete via distance hysteresis, never bosses vs normals.
 	PackedInt32Array select_top_priority_stable(const PackedFloat64Array &p_distances,

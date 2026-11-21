@@ -218,6 +218,87 @@ TEST_CASE("[SignificanceBudget] ranged effect categories protect distant milesto
 			visible, { 0, 0, 0, 1 }, ranges, 8) == PackedInt32Array({ 6 }));
 }
 
+
+TEST_CASE("[SignificanceBudget] soft category minimums protect battle feedback after urgency") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distances = { 1, 2, 3, 4, 5, 6, 7, 8 };
+	const PackedByteArray priority = { 2, 2, 2, 2, 1, 1, 0, 3 };
+	const PackedByteArray categories = { 2, 2, 2, 2, 1, 1, 0, 3 };
+	const PackedByteArray visible = { 1, 1, 1, 1, 1, 1, 1, 1 };
+	const PackedInt32Array caps = { 4, 4, 4, 4 };
+	const PackedFloat64Array ranges = { 40, 80, 120, 140 };
+	const PackedInt32Array minimums = { 0, 1, 1, 0 };
+	const PackedInt32Array wanted = { 7, 4, 0, 1 };
+	CHECK(planner->select_effects_visible_fair(distances, priority, categories,
+			visible, caps, ranges, minimums, 4) == wanted);
+	// The old global-rank method would starve ordinary hit effects.
+	const PackedInt32Array old = { 7, 0, 1, 2 };
+	CHECK(planner->select_effects_visible_ranged(distances, priority, categories,
+			visible, caps, ranges, 4) == old);
+	CHECK(planner->select_effects_visible_fair(distances, priority, categories,
+			visible, caps, ranges, { 0, 0, 0, 0 }, 4) == old);
+	const PackedByteArray emergency = { 3, 3, 3, 3, 1, 1, 0, 3 };
+	const PackedInt32Array emergency_expected = { 0, 1, 2, 3 };
+	CHECK(planner->select_effects_visible_fair(distances, emergency, categories,
+			visible, caps, ranges, minimums, 4) == emergency_expected);
+	CHECK(distances[0] == 1.0); // No mutation of caller input.
+}
+
+TEST_CASE("[SignificanceBudget] VFX minimums are soft, within strict category caps and range gates") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distance = { 5, 10, 30, 30.01, 100 };
+	const PackedByteArray priorities = { 0, 1, 2, 2, 3 };
+	const PackedByteArray categories = { 0, 1, 2, 2, 3 };
+	const PackedByteArray visible = { 1, 1, 1, 0, 0 };
+	const PackedInt32Array caps = { 2, 2, 1, 2 };
+	const PackedFloat64Array ranges = { 5, 20, 30, 90 };
+	const PackedInt32Array mins = { 0, 1, 1, 0 };
+	const PackedInt32Array expected = { 2, 1, 0 };
+	CHECK(planner->select_effects_visible_fair(distance, priorities, categories,
+			visible, caps, ranges, mins, 4) == expected);
+	// Category 2 is absent: its reserved slot returns to eligible work.
+	const PackedInt32Array no_combat = { 1, 0 };
+	CHECK(planner->select_effects_visible_fair({ 5, 10, 90, 91, 100 }, priorities,
+			categories, visible, caps, ranges, mins, 4) == no_combat);
+	const PackedInt32Array all_dust = { 0 };
+	CHECK(planner->select_effects_visible_fair({ 1 }, { 0 }, { 0 }, { 1 },
+			caps, ranges, mins, 3) == all_dust);
+}
+
+TEST_CASE("[SignificanceBudget] VFX soft reservations reject malformed input before selection") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array d = { 1, 2 };
+	const PackedByteArray pri = { 1, 2 };
+	const PackedByteArray cat = { 1, 2 };
+	const PackedByteArray visible = { 1, 1 };
+	const PackedInt32Array caps = { 2, 2, 2, 2 };
+	const PackedFloat64Array ranges = { 10, 20, 30, 40 };
+	const PackedInt32Array minimums = { 0, 1, 1, 0 };
+	CHECK(planner->select_effects_visible_fair(d, pri, cat, visible, caps, ranges,
+			minimums, 2).size() == 2);
+	CHECK(planner->select_effects_visible_fair(d, pri, cat, visible, caps, ranges,
+			{ 0, 1, 1 }, 2).is_empty());
+	CHECK(planner->select_effects_visible_fair(d, pri, cat, visible, caps, ranges,
+			{ 0, -1, 1, 0 }, 2).is_empty());
+	CHECK(planner->select_effects_visible_fair(d, pri, cat, visible, caps, ranges,
+			{ 0, 3, 0, 0 }, 3).is_empty());
+	CHECK(planner->select_effects_visible_fair(d, pri, cat, visible, caps, ranges,
+			minimums, 1).is_empty()); // Sum of minimums exceeds total budget.
+	CHECK(planner->select_effects_visible_fair(d, { 1 }, cat, visible, caps, ranges,
+			minimums, 2).is_empty());
+	CHECK(planner->select_effects_visible_fair(d, pri, cat, { 1, 2 }, caps, ranges,
+			minimums, 2).is_empty());
+	CHECK(planner->select_effects_visible_fair({ Math::NaN, 2 }, pri, cat, visible,
+			caps, ranges, minimums, 2).is_empty());
+	CHECK(planner->select_effects_visible_fair(d, pri, cat, visible, caps,
+			{ Math::INF, 20, 30, 40 }, minimums, 2).is_empty());
+	CHECK(planner->select_effects_visible_fair(d, pri, cat, visible, caps,
+			ranges, minimums, 129).is_empty());
+}
+
 TEST_CASE("[SignificanceBudget] ranged effect inputs fail closed") {
 	Ref<SignificanceBudgetPlanner> planner;
 	planner.instantiate();

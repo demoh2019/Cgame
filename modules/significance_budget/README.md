@@ -103,3 +103,42 @@ invalid input. No performance gains are claimed without runtime profiling.
 Albion After integrates the API in its real `effects.gd` burst queue, with separate quality-tier ranges and native/stock-Godot fallback parity. It affects visual-only effects, not server authority, damage, network state or audio. No unmeasured FPS improvements are claimed.
 
 Unreal reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/performance-budgeting-using-effect-types-in-niagara-for-unreal-engine
+
+## Fair Niagara-style VFX category reservation (new)
+
+`select_effects_visible_fair(distances, priorities, categories, visible,
+category_caps, category_ranges, category_minimums, budget)` extends the
+existing ranged-selector without changing it. The four minimums are soft
+*per-category reservations*, not additional particle allowances.
+
+The bounded native algorithm sorts at most four small top-K queues, then
+does three deterministic phases:
+
+1. **Emergency:** all eligible priority-3 cues are admitted first (until
+   hard caps or the global frame budget fill).
+2. **Diversity:** from remaining eligible candidates, fill each category's
+   minimum as fairly as significance allows. Empty categories do not hold
+   unused capacity.
+3. **Fill:** use all remaining slots globally by priority, frustum
+   visibility, distance and original index.
+
+The entire batch is validated before selection. The sum of minimums cannot
+exceed the total budget; each minimum must be no greater than its hard cap.
+Maximum 16,384 candidates and 128 selection slots. The strict per-category
+ranges, caps and frame budget never change. A zero-minimum array reproduces
+`select_effects_visible_ranged` exactly. Time is O(N × K) and scratch
+memory O(4 × K), with K ≤ 128; no scene access, RNG or per-frame state.
+
+The **actual Albion After particle burst queue** uses this new method.
+Quality-tier minimums reserve one or more hit/combat effects when there are
+eligible requests; priority-3 events (boss kills, level-ups, urgent effects)
+are unaffected. On older native engines and stock Godot, the game uses an
+equivalent deterministic script algorithm. Tests verify native/fallback
+parity, category scarcity, emergency priority and strict range boundaries.
+This is cosmetic selection, not gameplay authority or a benchmarked FPS
+change.
+
+The idea builds on Unreal Niagara's per-Effect-Type budgeting and
+significance features; this policy is a Cgame-specific soft quota and is
+not a direct copy of the Unreal implementation:
+https://dev.epicgames.com/documentation/en-us/unreal-engine/performance-budgeting-using-effect-types-in-niagara-for-unreal-engine
