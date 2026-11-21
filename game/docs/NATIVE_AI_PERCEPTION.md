@@ -36,6 +36,21 @@ The executable sandbox `modules/behavior_tree/demo_reactive_ai/` demonstrates th
 
 The engine also provides `BehaviorTreeBlackboardCompare`: a Resource guard supporting equality, numeric ordering, existence checks and optional comparison to a second Blackboard key. The accompanying playable AI sandbox uses it for the native low-health retreat threshold without modifying the main game's authoritative infected targeting logic.
 
+## Server-only AI decision replay
+
+After enabling optional native tracing for **one** authoritative infected NPC, Albion After now retains up to **eight** recent simulation ticks for that NPC only. `Zombie.get_ai_trace_history_frames(changes_only)` returns detached snapshots for server debugging, where changes are based on task paths and statuses rather than noisy CPU duration fluctuations. `Zombie.get_ai_slowest_trace_nodes(limit)` reports the most expensive observed task stages, with estimated exclusive CPU time as `self_usec` and inclusive time as `duration_usec`.
+
+```gdscript
+if zombie.enable_ai_trace(true):
+    # After one or more server zombie.think(...) calls:
+    var changes: Array = zombie.get_ai_trace_history_frames(true)
+    var slowest: Array = zombie.get_ai_slowest_trace_nodes(4)
+    # Disable the optional recorder when diagnosis is finished.
+    zombie.enable_ai_trace(false)
+```
+
+A `trace_history` (changed-only) Array and a bounded `slowest_ai_phases` Array are also available in `Zombie.get_ai_debug_snapshot()`. **Never broadcast those snapshots or player IDs to untrusted clients.** Tracing is not enabled by the normal game, and the existing state machine's decisions, threat, safe zones and authoritative combat remain unchanged.
+
 ## Visual AI debugger and authoritative infected state views
 
 The native `BehaviorTreeRunner.get_tree_snapshot()` enumerates all static child Resource occurrences (up to 256 nodes), merges visited/unvisited status from its per-node execution trace, and returns a detached hierarchy for visual displays. Both Godot projects now include the enabled `Cgame AI` editor dock under `res://addons/cgame_bt_debugger/`. It inspects a selected BehaviorTreeRunner in the **edited scene**; live game-side task execution is shown in the playable AI sandbox's **T**-toggle Tree panel instead of claiming remote editor-debugger attachment.
