@@ -31,6 +31,7 @@
 #include "foot_placement_modifier_3d.h"
 
 #include "core/object/class_db.h"
+#include "core/os/time.h"
 #include "scene/3d/skeleton_3d.h"
 #include "scene/resources/3d/world_3d.h"
 
@@ -200,6 +201,39 @@ void FootPlacementModifier3D::reset() {
 	pelvis_initialized = false;
 }
 
+int FootPlacementModifier3D::smooth_process_cost_us(int p_previous_us, int p_sample_us) {
+	ERR_FAIL_COND_V_MSG(p_previous_us < 0 || p_previous_us > 100000 ||
+					p_sample_us <= 0 || p_sample_us > 100000, -1,
+			"Foot IK CPU telemetry samples must be in 1..100000us; the previous sample may be zero.");
+	return p_previous_us == 0 ? p_sample_us : (3 * p_previous_us + p_sample_us + 2) / 4;
+}
+
+void FootPlacementModifier3D::reset_process_telemetry() {
+	last_process_cost_us = 0;
+	estimated_process_cost_us = 0;
+	process_sample_count = 0;
+}
+
+void FootPlacementModifier3D::set_profiling_enabled(bool p_enabled) {
+	if (profiling_enabled == p_enabled) {
+		return;
+	}
+	profiling_enabled = p_enabled;
+	reset_process_telemetry();
+}
+
+void FootPlacementModifier3D::_record_process_sample(uint64_t p_started_us) {
+	if (!profiling_enabled) {
+		return;
+	}
+	const uint64_t now_us = Time::get_singleton()->get_ticks_usec();
+	const uint64_t measured_us = now_us >= p_started_us ? now_us - p_started_us : 1;
+	const int bounded_us = int(CLAMP(measured_us, uint64_t(1), uint64_t(100000)));
+	last_process_cost_us = bounded_us;
+	estimated_process_cost_us = smooth_process_cost_us(estimated_process_cost_us, bounded_us);
+	process_sample_count = MIN(process_sample_count + 1, 1000000);
+}
+
 void FootPlacementModifier3D::_process_modification(double p_delta) {
 	Skeleton3D *skeleton = get_skeleton();
 	if (!skeleton || legs.is_empty() || influence <= 0.0) {
@@ -208,12 +242,14 @@ void FootPlacementModifier3D::_process_modification(double p_delta) {
 	if (!ground_height_callback.is_valid() && !use_raycast) {
 		return;
 	}
+	const uint64_t started_us = profiling_enabled ? Time::get_singleton()->get_ticks_usec() : 0;
 
 	const Transform3D skel_xf = skeleton->get_global_transform();
 	const Transform3D skel_inv = skel_xf.affine_inverse();
 
 	float root_ground = 0.0f;
 	if (!_sample_ground(skeleton, skel_xf.origin.x, skel_xf.origin.z, root_ground)) {
+		_record_process_sample(started_us);
 		return;
 	}
 
@@ -249,6 +285,7 @@ void FootPlacementModifier3D::_process_modification(double p_delta) {
 		offsets.push_back(st.delta);
 	}
 	if (offsets.is_empty()) {
+		_record_process_sample(started_us);
 		return;
 	}
 
@@ -302,6 +339,7 @@ void FootPlacementModifier3D::_process_modification(double p_delta) {
 			}
 		}
 	}
+	_record_process_sample(started_us);
 }
 
 // Properties.
@@ -401,8 +439,16 @@ void FootPlacementModifier3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_current_pelvis_offset"), &FootPlacementModifier3D::get_current_pelvis_offset);
 	ClassDB::bind_method(D_METHOD("reset"), &FootPlacementModifier3D::reset);
+	ClassDB::bind_static_method("FootPlacementModifier3D", D_METHOD("smooth_process_cost_us", "previous_us", "sample_us"), &FootPlacementModifier3D::smooth_process_cost_us);
+	ClassDB::bind_method(D_METHOD("set_profiling_enabled", "enabled"), &FootPlacementModifier3D::set_profiling_enabled);
+	ClassDB::bind_method(D_METHOD("is_profiling_enabled"), &FootPlacementModifier3D::is_profiling_enabled);
+	ClassDB::bind_method(D_METHOD("get_last_process_cost_us"), &FootPlacementModifier3D::get_last_process_cost_us);
+	ClassDB::bind_method(D_METHOD("get_estimated_process_cost_us"), &FootPlacementModifier3D::get_estimated_process_cost_us);
+	ClassDB::bind_method(D_METHOD("get_process_sample_count"), &FootPlacementModifier3D::get_process_sample_count);
+	ClassDB::bind_method(D_METHOD("reset_process_telemetry"), &FootPlacementModifier3D::reset_process_telemetry);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "pelvis_bone"), "set_pelvis_bone", "get_pelvis_bone");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "profiling_enabled"), "set_profiling_enabled", "is_profiling_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "ground_height_callback"), "set_ground_height_callback", "get_ground_height_callback");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_raycast"), "set_use_raycast", "is_using_raycast");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
