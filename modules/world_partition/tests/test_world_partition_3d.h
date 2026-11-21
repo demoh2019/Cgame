@@ -501,7 +501,7 @@ TEST_CASE("[WorldPartition3D] Predictive settings reject invalid values and cap 
 	CHECK(partition->get_predictive_max_distance() == 24.0);
 	CHECK(partition->get_predictive_velocity() == Vector3(4.0, 0.0, -8.0));
 	partition->set_predictive_velocity(Vector3(1024.0, 0.0, 0.0));
-	CHECK(Math::is_equal_approx(partition->get_predictive_velocity().x, 512.0));
+	CHECK(Math::is_equal_approx((double)partition->get_predictive_velocity().x, 512.0));
 	partition->set_predictive_lookahead_seconds(0.0);
 	CHECK_FALSE(partition->has_predicted_cell());
 	memdelete(partition);

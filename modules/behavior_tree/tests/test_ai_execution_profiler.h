@@ -45,7 +45,7 @@ TEST_CASE("[AIExecutionProfiler] Disabled by default and rejects recording") {
 	CHECK_FALSE(profile->begin_sample(SNAME("decision")));
 	CHECK(profile->end_sample(SNAME("decision")) == -1);
 	Dictionary snap = profile->get_snapshot();
-	CHECK(snap["total_samples"] == 0);
+	CHECK(snap["total_samples"] == Variant(0));
 	CHECK(Dictionary(snap["categories"]).is_empty());
 }
 
@@ -57,18 +57,18 @@ TEST_CASE("[AIExecutionProfiler] Records independent named category statistics")
 	CHECK(profile->record_sample(SNAME("decision"), 200));
 	CHECK(profile->record_sample(SNAME("vision"), 50));
 	Dictionary all = profile->get_snapshot();
-	CHECK(all["total_samples"] == 3);
+	CHECK(all["total_samples"] == Variant(3));
 	Dictionary categories = all["categories"];
 	Dictionary decision = categories[SNAME("decision")];
 	Dictionary vision = categories[SNAME("vision")];
-	CHECK(decision["count"] == 2);
-	CHECK(decision["total_usec"] == 300);
-	CHECK(decision["min_usec"] == 100);
-	CHECK(decision["max_usec"] == 200);
-	CHECK(decision["last_usec"] == 200);
-	CHECK(decision["mean_usec"] == 150.0);
-	CHECK(vision["count"] == 1);
-	CHECK(vision["last_usec"] == 50);
+	CHECK(decision["count"] == Variant(2));
+	CHECK(decision["total_usec"] == Variant(300));
+	CHECK(decision["min_usec"] == Variant(100));
+	CHECK(decision["max_usec"] == Variant(200));
+	CHECK(decision["last_usec"] == Variant(200));
+	CHECK(decision["mean_usec"] == Variant(150.0));
+	CHECK(vision["count"] == Variant(1));
+	CHECK(vision["last_usec"] == Variant(50));
 }
 
 TEST_CASE("[AIExecutionProfiler] Budget counts slow samples without losing timings") {
@@ -82,9 +82,9 @@ TEST_CASE("[AIExecutionProfiler] Budget counts slow samples without losing timin
 	Dictionary snap = profile->get_snapshot();
 	Dictionary categories = snap["categories"];
 	Dictionary entry = categories[SNAME("ai")];
-	CHECK(entry["count"] == 3);
-	CHECK(entry["over_budget"] == 2);
-	CHECK(entry["max_usec"] == 300);
+	CHECK(entry["count"] == Variant(3));
+	CHECK(entry["over_budget"] == Variant(2));
+	CHECK(entry["max_usec"] == Variant(300));
 }
 
 TEST_CASE("[AIExecutionProfiler] Manual spans use monotonic elapsed time") {
@@ -100,7 +100,7 @@ TEST_CASE("[AIExecutionProfiler] Manual spans use monotonic elapsed time") {
 	Dictionary snap = profile->get_snapshot();
 	Dictionary categories = snap["categories"];
 	Dictionary entry = categories[SNAME("navigation")];
-	CHECK(entry["count"] == 1);
+	CHECK(entry["count"] == Variant(1));
 	CHECK(int64_t(entry["last_usec"]) >= 0);
 }
 
@@ -117,10 +117,10 @@ TEST_CASE("[AIExecutionProfiler] Snapshot isolation and reset preserve settings"
 	Dictionary current = profile->get_snapshot();
 	Dictionary current_categories = current["categories"];
 	Dictionary current_brain = current_categories[SNAME("brain")];
-	CHECK(current_brain["count"] == 1);
+	CHECK(current_brain["count"] == Variant(1));
 	profile->reset();
 	Dictionary reset = profile->get_snapshot();
-	CHECK(reset["total_samples"] == 0);
+	CHECK(reset["total_samples"] == Variant(0));
 	CHECK(Dictionary(reset["categories"]).is_empty());
 	CHECK(profile->is_enabled());
 	CHECK(profile->get_budget_usec() == 500);
@@ -137,7 +137,7 @@ TEST_CASE("[AIExecutionProfiler] Invalid category and duration fail safely") {
 	profile->set_budget_usec(0);
 	ERR_PRINT_ON;
 	CHECK(profile->get_budget_usec() == 2000);
-	CHECK(profile->get_snapshot()["total_samples"] == 0);
+	CHECK(profile->get_snapshot()["total_samples"] == Variant(0));
 }
 
 TEST_CASE("[AIExecutionProfiler] Bounded categories and disabled span reset") {
@@ -150,7 +150,7 @@ TEST_CASE("[AIExecutionProfiler] Bounded categories and disabled span reset") {
 	ERR_PRINT_OFF;
 	CHECK_FALSE(profile->record_sample(SNAME("phase_32"), 1));
 	ERR_PRINT_ON;
-	CHECK(profile->get_snapshot()["total_samples"] == 32);
+	CHECK(profile->get_snapshot()["total_samples"] == Variant(32));
 	CHECK(profile->begin_sample(SNAME("phase_0")));
 	profile->set_enabled(false);
 	CHECK(profile->end_sample(SNAME("phase_0")) == -1);
@@ -166,24 +166,24 @@ TEST_CASE("[BehaviorTreeRunner] Opt-in profiling records decision ticks only") {
 	runner->set_root_task(task);
 	CHECK_FALSE(runner->is_profiling_enabled());
 	CHECK(runner->tick(0.1) == BehaviorTreeTask::RUNNING);
-	CHECK(runner->get_profile_snapshot()["total_samples"] == 0);
+	CHECK(runner->get_profile_snapshot()["total_samples"] == Variant(0));
 	runner->set_profiling_enabled(true);
 	CHECK(runner->tick(0.1) == BehaviorTreeTask::RUNNING);
 	CHECK(runner->tick(0.2) == BehaviorTreeTask::SUCCESS);
 	Dictionary snap = runner->get_profile_snapshot();
-	CHECK(snap["total_samples"] == 2);
+	CHECK(snap["total_samples"] == Variant(2));
 	Dictionary categories = snap["categories"];
 	Dictionary row = categories[SNAME("behavior_tree")];
-	CHECK(row["count"] == 2);
+	CHECK(row["count"] == Variant(2));
 	CHECK(runner->tick(0.1) == BehaviorTreeTask::SUCCESS);
-	CHECK(runner->get_profile_snapshot()["total_samples"] == 2);
+	CHECK(runner->get_profile_snapshot()["total_samples"] == Variant(2));
 	runner->reset_profile();
-	CHECK(runner->get_profile_snapshot()["total_samples"] == 0);
+	CHECK(runner->get_profile_snapshot()["total_samples"] == Variant(0));
 	CHECK(runner->is_profiling_enabled());
 	runner->set_profiling_enabled(false);
 	runner->reset();
 	CHECK(runner->tick(0.1) == BehaviorTreeTask::RUNNING);
-	CHECK(runner->get_profile_snapshot()["total_samples"] == 0);
+	CHECK(runner->get_profile_snapshot()["total_samples"] == Variant(0));
 	memdelete(runner);
 }
 
