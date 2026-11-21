@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeReactiveSelector" inherits="BehaviorTreeComposite" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Priority selector that reevaluates higher-priority tasks every tick.</brief_description>
+	<description>Runs children from index zero every time the [BehaviorTreeRunner] ticks. The first child that succeeds or is running wins. A newly available higher-priority child can interrupt a lower-priority running branch, and the interrupted branch's runner-local execution state is cleared. The selector fails if all children fail. The selector respects the [BehaviorTreeRunner] terminal state: a runner that finished requires [method BehaviorTreeRunner.reset] before it can run again. Preemption does not roll back blackboard writes or notify custom tasks.</description>
+</class>
