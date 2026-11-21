@@ -215,6 +215,12 @@
 				Returns the number of registered scene paths, whether loaded or unloaded.
 			</description>
 		</method>
+		<method name="get_disabled_navigation_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of distinct cells currently disabled for navigation, regardless of whether they have a loaded scene or existing route lease. Only explicit false entries are stored.
+			</description>
+		</method>
 		<method name="get_layer_states" qualifiers="const">
 			<return type="Dictionary" />
 			<description>
@@ -237,6 +243,12 @@
 			<return type="Array" />
 			<description>
 				Returns the cell coordinates of currently instantiated scenes.
+			</description>
+		</method>
+		<method name="get_navigation_cell_states" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns a defensive copy of the navigation gate state map (Vector2i to false). Cells missing from the map are enabled by default. Store this dictionary in a game checkpoint if gates must survive a save/load.
 			</description>
 		</method>
 		<method name="get_pinned_cell_count" qualifiers="const">
@@ -270,6 +282,13 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Returns [code]true[/code] when the cell has a living instantiated scene.
+			</description>
+		</method>
+		<method name="is_cell_navigation_enabled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns whether a cell's navigation regions are enabled. Missing entries default to true. A disabled cell remains in the scene and retains its physics, graphics and existing leases, but new acquire_cell_route requests passing through it are rejected.
 			</description>
 		</method>
 		<method name="is_cell_pinned" qualifiers="const">
@@ -376,6 +395,14 @@
 				Replaces the dictionary of [Vector2i] to nonempty [String] layer assignments. Invalid dictionary entries are omitted. Existing scene registrations, pinning and cached gameplay state are preserved.
 			</description>
 		</method>
+		<method name="set_cell_navigation_enabled">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				Enables or disables every NavigationRegion3D descendant of the loaded scene for a given cell, without unloading it. Removes the map entry when enabled is true. Emits cell_navigation_state_changed only for effective transitions. A disabled gate blocks new acquire_cell_route reservations; existing lease owners keep their tokens. The NavigationServer3D synchronizes topology changes on the following physics frame.
+			</description>
+		</method>
 		<method name="set_cell_scene">
 			<return type="void" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -405,6 +432,13 @@
 			<param index="0" name="states" type="Dictionary" />
 			<description>
 				Replaces the dictionary of named runtime states. Only nonempty [String] keys with [bool] values are accepted. Missing layer names are active by default. Useful for restoring event-state data from a save game.
+			</description>
+		</method>
+		<method name="set_navigation_cell_states">
+			<return type="void" />
+			<param index="0" name="states" type="Dictionary" />
+			<description>
+				Replaces the current cell navigation gate map with validated Vector2i-to-bool entries (only false entries are stored). Immediately applies changes to loaded NavigationRegion3D descendants, and emits cell_navigation_state_changed per effective transition, including reopening gates removed by a bulk checkpoint import. Cells missing from the dictionary are enabled by default.
 			</description>
 		</method>
 		<method name="set_persist_rigid_bodies">
@@ -491,6 +525,9 @@
 		<member name="max_unloads_per_frame" type="int" setter="set_max_unloads_per_frame" getter="get_max_unloads_per_frame" default="32">
 			Maximum number of out-of-range cell scenes to queue for deletion in one streaming update, between 1 and 128. Remaining cells are considered on subsequent frames. Explicit clear/remove operations and disabling streaming unload immediately without this limit.
 		</member>
+		<member name="navigation_cell_states" type="Dictionary" setter="set_navigation_cell_states" getter="get_navigation_cell_states" default="{}">
+			Per-cell dynamic navigation gates, mapping [Vector2i] to [code]false[/code]. All unlisted cells default to enabled. Disabled cells have their loaded NavigationRegion3D descendants disabled, do not admit new route leases through [method acquire_cell_route], but preserve existing leases and other scene components. Regions resynchronize on the next physics frame.
+		</member>
 		<member name="observer_path" type="NodePath" setter="set_observer_path" getter="get_observer_path" default="NodePath(&quot;&quot;)">
 			Path relative to this node pointing to a [Node3D] observer, such as a player or camera.
 		</member>
@@ -527,6 +564,13 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Emitted after a [PackedScene] is instantiated as a child of this node.
+			</description>
+		</signal>
+		<signal name="cell_navigation_state_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				Emitted when a cell changes effective navigability through [method set_cell_navigation_enabled] or [method set_navigation_cell_states]. NPCs can release stale corridor leases and requery navigation after the NavigationServer3D physics synchronization. Identical updates do not emit a signal.
 			</description>
 		</signal>
 		<signal name="cell_object_state_changed">

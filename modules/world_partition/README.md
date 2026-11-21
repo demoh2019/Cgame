@@ -8,6 +8,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Choose a `Node3D` observer, cell size, and square loading/unloading radii; negative coordinates are handled with floor division.
 - Add up to 16 extra observer paths for co-op, split-screen, cutscene cameras, portals and predictive prefetch (attach a Node3D in front of a moving character). All source locations share streaming budgets. Streaming scans nearest grid rings across sources, so another observer's central cell is considered before the primary observer's outer rings.
 - Assign cells to event-driven **Runtime Data Layers** via `cell_layers` and toggle them with `set_layer_enabled(name, bool)`. Disabled layers override even pinned and near-camera cells, but obey unload budgets. `layer_states` supports inspector editing and save-game snapshots; missing layer states default to enabled. Each cell has at most one layer, unlike Unreal's broader actor-layer model.
+- **Control streamed navigation at runtime:** `set_cell_navigation_enabled(cell, bool)` enables/disables loaded `NavigationRegion3D` nodes without unloading physics/visuals; `set_navigation_cell_states`, `get_navigation_cell_states` support checkpoint state and `cell_navigation_state_changed` notifies path-following AI. Disabled gates prevent new corridor reservations without invalidating existing leases.
 - Preload a **four-connected navigation corridor** for streamed AI using `get_cell_route(from_cell, to_cell)`, `acquire_cell_route(from_cell, to_cell)` and `release_cell_route(tokens)`. Route acquisition atomically reserves at most 64 neighboring cells, fails on disabled Data Layers or an exhausted 256-token budget, and does not replace real NavigationServer3D pathfinding.
 - Retain cells independently for multiple gameplay systems using **reference-counted cell lease tokens**. `acquire_cell_lease(cell)` returns a token and `release_cell_lease(token)` releases only that owner's request. Limit: 256 active tokens; tokens are runtime-only and must be explicitly released. Query counts with `get_cell_lease_count`, `get_cell_lease_count_total` and `get_leased_cell_count`; `clear_cell_leases` releases all. The usual background request/instantiation budgets and inactive Data Layer gates still apply.
 - Keep up to 128 specific gameplay-critical cells resident with `pin_cell`, `unpin_cell` and `clear_pinned_cells`. The `pinned_cells` property also appears in the inspector and is serialized with the node for design-time always-loaded areas. Pins are prioritized before camera neighborhoods, but respect the same request and instance budgets. Use this for arenas, quest scenes, safe towns and checkpoints; runtime pins do not require an observer and do not create scene mappings.
@@ -71,6 +72,55 @@ re-enabling streaming restores them. If you remove a cell mapping, pinning does
 not re-register the scene.
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Dynamic navigation cell gates and AI route invalidation
+
+Individual cells can stop contributing their navigation regions to
+`NavigationServer3D` without unloading their graphics, physics bodies,
+interactive objects or existing stream leases. This is useful for puzzle
+gates, changing terrain, doors and quest-controlled navigation access:
+
+```gdscript
+world.set_cell_navigation_enabled(Vector2i(1, 0), false)
+assert(not world.is_cell_navigation_enabled(Vector2i(1, 0)))
+assert(world.acquire_cell_route(Vector2i(0, 0), Vector2i(1, 0)).is_empty())
+
+# When the player opens the gate, the route may be reserved again.
+world.set_cell_navigation_enabled(Vector2i(1, 0), true)
+var corridor_tokens: Array = world.acquire_cell_route(Vector2i(0, 0), Vector2i(1, 0))
+world.release_cell_route(corridor_tokens)
+```
+
+The native streamer updates every `NavigationRegion3D` descendant of
+the specified loaded cell and emits
+`cell_navigation_state_changed(cell, enabled)` only on effective
+transitions. A navigation-disabled scene stays resident if its camera,
+pin, or independent lease still requires it. Existing owners' leases
+are **not revoked**; AI systems should subscribe to the signal, stop
+movement, release their own corridor tokens and reacquire them once
+the gate reopens. `acquire_cell_route` checks both runtime Data Layers
+and navigation gates atomically, with no partial token allocations.
+
+The `navigation_cell_states` inspector property, along with
+`get_navigation_cell_states()` and `set_navigation_cell_states()`,
+allows a game to save and import disabled cells. Only explicit
+disabled values are stored, and missing entries default to enabled.
+Bulk imports apply to loaded regions and notify subscribers when a gate
+changes. A cell is also brought to its effective navigation state after
+the scene's `streaming_activated()` callback and before
+`cell_activated` subscribers run.
+
+**Scope:** this is a coarse per-cell navigation switch, not geometric
+obstacle carving, navmesh runtime baking or edge-specific gates. The
+whole navigation region of the cell is disabled, even when only one
+door has changed. The current implementation sets all loaded
+`NavigationRegion3D` descendants to the effective cell state; custom
+region-level enable flags are not preserved independently. For an
+individual door, use authored `NavigationLink3D` or geometry-specific
+navigation updates in a more advanced system. Godot synchronizes
+navigation server changes on later physics frames, and existing agent
+paths do not automatically reroute; consumers must invalidate/requery
+their path before moving across the changed map.
 
 ## Per-object interactive state without scene-root boilerplate
 
@@ -433,7 +483,7 @@ performance on the intended hardware still require validation.
 
 ## Tests
 
-The module includes 105 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (84), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 109 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (88), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
