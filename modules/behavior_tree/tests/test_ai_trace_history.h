@@ -36,7 +36,7 @@
 
 namespace TestAITraceHistory {
 
-static void record_tick(Ref<AIBehaviorTrace> &r_trace, const String &p_path, int p_status, int p_depth = 1) {
+static void record_tick(Ref<AIBehaviorTrace> &r_trace, const String &p_path, int p_status) {
 	r_trace->begin_tick();
 	const int token = r_trace->begin_step(p_path, "BehaviorTreeWait");
 	CHECK(token >= 0);
@@ -91,14 +91,16 @@ TEST_CASE("[AITraceHistory] Equivalent execution ignores CPU duration changes") 
 	record_tick(trace, "root/0", BehaviorTreeTask::SUCCESS);
 	const Array frames = trace->get_history_frames();
 	REQUIRE(frames.size() == 4);
-	CHECK(Dictionary(frames[0])["changed"] == true);
-	CHECK(Dictionary(frames[1])["changed"] == false);
-	CHECK(Dictionary(frames[2])["changed"] == true);
-	CHECK(Dictionary(frames[3])["changed"] == false);
+	const Dictionary a = frames[0], b = frames[1], c = frames[2], d = frames[3];
+	CHECK(a["changed"] == true);
+	CHECK(b["changed"] == false);
+	CHECK(c["changed"] == true);
+	CHECK(d["changed"] == false);
 	const Array changes = trace->get_history_frames(true);
 	REQUIRE(changes.size() == 2);
-	CHECK(int64_t(Dictionary(changes[0])["tick_index"]) == 1);
-	CHECK(int64_t(Dictionary(changes[1])["tick_index"]) == 3);
+	const Dictionary first_change = changes[0], next_change = changes[1];
+	CHECK(int64_t(first_change["tick_index"]) == 1);
+	CHECK(int64_t(next_change["tick_index"]) == 3);
 }
 
 TEST_CASE("[AITraceHistory] Path and truncation differences are relevant changes") {
@@ -115,8 +117,9 @@ TEST_CASE("[AITraceHistory] Path and truncation differences are relevant changes
 	record_tick(trace, "root/0", BehaviorTreeTask::RUNNING);
 	const Array changes = trace->get_history_frames(true);
 	REQUIRE(changes.size() == 2);
-	CHECK(int64_t(Dictionary(changes[0])["tick_index"]) == 1);
-	CHECK(int64_t(Dictionary(changes[1])["tick_index"]) == 2);
+	const Dictionary first_change = changes[0], next_change = changes[1];
+	CHECK(int64_t(first_change["tick_index"]) == 1);
+	CHECK(int64_t(next_change["tick_index"]) == 2);
 }
 
 TEST_CASE("[AITraceHistory] History copies are detached from retained records") {
@@ -154,8 +157,8 @@ TEST_CASE("[AITraceHistory] Slow task report sorts by inclusive duration and pat
 	const Array hot = trace->get_slowest_nodes(2);
 	REQUIRE(hot.size() == 2);
 	const Dictionary first = hot[0], second = hot[1];
-	CHECK(int64_t(first["duration_usec"]) >= int64_t(second["duration_usec"]));
-	if (int64_t(first["duration_usec"]) == int64_t(second["duration_usec"])) {
+	CHECK(int64_t(first["self_usec"]) >= int64_t(second["self_usec"]));
+	if (int64_t(first["self_usec"]) == int64_t(second["self_usec"])) {
 		CHECK(String(first["path"]) < String(second["path"]));
 	}
 	CHECK(trace->get_slowest_nodes(1).size() == 1);
@@ -164,6 +167,28 @@ TEST_CASE("[AITraceHistory] Slow task report sorts by inclusive duration and pat
 	CHECK(trace->get_slowest_nodes(-1).is_empty());
 	CHECK(trace->get_slowest_nodes(33).is_empty());
 	ERR_PRINT_ON;
+}
+
+TEST_CASE("[AITraceHistory] Exclusive time clips nested spans and preserves inclusive values") {
+	Ref<AIBehaviorTrace> trace;
+	trace.instantiate();
+	trace->begin_tick();
+	const int root = trace->begin_step("root", "Root");
+	const int child = trace->begin_step("root/0", "Child");
+	CHECK(trace->end_step(child, BehaviorTreeTask::SUCCESS));
+	CHECK(trace->end_step(root, BehaviorTreeTask::SUCCESS));
+	const Array top = trace->get_slowest_nodes(2);
+	REQUIRE(top.size() == 2);
+	for (int i = 0; i < top.size(); ++i) {
+		const Dictionary entry = top[i];
+		CHECK(int64_t(entry["self_usec"]) >= 0);
+		CHECK(int64_t(entry["self_usec"]) <= int64_t(entry["duration_usec"]));
+	}
+	// The public raw trace remains unchanged (self-time is a derived view).
+	const Dictionary snapshot = trace->get_snapshot();
+	const Array steps = snapshot["steps"];
+	const Dictionary raw_root = steps[0];
+	CHECK_FALSE(raw_root.has("self_usec"));
 }
 
 TEST_CASE("[AITraceHistory] Unfinished tasks are ignored by slow task report") {
