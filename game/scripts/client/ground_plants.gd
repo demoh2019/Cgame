@@ -85,11 +85,13 @@ static func card_material() -> StandardMaterial3D:
 		_card_material.roughness = 0.85
 		_card_material.backlight_enabled = true
 		_card_material.backlight = Color(0.3, 0.42, 0.12)
+		_card_material.vertex_color_use_as_albedo = true # Darker roots inside the tuft (baked AO).
 	return _card_material
 
 
-## One tuft: three vertical photo cards crossed at 60 degrees. Normals lean up so the cards
-## light like a soft mass of grass instead of showing their flat sides.
+## One tuft: five photo cards fanned around the root (random angles) and leaning outward,
+## with roots darkened by vertex colour, so it reads as a round, deep tuft from any side.
+## Normals lean up so the cards light like a soft mass instead of showing flat faces.
 static func card_mesh(region_index: int) -> Mesh:
 	var region: Rect2 = CARD_REGIONS[region_index]
 	var row := 1.0 / float(CARD_REGIONS.size())
@@ -97,18 +99,29 @@ static func card_mesh(region_index: int) -> Mesh:
 	var uv1 := Vector2(1.0, row * float(region_index + 1))
 	var height := CARD_HEIGHT
 	var half_width := height * region.size.x / region.size.y * 0.5
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 9001 + region_index
 	var surface := SurfaceTool.new()
 	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for k in 3:
-		var angle := PI * float(k) / 3.0
-		var side := Vector3(cos(angle), 0.0, sin(angle)) * half_width
+	var cards := 5
+	for k in cards:
+		var angle := PI * float(k) / float(cards) + rng.randf_range(-0.2, 0.2)
+		var side := Vector3(cos(angle), 0.0, sin(angle)) * half_width * rng.randf_range(0.8, 1.05)
 		var facing := Vector3(-sin(angle), 0.0, cos(angle))
-		var normal := (Vector3.UP * 0.8 + facing * 0.2).normalized()
-		var corners := [[-side, Vector2(uv0.x, uv1.y)], [side, Vector2(uv1.x, uv1.y)],
-			[side + Vector3.UP * height, Vector2(uv1.x, uv0.y)], [-side + Vector3.UP * height, Vector2(uv0.x, uv0.y)]]
+		if rng.randf() < 0.5:
+			facing = -facing
+		var lean := facing * height * rng.randf_range(0.12, 0.3) # Tops splay outward.
+		var offset := facing * rng.randf_range(0.0, 0.06)
+		var tall := height * rng.randf_range(0.85, 1.1)
+		var normal := (Vector3.UP * 0.75 + facing * 0.25).normalized()
+		var root_shade := Color(0.5, 0.52, 0.45)
+		var corners := [[offset - side, Vector2(uv0.x, uv1.y), root_shade], [offset + side, Vector2(uv1.x, uv1.y), root_shade],
+			[offset + side + lean + Vector3.UP * tall, Vector2(uv1.x, uv0.y), Color.WHITE],
+			[offset - side + lean + Vector3.UP * tall, Vector2(uv0.x, uv0.y), Color.WHITE]]
 		for tri in [[0, 1, 2], [0, 2, 3]]:
 			for i in tri:
 				surface.set_normal(normal)
+				surface.set_color(corners[i][2])
 				surface.set_uv(corners[i][1])
 				surface.add_vertex(corners[i][0])
 	var result := surface.commit()
@@ -204,7 +217,8 @@ static func build_tile(origin: Vector2, tile: int, tiles_per_side: int, sample: 
 			var plant_mesh: Mesh = mesh(str(choice["file"]), dry)
 			if plant_mesh == null:
 				continue
-			var wanted: int = int(round(float(info["count"]) / float(per_tile) * density_scale * rng.randf_range(0.6, 1.3)))
+			var spread: float = rng.randf_range(0.95, 1.05) if bool(info.get("cards", false)) else rng.randf_range(0.6, 1.3)
+			var wanted: int = int(round(float(info["count"]) / float(per_tile) * density_scale * spread))
 			if wanted <= 0:
 				continue
 			var instance: MultiMeshInstance3D = _scatter(species, info, plant_mesh, wanted, tile_x, tile_z, rng, sample)
@@ -217,6 +231,10 @@ static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted
 		rng: RandomNumberGenerator, sample: Callable) -> MultiMeshInstance3D:
 	if true:
 		var centers: Array = []
+		# The carpet covers the ground evenly: a jittered grid leaves no bald patches.
+		var grid: bool = bool(info.get("cards", false))
+		var grid_side: int = maxi(1, int(ceil(sqrt(float(wanted)))))
+		var grid_cell: float = TILE / float(grid_side)
 		if bool(info["cluster"]):
 			for c in rng.randi_range(1, 3):
 				centers.append(Vector2(tile_x + rng.randf() * TILE, tile_z + rng.randf() * TILE))
@@ -224,11 +242,16 @@ static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted
 		var low := INF
 		var high := -INF
 		for attempt in wanted * 2:
-			if transforms.size() >= wanted:
+			if transforms.size() >= wanted and not grid:
 				break
 			var lx: float
 			var lz: float
-			if centers.is_empty():
+			if grid:
+				if attempt >= grid_side * grid_side:
+					break
+				lx = tile_x + (float(attempt % grid_side) + rng.randf()) * grid_cell
+				lz = tile_z + (float(attempt / grid_side) + rng.randf()) * grid_cell
+			elif centers.is_empty():
 				lx = tile_x + rng.randf() * TILE
 				lz = tile_z + rng.randf() * TILE
 			else:
