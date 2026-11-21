@@ -1493,7 +1493,8 @@ func _update_shadow_casters() -> void:
 		var caster: MultiMeshInstance3D = entry["node"]
 		if not is_instance_valid(caster):
 			continue
-		var world_bounds: AABB = caster.global_transform * (entry["bounds"] as AABB)
+		var local_bounds: AABB = entry["bounds"]
+		var world_bounds: AABB = caster.global_transform * local_bounds
 		bounds_min.append(world_bounds.position)
 		bounds_max.append(world_bounds.end)
 		roles.append(ShadowBudget.role_index(str(entry["role"])))
