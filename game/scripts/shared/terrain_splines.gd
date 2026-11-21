@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 ## Spline-based world authoring helpers for roads, rivers, bridges and landscape
 ## deformation. Inspired by Unreal Engine's Landscape Splines (deform terrain along

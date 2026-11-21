@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 ## Chunked, non-destructive terrain editing core.
 ##

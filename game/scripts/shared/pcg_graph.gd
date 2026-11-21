@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 ## Procedural content graph runtime (UE5 PCG-style): typed point-data graphs with
 ## subgraphs, an extension API, a dependency-aware incremental cache, a per-node
