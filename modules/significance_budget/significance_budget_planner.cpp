@@ -211,6 +211,74 @@ PackedInt32Array SignificanceBudgetPlanner::select_effects_visible(
 	return output;
 }
 
+PackedInt32Array SignificanceBudgetPlanner::select_effects_visible_costed(
+		const PackedFloat64Array &p_distances, const PackedByteArray &p_priorities,
+		const PackedByteArray &p_categories, const PackedByteArray &p_visible,
+		const PackedInt32Array &p_particle_costs, const PackedInt32Array &p_category_caps,
+		int p_budget, double p_max_distance, int p_particle_budget) const {
+	PackedInt32Array empty;
+	const int count = p_distances.size();
+	ERR_FAIL_COND_V_MSG(count != p_priorities.size() || count != p_categories.size() ||
+			count != p_visible.size() || count != p_particle_costs.size() ||
+			count > MAX_CANDIDATES || p_category_caps.size() != 4 ||
+			!valid_budget(p_budget) || !Math::is_finite(p_max_distance) ||
+			p_max_distance < 0.0 || p_max_distance > MAX_RANGE ||
+			p_particle_budget < 0 || p_particle_budget > 65536,
+			empty, "Invalid cost-aware effect arrays or budgets.");
+	for (int group = 0; group < 4; ++group) {
+		ERR_FAIL_COND_V_MSG(p_category_caps[group] < 0 ||
+				p_category_caps[group] > MAX_BUDGET,
+				empty, "Cost-aware effect category caps must be between 0 and 128.");
+	}
+	for (int i = 0; i < count; ++i) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(p_distances[i]) ||
+				p_distances[i] < 0.0 || !valid_priority(p_priorities[i]) ||
+				p_categories[i] > 3 || p_visible[i] > 1 ||
+				p_particle_costs[i] < 1 || p_particle_costs[i] > 4096,
+				empty, "Invalid cost-aware effect distance, priority, category, visibility or particle cost.");
+	}
+	if (p_budget == 0 || p_particle_budget == 0 || count == 0) {
+		return empty;
+	}
+
+	// Each slot scans at most 16,384 entries; O(N * budget), O(N) bytes.
+	// A costly high-priority effect that cannot fit must not prevent a
+	// cheaper, otherwise eligible effect from filling the remaining budget.
+	Vector<uint8_t> taken;
+	taken.resize(count);
+	for (int i = 0; i < count; ++i) {
+		taken.write[i] = 0;
+	}
+	int category_used[4] = { 0, 0, 0, 0 };
+	int particle_used = 0;
+	PackedInt32Array result;
+	for (int slot = 0; slot < p_budget; ++slot) {
+		int best_index = -1;
+		Candidate best;
+		for (int i = 0; i < count; ++i) {
+			const int group = p_categories[i];
+			if (taken[i] || p_distances[i] > p_max_distance ||
+					category_used[group] >= p_category_caps[group] ||
+					p_particle_costs[i] > p_particle_budget - particle_used) {
+				continue;
+			}
+			const Candidate candidate = { p_priorities[i], p_distances[i], i, p_visible[i] };
+			if (best_index == -1 || better(candidate, best)) {
+				best_index = i;
+				best = candidate;
+			}
+		}
+		if (best_index == -1) {
+			break;
+		}
+		taken.write[best_index] = 1;
+		category_used[p_categories[best_index]]++;
+		particle_used += p_particle_costs[best_index];
+		result.push_back(best_index);
+	}
+	return result;
+}
+
 PackedInt32Array SignificanceBudgetPlanner::select_world(const PackedVector3Array &p_positions,
 		const PackedVector3Array &p_viewers, const PackedByteArray &p_priorities,
 		int p_budget, double p_max_distance) const {
@@ -411,6 +479,8 @@ void SignificanceBudgetPlanner::_bind_methods() {
 			&SignificanceBudgetPlanner::select_effects);
 	ClassDB::bind_method(D_METHOD("select_effects_visible", "distances", "priorities", "categories", "visible", "category_caps", "budget", "max_distance"),
 			&SignificanceBudgetPlanner::select_effects_visible);
+	ClassDB::bind_method(D_METHOD("select_effects_visible_costed", "distances", "priorities", "categories", "visible", "particle_costs", "category_caps", "budget", "max_distance", "particle_budget"),
+			&SignificanceBudgetPlanner::select_effects_visible_costed);
 	ClassDB::bind_method(D_METHOD("select_top_priority_stable", "distances", "priorities", "ids", "retained_ids", "budget", "max_distance", "hysteresis"),
 			&SignificanceBudgetPlanner::select_top_priority_stable, DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("select_top_stable", "distances", "ids", "retained_ids", "budget", "max_distance", "hysteresis"),
