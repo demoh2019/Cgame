@@ -71,4 +71,13 @@ public:
 	PackedVector2Array query_separation_batch(const PackedVector2Array &p_positions,
 			const PackedInt32Array &p_source_indices,
 			double p_radius, double p_cell_size, int p_max_neighbors) const;
+
+	// Bounded cross-set broadphase: each source position is queried against
+	// a different set of target positions. Results contain target indices
+	// in ascending input order (e.g. authoritative trap iteration order).
+	// Uses 3x3 hashed target cells; exact gameplay collision is still owned by
+	// the caller. Rejects invalid inputs / excessive candidate pairs atomically.
+	// p_sources <= 4096, p_targets <= 8192, total hits <= 32768.
+	Array query_cross_radius_batch(const PackedVector2Array &p_sources,
+			const PackedVector2Array &p_targets, double p_radius, double p_cell_size) const;
 };
