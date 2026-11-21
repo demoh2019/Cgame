@@ -130,3 +130,27 @@ C++ unit tests cover invalid input, reset, independent importance and
 frequency, non-starvation, and frame-slot limits. The headless game suite
 compares the native and scripted schedulers for 241 frames, with the
 same significance and rate configuration.
+
+## Suspend irrelevant presentation lanes
+
+`set_lane_enabled(lane, enabled)` lets callers temporarily suspend a named
+presentation lane without unregistering it or losing its learned CPU cost,
+importance, or frequency settings. Disabled lanes receive no regular slot,
+never accumulate stale elapsed time, and do not contribute to overdue aging.
+`get_enabled_lane_count()` and `is_lane_enabled(lane)` report active state.
+When every lane is disabled, `current_budget()` becomes zero. Invalid lane
+names return `false` without mutating the scheduler.
+
+A forced `consume(lane, delta, true)` is permitted while disabled so the game
+can hide existing particles exactly once when entering a new environment.
+When re-enabled, that lane receives one immediate capped refresh, even when
+the next regular 12–60 Hz update would not yet be due. Repeated `consume()`
+calls cannot claim that refresh twice. This follows the practical direction
+of relevance-based budgets such as Unreal's Significance Manager; it does
+not perform camera occlusion detection or change gameplay/network ticks.
+
+Albion After disables all four outdoor atmosphere lanes while underground.
+The already-existing entrance/exit forced refresh hides or restores effects,
+and a native/fallback feature check preserves support for older Cgame builds.
+Engine C++ tests and `test_ambient_tick_budget.gd` cover the active count,
+forced cleanup, no backlog, resume refresh and native/script parity.

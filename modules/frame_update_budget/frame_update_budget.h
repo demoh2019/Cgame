@@ -25,6 +25,8 @@ class FrameUpdateBudget : public RefCounted {
 		double rate_scale = 1.0; // Frequency multiplier; 1.0 keeps the tier baseline.
 		int64_t estimated_cost_us = 0;
 		int overdue_frames = 0;
+		bool enabled = true;
+		bool refresh_pending = false; // Re-enable requires one immediate scene refresh.
 	};
 
 	Vector<Lane> lanes;
@@ -59,6 +61,9 @@ public:
 	bool register_lane(const StringName &p_lane);
 	bool unregister_lane(const StringName &p_lane);
 	int get_lane_count() const { return lanes.size(); }
+	bool set_lane_enabled(const StringName &p_lane, bool p_enabled);
+	bool is_lane_enabled(const StringName &p_lane) const;
+	int get_enabled_lane_count() const;
 	bool configure(const PackedFloat64Array &p_rates, const PackedInt32Array &p_slots);
 	void begin_frame(double p_delta, int p_quality);
 	bool set_frame_time_budget_us(int64_t p_budget_us);
