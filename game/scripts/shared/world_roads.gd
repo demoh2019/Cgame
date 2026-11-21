@@ -19,6 +19,9 @@ const REGION_REACH := 13 # Sites of regions -13..12 on both axes: the whole isla
 
 var world
 var _pieces_by_cell: Dictionary = {} # Vector2i -> Array of [Vector2 a, Vector2 b]
+# Prepacked spatial cells for Cgame's native nearest-segment query; never sent over the network.
+var _packed_pieces_by_cell: Dictionary = {}
+var _native_nearest_segments: bool = Geometry2D.has_method("get_closest_point_on_segments")
 var _signs_by_cell: Dictionary = {} # Vector2i -> Array of sign dictionaries
 var roads: Array = [] # Every road: {"from": name, "to": name, "points": PackedVector2Array}
 var _built := false
@@ -121,6 +124,12 @@ func _add_piece(p: Vector2, q: Vector2) -> void:
 			if not _pieces_by_cell.has(key):
 				_pieces_by_cell[key] = []
 			_pieces_by_cell[key].append([p, q])
+			# The original scalar fallback ignores degenerate segments; keep native parity.
+			if _native_nearest_segments and (q - p).length_squared() >= 0.00001:
+				var packed: PackedVector2Array = _packed_pieces_by_cell.get(key, PackedVector2Array())
+				packed.append(p)
+				packed.append(q)
+				_packed_pieces_by_cell[key] = packed
 
 ## Nearest point on each terrain-painted segment. All road checks use the
 ## existing spatial cell index, never the full network on every frame.
@@ -151,7 +160,17 @@ func coverage_at(x: float, z: float) -> float:
 	if not is_finite(x) or not is_finite(z) or world.is_water(x, z):
 		return 0.0
 	var cell := Vector2i(floori(x / Defs.CHUNK_SIZE), floori(z / Defs.CHUNK_SIZE))
-	return coverage_on_segments(Vector2(x, z), pieces_in_cell(cell))
+	# Populate the existing per-cell index before a native lookup.
+	var pieces: Array = pieces_in_cell(cell)
+	if _native_nearest_segments:
+		var packed: PackedVector2Array = _packed_pieces_by_cell.get(cell, PackedVector2Array())
+		if not packed.is_empty():
+			var nearest: Dictionary = Geometry2D.call("get_closest_point_on_segments", Vector2(x, z), packed)
+			if not nearest.is_empty():
+				var coverage: float = 1.0 - smoothstep(HALF_WIDTH * 0.75, HALF_WIDTH + 1.0, float(nearest["distance"]))
+				# The scalar path short-circuits when it reaches this threshold.
+				return 1.0 if coverage >= 0.9999 else coverage
+	return coverage_on_segments(Vector2(x, z), pieces)
 
 
 ## A signpost a little way along the road from one end (the start when `at_start`), naming and pointing to `destination`
