@@ -343,6 +343,79 @@ static func align_cosmetic_transforms_surface(transforms: Array[Transform3D],
 	return fallback if fallback.size() == transforms.size() else transforms
 
 
+## Unreal PCG spline-distance-inspired batch road corridor exclusion.
+## Roads are independent XZ segments [Vector2 start, Vector2 end], not one
+## continuous polyline. Keep the old strict "< clearance" boundary policy.
+## All candidate RNG and biome filtering happens upstream in ChunkView.
+static var _path_corridor_native: Object = null
+static var _path_corridor_checked := false
+
+
+static func _road_spots_fallback(spots: Array, road_pieces: Array,
+		clearance: float) -> Array:
+	var kept: Array = []
+	for at in spots:
+		var near_road := false
+		for piece in road_pieces:
+			var a: Vector2 = piece[0]
+			var ab: Vector2 = piece[1] - a
+			var t: float = clampf((at - a).dot(ab) /
+				maxf(ab.length_squared(), 0.0001), 0.0, 1.0)
+			if at.distance_to(a + ab * t) < clearance:
+				near_road = true
+				break
+		if not near_road:
+			kept.append(at)
+	return kept
+
+
+## Native preprocessing avoids running the per-plant/per-road loop in GDScript.
+## Overlarge or malformed batches keep the original scalar policy.
+## No changes to road geometry, RNG, scene nodes, or authoritative resources.
+static func filter_cosmetic_spots_outside_roads(spots: Array, road_pieces: Array,
+		clearance: float, prefer_native: bool = true) -> Array:
+	if spots.is_empty() or road_pieces.is_empty():
+		return spots
+	if not is_finite(clearance) or clearance < 0.0 or clearance > 10000.0 or \
+			spots.size() > 16384 or road_pieces.size() > 256:
+		return _road_spots_fallback(spots, road_pieces, clearance)
+	var candidates := PackedVector3Array()
+	for at in spots:
+		if not (at is Vector2) or not (at as Vector2).is_finite() or \
+				absf(at.x) > 10000000.0 or absf(at.y) > 10000000.0:
+			return _road_spots_fallback(spots, road_pieces, clearance)
+		candidates.append(Vector3(at.x, 0.0, at.y))
+	var segments := PackedVector3Array()
+	for piece in road_pieces:
+		if not (piece is Array) or piece.size() < 2 or \
+				not (piece[0] is Vector2) or not (piece[1] is Vector2):
+			return _road_spots_fallback(spots, road_pieces, clearance)
+		var a: Vector2 = piece[0]
+		var b: Vector2 = piece[1]
+		if not a.is_finite() or not b.is_finite() or \
+				absf(a.x) > 10000000.0 or absf(a.y) > 10000000.0 or \
+				absf(b.x) > 10000000.0 or absf(b.y) > 10000000.0:
+			return _road_spots_fallback(spots, road_pieces, clearance)
+		segments.append(Vector3(a.x, 0.0, a.y))
+		segments.append(Vector3(b.x, 0.0, b.y))
+	if prefer_native:
+		if not _path_corridor_checked:
+			_path_corridor_checked = true
+			if ClassDB.class_exists("PCGPathFalloff3D"):
+				var instance: Object = ClassDB.instantiate("PCGPathFalloff3D")
+				if instance != null and instance.has_method("filter_indices_outside_segments"):
+					_path_corridor_native = instance
+		if _path_corridor_native != null:
+			var indices: PackedInt32Array = _path_corridor_native.call(
+				"filter_indices_outside_segments", candidates, segments,
+				clearance, candidates.size())
+			var selected: Array = []
+			for index in indices:
+				selected.append(spots[index])
+			return selected
+	return _road_spots_fallback(spots, road_pieces, clearance)
+
+
 ## Unreal PCG-style minimum-distance sampling for client-only decorations.
 ## The native filter uses a spatial hash; on older/stock engines the same
 ## greedy stable-input policy is implemented with GDScript buckets.
