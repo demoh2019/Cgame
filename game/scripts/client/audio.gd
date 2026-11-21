@@ -182,6 +182,11 @@ func play_sting(track: String, volume_db: float = -9.0) -> void:
 
 func mark_combat() -> void:
 	_combat_left = COMBAT_SECONDS
+	# A short Unreal Control Bus Mix-style combat focus stage reduces
+	# ambient masking of important attack cues. Repeated hits extend its
+	# life without resetting the existing fade; user sliders still apply.
+	_activate_timed_mix_snapshot("Combat.Focus",
+		{"Ambience": -3.0, "Music": -1.0}, 0.15, COMBAT_SECONDS, 1.5)
 
 
 func set_footsteps(active: bool) -> void:
@@ -424,6 +429,18 @@ func _activate_mix_snapshot(source: String, offsets: Dictionary, fade_seconds: f
 		AudioMixSnapshots.activate_mix(_script_mix_snapshots, source, offsets, fade_seconds)
 
 
+func _activate_timed_mix_snapshot(source: String, offsets: Dictionary,
+		attack_seconds: float, hold_seconds: float, release_seconds: float) -> void:
+	if _native_mix_snapshots != null and _native_mix_snapshots.has_method("activate_timed_mix"):
+		_native_mix_snapshots.call("activate_timed_mix", StringName(source),
+			offsets, attack_seconds, hold_seconds, release_seconds)
+	else:
+		# Old native engines can still run their manually managed zone mixes.
+		# This timed profile is tracked in script only, then combined below.
+		AudioMixSnapshots.activate_timed_mix(_script_mix_snapshots, source,
+			offsets, attack_seconds, hold_seconds, release_seconds)
+
+
 func _deactivate_mix_snapshot(source: String, fade_seconds: float) -> void:
 	if _native_mix_snapshots != null:
 		_native_mix_snapshots.call("deactivate_mix", StringName(source), fade_seconds)
@@ -432,9 +449,12 @@ func _deactivate_mix_snapshot(source: String, fade_seconds: float) -> void:
 
 
 func _snapshot_bus_db(bus: String) -> float:
+	var native_offset := 0.0
 	if _native_mix_snapshots != null:
-		return float(_native_mix_snapshots.call("get_bus_offset_db", StringName(bus)))
-	return AudioMixSnapshots.bus_offset_db(_script_mix_snapshots, bus)
+		native_offset = float(_native_mix_snapshots.call("get_bus_offset_db", StringName(bus)))
+	# When a pre-timed Cgame build has native zone mixing but no timed API,
+	# combine its zone contribution with the scripted combat focus mix.
+	return maxf(-60.0, native_offset + AudioMixSnapshots.bus_offset_db(_script_mix_snapshots, bus))
 
 
 ## Unreal Audio Volume / Control Bus Mix-style independent, layered profiles.
@@ -464,8 +484,9 @@ func _update_environment_mix_snapshots(underground: bool, biome: String,
 			_storm_mix_active = false
 	if _native_mix_snapshots != null:
 		_native_mix_snapshots.call("tick", delta)
-	else:
-		AudioMixSnapshots.tick(_script_mix_snapshots, delta)
+	# Script timed mixes may coexist with native zone mixes on older Cgame
+	# binaries, while native timed builds have an empty script dictionary.
+	AudioMixSnapshots.tick(_script_mix_snapshots, delta)
 
 
 ## Do not resubmit identical AudioServer bus gain every render frame.
