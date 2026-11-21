@@ -256,7 +256,7 @@ public:
 	void reset();
 	bool is_finished() const { return finished; }
 	BehaviorTreeTask::Status get_last_status() const { return last_status; }
-	// A detached copy for inspection; callers cannot mutate runner state.
+	// On-demand diagnostic view; nested containers are copied, Objects stay shared.
 	Dictionary get_debug_snapshot() const;
 
 	BehaviorTreeRunner();
