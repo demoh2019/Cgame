@@ -36,6 +36,12 @@
 
 #include "core/object/class_db.h"
 
+#ifdef TESTS_ENABLED
+#include "tests/test_ai_visual_sensor_2d.h"
+#include "tests/test_ai_hearing_sensor_2d.h"
+#include "tests/test_reactive_behavior_tree.h"
+#endif
+
 void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
