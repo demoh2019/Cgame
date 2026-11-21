@@ -414,3 +414,14 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 			var unload_limit: int = unload_budget_for_quality(_level)
 			if int(streamer.call("get_max_unloads_per_update")) != unload_limit:
 				streamer.call("set_max_unloads_per_update", unload_limit)
+		# Native cosmetic tick LOD never pauses collision, network state,
+		# loot or other authoritative actors; only ChunkView opts in.
+		if streamer.has_method("set_tick_throttle_radius"):
+			var tick_radius: float = streamed_tick_radius_for_quality(_level)
+			var tick_interval: float = streamed_tick_interval_for_quality(_level)
+			if not is_equal_approx(float(streamer.call("get_tick_throttle_radius")), tick_radius):
+				streamer.call("set_tick_throttle_radius", tick_radius)
+			if not is_equal_approx(float(streamer.call("get_tick_throttle_interval")), tick_interval):
+				streamer.call("set_tick_throttle_interval", tick_interval)
+			if not is_equal_approx(float(streamer.call("get_tick_throttle_hysteresis")), 12.0):
+				streamer.call("set_tick_throttle_hysteresis", 12.0)
