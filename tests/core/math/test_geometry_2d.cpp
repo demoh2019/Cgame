@@ -92,6 +92,60 @@ TEST_CASE("[CoreBind] Geometry2D binary 8-connected distance transform") {
 	ERR_PRINT_ON;
 }
 
+
+TEST_CASE("[CoreBind] Geometry2D deterministic point self-pruning") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+	PackedVector2Array points;
+	points.push_back(Vector2(0, 0));
+	points.push_back(Vector2(0.5, 0));
+	points.push_back(Vector2(1, 0));
+	points.push_back(Vector2(1, 0));
+	points.push_back(Vector2(1, 1));
+	points.push_back(Vector2(-1, -1));
+	PackedInt32Array keep = api->prune_points_min_distance(points, 1.0);
+	REQUIRE(keep.size() == 4);
+	CHECK(keep[0] == 0);
+	CHECK(keep[1] == 2); // Exactly one unit is allowed.
+	CHECK(keep[2] == 4);
+	CHECK(keep[3] == 5);
+	CHECK(api->prune_points_min_distance(points, 1.0, 2).size() == 2);
+	CHECK(api->prune_points_min_distance(points, 1.0, 0).is_empty());
+	CHECK(api->prune_points_min_distance(points, 0.0).size() == 6);
+	CHECK(api->prune_points_min_distance(PackedVector2Array(), 1.0).is_empty());
+
+	// Two accepted points can share a grid cell if they occupy opposite
+	// corners: later candidates must still test *both* points.
+	PackedVector2Array cells;
+	cells.push_back(Vector2(0.01, 0.01));
+	cells.push_back(Vector2(0.95, 0.95));
+	cells.push_back(Vector2(0.99, 0.99));
+	keep = api->prune_points_min_distance(cells, 1.0);
+	REQUIRE(keep.size() == 2);
+	CHECK(keep[0] == 0);
+	CHECK(keep[1] == 1);
+
+	// Very large coordinate/cell ratios safely select using the direct path.
+	PackedVector2Array extreme;
+	extreme.push_back(Vector2(100000000.0, 200000000.0));
+	extreme.push_back(Vector2(100000010.0, 200000000.0));
+	keep = api->prune_points_min_distance(extreme, 1.0);
+	CHECK(keep.size() == 2);
+
+	ERR_PRINT_OFF;
+	CHECK(api->prune_points_min_distance(points, -1.0).is_empty());
+	CHECK(api->prune_points_min_distance(points, 1.0, -2).is_empty());
+	CHECK(api->prune_points_min_distance(points, 1.0, 8193).is_empty());
+	PackedVector2Array oversized;
+	oversized.resize(8193);
+	CHECK(api->prune_points_min_distance(oversized, 1.0).is_empty());
+	PackedVector2Array invalid;
+	invalid.push_back(Vector2(0, 0));
+	invalid.push_back(Vector2(Math_INF, 0));
+	CHECK(api->prune_points_min_distance(invalid, 1.0).is_empty());
+	ERR_PRINT_ON;
+}
+
 TEST_CASE("[CoreBind] Geometry2D batched nearest neighbors are stable and bounded") {
 	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
 	REQUIRE(api != nullptr);
