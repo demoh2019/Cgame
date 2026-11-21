@@ -376,6 +376,13 @@ var _pack_spatial_grid: Variant = null # Optional C++ radius broadphase; old-eng
 var last_pack_query_stats: Dictionary = {"native": false, "population": 0, "sources": 0, "max_alerts": 12, "alerts_sent": 0}
 var last_ai_schedule_stats: Dictionary = {"enabled": false, "population": 0, "phase_due": 0, "phase_deferred": 0}
 var last_population_query_stats: Dictionary = {} # Last once-per-second maintenance broadphase counters.
+# Prepared only during one synchronous network snapshot broadcast.
+# Standalone snapshot_for callers retain the exact non-indexed behavior.
+var _snapshot_players_grid: Variant = null
+var _snapshot_zombies_grid: Variant = null
+var _snapshot_interest_prepared: bool = false
+var _snapshot_interest_tick: int = -1
+var last_snapshot_interest_stats: Dictionary = {"enabled": false}
 var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
 var next_supply_drop_at: float = SupplyDrops.INTERVAL_SECONDS # Server-owned session clock.
@@ -8842,6 +8849,50 @@ func threat_scan_for(peer_id: int) -> Dictionary:
 	return {}
 
 
+## Build the Replication Graph-style spatial lists just once for a packet
+## broadcast. Only transient authoritative server values enter these grids.
+func prepare_snapshot_interest() -> bool:
+	_snapshot_interest_prepared = false
+	last_snapshot_interest_stats = {"enabled": false}
+	if not ClassDB.class_exists("SpatialRelevancyGrid2D"):
+		return false
+	if _snapshot_players_grid == null:
+		_snapshot_players_grid = ClassDB.instantiate("SpatialRelevancyGrid2D")
+		_snapshot_zombies_grid = ClassDB.instantiate("SpatialRelevancyGrid2D")
+	if _snapshot_players_grid == null or _snapshot_zombies_grid == null:
+		return false
+	var player_ids := PackedInt64Array()
+	var player_positions := PackedVector2Array()
+	for other in players.values():
+		player_ids.append(other.id)
+		player_positions.append(Vector2(other.position.x, other.position.z))
+	var infected_ids := PackedInt64Array()
+	var infected_positions := PackedVector2Array()
+	for infected in zombies.values():
+		if infected.is_alive():
+			infected_ids.append(infected.id)
+			infected_positions.append(Vector2(infected.position.x, infected.position.z))
+	# A failed/oversized/invalid index cannot hide entities from a client:
+	# both actor lists fall back to the original authoritative full scans.
+	if not _snapshot_players_grid.rebuild(player_ids, player_positions):
+		return false
+	if not _snapshot_zombies_grid.rebuild(infected_ids, infected_positions):
+		return false
+	_snapshot_interest_prepared = true
+	_snapshot_interest_tick = tick_count
+	return true
+
+
+func finish_snapshot_interest() -> void:
+	if _snapshot_interest_prepared:
+		last_snapshot_interest_stats = {
+			"enabled": true,
+			"players": _snapshot_players_grid.get_stats(),
+			"zombies": _snapshot_zombies_grid.get_stats(),
+		}
+	_snapshot_interest_prepared = false
+
+
 ## What one player is allowed to know: their own full state and nearby entities.
 func snapshot_for(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
@@ -8850,7 +8901,16 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	_refresh_daily(player)
 	var here := Vector2(player.position.x, player.position.z)
 	var nearby_players: Array = []
-	for other in players.values():
+	var player_candidates: Array = []
+	if _snapshot_interest_prepared and _snapshot_interest_tick == tick_count:
+		var player_ids: PackedInt64Array = _snapshot_players_grid.query_ids(here, Defs.INTEREST_RADIUS)
+		for candidate_id in player_ids:
+			var candidate = players.get(candidate_id)
+			if candidate != null:
+				player_candidates.append(candidate)
+	else:
+		player_candidates = players.values()
+	for other in player_candidates:
 		if other.id == peer_id:
 			continue
 		var p: Vector3 = other.position
@@ -8871,7 +8931,16 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"arena_tier": ArenaRating.tier(other.arena_rating)})
 	var nearby_zombies: Array = []
 	var party_flank_hint: Dictionary = {}
-	for zombie in zombies.values():
+	var zombie_candidates: Array = []
+	if _snapshot_interest_prepared and _snapshot_interest_tick == tick_count:
+		var infected_ids: PackedInt64Array = _snapshot_zombies_grid.query_ids(here, Defs.INTEREST_RADIUS)
+		for candidate_id in infected_ids:
+			var candidate = zombies.get(candidate_id)
+			if candidate != null:
+				zombie_candidates.append(candidate)
+	else:
+		zombie_candidates = zombies.values()
+	for zombie in zombie_candidates:
 		var p: Vector3 = zombie.position
 		if zombie.is_alive() and here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:
 			# Only one per-viewer hint. Enemy aggro and party membership are
