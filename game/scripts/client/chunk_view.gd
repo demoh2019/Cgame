@@ -31,6 +31,7 @@ const OutdoorReflectionBudget = preload("res://scripts/client/outdoor_reflection
 const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
 const SceneryDensityLod = preload("res://scripts/client/scenery_density_lod.gd")
+const SceneryHlodProxy = preload("res://scripts/client/scenery_hlod_proxy.gd")
 const CampfireFx = preload("res://scripts/client/campfire_fx.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
@@ -273,6 +274,15 @@ static var decor_budget_usec := 1500
 var _grass_tiles: Array[MultiMeshInstance3D] = []
 ## Density-scalable decorative flowers/grass only; no gameplay nodes.
 var _density_scenery_batches: Array[MultiMeshInstance3D] = []
+## Chunk-local cosmetic pebbles: several near MultiMesh variants share
+## one low-poly, single-surface HLOD mesh in the distance.
+var _hlod_stone_sources: Array[MultiMeshInstance3D] = []
+var _hlod_stone_transforms: Array[Transform3D] = []
+var _hlod_stone_centers := PackedVector3Array()
+var _hlod_stone_extents := PackedVector3Array()
+var _hlod_stone_overflow := false
+var _hlod_stone_proxy: MeshInstance3D = null
+var _hlod_stone_far := false
 var _density_lod_elapsed := 0.0
 const DENSITY_LOD_INTERVAL := 0.6
 var _grass_lod_elapsed := 0.0
@@ -1395,6 +1405,7 @@ func _process(delta: float) -> void:
 	if _density_lod_elapsed >= DENSITY_LOD_INTERVAL:
 		_density_lod_elapsed = 0.0
 		_update_decor_density_lods()
+		_update_hlod_stones()
 	_shadow_timer += delta
 	if _shadow_timer >= SHADOW_INTERVAL:
 		_shadow_timer = 0.0
@@ -1413,6 +1424,45 @@ func _update_decor_density_lods() -> void:
 		return
 	SceneryDensityLod.update_instances_projected(_density_scenery_batches,
 		camera, scenery_quality)
+
+
+## HLOD replaces multiple decorative pebble MultiMeshes with one coarse
+## ArrayMesh at long range. A single stable 0.6-second update is shared with
+## foliage scalability; original transforms are retained for near-camera use.
+func _update_hlod_stones() -> void:
+	if _hlod_stone_proxy == null or not is_instance_valid(_hlod_stone_proxy):
+		return
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	var proxy_center: Vector3 = _hlod_stone_proxy.to_global(
+		_hlod_stone_proxy.get_aabb().get_center())
+	var distance: float = camera.global_position.distance_to(proxy_center)
+	var near_range: float = SceneryLod.range_for(
+		"decor:Pebble", scenery_quality, 80.0)
+	_hlod_stone_far = SceneryHlodProxy.switch_visible(
+		_hlod_stone_sources, _hlod_stone_proxy, distance,
+		near_range, _hlod_stone_far)
+
+
+## A proxy is built after all seeded stone categories are complete. Its
+## geometry is static and consists of at most 384 low-poly octahedra; there
+## are no per-frame mesh rebuilds, physics bodies, or gameplay mutations.
+func _finalize_hlod_stones() -> void:
+	if _hlod_stone_proxy != null or _hlod_stone_overflow or \
+			_hlod_stone_sources.size() < 2 or \
+			_hlod_stone_transforms.size() < SceneryHlodProxy.MIN_SOURCE_INSTANCES:
+		return
+	_hlod_stone_proxy = SceneryHlodProxy.attach_proxy(
+		self, _hlod_stone_transforms, _hlod_stone_centers,
+		_hlod_stone_extents, 384)
+	if _hlod_stone_proxy != null:
+		_update_hlod_stones()
+	# Proxy and GPU batches own their geometry from now on; clear temporary
+	# large transform arrays even if proxy generation fails validation.
+	_hlod_stone_transforms.clear()
+	_hlod_stone_centers.clear()
+	_hlod_stone_extents.clear()
 
 
 ## Weak-reference global queue. Newly near-camera chunks take precedence, and
@@ -1829,6 +1879,7 @@ func _build_next_decor_entry() -> void:
 	else:
 		_build_extra_decor_entry(task["entry"])
 	if _decor_next >= _decor_tasks.size():
+		_finalize_hlod_stones()
 		var streamer := get_parent() as WorldStreamer
 		if streamer != null:
 			streamer.mark_visual_details_ready(Vector3i(cell.x, 0, cell.y))
@@ -1912,6 +1963,26 @@ func _build_nature_decor_entry(entry: Dictionary) -> void:
 			_density_lod_elapsed = DENSITY_LOD_INTERVAL
 		if file.begins_with("Bush"):
 			_shadow_casters.append({"node": decor_batch, "role": "bush", "bounds": decor_batch.custom_aabb})
+		if file.begins_with("Pebble"):
+			_hlod_stone_sources.append(decor_batch)
+	# Store only the decorative geometry actually emitted (after spacing/
+	# terrain alignment). Two rock categories can share one far proxy draw.
+	if file.begins_with("Pebble") and not _hlod_stone_overflow:
+		if _hlod_stone_transforms.size() + transforms.size() > \
+				SceneryHlodProxy.MAX_INPUT_INSTANCES:
+			_hlod_stone_overflow = true
+			_hlod_stone_transforms.clear()
+			_hlod_stone_centers.clear()
+			_hlod_stone_extents.clear()
+		else:
+			var stone_bounds: AABB = mesh.get_aabb()
+			var half_extents: Vector3 = stone_bounds.size * 0.5
+			half_extents = Vector3(maxf(0.02, half_extents.x),
+				maxf(0.02, half_extents.y), maxf(0.02, half_extents.z))
+			for transform in transforms:
+				_hlod_stone_transforms.append(transform)
+				_hlod_stone_centers.append(stone_bounds.get_center())
+				_hlod_stone_extents.append(half_extents)
 
 func _build_extra_decor_entry(entry: Dictionary) -> void:
 	var origin: Vector2 = _decor_origin
