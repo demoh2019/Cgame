@@ -1,0 +1,450 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameTerrainEditLayers" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Chunked, non-destructive terrain editing core with layers, brushes, material splat, undo and chunk meshes.
+	</brief_description>
+	<description>
+		[CgameTerrainEditLayers] is a native port of the GDScript [code]terrain_edit_layers.gd[/code] library. It keeps a base heightfield of [code]width x height[/code] texels (index [code]y * width + x[/code]) that is never modified, and an ordered stack of edit layers that store a height delta and an alpha per texel. Layers are composited over the base heights with a [enum Blend] mode, visibility and opacity.
+		A chunk covers [code]chunk_size[/code] cells: chunk [code](cx, cz)[/code] spans texels [code]cx * chunk_size[/code] to [code]cx * chunk_size + chunk_size[/code] inclusive, so neighbouring chunks share a seam row and column. Exported heights add a one-texel border for seamless normals.
+		Brush strokes ([method apply_brush], [method paint_splat]) and fills ([method fill_layer_rect]) are recorded on a memory-bounded undo stack. Layer property changes (visibility, opacity, blend, order) and the direct write API ([method set_layer_texel], [method write_layer_region]) are not. Every change marks the affected chunks dirty ([method take_dirty_chunks]) and queues them for collision rebuilds ([method collision_jobs]).
+		[b]Per-texel delta API:[/b] editor tools that generate layer content themselves (for example erosion or spline stamps) use [method add_layer_from_region], [method write_layer_region], [method set_layer_texel], [method get_layer_region_deltas] and [method get_layer_region_alphas] instead of touching internal storage. These methods keep the layer bounds and dirty chunks consistent.
+		Large composites are evaluated row by row on the [WorkerThreadPool] without affecting the result.
+		[codeblock]
+		var edit := CgameTerrainEditLayers.new()
+		edit.setup(129, 129, 32, base_heights)
+		var layer := edit.add_layer("sculpt")
+		edit.apply_brush(layer, CgameTerrainEditLayers.BRUSH_RAISE, Vector2(40, 40), 8.0, 2.0)
+		for chunk in edit.take_dirty_chunks():
+		    mesh_instance.mesh = edit.build_chunk_mesh(chunk, 1.0)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_layer">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="blend" type="int" enum="CgameTerrainEditLayers.Blend" default="0" />
+			<param index="2" name="opacity" type="float" default="1.0" />
+			<description>
+				Adds an empty layer on top of the stack and returns its id. Returns [code]-1[/code] if [method setup] has not been called.
+			</description>
+		</method>
+		<method name="add_layer_from_region">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="rect" type="Rect2i" />
+			<param index="2" name="delta" type="PackedFloat32Array" />
+			<param index="3" name="alpha" type="PackedFloat32Array" />
+			<param index="4" name="blend" type="int" enum="CgameTerrainEditLayers.Blend" default="0" />
+			<param index="5" name="opacity" type="float" default="1.0" />
+			<description>
+				Adds a layer and fills [param rect] with the row-major [param delta] and [param alpha] values (see [method write_layer_region]). The initial content is not on the undo stack.
+			</description>
+		</method>
+		<method name="apply_brush">
+			<return type="Rect2i" />
+			<param index="0" name="layer_id" type="int" />
+			<param index="1" name="brush" type="int" enum="CgameTerrainEditLayers.Brush" />
+			<param index="2" name="center" type="Vector2" />
+			<param index="3" name="radius" type="float" />
+			<param index="4" name="strength" type="float" />
+			<param index="5" name="falloff" type="int" enum="CgameTerrainEditLayers.Falloff" default="1" />
+			<param index="6" name="target_height" type="float" default="0.0" />
+			<param index="7" name="seed_value" type="int" default="0" />
+			<param index="8" name="curve" type="Curve" default="null" />
+			<description>
+				Applies a height brush to one layer and returns the changed texel rectangle, or an empty [Rect2i] if nothing changed. [param target_height] is used by [constant BRUSH_FLATTEN], [param seed_value] by [constant BRUSH_NOISE]. If [param curve] is set it replaces [param falloff]. The stroke is added to the undo stack.
+			</description>
+		</method>
+		<method name="build_chunk_mesh" qualifiers="const">
+			<return type="ArrayMesh" />
+			<param index="0" name="chunk" type="Vector2i" />
+			<param index="1" name="cell_size" type="float" />
+			<description>
+				Builds the chunk's mesh in chunk-local space (origin at the chunk's minimum corner). Normals use the exported border so lighting is continuous across seams. The colour array carries the first four splat weights when splat is set up. An invalid chunk returns an empty mesh.
+			</description>
+		</method>
+		<method name="can_redo" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if there is an undone edit that can be redone.
+			</description>
+		</method>
+		<method name="can_undo" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if there is an edit that can be undone.
+			</description>
+		</method>
+		<method name="chunk_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns [code]chunks_x * chunks_z[/code].
+			</description>
+		</method>
+		<method name="collision_jobs">
+			<return type="Vector2i[]" />
+			<param index="0" name="max_per_frame" type="int" />
+			<description>
+				Pops up to [param max_per_frame] distinct chunks that need a collision rebuild, oldest first. Re-dirtied chunks are queued again.
+			</description>
+		</method>
+		<method name="composite_height" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="x" type="int" />
+			<param index="1" name="y" type="int" />
+			<description>
+				Returns the composited height at a texel. Coordinates are clamped to the map.
+			</description>
+		</method>
+		<method name="composite_region" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="rect" type="Rect2i" />
+			<description>
+				Returns composited heights for [param rect] clipped to the map, row-major with the clipped width per row.
+			</description>
+		</method>
+		<method name="export_chunk_heights" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="chunk" type="Vector2i" />
+			<description>
+				Returns the chunk's heights with a one-texel border: [code](chunk_size + 3)^2[/code] values, row-major. Index [code](i, j)[/code] is texel [code](cx * chunk_size - 1 + i, cz * chunk_size - 1 + j)[/code]; out-of-map texels clamp to the edge. An invalid chunk returns an empty array.
+			</description>
+		</method>
+		<method name="fill_layer_rect">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="rect" type="Rect2i" />
+			<param index="2" name="delta" type="float" />
+			<param index="3" name="alpha" type="float" default="1.0" />
+			<description>
+				Writes [param delta] and [param alpha] into every texel of [param rect] (clipped to the map). This is undoable.
+			</description>
+		</method>
+		<method name="get_chunk_size" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the chunk size in cells.
+			</description>
+		</method>
+		<method name="get_chunks_x" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of chunks along X.
+			</description>
+		</method>
+		<method name="get_chunks_z" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of chunks along Z.
+			</description>
+		</method>
+		<method name="get_height" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the heightfield height in texels.
+			</description>
+		</method>
+		<method name="get_layer_blend" qualifiers="const">
+			<return type="int" enum="CgameTerrainEditLayers.Blend" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the blend mode of a layer, or [constant BLEND_ADD] for an unknown id.
+			</description>
+		</method>
+		<method name="get_layer_bounds" qualifiers="const">
+			<return type="Rect2i" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the texel bounds ever touched by the layer, or an empty [Rect2i] if it was never edited.
+			</description>
+		</method>
+		<method name="get_layer_name" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the name of a layer, or an empty string for an unknown id.
+			</description>
+		</method>
+		<method name="get_layer_opacity" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the opacity of a layer, or [code]0.0[/code] for an unknown id.
+			</description>
+		</method>
+		<method name="get_layer_region_alphas" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="rect" type="Rect2i" />
+			<description>
+				Returns the alpha values of a layer for [param rect] (clipped to the map), row-major.
+			</description>
+		</method>
+		<method name="get_layer_region_deltas" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="rect" type="Rect2i" />
+			<description>
+				Returns the delta values of a layer for [param rect] (clipped to the map), row-major.
+			</description>
+		</method>
+		<method name="get_max_undo_bytes" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the memory bound of the undo and redo history in bytes.
+			</description>
+		</method>
+		<method name="get_width" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the heightfield width in texels.
+			</description>
+		</method>
+		<method name="has_layer" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns [code]true[/code] if a layer with this id exists.
+			</description>
+		</method>
+		<method name="is_layer_visible" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns whether a layer is visible.
+			</description>
+		</method>
+		<method name="layer_alpha_at" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="x" type="int" />
+			<param index="2" name="y" type="int" />
+			<description>
+				Returns the alpha stored by a layer at a texel, or [code]0.0[/code] for an unknown layer or an out-of-map texel.
+			</description>
+		</method>
+		<method name="layer_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of layers.
+			</description>
+		</method>
+		<method name="layer_delta_at" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="x" type="int" />
+			<param index="2" name="y" type="int" />
+			<description>
+				Returns the height delta stored by a layer at a texel, or [code]0.0[/code] for an unknown layer or an out-of-map texel.
+			</description>
+		</method>
+		<method name="layer_ids" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>
+				Returns the layer ids from bottom to top.
+			</description>
+		</method>
+		<method name="move_layer">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="to_index" type="int" />
+			<description>
+				Moves a layer to [param to_index] in the stack (0 is the bottom, composited first). Returns [code]false[/code] for an unknown id.
+			</description>
+		</method>
+		<method name="paint_splat">
+			<return type="Rect2i" />
+			<param index="0" name="material" type="int" />
+			<param index="1" name="center" type="Vector2" />
+			<param index="2" name="radius" type="float" />
+			<param index="3" name="strength" type="float" />
+			<param index="4" name="falloff" type="int" enum="CgameTerrainEditLayers.Falloff" default="1" />
+			<param index="5" name="curve" type="Curve" default="null" />
+			<description>
+				Paints material [param material] with a brush; the other weights shrink so the sum stays 1. Returns the changed rectangle or an empty [Rect2i]. This is undoable.
+			</description>
+		</method>
+		<method name="pending_collision_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of chunks waiting for a collision rebuild.
+			</description>
+		</method>
+		<method name="redo">
+			<return type="bool" />
+			<description>
+				Redoes the last undone edit. Returns [code]false[/code] if there is nothing to redo.
+			</description>
+		</method>
+		<method name="remove_layer">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Removes a layer and marks its chunks dirty. Returns [code]false[/code] for an unknown id.
+			</description>
+		</method>
+		<method name="set_layer_blend">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="blend" type="int" enum="CgameTerrainEditLayers.Blend" />
+			<description>
+				Sets the blend mode of a layer.
+			</description>
+		</method>
+		<method name="set_layer_name">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="name" type="String" />
+			<description>
+				Renames a layer.
+			</description>
+		</method>
+		<method name="set_layer_opacity">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="opacity" type="float" />
+			<description>
+				Sets the opacity of a layer, clamped to [code][0, 1][/code].
+			</description>
+		</method>
+		<method name="set_layer_texel">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="x" type="int" />
+			<param index="2" name="y" type="int" />
+			<param index="3" name="delta" type="float" />
+			<param index="4" name="alpha" type="float" default="1.0" />
+			<description>
+				Writes the delta and alpha of a single texel. Grows the layer bounds and marks the affected chunks dirty, but is not on the undo stack. Returns [code]false[/code] for an unknown layer or an out-of-map texel.
+			</description>
+		</method>
+		<method name="set_layer_visible">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="visible" type="bool" />
+			<description>
+				Shows or hides a layer.
+			</description>
+		</method>
+		<method name="set_max_undo_bytes">
+			<return type="void" />
+			<param index="0" name="bytes" type="int" />
+			<description>
+				Sets the memory bound of the undo and redo history. Oldest entries are dropped first.
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="width" type="int" />
+			<param index="1" name="height" type="int" />
+			<param index="2" name="chunk_size" type="int" />
+			<param index="3" name="base_heights" type="PackedFloat32Array" />
+			<description>
+				Initialises the heightfield and clears layers, splat and history. Sizes below 2 are clamped to 2. If [param base_heights] does not hold [code]width * height[/code] values the base is flat zero. Every chunk starts dirty.
+			</description>
+		</method>
+		<method name="setup_splat">
+			<return type="void" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Creates [param count] material layers per texel; material 0 starts at weight 1.
+			</description>
+		</method>
+		<method name="splat_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of material layers, or 0 if splat is not set up.
+			</description>
+		</method>
+		<method name="splat_weights" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="x" type="int" />
+			<param index="1" name="y" type="int" />
+			<description>
+				Returns the material weights at a texel (clamped to the map).
+			</description>
+		</method>
+		<method name="take_dirty_chunks">
+			<return type="Vector2i[]" />
+			<description>
+				Returns the chunks touched since the previous call, sorted by Z then X, and clears the set.
+			</description>
+		</method>
+		<method name="undo">
+			<return type="bool" />
+			<description>
+				Undoes the last edit. Returns [code]false[/code] if there is nothing to undo.
+			</description>
+		</method>
+		<method name="undo_bytes" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the memory used by the undo and redo history in bytes.
+			</description>
+		</method>
+		<method name="undo_depth" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of undoable edits.
+			</description>
+		</method>
+		<method name="write_layer_region">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="rect" type="Rect2i" />
+			<param index="2" name="delta" type="PackedFloat32Array" />
+			<param index="3" name="alpha" type="PackedFloat32Array" />
+			<description>
+				Writes delta and alpha values for [param rect] (row-major, [code]rect.size.x[/code] per row). [param rect] must lie inside the map and both arrays must hold exactly [code]rect.size.x * rect.size.y[/code] values; otherwise nothing is written and [code]false[/code] is returned. Grows the layer bounds and marks chunks dirty; not on the undo stack.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="max_undo_bytes" type="int" setter="set_max_undo_bytes" getter="get_max_undo_bytes" default="8388608">
+			Upper bound on the memory used by the undo and redo history.
+		</member>
+	</members>
+	<constants>
+		<constant name="BLEND_ADD" value="0" enum="Blend">
+			The layer delta, scaled by opacity, is added to the height below.
+		</constant>
+		<constant name="BLEND_MAX" value="1" enum="Blend">
+			The height below is raised to base plus delta if that is higher, blended by opacity.
+		</constant>
+		<constant name="BLEND_REPLACE" value="2" enum="Blend">
+			The height becomes base plus delta, blended by alpha times opacity.
+		</constant>
+		<constant name="BRUSH_RAISE" value="0" enum="Brush">
+			Raises the terrain.
+		</constant>
+		<constant name="BRUSH_LOWER" value="1" enum="Brush">
+			Lowers the terrain.
+		</constant>
+		<constant name="BRUSH_SMOOTH" value="2" enum="Brush">
+			Blends heights toward the average of their 3x3 neighbourhood.
+		</constant>
+		<constant name="BRUSH_FLATTEN" value="3" enum="Brush">
+			Blends heights toward a target height.
+		</constant>
+		<constant name="BRUSH_NOISE" value="4" enum="Brush">
+			Adds deterministic hash noise based on the seed value.
+		</constant>
+		<constant name="BRUSH_ERODE" value="5" enum="Brush">
+			Lowers texels toward their lowest neighbour.
+		</constant>
+		<constant name="FALLOFF_LINEAR" value="0" enum="Falloff">
+			Linear brush falloff.
+		</constant>
+		<constant name="FALLOFF_SMOOTH" value="1" enum="Falloff">
+			Smoothstep brush falloff.
+		</constant>
+		<constant name="FALLOFF_SPHERE" value="2" enum="Falloff">
+			Spherical (round dome) brush falloff.
+		</constant>
+		<constant name="FALLOFF_CONSTANT" value="3" enum="Falloff">
+			Full strength everywhere inside the radius.
+		</constant>
+	</constants>
+</class>

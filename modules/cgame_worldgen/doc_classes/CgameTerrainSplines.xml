@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameTerrainSplines" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Spline helpers for roads, rivers, bridges and landscape deformation.
+	</brief_description>
+	<description>
+		[CgameTerrainSplines] is a native port of the GDScript [code]terrain_splines.gd[/code] library. All methods are static. Heights are indexed [code]y * width + x[/code]; the world position of a cell is [code](x, y) * cell_size[/code] on the XZ plane ([member Vector3.x], [member Vector3.z]) and the spline height is [member Vector3.y].
+		[method deform] deforms the terrain around a spline (flatten for roads, carve for rivers, raise for embankments) and is evaluated row by row on the [WorkerThreadPool] for large maps. [method bridge_spans] finds the stretches of a spline that float above the terrain and therefore need a bridge.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="bridge_spans" qualifiers="static">
+			<return type="Dictionary[]" />
+			<param index="0" name="heights" type="PackedFloat32Array" />
+			<param index="1" name="width" type="int" />
+			<param index="2" name="height" type="int" />
+			<param index="3" name="cell_size" type="float" />
+			<param index="4" name="spline" type="PackedVector3Array" />
+			<param index="5" name="clearance" type="float" default="2.0" />
+			<description>
+				Returns the inclusive index ranges of [param spline] samples that float more than [param clearance] above the terrain. Every entry is a [Dictionary] with the integer keys [code]start[/code] and [code]end[/code].
+			</description>
+		</method>
+		<method name="catmull_rom" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="points" type="PackedVector3Array" />
+			<param index="1" name="samples_per_segment" type="int" />
+			<description>
+				Returns a uniform Catmull-Rom spline through all [param points] (the end points are duplicated). The result contains every control point exactly and has [code](points.size() - 1) * samples_per_segment + 1[/code] samples. With fewer than two points the input is returned.
+			</description>
+		</method>
+		<method name="deform" qualifiers="static">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="heights" type="PackedFloat32Array" />
+			<param index="1" name="width" type="int" />
+			<param index="2" name="height" type="int" />
+			<param index="3" name="cell_size" type="float" />
+			<param index="4" name="spline" type="PackedVector3Array" />
+			<param index="5" name="half_width" type="float" />
+			<param index="6" name="falloff" type="float" />
+			<param index="7" name="mode" type="String" />
+			<description>
+				Returns a deformed copy of [param heights]. [param mode] is [code]"flatten"[/code] (blend toward the spline height), [code]"carve"[/code] (lower a channel 1.0 below the spline with smooth banks) or [code]"raise"[/code] (only lift terrain up to the spline height). The effect is full within [param half_width] and fades out smoothly over the next [param falloff] units. Unknown modes leave the terrain unchanged.
+			</description>
+		</method>
+		<method name="distance_to_polyline" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="point" type="Vector2" />
+			<param index="1" name="polyline" type="PackedVector2Array" />
+			<description>
+				Returns the distance from [param point] to the closest point of [param polyline], or infinity for an empty polyline.
+			</description>
+		</method>
+	</methods>
+</class>

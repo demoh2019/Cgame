@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameHydraulicErosion" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Deterministic droplet-based hydraulic erosion and thermal (talus) erosion of heightfields.
+	</brief_description>
+	<description>
+		[CgameHydraulicErosion] is a native port of the GDScript [code]hydraulic_erosion.gd[/code] library. All methods are static: they take plain data and return a new array, and the input is never modified. Heights are stored row-major, indexed [code]y * width + x[/code].
+		[method erode] simulates water droplets that pick up sediment on slopes and deposit it where they slow down (Hans Beyer's particle model). Sediment is conserved: whatever a droplet picks up is deposited again, at the latest where it dies. For identical inputs and seed the result is identical, because the droplets use [RandomNumberGenerator] with the given seed.
+		[method thermal] slides material down slopes steeper than a talus threshold. Each iteration is computed in two read-only passes over the heightfield, so large maps are processed on the [WorkerThreadPool] without changing the result.
+		[codeblock]
+		var eroded := CgameHydraulicErosion.erode(heights, 128, 128, 20000, 1234, {"capacity": 6.0})
+		eroded = CgameHydraulicErosion.thermal(eroded, 128, 128, 20, 0.6)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="erode" qualifiers="static">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="heights" type="PackedFloat32Array" />
+			<param index="1" name="width" type="int" />
+			<param index="2" name="height" type="int" />
+			<param index="3" name="droplets" type="int" />
+			<param index="4" name="seed" type="int" />
+			<param index="5" name="params" type="Dictionary" default="{}" />
+			<description>
+				Returns an eroded copy of [param heights] after simulating [param droplets] droplets with the given [param seed]. Keys of [param params] override the values returned by [method get_default_params]. If [param width] or [param height] is smaller than 3, or the array size is not [code]width * height[/code], an unmodified copy is returned.
+			</description>
+		</method>
+		<method name="get_default_params" qualifiers="static">
+			<return type="Dictionary" />
+			<description>
+				Returns the default erosion parameters: [code]inertia[/code] (0.05), [code]capacity[/code] (4.0), [code]deposition[/code] (0.3), [code]erosion[/code] (0.3), [code]evaporation[/code] (0.02), [code]gravity[/code] (4.0), [code]max_lifetime[/code] (30), [code]erosion_radius[/code] (2) and [code]min_slope[/code] (0.01).
+			</description>
+		</method>
+		<method name="max_slope" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="heights" type="PackedFloat32Array" />
+			<param index="1" name="width" type="int" />
+			<param index="2" name="height" type="int" />
+			<description>
+				Returns the largest height difference between two 4-neighbouring cells. Useful to verify thermal erosion.
+			</description>
+		</method>
+		<method name="thermal" qualifiers="static">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="heights" type="PackedFloat32Array" />
+			<param index="1" name="width" type="int" />
+			<param index="2" name="height" type="int" />
+			<param index="3" name="iterations" type="int" />
+			<param index="4" name="talus" type="float" default="0.6" />
+			<description>
+				Returns a copy of [param heights] after [param iterations] passes of thermal erosion. Material moves to lower 4-neighbours where the drop exceeds [param talus] (height units per cell). Mass is conserved.
+			</description>
+		</method>
+	</methods>
+</class>

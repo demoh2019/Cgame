@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameProceduralCaves" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Cellular-automata cave generator with guaranteed connectivity.
+	</brief_description>
+	<description>
+		[CgameProceduralCaves] is a native port of the GDScript [code]procedural_caves.gd[/code] library. A cave is a [PackedByteArray] of [code]width * height[/code] cells (index [code]y * width + x[/code]) where [code]1[/code] is rock and [code]0[/code] is open floor.
+		[method generate] fills the grid randomly, smooths it with an 8-neighbour majority rule and joins every disconnected region to the largest one with an L-shaped tunnel between the closest cells. The result is deterministic for a given seed. Smoothing is distributed over the [WorkerThreadPool] for large grids without changing the result.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="chambers" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="grid" type="PackedByteArray" />
+			<param index="1" name="w" type="int" />
+			<param index="2" name="h" type="int" />
+			<param index="3" name="min_size" type="int" />
+			<description>
+				Returns the centre of every open region with at least [param min_size] cells as an [Array] of [Vector2] (cell coordinates), snapped to the nearest open cell of the region and ordered by region size, largest first. Good spots for loot, bosses or spawners.
+			</description>
+		</method>
+		<method name="generate" qualifiers="static">
+			<return type="PackedByteArray" />
+			<param index="0" name="width" type="int" />
+			<param index="1" name="height" type="int" />
+			<param index="2" name="seed" type="int" />
+			<param index="3" name="fill" type="float" default="0.47" />
+			<param index="4" name="steps" type="int" default="5" />
+			<description>
+				Generates a cave. The border is always rock. [param fill] is the initial probability of a rock cell and [param steps] the number of smoothing passes. Sizes below 3 are clamped to 3.
+			</description>
+		</method>
+		<method name="regions" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="grid" type="PackedByteArray" />
+			<param index="1" name="w" type="int" />
+			<param index="2" name="h" type="int" />
+			<description>
+				Flood-fills the open cells (4-connected) and returns one [PackedInt32Array] of cell indices per region, ordered by discovery. Returns an empty array if the grid size does not match [code]w * h[/code].
+			</description>
+		</method>
+	</methods>
+</class>

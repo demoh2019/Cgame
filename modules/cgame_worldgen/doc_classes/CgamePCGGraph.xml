@@ -1,0 +1,346 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgamePCGGraph" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Procedural content graph runtime with typed pins, subgraphs, custom nodes, an incremental cache, a debugger and world-partition cell execution.
+	</brief_description>
+	<description>
+		[CgamePCGGraph] is a native port of the GDScript [code]pcg_graph.gd[/code] and [code]pcg_presets.gd[/code] libraries, with the same data model and the same deterministic results. Its design follows the publicly documented concepts of UE5's PCG framework (typed pins, point data with attributes, subgraphs, partitioned generation, debug capture).
+		[b]Data[/b] is plain [Dictionary] values tagged by a [code]"type"[/code] key:
+		- [code]points[/code]: [code]{positions: PackedVector3Array, attrs: {density, scale, rotation_y: PackedFloat32Array, seed: PackedInt64Array, custom attributes: PackedFloat32Array}}[/code]
+		- [code]spline[/code]: [code]{points: PackedVector3Array, closed: bool}[/code]
+		- [code]volume[/code]: [code]{aabb: AABB}[/code]
+		- [code]landscape[/code]: [code]{height_at: Callable(x, z) -> float, normal_at: Callable(x, z) -> Vector3}[/code]
+		- [code]mesh_instances[/code] and [code]scene_instances[/code]: [code]{records: [{mesh_id or scene_path, transforms: Array of Transform3D}]}[/code]
+		- [code]layer_weights[/code]: [code]{layer, positions, weights}[/code]
+		Node outputs are cached and shared; nodes must never modify their inputs.
+		[b]Pins[/b] have a type string, which is one of the types above or [code]"any"[/code]. A trailing [code]"[]"[/code] on an input pin type makes it a multi-input pin that receives an [Array].
+		[b]Built-in nodes:[/b] [code]surface_sampler[/code], [code]spline_sampler[/code], [code]volume_sampler[/code], [code]density_noise[/code], [code]density_filter[/code], [code]self_pruning[/code], [code]difference[/code], [code]transform_points[/code], [code]attribute_set[/code], [code]merge[/code], [code]partition_by_attribute[/code], [code]copy_points[/code], [code]constant_volume[/code], [code]static_mesh_spawner[/code], [code]instanced_scene_output[/code], [code]material_layer_output[/code], plus [code]graph_input[/code], [code]graph_output[/code] and [code]subgraph[/code] (a node whose [code]graph[/code] parameter is another [CgamePCGGraph]).
+		[b]Custom nodes[/b] are registered with [method register_node]. The [Callable] may take [code](inputs)[/code], [code](inputs, params)[/code] or [code](inputs, params, ctx)[/code] and must return a [Dictionary] mapping output pin names to data. [code]ctx[/code] holds [code]node_seed[/code], [code]node_id[/code], [code]has_bounds[/code] and [code]bounds[/code] (the partition cell as [AABB]).
+		[b]Incremental cache:[/b] every node result is cached under a key derived from the node type, parameters, seed, bounds and the hashes of its inputs. Re-running the graph only executes nodes whose key changed; if a changed node produces an identical output, downstream nodes stay cached (early cutoff). [member executed_nodes] lists what actually ran.
+		[b]Partition execution:[/b] [method partition_execute] runs the graph for one world-partition cell. Sampling is restricted to the cell grown by a margin and outputs are cropped to the exact cell, so the union of all cells equals an unpartitioned run.
+		[codeblock]
+		var graph := CgamePCGGraph.forest_scatter()
+		var volume := CgamePCGGraph.make_volume(AABB(Vector3(-60, -10, -60), Vector3(120, 40, 120)))
+		var result := graph.partition_execute(Vector2i(0, 0), 64.0, {"volume": volume, "landscape": landscape, "road": road})
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_graph_input">
+			<return type="String" />
+			<param index="0" name="id" type="String" />
+			<param index="1" name="pin_name" type="String" />
+			<param index="2" name="pin_type" type="String" />
+			<description>
+				Adds a [code]graph_input[/code] node. When this graph is used as a subgraph, [param pin_name] becomes an input pin of the subgraph node. Returns [param id].
+			</description>
+		</method>
+		<method name="add_graph_output">
+			<return type="String" />
+			<param index="0" name="id" type="String" />
+			<param index="1" name="pin_name" type="String" />
+			<param index="2" name="pin_type" type="String" />
+			<description>
+				Adds a [code]graph_output[/code] node. [param pin_name] is the key of the result returned by [method execute] and the output pin of a subgraph node. Returns [param id].
+			</description>
+		</method>
+		<method name="add_node">
+			<return type="String" />
+			<param index="0" name="id" type="String" />
+			<param index="1" name="type_name" type="String" />
+			<param index="2" name="params" type="Dictionary" default="{}" />
+			<description>
+				Adds (or replaces) a node. The parameters are copied. Returns [param id].
+			</description>
+		</method>
+		<method name="clear_cache">
+			<return type="void" />
+			<description>
+				Drops all cached node results.
+			</description>
+		</method>
+		<method name="execute">
+			<return type="Dictionary" />
+			<param index="0" name="inputs" type="Dictionary" default="{}" />
+			<description>
+				Runs the graph. [param inputs] maps [code]graph_input[/code] pin names to data. Returns a dictionary mapping [code]graph_output[/code] pin names to data. If validation fails the result is empty and [method get_last_errors] explains why.
+			</description>
+		</method>
+		<method name="get_cache_hits" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of nodes that were served from the cache in the last run.
+			</description>
+		</method>
+		<method name="get_debug" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the debugger records of the last run keyed by node id. Each record has [code]id[/code], [code]step[/code], [code]type[/code], [code]executed[/code], [code]usec[/code], [code]in_counts[/code], [code]outputs[/code] (summaries from [method summarize]) and, if [member debug_capture_full] is set, [code]full[/code].
+			</description>
+		</method>
+		<method name="get_debug_steps" qualifiers="const">
+			<return type="Dictionary[]" />
+			<description>
+				Returns the debugger records of the last run in dependency order, for step-by-step stepping.
+			</description>
+		</method>
+		<method name="get_executed_nodes" qualifiers="const">
+			<return type="String[]" />
+			<description>
+				Returns the ids of the nodes that actually ran in the last run (cache misses), in order. Nodes inside subgraphs are prefixed with the subgraph node id and a slash.
+			</description>
+		</method>
+		<method name="get_io_pins" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="inputs" type="bool" />
+			<description>
+				Returns a dictionary mapping the pin names of the graph's inputs (or outputs if [param inputs] is [code]false[/code]) to their pin types.
+			</description>
+		</method>
+		<method name="get_last_errors" qualifiers="const">
+			<return type="String[]" />
+			<description>
+				Returns the validation errors found by the last run.
+			</description>
+		</method>
+		<method name="get_edges" qualifiers="const">
+			<return type="Dictionary[]" />
+			<description>
+				Returns the edge list. Each edge is a dictionary with the keys [code]from[/code], [code]from_pin[/code], [code]to[/code] and [code]to_pin[/code]. The returned array shares its storage with the graph.
+			</description>
+		</method>
+		<method name="get_nodes" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the node dictionary keyed by node id; each value has [code]type[/code] and [code]params[/code]. The returned dictionary shares its storage with the graph.
+			</description>
+		</method>
+		<method name="get_param" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="id" type="String" />
+			<param index="1" name="key" type="String" />
+			<param index="2" name="default_value" type="Variant" default="null" />
+			<description>
+				Returns a node parameter, or [param default_value] if the node or key does not exist.
+			</description>
+		</method>
+		<method name="hash3" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="a" type="int" />
+			<param index="1" name="b" type="int" />
+			<param index="2" name="c" type="int" />
+			<description>
+				Mixes three integers into one 64-bit hash.
+			</description>
+		</method>
+		<method name="landscape_height" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="landscape" type="Variant" />
+			<param index="1" name="x" type="float" />
+			<param index="2" name="z" type="float" />
+			<param index="3" name="fallback" type="float" />
+			<description>
+				Returns the height of a [code]landscape[/code] data value at [code](x, z)[/code], or [param fallback] if it is not a valid landscape.
+			</description>
+		</method>
+		<method name="landscape_normal" qualifiers="static">
+			<return type="Vector3" />
+			<param index="0" name="landscape" type="Variant" />
+			<param index="1" name="x" type="float" />
+			<param index="2" name="z" type="float" />
+			<description>
+				Returns the surface normal of a [code]landscape[/code] data value at [code](x, z)[/code], using [code]normal_at[/code] or finite differences of [code]height_at[/code]. Returns [constant Vector3.UP] if the landscape is invalid.
+			</description>
+		</method>
+		<method name="link">
+			<return type="String" />
+			<param index="0" name="from_id" type="String" />
+			<param index="1" name="from_pin" type="String" />
+			<param index="2" name="to_id" type="String" />
+			<param index="3" name="to_pin" type="String" />
+			<description>
+				Adds an edge. Returns an empty string on success, otherwise the validation error (unknown node or pin, incompatible pin types, or an already connected single-input pin); in that case the edge is not added.
+			</description>
+		</method>
+		<method name="make_landscape" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="height_at" type="Callable" />
+			<param index="1" name="normal_at" type="Callable" default="Callable()" />
+			<description>
+				Creates [code]landscape[/code] data. [param height_at] takes [code](x, z)[/code] and returns a height; [param normal_at] is optional and returns a [Vector3] (derived by finite differences when omitted).
+			</description>
+		</method>
+		<method name="make_points" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="positions" type="PackedVector3Array" default="PackedVector3Array()" />
+			<description>
+				Creates [code]points[/code] data with density 1, scale 1, yaw 0 and a seed derived from each position.
+			</description>
+		</method>
+		<method name="make_spline" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="points" type="PackedVector3Array" />
+			<param index="1" name="closed" type="bool" default="false" />
+			<description>
+				Creates [code]spline[/code] data.
+			</description>
+		</method>
+		<method name="make_volume" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="box" type="AABB" />
+			<description>
+				Creates [code]volume[/code] data.
+			</description>
+		</method>
+		<method name="mix64" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="x" type="int" />
+			<description>
+				Mixes an integer with the SplitMix64 finaliser (public domain).
+			</description>
+		</method>
+		<method name="node_output" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="id" type="String" />
+			<param index="1" name="pin" type="String" default="&quot;out&quot;" />
+			<description>
+				Returns the output of a node from the last run, or [code]null[/code] if it was not evaluated.
+			</description>
+		</method>
+		<method name="partition_execute">
+			<return type="Dictionary" />
+			<param index="0" name="grid_cell" type="Vector2i" />
+			<param index="1" name="cell_size" type="float" />
+			<param index="2" name="inputs" type="Dictionary" default="{}" />
+			<param index="3" name="margin" type="float" default="0.0" />
+			<description>
+				Runs the graph for one world-partition cell. Sampling nodes are restricted to the cell grown by [param margin] so neighbour-dependent nodes (such as [code]self_pruning[/code]) see context, and the outputs are cropped to the exact cell. Every cell and margin has its own cache entries.
+			</description>
+		</method>
+		<method name="pins_compatible" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="from_type" type="String" />
+			<param index="1" name="to_type" type="String" />
+			<description>
+				Returns [code]true[/code] if an output pin of type [param from_type] may feed an input pin of type [param to_type]. [code]"any"[/code] is a wildcard and a trailing [code]"[]"[/code] is ignored.
+			</description>
+		</method>
+		<method name="point_count" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="data" type="Variant" />
+			<description>
+				Returns the number of points, spline points, layer weights or mesh/scene instances in a data value, or 0 for other values.
+			</description>
+		</method>
+		<method name="rand01" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="h" type="int" />
+			<description>
+				Maps the low 24 bits of a hash to [code][0, 1)[/code].
+			</description>
+		</method>
+		<method name="register_node">
+			<return type="void" />
+			<param index="0" name="type_name" type="String" />
+			<param index="1" name="input_pins" type="Dictionary" />
+			<param index="2" name="output_pins" type="Dictionary" />
+			<param index="3" name="execute" type="Callable" />
+			<description>
+				Registers a custom node type. [param input_pins] and [param output_pins] map pin names to pin type strings. [param execute] takes [code](inputs)[/code], [code](inputs, params)[/code] or [code](inputs, params, ctx)[/code] and returns a [Dictionary] mapping output pin names to data.
+			</description>
+		</method>
+		<method name="run_scoped">
+			<return type="Dictionary" />
+			<param index="0" name="inputs" type="Dictionary" />
+			<param index="1" name="scope" type="String" />
+			<param index="2" name="bounds_ctx" type="Dictionary" />
+			<param index="3" name="seed_value" type="int" />
+			<description>
+				Low-level entry point used by [method execute], [method partition_execute] and subgraph nodes. [param scope] prefixes the cache keys, [param bounds_ctx] holds [code]has_bounds[/code] and [code]bounds[/code], and [param seed_value] replaces the graph seed.
+			</description>
+		</method>
+		<method name="set_param">
+			<return type="void" />
+			<param index="0" name="id" type="String" />
+			<param index="1" name="key" type="String" />
+			<param index="2" name="value" type="Variant" />
+			<description>
+				Sets a node parameter. Does nothing if the node does not exist.
+			</description>
+		</method>
+		<method name="structure_hash" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns a hash of the whole graph definition (nodes, parameters, edges, nested subgraphs and seed).
+			</description>
+		</method>
+		<method name="summarize" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="data" type="Variant" />
+			<param index="1" name="sample_count" type="int" />
+			<description>
+				Returns a debugger summary of a data value: [code]type[/code], [code]count[/code] and, for points, [code]sample[/code] (the first [param sample_count] points) and [code]bounds[/code]; for volumes, [code]bounds[/code].
+			</description>
+		</method>
+		<method name="validate" qualifiers="const">
+			<return type="String[]" />
+			<description>
+				Returns the validation errors: unknown node types, subgraph nodes without a graph, invalid or type-mismatched edges, several edges into a single-input pin and cycles. An empty array means the graph is valid.
+			</description>
+		</method>
+		<method name="forest_scatter" qualifiers="static">
+			<return type="CgamePCGGraph" />
+			<param index="0" name="graph_seed" type="int" default="1337" />
+			<description>
+				Creates a dense forest preset with a cleared corridor around a road; steep ground gets rocks instead of trees. Inputs: [code]volume[/code], [code]landscape[/code], [code]road[/code] (spline). Outputs: [code]trees[/code], [code]rocks[/code], [code]floor[/code].
+			</description>
+		</method>
+		<method name="ruins_debris" qualifiers="static">
+			<return type="CgamePCGGraph" />
+			<param index="0" name="graph_seed" type="int" default="4242" />
+			<description>
+				Creates a preset that stamps rubble clusters onto each point of interest. Input: [code]pois[/code] (points). Outputs: [code]debris[/code], [code]ground[/code].
+			</description>
+		</method>
+		<method name="cave_rocks" qualifiers="static">
+			<return type="CgamePCGGraph" />
+			<param index="0" name="graph_seed" type="int" default="9001" />
+			<description>
+				Creates a preset with boulders ringing each cave mouth while the opening itself stays clear. Input: [code]entrances[/code] (points). Output: [code]rocks[/code].
+			</description>
+		</method>
+		<method name="is_debug_capture_full" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [member debug_capture_full].
+			</description>
+		</method>
+		<method name="is_debug_enabled" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [member debug_enabled].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="debug_capture_full" type="bool" setter="set_debug_capture_full" getter="is_debug_capture_full" default="false">
+			If [code]true[/code], the debugger records keep the full output data of every node ([code]full[/code] key).
+		</member>
+		<member name="debug_enabled" type="bool" setter="set_debug_enabled" getter="is_debug_enabled" default="true">
+			If [code]true[/code], every run records per-node debugger information in [method get_debug].
+		</member>
+		<member name="debug_sample_count" type="int" setter="set_debug_sample_count" getter="get_debug_sample_count" default="5">
+			Number of sample points kept in each point summary.
+		</member>
+		<member name="edges" type="Array" setter="set_edges" getter="get_edges" default="[]">
+			The graph's edges. Prefer [method link], which validates pins.
+		</member>
+		<member name="graph_seed" type="int" setter="set_graph_seed" getter="get_graph_seed" default="0">
+			Seed mixed into every node seed. The same seed and inputs always give the same output.
+		</member>
+		<member name="nodes" type="Dictionary" setter="set_nodes" getter="get_nodes" default="{}">
+			The graph's nodes keyed by id. Prefer [method add_node].
+		</member>
+	</members>
+</class>

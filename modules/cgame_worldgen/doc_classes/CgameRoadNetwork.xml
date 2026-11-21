@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameRoadNetwork" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Road graph between sites: Delaunay edges, minimum spanning tree and a few loops.
+	</brief_description>
+	<description>
+		[CgameRoadNetwork] is a native port of the GDScript [code]road_network.gd[/code] library. [method connect_sites] builds the Delaunay triangulation of the sites, keeps the minimum spanning tree (Kruskal with union-find) and adds a seeded fraction of the remaining short edges as loops. Degenerate input (collinear or duplicate sites) falls back to all pairs. [method route_cost] scores a straight road by its length and slope.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="connect_sites" qualifiers="static">
+			<return type="Dictionary[]" />
+			<param index="0" name="sites" type="PackedVector2Array" />
+			<param index="1" name="extra_edge_ratio" type="float" default="0.15" />
+			<param index="2" name="seed" type="int" default="0" />
+			<description>
+				Returns road edges as dictionaries with the keys [code]a[/code] and [code]b[/code] (site indices, [code]a &lt; b[/code]) and [code]length[/code]. The first [code]n - 1[/code] entries are the minimum spanning tree (acyclic, connects all sites); further entries are loop edges. Fewer than two sites give an empty array.
+			</description>
+		</method>
+		<method name="route_cost" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="a" type="Vector2" />
+			<param index="1" name="b" type="Vector2" />
+			<param index="2" name="height_at" type="Callable" />
+			<param index="3" name="slope_penalty" type="float" />
+			<description>
+				Returns the travel cost of a straight road from [param a] to [param b]: its length plus [param slope_penalty] metres for every metre of climb, sampled every 4 metres. [param height_at] is a [Callable] taking a [Vector2] and returning a height as [float].
+			</description>
+		</method>
+	</methods>
+</class>

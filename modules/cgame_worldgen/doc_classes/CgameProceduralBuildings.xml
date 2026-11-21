@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameProceduralBuildings" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Shape-grammar style building layouts and Poisson-disk settlements.
+	</brief_description>
+	<description>
+		[CgameProceduralBuildings] is a native port of the GDScript [code]procedural_buildings.gd[/code] library. Both methods are static and deterministic for a given seed.
+		[method building] splits a footprint into rooms with binary space partitioning, connects them with a randomised spanning tree of doors (plus a few loops), places windows on exterior walls, an entrance on the south wall and stairs between floors. [method settlement] places building lots around a central plaza using Bridson's Poisson-disk sampling.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="building" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="seed" type="int" />
+			<param index="1" name="footprint" type="Vector2i" />
+			<param index="2" name="floors" type="int" />
+			<description>
+				Returns a building as a [Dictionary] with the keys [code]footprint[/code] ([Vector2i]), [code]floors[/code] ([int]), [code]rooms[/code] (entries [code]{id, floor, rect: Rect2i}[/code], the rooms of one floor tile the footprint), [code]doors[/code] (entries [code]{floor, a, b, cell_a, cell_b}[/code] where [code]a[/code] and [code]b[/code] are room ids), [code]stairs[/code] (entries [code]{from_floor, to_floor, cell, room_from, room_to}[/code]), [code]windows[/code] (entries [code]{floor, room, cell, normal}[/code]) and [code]entrance[/code] ([code]{room, cell, normal}[/code]). The footprint is clamped to at least 3x3 and at least one floor is generated.
+			</description>
+		</method>
+		<method name="settlement" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="seed" type="int" />
+			<param index="1" name="center" type="Vector2" />
+			<param index="2" name="radius" type="float" />
+			<param index="3" name="count" type="int" />
+			<description>
+				Returns building lots around a plaza. Entry 0 is [code]{kind: "plaza", center, radius}[/code]; the remaining entries are [code]{kind: "lot", center, rect: Rect2, footprint: Vector2i, floors, seed}[/code]. Lots never overlap each other or the plaza and lie completely inside the settlement circle; at most [param count] lots are produced. A non-positive [param radius] returns an empty array.
+			</description>
+		</method>
+	</methods>
+</class>
