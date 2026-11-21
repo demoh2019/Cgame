@@ -93,3 +93,28 @@ The game smoke checks native/fallback parity, box-only candidate
 coverage, reserved zone safety and regeneration stability. Gameplay
 colliders, resource interactions, AI and networking remain untouched.
 Measure a compiled game to determine actual CPU/GPU benefit.
+
+## Stable PCG biome-density masks
+
+The native Cgame `PCGDensitySelector` now performs a separate procedural
+**density stage** before foliage spacing/exclusion. `pcg_density_policy.gd`
+uses native density remap and stable-ID seeded probability selection when
+available, with exactly equivalent stock-Godot fallback. The western
+undergrowth is denser (92% point probability), while exposed eastern rubble
+is sparser (35%). This is purely decorative, and does not change any
+resource, collision, combat, or multiplayer code. The existing 625-cell
+grid remains stable, but each cell makes its decision independently
+of regeneration order; no shared RNG is advanced.
+
+The original sphere/box exclusions are still applied *after* density filtering
+and before 2.1 m spatial pruning, so every spawned visible plant remains safe.
+Invalid density profiles fail open for cosmetic geometry to avoid disappearing
+scenery. Visual quality and draw-call savings have not been benchmarked.
+
+Headless regression:
+```bash
+godot --headless --path games/days_after --script res://pcg_density_smoke_test.gd
+godot --headless --path games/days_after --script res://smoke_test.gd
+```
+Native doctests: `[PCGDensitySelector]`. Both are run in the
+`native-pcg-spatial-filter.yml` workflow.
