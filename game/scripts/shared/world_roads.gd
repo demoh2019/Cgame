@@ -48,6 +48,49 @@ func all_roads() -> Array:
 	return roads
 
 
+## Undirected nearest-neighbor graph. All locations have stable array indices.
+## On Cgame a single native query handles all pairs; on stock Godot we preserve
+## the original distance scan with a deterministic index tie-break.
+static func compute_links(places: Array, max_link: float = MAX_LINK,
+		regular_neighbors: int = NEIGHBOURS, hub_neighbors: int = HUB_LINKS,
+		force_scalar: bool = false) -> Dictionary:
+	var links: Dictionary = {}
+	if not is_finite(max_link) or max_link < 0.0 or regular_neighbors < 0 or hub_neighbors < 0:
+		return links
+	var positions := PackedVector2Array()
+	for place in places:
+		var point := Vector2(float(place["x"]), float(place["z"]))
+		if not point.is_finite():
+			return {}
+		positions.append(point)
+	var native: Array = []
+	if not force_scalar and places.size() <= 4096 and maxi(regular_neighbors, hub_neighbors) <= 32 			and Geometry2D.has_method("get_nearest_neighbors"):
+		native = Geometry2D.call(
+				"get_nearest_neighbors", positions, maxi(regular_neighbors, hub_neighbors), max_link)
+	for i in positions.size():
+		var wanted: int = hub_neighbors if i == 0 else regular_neighbors
+		if native.size() == positions.size():
+			var matches: PackedInt32Array = native[i]
+			for k in mini(wanted, matches.size()):
+				var neighbor: int = matches[k]
+				links[Vector2i(mini(i, neighbor), maxi(i, neighbor))] = true
+			continue
+		var nearest: Array = []
+		for j in positions.size():
+			if i == j:
+				continue
+			var distance: float = positions[i].distance_to(positions[j])
+			if distance <= max_link:
+				nearest.append([distance, j])
+		# Equal-distance site ties are deterministic on all script runtimes.
+		nearest.sort_custom(func(a, b) -> bool:
+			return a[0] < b[0] or (a[0] == b[0] and a[1] < b[1]))
+		for k in mini(wanted, nearest.size()):
+			var neighbor: int = int(nearest[k][1])
+			links[Vector2i(mini(i, neighbor), maxi(i, neighbor))] = true
+	return links
+
+
 func _build() -> void:
 	if _built:
 		return
@@ -59,23 +102,9 @@ func _build() -> void:
 				if LINKED_KINDS.has(str(site["kind"])):
 					places.append({"name": str(site["display"]), "x": float(site["x"]), "z": float(site["z"]), "radius": float(site["radius"]),
 						"end": minf(float(site["radius"]) * 0.35, 20.0), "id": int(site["id"])})
-	# Links: each place to its nearest neighbours; links are undirected and kept once.
-	var links: Dictionary = {}
-	for i in places.size():
-		var here := Vector2(places[i]["x"], places[i]["z"])
-		var nearest: Array = []
-		for j in places.size():
-			if i == j:
-				continue
-			var distance: float = here.distance_to(Vector2(places[j]["x"], places[j]["z"]))
-			if distance <= MAX_LINK:
-				nearest.append([distance, j])
-		nearest.sort_custom(func(a, b) -> bool: return a[0] < b[0])
-		var wanted: int = HUB_LINKS if i == 0 else NEIGHBOURS
-		for k in mini(wanted, nearest.size()):
-			var j: int = nearest[k][1]
-			links[Vector2i(mini(i, j), maxi(i, j))] = true
-	for key in links:
+	# Build the graph in one native nearest-neighbor pass when Cgame supports it.
+	# The identical scalar fallback works on stock Godot.
+	for key in compute_links(places):
 		_lay_road(places[key.x], places[key.y])
 
 

@@ -63,6 +63,17 @@
 				The operation may result in an outer polygon (boundary) and inner polygon (hole) produced which could be distinguished by calling [method is_polygon_clockwise].
 			</description>
 		</method>
+		<method name="get_nearest_neighbors">
+			<return type="PackedInt32Array[]" />
+			<param index="0" name="points" type="PackedVector2Array" />
+			<param index="1" name="neighbor_count" type="int" />
+			<param index="2" name="max_distance" type="float" />
+			<description>
+				Cgame extension: finds up to [param neighbor_count] nearest other points for [i]each[/i] input point in a single CPU call. Returns one [PackedInt32Array] of [b]input point indices[/b] per input element, ordered by increasing squared Euclidean distance (equal distances break ties by the lowest point index). The point does not match itself, although different indices at the same coordinates are valid neighbors. Candidates at exactly [param max_distance] are included; points with no qualifying neighbors return empty index arrays.
+				All inputs are validated before processing: at most 4096 points, 0–32 neighbors, finite coordinates and a finite nonnegative radius whose square is representable. Invalid input returns an empty outer array. Zero neighbors returns an empty index array for each input. Empty input returns an empty outer array.
+				This performs a bounded [code]O(n² × k)[/code] scan, not a persistent spatial index or a kd-tree; it holds only [code]k[/code] temporary candidates. Best for procedural graph construction from moderate point collections. For repeated queries on many moving points, use a spatial partition or broadphase instead.
+			</description>
+		</method>
 		<method name="get_closest_point_on_segments">
 			<return type="Dictionary" />
 			<param index="0" name="point" type="Vector2" />

@@ -8,6 +8,42 @@ const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 
 
 func run(t) -> void:
+	t.current = "procedural road nearest-neighbor graph"
+	var sample_places: Array = [
+		{"x": 0.0, "z": 0.0},
+		{"x": 2.0, "z": 0.0},
+		{"x": -2.0, "z": 0.0},
+		{"x": 0.0, "z": 4.0},
+		{"x": 50.0, "z": 50.0},
+	]
+	var scalar_links: Dictionary = WorldRoads.compute_links(sample_places, 4.1, 1, 2, true)
+	var generated_links: Dictionary = WorldRoads.compute_links(sample_places, 4.1, 1, 2)
+	t.eq(generated_links, scalar_links, "native and GDScript graph topology agree")
+	t.check(generated_links.has(Vector2i(0, 1)), "first equidistant neighbor is selected")
+	t.check(generated_links.has(Vector2i(0, 2)), "second equidistant neighbor is selected")
+	t.check(generated_links.has(Vector2i(0, 3)), "a point on the radius boundary connects")
+	t.eq(generated_links.size(), 3, "distant sites do not create out-of-range road edges")
+	t.eq(WorldRoads.compute_links(sample_places, 0.0, 2, 4).size(), 0, "zero radius excludes separated sites")
+	if Geometry2D.has_method("get_nearest_neighbors"):
+		var points := PackedVector2Array([Vector2.ZERO, Vector2(2.0, 0.0),
+				Vector2(-2.0, 0.0), Vector2(0.0, 4.0)])
+		var nearest: Array = Geometry2D.call("get_nearest_neighbors", points, 2, 4.1)
+		t.eq(nearest.size(), 4, "native API returns one index list per point")
+		t.eq(PackedInt32Array(nearest[0]), PackedInt32Array([1, 2]), "nearest point ordering is stable")
+
+	# Compare the full generated road graph from actual island locations.
+	var region_places: Array = [{"x": 0.0, "z": 0.0}]
+	for rx in range(-3, 4):
+		for rz in range(-3, 4):
+			for site in world.poi.sites_in_region(rx, rz):
+				if WorldRoads.LINKED_KINDS.has(str(site["kind"])):
+					region_places.append({"x": float(site["x"]), "z": float(site["z"])})
+	var expected_links: Dictionary = WorldRoads.compute_links(region_places, WorldRoads.MAX_LINK,
+			WorldRoads.NEIGHBOURS, WorldRoads.HUB_LINKS, true)
+	var real_links: Dictionary = WorldRoads.compute_links(region_places)
+	t.eq(real_links, expected_links, "island road graph matches stock-Godot fallback")
+	t.check(region_places.size() >= 10, "road graph parity covers multiple inhabited regions")
+
 	t.current = "roads"
 	var world := WorldGen.new(1337)
 	var roads: Array = world.roads.all_roads()
