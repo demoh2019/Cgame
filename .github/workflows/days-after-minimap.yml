@@ -1,0 +1,56 @@
+name: Days After tactical minimap smoke
+
+on:
+  pull_request:
+    paths:
+      - 'demo/days_after/minimap.gd'
+      - 'demo/days_after/minimap_overlay.gd'
+      - 'demo/days_after/main.tscn'
+      - 'demo/days_after/smoke_test_minimap.gd'
+      - '.github/workflows/days-after-minimap.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'demo/days_after/minimap.gd'
+      - 'demo/days_after/minimap_overlay.gd'
+      - 'demo/days_after/main.tscn'
+      - 'demo/days_after/smoke_test_minimap.gd'
+      - '.github/workflows/days-after-minimap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  minimap-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download verified Godot 4.7.2 compatibility editor
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum --check --status
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+      - name: Import project scripts
+        run: |
+          set -euo pipefail
+          ./godot --headless --path demo/days_after --editor --import --quit 2>&1 | tee minimap-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' minimap-import.log; then exit 1; fi
+      - name: Run tactical map smoke test
+        run: |
+          set -euo pipefail
+          timeout 120s ./godot --headless --path demo/days_after --script res://smoke_test_minimap.gd 2>&1 | tee minimap-smoke.log
+          grep -F 'PASS: tactical minimap world coordinates, range, live tracking and toggle.' minimap-smoke.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed' minimap-smoke.log; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: days-after-minimap-logs
+          if-no-files-found: ignore
+          path: |
+            minimap-import.log
+            minimap-smoke.log
