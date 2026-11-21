@@ -60,6 +60,22 @@ func _smoke() -> void:
         if int(foliage.call("get_box_only_candidate_count")) < 1:
             push_error("Rectangular exclusion volumes are not covering any additional grass candidates")
             ok = false
+        var densities: PackedFloat32Array = foliage.call("get_density_values")
+        var sampled_count: int = int(foliage.call("get_density_sampled_count"))
+        if densities.size() != 625 or sampled_count < 250 or sampled_count > 500:
+            push_error("PCG seeded per-ID density sampling has an invalid candidate population")
+            ok = false
+        else:
+            var low_density: int = 0
+            var high_density: int = 0
+            for density in densities:
+                if density < 0.2:
+                    low_density += 1
+                if density > 0.9:
+                    high_density += 1
+            if low_density < 50 or high_density < 100:
+                push_error("PCG biome density regions were not generated")
+                ok = false
         if positions.size() == 0 or positions.size() > 160 or foliage.multimesh.instance_count != positions.size():
             push_error("PCG foliage did not create a bounded instancing batch")
             ok = false
