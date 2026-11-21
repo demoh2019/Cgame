@@ -23,6 +23,12 @@
 			<param index="2" name="stacks" type="int" default="1" />
 			<description>Sets an exact effect or removes it if the duration is zero.</description>
 		</method>
+		<method name="replace_effect_branch">
+			<return type="bool" />
+			<param index="0" name="branch" type="StringName" />
+			<param index="1" name="effects" type="Dictionary" />
+			<description>Atomically replaces only effects equal to or below the dotted tag [param branch]. Preserves independent durations, stacking, periodic phases and queued pulses in other branches. Effect values have the same schema and validation as [method replace_snapshot], including optional [code]period[/code], [code]next_period[/code], and [code]reset_on_reapply[/code]. A zero remaining duration removes that tag. Invalid entries, out-of-branch tags, normalized aliases, and snapshots exceeding the global cap are rejected without mutation. Pending pulses in the authoritative branch are discarded when a valid replacement commits; all unrelated pending pulses survive. An empty dictionary clears only that branch.</description>
+		</method>
 		<method name="replace_snapshot">
 			<return type="bool" />
 			<param index="0" name="effects" type="Dictionary" />
