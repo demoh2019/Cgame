@@ -1403,6 +1403,11 @@ func _on_welcomed() -> void:
 		streamer.max_auto_retries = 2
 		streamer.retry_initial_delay = 0.5
 		streamer.retry_max_delay = 3.0
+		# Spread correlated failures across updates instead of retrying an
+		# entire damaged procedural region on the same client frame.
+		if streamer.has_method("set_retry_delay_spread"):
+			streamer.set_retry_delay_spread(0.30)
+			streamer.set_max_retry_releases_per_update(2)
 	# Prioritize content ahead of actual movement while keeping the same
 	# resident-world radius and unload hysteresis.
 	streamer.lookahead_seconds = 2.0
@@ -1455,6 +1460,18 @@ func _on_welcomed() -> void:
 			Performance.add_custom_monitor(loading_area_monitor,
 				Callable(streamer, "get_loading_range_area_percent"))
 			_ambient_monitors.append(loading_area_monitor)
+	# Retries respect the normal generation/activation budgets; these
+	# counters expose waiting failures and admission pressure separately.
+	if streamer.has_method("get_last_retry_deferred_count"):
+		for monitor in [
+			[&"Albion/StreamRetryPending", Callable(streamer, "get_retry_pending_count")],
+			[&"Albion/StreamRetryReleased", Callable(streamer, "get_last_retry_release_count")],
+			[&"Albion/StreamRetryDeferred", Callable(streamer, "get_last_retry_deferred_count")],
+		]:
+			var retry_monitor_name: StringName = monitor[0]
+			if not Performance.has_custom_monitor(retry_monitor_name):
+				Performance.add_custom_monitor(retry_monitor_name, monitor[1])
+				_ambient_monitors.append(retry_monitor_name)
 	# Native forecast telemetry is intentionally distinct from measured CPU.
 	if streamer.has_method("get_last_predicted_deferred_chunk_count"):
 		for monitor in [
