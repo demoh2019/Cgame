@@ -8,6 +8,7 @@ on:
       - 'modules/environment_query/environment_query_3d.cpp'
       - 'modules/environment_query/doc_classes/EnvironmentQuery3D.xml'
       - 'tests/scene/test_environment_query_3d.cpp'
+      - 'tests/scene/test_environment_query_occupancy.py'
       - 'game/scripts/shared/raid_reinforcements.gd'
       - 'game/tests/test_raid_multi_threat_query.gd'
       - 'game/tests/test_raid_reinforcements.gd'
@@ -20,6 +21,7 @@ on:
       - 'modules/environment_query/environment_query_3d.h'
       - 'modules/environment_query/environment_query_3d.cpp'
       - 'tests/scene/test_environment_query_3d.cpp'
+      - 'tests/scene/test_environment_query_occupancy.py'
       - 'game/scripts/shared/raid_reinforcements.gd'
       - 'game/tests/test_raid_multi_threat_query.gd'
       - 'game/tests/test_raid_reinforcements.gd'
@@ -37,6 +39,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Validate occupied EQS source contract and numeric oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests/scene/test_environment_query_occupancy.py -v
+          python3 -m unittest tests/scene/test_environment_query_topk.py -v
       - uses: ./.github/actions/godot-cache-restore
         with:
           cache-name: linux-multi-threat-eqs
