@@ -23,7 +23,7 @@
 			<param index="4" name="far_distance" type="float" default="125.0" />
 			<description>
 				Returns one visible-instance count for each input MultiMesh group, retaining zero-count groups at zero and at least one visible instance in each nonempty cosmetic group. Quality levels are 0 Performance (near 42%, far 20%), 1 Balanced (near 68%, far 42%), 2 High (near 88%, far 70%), and 3 Ultra (100% everywhere). Between the near and far distances, the density changes smoothly with smoothstep, with integer counts rounded to the nearest instance. Camera distances are nonnegative world-space distances; this selector does not perform frustum or occlusion culling. Use the result to update existing [member MultiMesh.visible_instance_count] without rebuilding an instance buffer, and keep gameplay objects independent of density budgets.
-				Inputs must contain matching arrays of at most 4096 groups, counts from 0 through 65536 and finite distances between 0 and 10000000. Near and far thresholds must be finite, ordered with 0 <= near < far <= 1000000; invalid quality or input rejects the whole request atomically. No source array mutation, RNG or scene access.
+				Inputs must contain matching arrays of at most 4096 groups, counts from 0 through 65536 and finite distances between 0 and 10000000. Near and far thresholds must be finite; near must be nonnegative and strictly below far, and far must not exceed 1000000; invalid quality or input rejects the whole request atomically. No source array mutation, RNG or scene access.
 			</description>
 		</method>
 	</methods>
