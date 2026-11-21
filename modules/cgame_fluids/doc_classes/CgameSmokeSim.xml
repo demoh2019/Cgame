@@ -1,0 +1,260 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameSmokeSim" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Volumetric smoke and fire simulation on a small cubic 3D grid.
+	</brief_description>
+	<description>
+		[CgameSmokeSim] implements Jos Stam's "Stable Fluids" (1999): semi-Lagrangian advection and pressure projection by Jacobi relaxation. Buoyancy and vorticity confinement follow Fedkiw, Stam and Jensen (2001) and GPU Gems 3 chapter 30. Fire is a simple fuel to heat and smoke reaction that ignites above [member ignition_temperature].
+		The grid has [member size] cells per axis. Cell centers sit at integer coordinates, the faces of the grid are open, and obstacle voxels (see [method set_obstacle]) are solid walls. Units are cells and seconds.
+		Advection, projection and force passes are split into z slices and run on the [WorkerThreadPool]. Every pass reads the previous state and writes only the cells of its own slice, so results are deterministic. Grids smaller than 16 cells per axis run serially.
+		The data can be uploaded to the GPU as an [ImageTexture3D] with two float channels (red is density, green is temperature) using [method to_image3d] and [method update_image3d]. This class is the native counterpart of the GDScript [code]smoke_sim.gd[/code].
+		[codeblock]
+		var smoke := CgameSmokeSim.new()
+		smoke.setup(24)
+		smoke.add_source(Vector3i(12, 3, 12), 1.0, 1.0)
+		func _physics_process(delta):
+		    smoke.step(delta)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_source">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector3i" />
+			<param index="1" name="density" type="float" />
+			<param index="2" name="temperature" type="float" default="0.0" />
+			<param index="3" name="fuel" type="float" default="0.0" />
+			<param index="4" name="velocity" type="Vector3" default="Vector3(0, 0, 0)" />
+			<description>
+				Adds the given amounts of smoke density, temperature, fuel and velocity to [param cell]. Does nothing if the cell is outside the grid or an obstacle.
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Resets velocity, density, temperature and fuel to zero. Obstacles are kept.
+			</description>
+		</method>
+		<method name="density_centroid" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the density-weighted center of mass in cell coordinates, or [constant Vector3.ZERO] if there is no smoke.
+			</description>
+		</method>
+		<method name="density_image_slices" qualifiers="const">
+			<return type="Image[]" />
+			<description>
+				Returns one [constant Image.FORMAT_RGF] image per z slice, with density in the red and temperature in the green channel. The array can be passed to [method ImageTexture3D.create].
+			</description>
+		</method>
+		<method name="divergence_rms">
+			<return type="float" />
+			<description>
+				Returns the root-mean-square divergence of the velocity field over fluid cells. Zero means incompressible.
+			</description>
+		</method>
+		<method name="get_field" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="field" type="int" enum="CgameSmokeSim.Field" />
+			<description>
+				Returns a copy of [param field] for all cells. The index of cell [code](x, y, z)[/code] is given by [method index].
+			</description>
+		</method>
+		<method name="get_value" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="field" type="int" enum="CgameSmokeSim.Field" />
+			<param index="1" name="cell" type="Vector3i" />
+			<description>
+				Returns the value of [param field] in [param cell], or [code]0.0[/code] (with an error) if the cell is outside the grid.
+			</description>
+		</method>
+		<method name="get_velocity" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Returns the velocity stored in [param cell].
+			</description>
+		</method>
+		<method name="in_bounds" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Returns [code]true[/code] if [param cell] lies inside the grid.
+			</description>
+		</method>
+		<method name="index" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="x" type="int" />
+			<param index="1" name="y" type="int" />
+			<param index="2" name="z" type="int" />
+			<description>
+				Returns the flat array index of the cell at [code](x, y, z)[/code], equal to [code]x + size * (y + size * z)[/code].
+			</description>
+		</method>
+		<method name="is_finite_state" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]false[/code] if any field contains NaN or infinity.
+			</description>
+		</method>
+		<method name="is_obstacle" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Returns [code]true[/code] if [param cell] is inside the grid and solid.
+			</description>
+		</method>
+		<method name="max_temperature" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the highest temperature in the grid.
+			</description>
+		</method>
+		<method name="project">
+			<return type="void" />
+			<description>
+				Makes the velocity field divergence free: solves the pressure Poisson equation with [member jacobi_iterations] Jacobi sweeps and subtracts the pressure gradient. Called automatically by [method step].
+			</description>
+		</method>
+		<method name="sample" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="field" type="int" enum="CgameSmokeSim.Field" />
+			<param index="1" name="position" type="Vector3" />
+			<description>
+				Returns the trilinearly interpolated value of [param field] at [param position] in cell coordinates. Positions outside the grid are clamped.
+			</description>
+		</method>
+		<method name="set_obstacle">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector3i" />
+			<param index="1" name="solid" type="bool" />
+			<description>
+				Marks [param cell] as a solid voxel or clears it. Solid voxels hold no velocity, density, temperature or fuel.
+			</description>
+		</method>
+		<method name="set_velocity">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector3i" />
+			<param index="1" name="velocity" type="Vector3" />
+			<description>
+				Overwrites the velocity stored in [param cell].
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="grid_size" type="int" />
+			<description>
+				Resets the simulation to an empty grid with [param grid_size] cells per axis (at least 4). Removes all obstacles.
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<param index="0" name="dt" type="float" />
+			<description>
+				Advances the simulation by [param dt] seconds: applies wind drag and buoyancy, vorticity confinement and combustion, projects, advects velocity, projects again, advects density, temperature and fuel, then applies cooling and decay. Does nothing if [param dt] is not positive.
+			</description>
+		</method>
+		<method name="to_image3d" qualifiers="const">
+			<return type="ImageTexture3D" />
+			<description>
+				Creates an [ImageTexture3D] with the current density (red) and temperature (green). Returns [code]null[/code] if the texture could not be created.
+			</description>
+		</method>
+		<method name="total_density" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the sum of density over the grid.
+			</description>
+		</method>
+		<method name="total_fuel" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the sum of fuel over the grid.
+			</description>
+		</method>
+		<method name="total_temperature" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the sum of temperature over the grid.
+			</description>
+		</method>
+		<method name="update_image3d" qualifiers="const">
+			<return type="void" />
+			<param index="0" name="texture" type="ImageTexture3D" />
+			<description>
+				Refreshes an existing [param texture] in place with the current state. Cheaper than creating a new texture every frame.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="buoyancy" type="float" setter="set_buoyancy" getter="get_buoyancy" default="30.0">
+			Upward acceleration per unit temperature.
+		</member>
+		<member name="burn_rate" type="float" setter="set_burn_rate" getter="get_burn_rate" default="4.0">
+			Rate at which hot fuel burns, as a fraction per second.
+		</member>
+		<member name="cell_count" type="int" setter="" getter="get_cell_count">
+			Total number of cells, [code]size ^ 3[/code].
+		</member>
+		<member name="cooling" type="float" setter="set_cooling" getter="get_cooling" default="0.8">
+			Exponential temperature decay rate in 1/s.
+		</member>
+		<member name="density_decay" type="float" setter="set_density_decay" getter="get_density_decay" default="0.05">
+			Exponential smoke density decay rate in 1/s.
+		</member>
+		<member name="heat_yield" type="float" setter="set_heat_yield" getter="get_heat_yield" default="2.0">
+			Temperature released per unit of fuel burnt.
+		</member>
+		<member name="ignition_temperature" type="float" setter="set_ignition_temperature" getter="get_ignition_temperature" default="0.4">
+			Fuel only burns in cells at or above this temperature.
+		</member>
+		<member name="jacobi_iterations" type="int" setter="set_jacobi_iterations" getter="get_jacobi_iterations" default="16">
+			Number of Jacobi sweeps used by [method project].
+		</member>
+		<member name="max_speed" type="float" setter="set_max_speed" getter="get_max_speed" default="40.0">
+			Per-axis velocity limit in cells per second, applied by the force pass.
+		</member>
+		<member name="size" type="int" setter="" getter="get_size">
+			Number of cells per axis. Set through [method setup].
+		</member>
+		<member name="smoke_yield" type="float" setter="set_smoke_yield" getter="get_smoke_yield" default="1.0">
+			Smoke density released per unit of fuel burnt.
+		</member>
+		<member name="vorticity_strength" type="float" setter="set_vorticity_strength" getter="get_vorticity_strength" default="2.0">
+			Vorticity confinement strength. [code]0[/code] disables confinement.
+		</member>
+		<member name="weight" type="float" setter="set_weight" getter="get_weight" default="0.0">
+			Downward acceleration per unit of smoke density (heavy gas).
+		</member>
+		<member name="wind" type="Vector3" setter="set_wind" getter="get_wind" default="Vector3(0, 0, 0)">
+			Target velocity the smoke relaxes toward, in cells per second.
+		</member>
+		<member name="wind_drag" type="float" setter="set_wind_drag" getter="get_wind_drag" default="1.5">
+			How fast velocity relaxes toward [member wind], in 1/s.
+		</member>
+	</members>
+	<constants>
+		<constant name="DEFAULT_SIZE" value="24">
+			Grid size used when constructing the simulation without calling [method setup].
+		</constant>
+		<constant name="FIELD_DENSITY" value="0" enum="Field">
+			Smoke density.
+		</constant>
+		<constant name="FIELD_TEMPERATURE" value="1" enum="Field">
+			Temperature.
+		</constant>
+		<constant name="FIELD_FUEL" value="2" enum="Field">
+			Unburnt fuel.
+		</constant>
+		<constant name="FIELD_VELOCITY_X" value="3" enum="Field">
+			X component of the velocity.
+		</constant>
+		<constant name="FIELD_VELOCITY_Y" value="4" enum="Field">
+			Y component of the velocity.
+		</constant>
+		<constant name="FIELD_VELOCITY_Z" value="5" enum="Field">
+			Z component of the velocity.
+		</constant>
+	</constants>
+</class>

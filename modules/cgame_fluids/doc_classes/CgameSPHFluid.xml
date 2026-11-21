@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameSPHFluid" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		3D position-based fluids (PBF) particle solver in a fixed box.
+	</brief_description>
+	<description>
+		[CgameSPHFluid] simulates liquids as particles using Position Based Fluids (Macklin and Müller, 2013): a density constraint is solved with Jacobi iterations, an artificial pressure term prevents tensile instability, and XSPH viscosity plus optional vorticity confinement shape the motion. The smoothing kernels are poly6 (density) and spiky (gradients) from Müller, Charypar and Gross (2003). The domain is an axis-aligned box; neighbours are found with a uniform counting-sort grid. Sphere obstacles exchange momentum with the fluid.
+		The neighbour search and the constraint solves run on the [WorkerThreadPool]. All parallel loops write only data owned by their own particle, so results are bit-identical to a serial run and fully deterministic.
+		This class is the native counterpart of the GDScript [code]sph_fluid.gd[/code] and exposes the same API. Create it, call [method setup] (the default constructor already uses spacing [code]0.1[/code] and a 2 m cube), add particles with [method add_block] or [method add_particle], then call [method step] every physics frame.
+		[codeblock]
+		var fluid := CgameSPHFluid.new()
+		fluid.setup(0.1, Vector3.ZERO, Vector3(0.6, 1.0, 0.6))
+		fluid.add_block(Vector3(0.05, 0.35, 0.05), Vector3(0.55, 0.65, 0.55))
+		func _physics_process(delta):
+		    fluid.step(delta, 3)
+		    var points: PackedVector3Array = fluid.positions()
+		[/codeblock]
+		[b]Note:[/b] Units are meters, kilograms and seconds. The base density is 1000 kg/m³ and particle speed is clamped to 20 m/s for stability.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_block">
+			<return type="int" />
+			<param index="0" name="lo" type="Vector3" />
+			<param index="1" name="hi" type="Vector3" />
+			<description>
+				Fills the axis-aligned box from [param lo] to [param hi] with a cubic lattice of particles spaced by [member spacing]. Returns the number of particles added.
+			</description>
+		</method>
+		<method name="add_particle">
+			<return type="void" />
+			<param index="0" name="position" type="Vector3" />
+			<param index="1" name="velocity" type="Vector3" default="Vector3(0, 0, 0)" />
+			<description>
+				Adds a single particle at [param position] with the given initial [param velocity].
+			</description>
+		</method>
+		<method name="add_sphere_obstacle">
+			<return type="int" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="velocity" type="Vector3" default="Vector3(0, 0, 0)" />
+			<param index="3" name="mass" type="float" default="0.0" />
+			<description>
+				Adds a sphere obstacle and returns its index. If [param mass] is not positive the obstacle is kinematic and its velocity never changes. Otherwise fluid impulses change its velocity (two-way coupling), and gravity also applies when [member obstacle_gravity] is [code]true[/code].
+			</description>
+		</method>
+		<method name="average_density" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the mean particle density computed during the last [method step], or [code]0.0[/code] if there are no particles.
+			</description>
+		</method>
+		<method name="clear_particles">
+			<return type="void" />
+			<description>
+				Removes all particles. Obstacles are kept.
+			</description>
+		</method>
+		<method name="kinetic_energy" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the total kinetic energy of all particles.
+			</description>
+		</method>
+		<method name="obstacle_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of sphere obstacles.
+			</description>
+		</method>
+		<method name="obstacle_position" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Returns the current center of the obstacle at [param index].
+			</description>
+		</method>
+		<method name="obstacle_velocity" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Returns the current velocity of the obstacle at [param index].
+			</description>
+		</method>
+		<method name="particle_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of particles.
+			</description>
+		</method>
+		<method name="positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns a copy of all particle positions.
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="spacing" type="float" />
+			<param index="1" name="bounds_min" type="Vector3" />
+			<param index="2" name="bounds_max" type="Vector3" />
+			<description>
+				Configures the solver: [param spacing] is the rest particle spacing (the kernel radius is twice that), and the fluid is confined to the box from [param bounds_min] to [param bounds_max]. The rest density is calibrated from a perfect lattice of that spacing. Calling this method removes all particles and obstacles.
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<param index="0" name="dt" type="float" />
+			<param index="1" name="iterations" type="int" default="4" />
+			<description>
+				Advances the simulation by [param dt] seconds using at least one and at most [param iterations] density-constraint iterations. Does nothing if [param dt] is not positive or there are no particles.
+			</description>
+		</method>
+		<method name="total_momentum" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the summed momentum of all particles.
+			</description>
+		</method>
+		<method name="velocities" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns a copy of all particle velocities.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="attraction" type="float" setter="set_attraction" getter="get_attraction" default="0.0">
+			Strength of the attractive half of the density constraint, from [code]0[/code] (particles are only repelled, so surface particles are never pulled in) to [code]1[/code] (full PBF).
+		</member>
+		<member name="bounds_max" type="Vector3" setter="" getter="get_bounds_max">
+			Upper corner of the simulation box. Set through [method setup].
+		</member>
+		<member name="bounds_min" type="Vector3" setter="" getter="get_bounds_min">
+			Lower corner of the simulation box. Set through [method setup].
+		</member>
+		<member name="gravity" type="Vector3" setter="set_gravity" getter="get_gravity" default="Vector3(0, -9.81, 0)">
+			Gravitational acceleration applied to particles.
+		</member>
+		<member name="kernel_radius" type="float" setter="" getter="get_kernel_radius">
+			Smoothing kernel radius, twice [member spacing]. Set through [method setup].
+		</member>
+		<member name="obstacle_gravity" type="bool" setter="set_obstacle_gravity" getter="get_obstacle_gravity" default="false">
+			If [code]true[/code], dynamic obstacles (mass greater than zero) are accelerated by [member gravity].
+		</member>
+		<member name="particle_mass" type="float" setter="" getter="get_particle_mass">
+			Mass of one particle, derived from the 1000 kg/m³ base density and [member spacing].
+		</member>
+		<member name="relaxation" type="float" setter="set_relaxation" getter="get_relaxation" default="5.0">
+			Constraint force mixing (epsilon) added to the denominator of the density constraint. Larger values soften the fluid.
+		</member>
+		<member name="rest_density" type="float" setter="" getter="get_rest_density">
+			Density of a particle inside a perfect lattice of the chosen spacing. Calibrated by [method setup].
+		</member>
+		<member name="spacing" type="float" setter="" getter="get_spacing">
+			Rest distance between neighboring particles. Set through [method setup].
+		</member>
+		<member name="tensile_k" type="float" setter="set_tensile_k" getter="get_tensile_k" default="0.006">
+			Strength of the artificial pressure term that prevents particle clumping.
+		</member>
+		<member name="vorticity_epsilon" type="float" setter="set_vorticity_epsilon" getter="get_vorticity_epsilon" default="0.0">
+			Vorticity confinement strength. [code]0[/code] disables confinement.
+		</member>
+		<member name="wall_margin" type="float" setter="set_wall_margin" getter="get_wall_margin">
+			Distance kept between particles and the box walls or obstacle surfaces. Defaults to [code]0.02 * spacing[/code].
+		</member>
+		<member name="xsph_c" type="float" setter="set_xsph_c" getter="get_xsph_c" default="0.02">
+			XSPH viscosity coefficient.
+		</member>
+	</members>
+</class>

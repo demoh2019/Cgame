@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameFFTOcean" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Tessendorf FFT ocean heightfield.
+	</brief_description>
+	<description>
+		[CgameFFTOcean] generates a tileable ocean height grid with the method of Jerry Tessendorf, "Simulating Ocean Water" (2001). A Phillips spectrum [code]h0(k)[/code] is built once from a seed by [method setup]. Each call to [method evaluate] computes [code]h(k, t) = h0(k) e^(i w t) + conj(h0(-k)) e^(-i w t)[/code] with the deep-water dispersion [code]w = sqrt(g |k|)[/code] and transforms it with an inverse 2D radix-2 FFT into a real height grid. The grid can be sampled on the CPU (for example for buoyancy, see [method sample_height]) or uploaded as a texture for vertex displacement (see [method displacement_image]).
+		The rows and columns of the 2D transform are independent and run on the [WorkerThreadPool]; the result is bit-identical to a serial run. The spectrum is built serially from [RandomNumberGenerator] so the same seed always produces the same ocean.
+		This class is the native counterpart of the GDScript [code]fft_ocean.gd[/code].
+		[codeblock]
+		var ocean := CgameFFTOcean.new()
+		ocean.setup(64, 200.0, Vector2(12.0, 5.0), 4.0, 1234)
+		func _process(_delta):
+		    var heights: PackedFloat32Array = ocean.evaluate(Time.get_ticks_msec() / 1000.0)
+		    var height_here := ocean.sample_height(heights, Vector2(10.0, 20.0))
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="displacement_image">
+			<return type="Image" />
+			<param index="0" name="time" type="float" />
+			<description>
+				Evaluates the heights at [param time] and returns them as a single-channel [constant Image.FORMAT_RF] image of size [member n] by [member n] for a displacement shader.
+			</description>
+		</method>
+		<method name="evaluate">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="time" type="float" />
+			<description>
+				Returns [code]n * n[/code] heights (row-major) at [param time] in seconds. Updates [member last_max_imag]. Returns an empty array if [method setup] was not called.
+			</description>
+		</method>
+		<method name="fft_1d" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="re" type="PackedFloat32Array" />
+			<param index="1" name="im" type="PackedFloat32Array" />
+			<param index="2" name="inverse" type="bool" />
+			<description>
+				Applies a radix-2 Cooley-Tukey FFT to the complex signal given by the real parts [param re] and imaginary parts [param im] and returns the result as the array [code][re, im][/code]. The forward transform uses [code]e^(-i...)[/code]; the inverse uses [code]e^(+i...)[/code] and scales by [code]1/N[/code], so the inverse of the forward transform restores the input. The size must be a power of two and both arrays must have the same size.
+				[b]Note:[/b] Unlike the GDScript version, which modifies the arrays in place, packed arrays are passed by value to native methods, so the transformed data is returned instead.
+			</description>
+		</method>
+		<method name="sample_height" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="heights" type="PackedFloat32Array" />
+			<param index="1" name="position" type="Vector2" />
+			<description>
+				Returns the bilinearly interpolated height at [param position] (meters, x and z of the ocean surface) from a grid previously returned by [method evaluate]. The grid tiles with period [member patch_size], so any position is valid.
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="grid" type="int" />
+			<param index="1" name="patch" type="float" />
+			<param index="2" name="wind" type="Vector2" />
+			<param index="3" name="amplitude" type="float" />
+			<param index="4" name="seed" type="int" />
+			<description>
+				Builds the Phillips spectrum deterministically. [param grid] is the number of samples per side and must be a power of two of at least 4. [param patch] is the side length of the simulated square in meters, [param wind] gives the wind direction and speed in meters per second, [param amplitude] scales the wave height, and [param seed] seeds the random number generator.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="last_max_imag" type="float" setter="" getter="get_last_max_imag">
+			The largest absolute imaginary part seen by the last [method evaluate]. It should be close to zero for a real field.
+		</member>
+		<member name="n" type="int" setter="" getter="get_n">
+			Number of samples per side of the height grid. Set through [method setup].
+		</member>
+		<member name="patch_size" type="float" setter="" getter="get_patch_size">
+			Side length of the simulated patch in meters. Set through [method setup].
+		</member>
+	</members>
+</class>

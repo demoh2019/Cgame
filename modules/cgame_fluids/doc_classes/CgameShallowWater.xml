@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameShallowWater" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Shallow-water heightfield solver using virtual pipes, for floods and puddles.
+	</brief_description>
+	<description>
+		[CgameShallowWater] simulates water on a terrain heightfield with the virtual pipes method (Mei, Decaudin and Hu, 2007). Each cell is connected to its four neighbors by pipes whose flow is driven by the difference of the water surface height (terrain plus depth). Outflow is scaled so a cell never gives away more water than it holds, so depth never becomes negative, and the boundary is closed, so total volume is conserved.
+		[method step] subdivides the requested time step with a CFL condition (a wave must not cross more than half a cell per sub-step, at most 32 sub-steps). Each sub-step consists of two passes (flux update, depth update) that are split by rows and run on the [WorkerThreadPool]; each pass reads the previous pass and writes only its own cells, so results are deterministic.
+		Use [method depth_image] or [method surface_image] to feed a water shader. This class is the native counterpart of the GDScript [code]shallow_water.gd[/code].
+		[codeblock]
+		var water := CgameShallowWater.new()
+		var terrain := PackedFloat32Array()
+		terrain.resize(64 * 64)
+		water.setup(64, 64, 1.0, terrain)
+		water.add_water(Vector2i(10, 10), 2.0)
+		func _physics_process(delta):
+		    water.step(delta)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_water">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="depth" type="float" />
+			<description>
+				Adds [param depth] meters of water to [param cell]. Negative values remove water, and the depth never drops below zero. Cells outside the grid are ignored.
+			</description>
+		</method>
+		<method name="depth_at" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the water depth in [param cell], or [code]0.0[/code] outside the grid.
+			</description>
+		</method>
+		<method name="depth_image" qualifiers="const">
+			<return type="Image" />
+			<description>
+				Returns the water depth of all cells as a single-channel [constant Image.FORMAT_RF] image.
+			</description>
+		</method>
+		<method name="get_depth" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<description>
+				Returns a copy of the water depth of all cells in row-major order.
+			</description>
+		</method>
+		<method name="get_terrain" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<description>
+				Returns a copy of the terrain height of all cells in row-major order.
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="grid_w" type="int" />
+			<param index="1" name="grid_h" type="int" />
+			<param index="2" name="cell" type="float" />
+			<param index="3" name="terrain" type="PackedFloat32Array" />
+			<description>
+				Resets the simulation to a dry [param grid_w] by [param grid_h] grid with cells of edge length [param cell]. [param terrain] holds the ground height of each cell in row-major order; missing entries are treated as zero.
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>
+				Advances the simulation by [param delta] seconds, using as many CFL-limited sub-steps as needed.
+			</description>
+		</method>
+		<method name="surface_image" qualifiers="const">
+			<return type="Image" />
+			<description>
+				Returns the water surface height (terrain plus depth) of all cells as a single-channel [constant Image.FORMAT_RF] image.
+			</description>
+		</method>
+		<method name="terrain_at" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the terrain height of [param cell], or [code]0.0[/code] outside the grid.
+			</description>
+		</method>
+		<method name="total_volume" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the total volume of water in cubic meters (sum of depth times cell area).
+			</description>
+		</method>
+		<method name="velocity_at" qualifiers="const">
+			<return type="Vector2" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the average flow velocity through [param cell] in meters per second, or [constant Vector2.ZERO] for dry cells (depth below 0.0001) and cells outside the grid.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="cell_size" type="float" setter="" getter="get_cell_size">
+			Edge length of a cell in meters. Set through [method setup].
+		</member>
+		<member name="height" type="int" setter="" getter="get_height">
+			Number of cell rows. Set through [method setup].
+		</member>
+		<member name="width" type="int" setter="" getter="get_width">
+			Number of cell columns. Set through [method setup].
+		</member>
+	</members>
+</class>

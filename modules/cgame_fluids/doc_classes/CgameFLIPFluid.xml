@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameFLIPFluid" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		2D FLIP/PIC fluid on a staggered grid with destructible walls and a moving circle obstacle.
+	</brief_description>
+	<description>
+		[CgameFLIPFluid] is a 2D water solver that blends the PIC and FLIP methods (Zhu and Bridson, 2005) on a MAC grid (Harlow and Welch, 1965). Each step integrates particles, pushes overlapping particles apart, transfers velocities to the grid with bilinear weights, projects the grid velocity to be divergence free with over-relaxed Gauss-Seidel sweeps (with optional density-based drift compensation), and transfers the result back with a PIC/FLIP blend. The step structure follows Matthias Müller's Ten Minute Physics tutorial 18 (MIT license).
+		The domain is [member cols] by [member rows] square cells of size [member cell_size]; the outer border is always solid. Individual cells can be made solid or opened again with [method set_solid] (for example a breakable dam), and one circular obstacle can move through the fluid. Coordinates are y-up.
+		Particle collision and the grid-to-particle transfer run on the [WorkerThreadPool] with per-particle ownership of the written data, so results are deterministic. Gauss-Seidel pressure solving, particle-to-grid scattering and push-apart are order dependent and run serially.
+		This class is the native counterpart of the GDScript [code]flip_fluid.gd[/code] and exposes the same API.
+		[codeblock]
+		var sim := CgameFLIPFluid.new()
+		sim.setup(30, 12, 0.1)
+		sim.add_water_block(Vector2(0.2, 0.2), Vector2(1.3, 0.9))
+		func _physics_process(delta):
+		    sim.step(delta)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_water_block">
+			<return type="int" />
+			<param index="0" name="lo" type="Vector2" />
+			<param index="1" name="hi" type="Vector2" />
+			<description>
+				Fills the box from [param lo] to [param hi] with a hexagonal lattice of particles, skipping wall cells. Returns the number of particles added.
+			</description>
+		</method>
+		<method name="average_height" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the mean particle y position, or [code]0.0[/code] if there are no particles.
+			</description>
+		</method>
+		<method name="cell_of" qualifiers="const">
+			<return type="Vector2i" />
+			<param index="0" name="position" type="Vector2" />
+			<description>
+				Returns the grid cell containing [param position], clamped to the grid.
+			</description>
+		</method>
+		<method name="cell_type_at" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the [enum CellType] of [param cell] as classified after the last step. Cells outside the grid are [constant CELL_SOLID].
+			</description>
+		</method>
+		<method name="clear_obstacle">
+			<return type="void" />
+			<description>
+				Removes the moving obstacle.
+			</description>
+		</method>
+		<method name="clear_particles">
+			<return type="void" />
+			<description>
+				Removes all particles. Walls and the obstacle are kept.
+			</description>
+		</method>
+		<method name="divergence_max" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the largest absolute divergence of the current grid velocity over fluid cells.
+			</description>
+		</method>
+		<method name="get_cell_density" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<description>
+				Returns the particle density per cell from the last step. The index of cell [code](i, j)[/code] is [code]i * rows + j[/code].
+			</description>
+		</method>
+		<method name="get_cell_types" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>
+				Returns the [enum CellType] of every cell. The index of cell [code](i, j)[/code] is [code]i * rows + j[/code].
+			</description>
+		</method>
+		<method name="is_wall" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] if [param cell] is a wall. Cells outside the grid count as walls.
+			</description>
+		</method>
+		<method name="kinetic_energy" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the summed kinetic energy of all particles per unit mass.
+			</description>
+		</method>
+		<method name="particle_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of particles.
+			</description>
+		</method>
+		<method name="particle_positions" qualifiers="const">
+			<return type="PackedVector2Array" />
+			<description>
+				Returns a copy of all particle positions.
+			</description>
+		</method>
+		<method name="particle_velocities" qualifiers="const">
+			<return type="PackedVector2Array" />
+			<description>
+				Returns a copy of all particle velocities.
+			</description>
+		</method>
+		<method name="set_obstacle">
+			<return type="void" />
+			<param index="0" name="center" type="Vector2" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="velocity" type="Vector2" default="Vector2(0, 0)" />
+			<description>
+				Places a circular obstacle that moves with [param velocity] every step and also acts as a particle collider.
+			</description>
+		</method>
+		<method name="set_solid">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="solid" type="bool" />
+			<description>
+				Turns [param cell] into a wall or opens it again (destructible barrier). The outer border cannot be changed.
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="cols" type="int" />
+			<param index="1" name="rows" type="int" />
+			<param index="2" name="cell_size" type="float" />
+			<description>
+				Resets the simulation to an empty domain of [param cols] by [param rows] cells (each at least 4) of size [param cell_size]. Removes all particles and the obstacle and rebuilds the border walls.
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<param index="0" name="dt" type="float" />
+			<description>
+				Advances the simulation by [param dt] seconds. Does nothing if [param dt] is not positive or there are no particles.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="cell_size" type="float" setter="" getter="get_cell_size">
+			Edge length of a grid cell. Set through [method setup].
+		</member>
+		<member name="cols" type="int" setter="" getter="get_cols">
+			Number of grid columns. Set through [method setup].
+		</member>
+		<member name="compensate_drift" type="bool" setter="set_compensate_drift" getter="get_compensate_drift" default="true">
+			If [code]true[/code], over-dense cells are decompressed during the pressure solve to keep the particle volume from drifting.
+		</member>
+		<member name="flip_ratio" type="float" setter="set_flip_ratio" getter="get_flip_ratio" default="0.9">
+			Blend between PIC ([code]0[/code], stable and viscous) and FLIP ([code]1[/code], lively and noisy).
+		</member>
+		<member name="fluid_density" type="float" setter="set_fluid_density" getter="get_fluid_density" default="1000.0">
+			Nominal fluid density. Kept for API compatibility; the solver works with relative particle density.
+		</member>
+		<member name="gravity" type="Vector2" setter="set_gravity" getter="get_gravity" default="Vector2(0, -9.81)">
+			Gravitational acceleration.
+		</member>
+		<member name="last_divergence_before" type="float" setter="" getter="get_last_divergence_before">
+			The largest absolute divergence measured at the start of the last pressure solve, before projection.
+		</member>
+		<member name="obstacle_active" type="bool" setter="" getter="get_obstacle_active">
+			[code]true[/code] if an obstacle was placed with [method set_obstacle].
+		</member>
+		<member name="obstacle_center" type="Vector2" setter="" getter="get_obstacle_center">
+			Current center of the obstacle.
+		</member>
+		<member name="obstacle_radius" type="float" setter="" getter="get_obstacle_radius">
+			Radius of the obstacle.
+		</member>
+		<member name="obstacle_velocity" type="Vector2" setter="" getter="get_obstacle_velocity">
+			Velocity of the obstacle.
+		</member>
+		<member name="over_relaxation" type="float" setter="set_over_relaxation" getter="get_over_relaxation" default="1.9">
+			Over-relaxation factor of the Gauss-Seidel pressure solve. Values between [code]1[/code] and [code]2[/code] converge faster.
+		</member>
+		<member name="particle_radius" type="float" setter="set_particle_radius" getter="get_particle_radius">
+			Collision radius of a particle. Defaults to [code]0.3 * cell_size[/code].
+		</member>
+		<member name="pressure_iterations" type="int" setter="set_pressure_iterations" getter="get_pressure_iterations" default="40">
+			Number of Gauss-Seidel sweeps per step.
+		</member>
+		<member name="push_iterations" type="int" setter="set_push_iterations" getter="get_push_iterations" default="2">
+			Number of particle push-apart passes per step.
+		</member>
+		<member name="rows" type="int" setter="" getter="get_rows">
+			Number of grid rows. Set through [method setup].
+		</member>
+	</members>
+	<constants>
+		<constant name="CELL_FLUID" value="0" enum="CellType">
+			The cell contains particles.
+		</constant>
+		<constant name="CELL_AIR" value="1" enum="CellType">
+			The cell is open and contains no particles.
+		</constant>
+		<constant name="CELL_SOLID" value="2" enum="CellType">
+			The cell is a wall or covered by the obstacle.
+		</constant>
+	</constants>
+</class>
