@@ -723,10 +723,18 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 	if not _flank_incremental_running and _flank_replan_remaining > 0.0 and _flank_target_id_cached == target_id and \
 			here.distance_squared_to(_flank_here_cached) <= 3.24 and \
 			target.distance_squared_to(_flank_target_cached) <= 1.0:
-		# New engine/portable pools expose current ownership. After an expiring
-		# lease or server-driven release, do not follow an unowned cached slot.
-		# Older native binaries retain their original cache behavior.
-		if flank_reservations == null or not flank_reservations.has_method("get_actor_slot") \
+		# One native/portable O(1) heartbeat validates the exact server-owned
+		# claim, keeps its lease alive and atomically marks occupancy as the
+		# infected actually reaches (or leaves) the physical flank spot.
+		# A preempted/expired handle fails and forces fresh EQS planning.
+		if flank_reservations != null and _flank_slot_id_cached > 0 \
+				and flank_reservations.has_method("refresh_claim"):
+			var at_slot: bool = here.distance_squared_to(_flank_goal_cached) <= 1.0
+			if flank_reservations.refresh_claim(_flank_slot_id_cached, id, 1.5, at_slot):
+				return _flank_goal_cached
+		# Older native engines retain their owner-only query, never a client
+		# claim; a portable pool also exposes the new heartbeat above.
+		elif flank_reservations == null or not flank_reservations.has_method("get_actor_slot") \
 				or int(flank_reservations.get_actor_slot(id)) == _flank_slot_id_cached:
 			return _flank_goal_cached
 	# Pending query results are tied to the original actor/target context.

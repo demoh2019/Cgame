@@ -106,12 +106,54 @@ func _exercise_priority(t, pool) -> void:
 	t.eq(pool.get_claim_count(), 0, "expiry releases both claims and occupancy")
 
 
+## Run identical portable and native Smart Object heartbeat semantics.
+func _exercise_heartbeat(t, pool) -> void:
+	if not pool.has_method("refresh_claim"):
+		t.check(true, "older Cgame binaries retain separate lease/occupancy APIs")
+		return
+	t.eq(pool.try_claim_first_priority(PackedInt64Array([101]), 1, 1.0, 0),
+		101, "first infected owns a short claimed flank lease")
+	pool.advance_time(0.8)
+	t.check(bool(pool.refresh_claim(101, 1, 1.5, true)),
+		"owned smart slot is atomically renewed and marked occupied")
+	t.check(pool.is_slot_occupied(101), "arriving at the spot marks it in use")
+	t.eq(pool.try_claim_first_priority(PackedInt64Array([101]), 2, 1.0, 3),
+		0, "elite cannot preempt a currently occupied flank position")
+	pool.advance_time(1.0)
+	t.eq(int(pool.get_owner(101)), 1, "lease persists past original expiry")
+	for bad_lease in [0.0, -0.1, NAN, INF, 5.01]:
+		t.check(not bool(pool.refresh_claim(101, 1, bad_lease, false)),
+			"invalid heartbeat lease cannot mutate occupancy or expiry")
+	t.check(not bool(pool.refresh_claim(101, 3, 1.0, false)),
+		"wrong actor cannot refresh another agent's slot")
+	t.check(not bool(pool.refresh_claim(102, 1, 1.0, false)),
+		"wrong cached slot identity cannot renew another lease")
+	t.check(pool.is_slot_occupied(101),
+		"invalid heartbeat calls must not release occupied positions")
+	t.check(bool(pool.refresh_claim(101, 1, 0.75, false)),
+		"walking away from a spot returns it to claimed-but-preemptible state")
+	t.eq(pool.try_claim_first_priority(PackedInt64Array([101]), 2, 1.0, 3),
+		101, "higher-priority agent can now take a released-to-claimed spot")
+	t.eq(int(pool.get_actor_slot(1)), 0,
+		"preempted agent loses indexed ownership immediately")
+	t.check(not bool(pool.refresh_claim(101, 1, 1.0, true)),
+		"stale cached heartbeat cannot recover a preempted lease")
+	t.eq(int(pool.get_owner(101)), 2, "new owner remains authoritative")
+	pool.advance_time(1.0)
+	t.eq(int(pool.get_owner(101)), 0, "forgotten claimed spot expires")
+	t.check(not bool(pool.refresh_claim(101, 2, 1.0, true)),
+		"expired reservation cannot be recreated by heartbeat")
+
+
 func run(t) -> void:
 	t.current = "Smart Object slot allocator portable reference"
 	_exercise(t, Portable.new())
 
 	t.current = "portable Smart Object priority claims and occupancy"
 	_exercise_priority(t, Portable.new())
+
+	t.current = "portable Smart Object atomic cached claim heartbeats"
+	_exercise_heartbeat(t, Portable.new())
 
 	t.current = "native C++ reservation table matches portable API"
 	if ClassDB.class_exists("SmartObjectSlotReservations"):
@@ -120,6 +162,8 @@ func run(t) -> void:
 		if native != null:
 			_exercise(t, native)
 			_exercise_priority(t, native)
+			t.current = "native Smart Object cached claim heartbeat parity"
+			_exercise_heartbeat(t, native)
 	else:
 		t.check(true, "stock Godot executes the same deterministic fallback")
 
@@ -242,6 +286,59 @@ func run(t) -> void:
 		t.eq(pool.get_claim_count(), 0, "abandoned flank reservations release when a zombie stops chasing")
 	else:
 		t.check(true, "legacy Godot keeps existing direct pursuit without native EQS")
+
+	t.current = "actual infected cached flank goal refreshes ownership and true occupancy"
+	if ClassDB.class_exists("EnvironmentQuery3D"):
+		for native_mode in [false, true]:
+			if native_mode and not ClassDB.class_exists("SmartObjectSlotReservations"):
+				continue
+			var lease_pool = _pool(native_mode)
+			if not lease_pool.has_method("refresh_claim"):
+				continue
+			var agent := Zombie.new(1601, "walker", Vector3.ZERO)
+			agent.target_id = 77
+			agent.flank_reservations = lease_pool
+			var leased_slot: int = 77 * 16 + 1
+			t.eq(int(lease_pool.try_claim_first(PackedInt64Array([leased_slot]),
+				agent.id, 1.0)), leased_slot,
+				"real infected begins with server-owned ring slot reservation")
+			# Seed the already-planned path: only a cached path can exercise the
+			# cheap heartbeat, without another native EQS query.
+			agent._flank_goal_cached = Vector2(0.5, 0.0)
+			agent._flank_here_cached = Vector2.ZERO
+			agent._flank_target_cached = Vector2(6.0, 0.0)
+			agent._flank_target_id_cached = 77
+			agent._flank_slot_id_cached = leased_slot
+			agent._flank_replan_remaining = 0.2
+			agent.flank_replan_allowed = false
+			var target_pos := Vector2(6.0, 0.0)
+			t.eq(agent._flank_goal(Vector2(0.5, 0.0), target_pos),
+				Vector2(0.5, 0.0),
+				"cached flank goal remains usable even when EQS replans are budget-denied")
+			t.check(lease_pool.is_slot_occupied(leased_slot),
+				"reaching cached flank spot marks the actual native smart slot occupied")
+			t.eq(int(lease_pool.try_claim_first_priority(PackedInt64Array([leased_slot]),
+				1602, 1.0, 3)), 0,
+				"elite cannot steal the occupied spot during an intervening cached tick")
+			lease_pool.advance_time(0.8)
+			t.eq(agent._flank_goal(Vector2(0.5, 0.0), target_pos),
+				Vector2(0.5, 0.0),
+				"cache heartbeat renews lease instead of triggering a tactical requery")
+			lease_pool.advance_time(0.8)
+			t.eq(int(lease_pool.get_owner(leased_slot)), agent.id,
+				"renewed cached goal stays owned beyond the original lease deadline")
+			t.eq(agent._flank_goal(Vector2(1.7, 0.0), target_pos),
+				Vector2(0.5, 0.0),
+				"moving away from a cached spot can still retain a valid destination")
+			t.check(not lease_pool.is_slot_occupied(leased_slot),
+				"the same cached heartbeat makes a vacated physical slot preemptible")
+			t.eq(int(lease_pool.try_claim_first_priority(PackedInt64Array([leased_slot]),
+				1602, 1.0, 3)), leased_slot,
+				"higher-priority infected can now claim the abandoned pending spot")
+			t.eq(agent._flank_goal(Vector2(0.5, 0.0), target_pos), target_pos,
+				"stale cached goal is discarded when its smart-object claim was preempted")
+	else:
+		t.check(true, "stock Godot has no EQS cache; uses existing direct pursuit")
 
 	t.current = "source wiring never lets a client claim or cause an attack"
 	var code: String = (GameServer as Script).source_code
