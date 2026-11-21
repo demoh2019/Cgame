@@ -174,6 +174,17 @@ func run(t) -> void:
 			t.check(true, "older Cgame binary keeps the position-only EQS fallback")
 		var first_spot: Vector2 = first._flank_goal(here, target)
 		var second_spot: Vector2 = second._flank_goal(here, target)
+		if first._flank_query != null and first._flank_query.has_method("query_random_best_positions"):
+			var preferred: PackedVector3Array = first._flank_query.call(
+				"query_random_best_positions", 25, first.id)
+			t.eq(preferred.size(), 1,
+				"server-owned smart slot AI computes one near-best seeded preference")
+			if preferred.size() == 1:
+				t.check(first_spot.distance_to(Vector2(preferred[0].x, preferred[0].z)) < 0.001,
+					"first unoccupied lease uses the native seeded preference")
+			var second_choice: PackedVector3Array = second._flank_query.call(
+				"query_random_best_positions", 25, second.id)
+			t.eq(second_choice.size(), 1, "second agent can independently seed a flank preference")
 		t.check(first_spot.distance_to(target) < 2.5 and first_spot.distance_to(target) > 2.3,
 			"first zombie claims a valid EQS ring position")
 		t.check(second_spot.distance_to(target) < 2.5 and second_spot.distance_to(target) > 2.3,

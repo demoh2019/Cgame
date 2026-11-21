@@ -325,3 +325,37 @@ This is a lightweight Cgame sampling primitive, **not** an implementation
 of Unreal's particular node. It is inspired by radial point scatter in
 Unreal Dataflow/PCG:
 https://dev.epicgames.com/documentation/unreal-engine/node-reference/Dataflow/RadialScatterPoints
+
+
+## Unreal-style EQS Random Best 5% / 25% without full sorting
+
+`query_random_best_positions(best_percent, seed)` returns an array of zero or
+one `Vector3` candidate. Unlike always choosing the highest-scoring item,
+this run mode selects **one deterministic pseudorandom candidate** with score
+at least `max_score * (1 - best_percent / 100)`. The official Unreal EQS
+behavior tree service similarly supports a Random Best 5% (95–100% of max)
+and Random Best 25% (75–100% of max) mode.
+
+The engine uses the same filters and weighted scoring as `query()` but
+avoids its full sort and intermediate dictionary allocations: pass one
+computes the maximum valid score, pass two selects the largest SplitMix64
+hash of the caller-owned seed and original candidate index. Cost is
+O(N) candidate scoring plus O(1) scratch memory. The selection is repeatable
+for identical input, and **does not touch global or server RNG state**.
+The percent argument is an integer between 0 and 100; 0 chooses only
+best-score ties and 100 chooses from every valid candidate. The return
+array is empty when nothing passes (never an unvalidated fallback).
+
+Albion After's regular infected use the 25% random-best selection for
+their native EQS tactical flank goal, keyed by the stable infected ID.
+This replaces the old top-3 allocation/ranking for **unleased** flank
+decisions. The real server's Smart Object branch also tries the seeded
+Random Best 25% point first, then retains **every original ranked slot**
+as a collision-free fallback. The authoritative slot manager still enforces
+priorities, ownership, lease expiry and occupancy; no seeded choice can
+create or override a lease. Brutes and bosses still pursue directly. Older Cgame builds keep the
+old top-3 path, and stock Godot still follows direct chase. Directional
+side-flank filters and cache invalidation remain unchanged.
+
+Official reference:
+https://dev.epicgames.com/documentation/unreal-engine/unreal-engine-behavior-tree-node-reference-services

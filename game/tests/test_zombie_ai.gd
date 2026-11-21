@@ -155,6 +155,17 @@ func run(t) -> void:
 			"native top-3 flanking keeps a deterministic circle around survivor")
 		var owned_query: Resource = flanker._flank_query
 		t.check(owned_query != null, "one native query resource is cached per infected")
+		if owned_query != null and owned_query.has_method("query_random_best_positions"):
+			var random_goal: PackedVector3Array = owned_query.call(
+				"query_random_best_positions", 25, flanker.id)
+			t.eq(random_goal.size(), 1,
+				"native Random Best 25% returns exactly one tactical flank")
+			if random_goal.size() == 1:
+				t.check(Vector2(random_goal[0].x, random_goal[0].z).distance_to(
+					flank_first) < 0.001,
+					"unleased infected actually use the native random-best selection")
+			t.eq(owned_query.call("query_random_best_positions", 25, flanker.id),
+				random_goal, "same actor ID and query produce a replay-stable flank")
 		if owned_query != null and owned_query.has_method("set_direction_axis"):
 			var candidate_side: Vector2 = (flank_first - prey).normalized()
 			t.check(candidate_side.dot(prey.normalized()) >= -0.251,
@@ -180,6 +191,11 @@ func run(t) -> void:
 			"expired cache still reuses the same native query")
 	else:
 		t.eq(flank_first, prey, "stock Godot directly chases without native EQS")
+	# A shared lease pool must bypass Random Best entirely: every eligible
+	# ranked slot must remain available for authoritative ownership attempts.
+	if ClassDB.class_exists("EnvironmentQuery3D") and flanker._flank_query != null:
+		t.check(flanker._flank_query.has_method("query_top_positions"),
+			"leased fallback keeps the native ordered top-K API available")
 	t.eq(flanker._flank_goal(Vector2.ZERO, Vector2(2.0, 0.0)),
 		Vector2(2.0, 0.0), "close melee pursuit bypasses expensive flank scoring")
 	t.eq(flanker._flank_goal(Vector2.ZERO, Vector2(60.0, 0.0)),

@@ -29,6 +29,12 @@
 			<param index="1" name="min_separation" type="float" />
 			<description>Returns up to [param count] ranked positions while requiring pairwise separation greater than or equal to [param min_separation]. Scores all candidates first, then greedily selects from the stable score/index order; a rejected nearby candidate does not count toward the requested limit. Uses XZ-only spacing when [member horizontal_only] is true and respects [member max_results]. Count must be 1–64 and separation finite and nonnegative. No navigation or geometry validation is performed.</description>
 		</method>
+		<method name="query_random_best_positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<param index="0" name="best_percent" type="int" />
+			<param index="1" name="seed" type="int" />
+			<description>Deterministically selects at most one position, analogous to Unreal EQS's Single Random Item from Best 5% or 25% run modes. First find the maximum score among candidates passing all the same distance, height, directional, threat and occupancy tests as [method query], then uniformly mix [param seed] with each eligible source index and select the strongest hash. Eligible positions must score at least [code]best_score * (1 - best_percent / 100)[/code]. [param best_percent] must be 0–100; 0 accepts only maximum-scoring ties, 100 accepts every valid candidate. Returns an empty array for invalid percent or when no position passes the tests. The chosen point is stable for the same seed, candidate order and query parameters, without consuming gameplay RNG. The result is limited to 0 or 1 element regardless of [member max_results]. Complexity is O(N) scoring with two passes and O(1) scratch storage; it performs no physics or navigation checks.</description>
+		</method>
 		<method name="query_top_positions" qualifiers="const">
 			<return type="PackedVector3Array" />
 			<param index="0" name="count" type="int" />
