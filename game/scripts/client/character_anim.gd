@@ -5,6 +5,7 @@ extends RefCounted
 const UP := Vector3.UP
 const CombatAnimationPriority = preload("res://scripts/client/combat_animation_priority.gd")
 static var _native_tier_planner: Object = null
+const NEAR_CAMERA_VISIBILITY_RADIUS := 3.0 # Matches the animation LOD close-camera safeguard.
 
 # --- Animation LOD / crowd budget (Unreal URO / Unity Animator Culling) --------------------------------------------------
 
@@ -270,7 +271,7 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 		distances.append(distance)
 		# Use the actual camera, but keep close actors conservative: their
 		# limbs may cross the frustum while the root point is outside.
-		var visible: bool = model.is_visible_in_tree() and (distance < 8.0 or \
+		var visible: bool = model.is_visible_in_tree() and (distance < NEAR_CAMERA_VISIBILITY_RADIUS or \
 			camera.is_position_in_frustum(model.global_position + Vector3.UP))
 		visible_mask.append(1 if visible else 0)
 		# Combat urgency is visual-only, and the native mixer controller
