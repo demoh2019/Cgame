@@ -37,6 +37,62 @@ TEST_FORCE_LINK(test_geometry_2d)
 
 namespace TestGeometry2D {
 
+TEST_CASE("[CoreBind] Geometry2D batched nearest neighbors are stable and bounded") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+	PackedVector2Array points;
+	points.push_back(Vector2(0, 0));
+	points.push_back(Vector2(2, 0));
+	points.push_back(Vector2(-2, 0));
+	points.push_back(Vector2(0, 4));
+	points.push_back(Vector2(50, 50));
+
+	TypedArray<PackedInt32Array> neighbors = api->get_nearest_neighbors(points, 2, (real_t)4.1);
+	REQUIRE(neighbors.size() == 5);
+	PackedInt32Array first = neighbors[0];
+	REQUIRE(first.size() == 2);
+	CHECK(first[0] == 1); // Equal distances choose lower input index.
+	CHECK(first[1] == 2);
+	PackedInt32Array second = neighbors[1];
+	REQUIRE(second.size() == 2);
+	CHECK(second[0] == 0);
+	CHECK(second[1] == 2);
+	PackedInt32Array third = neighbors[3];
+	REQUIRE(third.size() == 1);
+	CHECK(third[0] == 0);
+	PackedInt32Array isolated = neighbors[4];
+	CHECK(isolated.is_empty());
+
+	// Exact-radius inclusion and equal-coordinate neighbors at distinct indices.
+	PackedVector2Array duplicate_points;
+	duplicate_points.push_back(Vector2(1, 1));
+	duplicate_points.push_back(Vector2(1, 1));
+	duplicate_points.push_back(Vector2(2, 1));
+	neighbors = api->get_nearest_neighbors(duplicate_points, 2, (real_t)0.0);
+	REQUIRE(neighbors.size() == 3);
+	first = neighbors[0];
+	REQUIRE(first.size() == 1);
+	CHECK(first[0] == 1);
+	isolated = neighbors[2];
+	CHECK(isolated.is_empty());
+
+	neighbors = api->get_nearest_neighbors(points, 0, (real_t)5.0);
+	REQUIRE(neighbors.size() == 5);
+	for (int i = 0; i < 5; i++) {
+		PackedInt32Array item = neighbors[i];
+		CHECK(item.is_empty());
+	}
+	CHECK(api->get_nearest_neighbors(PackedVector2Array(), 4, (real_t)100.0).is_empty());
+
+	ERR_PRINT_OFF;
+	CHECK(api->get_nearest_neighbors(points, 33, (real_t)5.0).is_empty());
+	CHECK(api->get_nearest_neighbors(points, 2, (real_t)-1.0).is_empty());
+	PackedVector2Array oversized;
+	oversized.resize(4097);
+	CHECK(api->get_nearest_neighbors(oversized, 2, (real_t)5.0).is_empty());
+	ERR_PRINT_ON;
+}
+
 TEST_CASE("[CoreBind] Geometry2D nearest point among independent segments") {
 	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
 	REQUIRE(api != nullptr);
