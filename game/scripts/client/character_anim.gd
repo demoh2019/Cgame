@@ -50,6 +50,67 @@ static func assign_tiers(distances: Array, budget: int) -> PackedInt32Array:
 	return out
 
 
+## Stable crowd tiers suppress threshold flip-flopping across render frames.
+## `previous` is aligned 1:1 to the current list of models. No process-wide
+## cache is kept: streamed actors can despawn/reorder without stale lookups.
+const TIER_BOUNDARIES := [22.0, 38.0, 60.0, 90.0]
+const TIER_HYSTERESIS_METERS := 1.5
+
+
+static func plan_crowd_tiers_stable(distances: PackedFloat64Array, priority_flags: PackedByteArray,
+		previous: PackedInt32Array, full_slots: int, priority_slots: int,
+		hysteresis_meters: float = TIER_HYSTERESIS_METERS,
+		prefer_native: bool = true) -> PackedInt32Array:
+	var count: int = distances.size()
+	if count != priority_flags.size() or count != previous.size() or count > 16384 \
+			or full_slots < 0 or full_slots > 256 or priority_slots < 0 or priority_slots > 256 \
+			or not is_finite(hysteresis_meters) or hysteresis_meters < 0.0 or hysteresis_meters > 4.0:
+		return PackedInt32Array()
+	for i in count:
+		if not is_finite(distances[i]) or distances[i] < 0.0 or previous[i] < 0 or previous[i] > 4:
+			return PackedInt32Array()
+	if prefer_native and ClassDB.class_exists("CrowdAnimationTierPlanner"):
+		if _native_tier_planner == null:
+			_native_tier_planner = ClassDB.instantiate("CrowdAnimationTierPlanner")
+		if _native_tier_planner != null and _native_tier_planner.has_method("plan_tiers_stable"):
+			var native_tiers: PackedInt32Array = _native_tier_planner.call(
+				"plan_tiers_stable", distances, priority_flags, previous, full_slots,
+				priority_slots, hysteresis_meters)
+			if native_tiers.size() == count:
+				return native_tiers
+	# Identical math and deterministic tie-breaking in stock Godot / old forks.
+	var tiers := PackedInt32Array()
+	tiers.resize(count)
+	var full_order: Array[int] = []
+	var priority_order: Array[int] = []
+	for i in count:
+		var tier: int = previous[i]
+		var distance: float = distances[i]
+		while tier < 4 and distance >= TIER_BOUNDARIES[tier] + hysteresis_meters:
+			tier += 1
+		while tier > 0 and distance < TIER_BOUNDARIES[tier - 1] - hysteresis_meters:
+			tier -= 1
+		tiers[i] = maxi(1, tier) # Full IK is awarded only from a finite shared budget.
+		if distance < 22.0 or (previous[i] == 0 and distance < 22.0 + hysteresis_meters):
+			full_order.append(i)
+		if priority_flags[i] != 0 and (
+				distance < 90.0 or (previous[i] <= 1 and distance < 90.0 + hysteresis_meters)):
+			priority_order.append(i)
+	full_order.sort_custom(func(a: int, b: int) -> bool:
+		var da: float = distances[a] - (hysteresis_meters if previous[a] == 0 else 0.0)
+		var db: float = distances[b] - (hysteresis_meters if previous[b] == 0 else 0.0)
+		return da < db if da != db else a < b)
+	priority_order.sort_custom(func(a: int, b: int) -> bool:
+		var da: float = distances[a] - (hysteresis_meters if previous[a] <= 1 else 0.0)
+		var db: float = distances[b] - (hysteresis_meters if previous[b] <= 1 else 0.0)
+		return da < db if da != db else a < b)
+	for i in mini(full_slots, full_order.size()):
+		tiers[full_order[i]] = 0
+	for i in mini(priority_slots, priority_order.size()):
+		tiers[priority_order[i]] = mini(tiers[priority_order[i]], 1)
+	return tiers
+
+
 ## Batch-selects pose tiers. Native Cgame does bounded top-K on numeric
 ## arrays; stock Godot uses an equivalent deterministic GDScript fallback.
 static func plan_crowd_tiers(distances: PackedFloat64Array, priority_flags: PackedByteArray,
@@ -246,7 +307,11 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 	var cam: Vector3 = camera.global_position
 	var distances := PackedFloat64Array()
 	var priority_mask := PackedByteArray()
+	var previous_tiers := PackedInt32Array()
 	for model in models:
+		# The live CharacterModel owns its current tier. This remains correct
+		# when WorldStreamer changes the array order or despawns characters.
+		previous_tiers.append(int(model.get("_lod_tier")))
 		var distance: float = model.global_position.distance_to(cam)
 		distances.append(distance)
 		# Combat urgency is visual-only, and the native mixer controller
@@ -256,8 +321,8 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 			and distance < 90.0 and camera.is_position_in_frustum(
 				model.global_position + Vector3.UP)
 		priority_mask.append(1 if critical else 0)
-	var tiers: PackedInt32Array = plan_crowd_tiers(distances, priority_mask,
-		full_budget(quality), CombatAnimationPriority.slots(quality))
+	var tiers: PackedInt32Array = plan_crowd_tiers_stable(distances, priority_mask,
+		previous_tiers, full_budget(quality), CombatAnimationPriority.slots(quality))
 	if tiers.size() != models.size():
 		return
 	for i in models.size():
