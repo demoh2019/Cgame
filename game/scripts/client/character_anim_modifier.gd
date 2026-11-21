@@ -132,7 +132,7 @@ func _process_modification_with_delta(delta: float) -> void:
 		# A quarter-weight bounded EWMA avoids reallocating full-IK slots
 		# just because one terrain query happened to be unusually slow.
 		estimated_full_pose_us = elapsed_us if estimated_full_pose_us == 0 else \
-			(3 * estimated_full_pose_us + elapsed_us + 2) / 4
+			int((3 * estimated_full_pose_us + elapsed_us + 2) / 4)
 
 
 func _foot_ik(skeleton: Skeleton3D, delta: float) -> void:
