@@ -46,3 +46,16 @@ Gameplay state stays in `survival_state.gd`. Game-specific nodes are in the game
 - Safe and contested regions, loot rules, PvP, guilds and territories.
 - Tiered professions, gear durability, player markets and settlements.
 - More post-apocalyptic simulation: weather, infection, building, vehicles.
+
+
+## Visual significance LOD (Unreal-inspired)
+
+Days After adds 96 small **non-colliding decorative rubble fragments** around
+the ruined area. `debris_lod.gd` updates at 5 Hz and displays up to 18 nearby
+fragments within 26 meters, with a 2-meter retention bonus to reduce flicker.
+The new native Cgame API `SignificanceBudgetPlanner.select_world_priority_stable()`
+supports up to 16 viewers; this game supplies the local player. A deterministic
+GDScript fallback works on stock Godot. This is presentation-only LOD: no AI,
+combat, resource pickup, collision, or network authority is skipped. The
+headless smoke test checks budgeted visibility, distance culling and restoration.
+Actual performance gains require profiling.

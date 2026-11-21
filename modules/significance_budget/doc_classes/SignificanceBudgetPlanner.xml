@@ -58,6 +58,18 @@
 			<param index="5" name="hysteresis" type="float" default="0.0" />
 			<description>Selects at most [param budget] indices by distance with optional retention hysteresis. Current candidates whose stable IDs appear in [param retained_ids] receive a discount in their ranking distance, but cannot survive outside [param max_distance]. Equal adjusted distances compare raw distance, then stable ID, then input index. All candidates must have finite nonnegative distances, matching unique positive IDs, at most 128 retained IDs, a budget of 0 to 128, a range of 0 to 1,000,000 and hysteresis between 0 and the range. Invalid input returns an empty result without modifying any state. Designed for temporally stable visual, audio and animation budgets, not authoritative gameplay.</description>
 		</method>
+		<method name="select_world_priority_stable" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="1" name="viewers" type="PackedVector3Array" />
+			<param index="2" name="priorities" type="PackedByteArray" />
+			<param index="3" name="ids" type="PackedInt64Array" />
+			<param index="4" name="retained_ids" type="PackedInt64Array" />
+			<param index="5" name="budget" type="int" />
+			<param index="6" name="max_distance" type="float" default="1000.0" />
+			<param index="7" name="hysteresis" type="float" default="0.0" />
+			<description>Ranks nearest-of-1-to-16 viewers with strict priorities 0 to 3 and retained positive unique IDs. A within-priority distance bonus reduces presentation flicker without extending the inclusive hard range. Ties use raw distance, ID and input order. At most 16,384 candidates, 128 retained IDs and 128 selection slots are supported. Invalid inputs fail closed, without mutating scene nodes or authoritative simulation.</description>
+		</method>
 		<method name="select_world" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="positions" type="PackedVector3Array" />

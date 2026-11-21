@@ -53,6 +53,14 @@ public:
 			const PackedInt64Array &p_ids, const PackedInt64Array &p_retained_ids,
 			int p_budget, double p_max_distance, double p_hysteresis = 0.0) const;
 
+	// Nearest-viewer priority ranking with stable-ID retention. The distance
+	// bonus never extends the world range or overrides importance tiers.
+	PackedInt32Array select_world_priority_stable(const PackedVector3Array &p_positions,
+			const PackedVector3Array &p_viewers, const PackedByteArray &p_priorities,
+			const PackedInt64Array &p_ids, const PackedInt64Array &p_retained_ids,
+			int p_budget, double p_max_distance = 1000.0,
+			double p_hysteresis = 0.0) const;
+
 	// Convenience for multi-viewer worlds. Only candidates within inclusive
 	// p_max_distance of at least one viewer are eligible.
 
