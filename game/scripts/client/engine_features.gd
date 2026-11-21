@@ -58,3 +58,57 @@ static func radial_push(parent: Node, at: Vector3, radius: float, strength: floa
 	field.global_position = at
 	field.call("fire")
 	return true
+
+## The native engine owns the live tag container. Snapshot states are read-only
+## hints for visuals/tools; server combat authority is never inferred from tags.
+static func runtime_tags(kind: String, state: Dictionary) -> PackedStringArray:
+	var tags := PackedStringArray()
+	if kind == "player":
+		tags.append("Runtime.Life.Alive" if bool(state.get("alive", false)) else "Runtime.Life.Dead")
+		if bool(state.get("mounted", false)):
+			tags.append("Runtime.Movement.Mounted")
+		if bool(state.get("crouching", false)):
+			tags.append("Runtime.Movement.Crouching")
+		if bool(state.get("outlaw", false)):
+			tags.append("Runtime.Status.Outlaw")
+		if bool(state.get("flare_lit", false)):
+			tags.append("Runtime.Item.FlareLit")
+	elif kind == "zombie":
+		tags.append("Runtime.Life.Alive" if float(state.get("hp", 0.0)) > 0.0 else "Runtime.Life.Dead")
+		if int(state.get("state", 0)) >= 2:
+			tags.append("Runtime.Combat.Alert")
+		if bool(state.get("elite", false)):
+			tags.append("Runtime.Rank.Elite")
+		if bool(state.get("raid_boss", false)):
+			tags.append("Runtime.Rank.RaidBoss")
+		if bool(state.get("raid_enraged", false)):
+			tags.append("Runtime.Status.Enraged")
+		if bool(state.get("melee_blocked", false)):
+			tags.append("Runtime.Status.Blocked")
+		if float(state.get("stagger_seconds", 0.0)) > 0.0:
+			tags.append("Runtime.Status.Staggered")
+		if float(state.get("snared_seconds", 0.0)) > 0.0:
+			tags.append("Runtime.Status.Snared")
+		if float(state.get("sunder_seconds", 0.0)) > 0.0:
+			tags.append("Runtime.Status.Sundered")
+		if int(state.get("resolve_stacks", 0)) >= 2 and float(state.get("resolve_seconds", 0.0)) > 0.0:
+			tags.append("Runtime.Status.Resolve")
+	return tags
+
+
+## Replaces one namespace atomically, preserving static Enemy/Player identity.
+## Old engine binaries simply retain the established rendering paths.
+static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) -> void:
+	if node == null or not node.has_meta("tags"):
+		return
+	var container: Object = node.get_meta("tags") as Object
+	if container != null and container.has_method("replace_tag_branch"):
+		container.call("replace_tag_branch", StringName("Runtime"), runtime_tags(kind, snapshot))
+
+
+static func runtime_has(node: Node, tag: String, fallback: bool = false) -> bool:
+	if node != null and node.has_meta("tags"):
+		var container: Object = node.get_meta("tags") as Object
+		if container != null and container.has_method("replace_tag_branch") and container.has_method("has_tag"):
+			return bool(container.call("has_tag", StringName(tag), true))
+	return fallback
