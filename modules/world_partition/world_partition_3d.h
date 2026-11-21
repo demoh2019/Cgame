@@ -109,6 +109,7 @@ class WorldPartition3D : public Node3D {
 	};
 	HashMap<String, NavigationAgentEntry> navigation_agents;
 	static constexpr int MAX_NAVIGATION_AGENTS = 128;
+	static constexpr int MAX_PATH_SEARCH_CELLS = 512; // Bound synchronous grid route queries.
 	uint64_t navigation_schedule_frame = 0;
 	bool navigation_schedule_valid = false;
 	HashSet<String> navigation_selected; // Winners chosen at physics-frame start.
@@ -223,6 +224,9 @@ public:
 	void remove_cell_scene(const Vector2i &p_cell);
 	void clear_cell_scenes();
 	int get_configured_cell_count() const;
+	// Deterministic shortest cardinal route through registered cell scenes.
+	// When p_loaded_only is true, every path cell must be instantiated.
+	Array find_cell_path(const Vector2i &p_from, const Vector2i &p_to, bool p_loaded_only = false) const;
 
 	bool pin_cell(const Vector2i &p_cell);
 	void unpin_cell(const Vector2i &p_cell);
