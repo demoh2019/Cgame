@@ -75,6 +75,39 @@ real_t AISimulationLOD2D::get_interval(real_t p_distance, real_t p_near_distance
 	return far_interval;
 }
 
+real_t AISimulationLOD2D::get_hysteretic_interval(real_t p_distance, real_t p_near_distance, real_t p_far_distance,
+		real_t p_previous_interval, real_t p_hysteresis, bool p_urgent) const {
+	const real_t nominal = get_interval(p_distance, p_near_distance, p_far_distance, p_urgent);
+	// Invalid or uninitialized previous states use the normal policy. Reject
+	// overlapping bands so transitions remain deterministic at every boundary.
+	if (p_urgent || nominal == near_interval || !Math::is_finite(p_distance) ||
+			!Math::is_finite(p_near_distance) || !Math::is_finite(p_far_distance) ||
+			p_near_distance < 0.0 || p_far_distance <= p_near_distance ||
+			!Math::is_finite(p_hysteresis) || p_hysteresis <= 0.0 ||
+			p_hysteresis > 256.0 || p_hysteresis * 2.0 > p_far_distance - p_near_distance ||
+			!Math::is_finite(p_previous_interval)) {
+		return nominal;
+	}
+	const bool was_near = Math::is_equal_approx(p_previous_interval, near_interval);
+	const bool was_medium = Math::is_equal_approx(p_previous_interval, medium_interval);
+	const bool was_far = Math::is_equal_approx(p_previous_interval, far_interval);
+	if (!was_near && !was_medium && !was_far) {
+		return nominal;
+	}
+	// Never delay a scan once an eligible viewer enters the exact game-owned
+	// near threshold (p_distance <= p_near_distance is handled above).
+	if (was_near && p_distance <= p_near_distance + p_hysteresis) {
+		return near_interval;
+	}
+	if (was_medium && p_distance <= p_far_distance + p_hysteresis) {
+		return medium_interval;
+	}
+	if (was_far && p_distance > p_far_distance - p_hysteresis) {
+		return far_interval;
+	}
+	return nominal;
+}
+
 real_t AISimulationLOD2D::get_staggered_interval(int64_t p_agent_id, real_t p_distance, real_t p_near_distance, real_t p_far_distance, bool p_urgent) const {
 	const real_t interval = get_interval(p_distance, p_near_distance, p_far_distance, p_urgent);
 	// Never stagger urgent/near AI; invalid identifiers must not throttle AI.
@@ -92,5 +125,6 @@ void AISimulationLOD2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_medium_interval"), &AISimulationLOD2D::get_medium_interval);
 	ClassDB::bind_method(D_METHOD("get_far_interval"), &AISimulationLOD2D::get_far_interval);
 	ClassDB::bind_method(D_METHOD("get_interval", "distance", "near_distance", "far_distance", "urgent"), &AISimulationLOD2D::get_interval, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("get_hysteretic_interval", "distance", "near_distance", "far_distance", "previous_interval", "hysteresis", "urgent"), &AISimulationLOD2D::get_hysteretic_interval, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_staggered_interval", "agent_id", "distance", "near_distance", "far_distance", "urgent"), &AISimulationLOD2D::get_staggered_interval, DEFVAL(false));
 }
