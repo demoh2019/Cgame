@@ -236,7 +236,8 @@ static func _validate_holds(source: Variant, sim) -> Variant:
 ## Refuse a snapshot from another seed or terrain layout, including overlapping
 ## terrain obstacles, neighboring restored walls and impossible owner quotas.
 static func validate(data: Variant, sim) -> Dictionary:
-	if typeof(data) != TYPE_DICTIONARY or data.size() not in [3, 4, 5]:
+	# version, world_seed, barricades are required; outposts, market, farm, guild_banks, alliances are optional.
+	if typeof(data) != TYPE_DICTIONARY or data.size() < 3 or data.size() > 8:
 		return {}
 	for key in data.keys():
 		if not str(key) in ["version", "world_seed", "barricades", "outposts", "market", "farm", "guild_banks", "alliances"]:
@@ -269,7 +270,12 @@ static func validate(data: Variant, sim) -> Dictionary:
 	var ids: Dictionary = {}
 	var owner_counts: Dictionary = {}
 	for value in source:
-		if typeof(value) != TYPE_DICTIONARY or value.size() not in [5, 6, 7, 9]:
+		if typeof(value) != TYPE_DICTIONARY or value.size() not in [5, 6, 7, 9, 11]:
+			return {}
+		# House-building checkpoints add the piece kind and the door state.
+		if value.size() == 11 and not (value.has("piece") and value.has("open") and value.has("tier") and value.has("yaw")):
+			return {}
+		if typeof(value.get("piece", "")) != TYPE_STRING or typeof(value.get("open", true)) != TYPE_BOOL:
 			return {}
 		# Current checkpoints add the facing and the upkeep left.
 		if value.size() == 9 and not (value.has("tier") and value.has("owner_guild") and value.has("yaw") and value.has("upkeep")):
