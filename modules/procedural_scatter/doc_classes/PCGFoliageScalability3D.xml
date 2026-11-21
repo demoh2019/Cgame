@@ -4,7 +4,7 @@
 		Deterministic batch foliage density planning and distributed instance-prefix ordering.
 	</brief_description>
 	<description>
-		Inspired by Unreal Engine Foliage Density Scaling, this data-only class controls how many cosmetic instanced foliage meshes should remain visible by graphics quality and camera distance. It does not change mesh buffers, create proxies, cull scene nodes, perform physics, or modify random generators. Use [member MultiMesh.visible_instance_count] with [method plan_visible_counts] outputs. For visually distributed prefixes, write instances in the order given by [method spread_indices] once when creating each MultiMesh. This is not true hierarchical level-of-detail or Nanite.
+		Inspired by Unreal Engine Foliage Density Scaling, this data-only class controls how many cosmetic instanced foliage meshes should remain visible by graphics quality and camera distance. It does not change mesh buffers, create proxies, cull scene nodes, perform physics, or modify random generators. Use [member MultiMesh.visible_instance_count] with [method plan_visible_counts] outputs. For visually distributed prefixes, write instances in the order given by [method spread_indices] once when creating each MultiMesh. The per-instance geometry tier methods plan explicit mesh proxy groups, but do not implement a GPU-resident hierarchical LOD or Nanite.
 	</description>
 	<methods>
 		<method name="spread_indices" qualifiers="const">
@@ -24,6 +24,26 @@
 			<description>
 				Returns one visible-instance count for each input MultiMesh group, retaining zero-count groups at zero and at least one visible instance in each nonempty cosmetic group. Quality levels are 0 Performance (near 42%, far 20%), 1 Balanced (near 68%, far 42%), 2 High (near 88%, far 70%), and 3 Ultra (100% everywhere). Between the near and far distances, the density changes smoothly with smoothstep, with integer counts rounded to the nearest instance. Camera distances are nonnegative world-space distances; this selector does not perform frustum or occlusion culling. Use the result to update existing [member MultiMesh.visible_instance_count] without rebuilding an instance buffer, and keep gameplay objects independent of density budgets.
 				Inputs must contain matching arrays of at most 4096 groups, counts from 0 through 65536 and finite distances between 0 and 10000000. Near and far thresholds must be finite; near must be nonnegative and strictly below far, and far must not exceed 1000000; invalid quality or input rejects the whole request atomically. No source array mutation, RNG or scene access.
+			</description>
+		</method>
+		<method name="plan_instance_lods" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="1" name="viewer" type="Vector3" />
+			<param index="2" name="previous_tiers" type="PackedInt32Array" />
+			<param index="3" name="switch_distance" type="float" default="24.0" />
+			<param index="4" name="hysteresis" type="float" default="3.0" />
+			<description>
+				Plans two geometry LOD tiers per visual instance without allocating meshes, querying physics or culling any point. Returns 0 for detailed near geometry and 1 for a simpler far proxy. Pass an empty [param previous_tiers] array for first evaluation (near when distance is less than or equal to [param switch_distance]), then feed back the returned array on later evaluations. Existing near instances switch to far only beyond [param switch_distance] + [param hysteresis]; existing far instances switch near only closer than [param switch_distance] - [param hysteresis]. Exact boundary equality retains the prior tier, preventing visible thrashing when the camera is steady. Camera distance is 3D Euclidean (not screen-size-based). Inputs: at most 16384 positions, bounded finite coordinates +/-10000000, finite viewer, [param switch_distance] at least 0.1 and at most 1000000, nonnegative [param hysteresis] strictly below [param switch_distance], and their sum at most 1000000. Existing tiers must be absent or match the full point count and each be 0 or 1. Invalid inputs return an empty array atomically; valid empty positions also return empty.
+			</description>
+		</method>
+		<method name="partition_variant_lods" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="variants" type="PackedInt32Array" />
+			<param index="1" name="lod_tiers" type="PackedInt32Array" />
+			<param index="2" name="variant_count" type="int" />
+			<description>
+				Partitions indices of point attributes into 2 * [param variant_count] arrays: variant zero detailed first, then variant zero proxy, followed by detailed/proxy pairs for each additional variant. Every input index is preserved exactly once in original source order. Empty combinations produce empty [PackedInt32Array] entries. At most 16384 points and 1 through 32 mesh variants are accepted. Both input arrays must match and all indices must be valid (variant in [0, variant_count - 1], tier 0 or 1). Malformed input returns an empty [Array] before producing any partial batch; valid empty inputs produce 2 * [param variant_count] empty groups. This function creates no nodes, meshes or renderer state. Call from a low-frequency visual refresh and build one [MultiMesh] per nonempty geometry/tier group.
 			</description>
 		</method>
 	</methods>
