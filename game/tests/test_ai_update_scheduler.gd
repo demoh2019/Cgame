@@ -103,6 +103,57 @@ func run(t) -> void:
     t.check(not step_server.get_eqs_replan_stats()["enabled"],
         "empty cohort disables the time-sliced work flag")
 
+    t.current = "Native shared time budget is initialized once and reused for all infected"
+    var ledger_supported: bool = ClassDB.class_exists("EnvironmentQueryTickBudget")
+    var shared_world := WorldGen.new(915)
+    var shared_server := GameServer.new(shared_world, 915)
+    for index in range(64):
+        var ledger_mob := Zombie.new(101000 + index, "walker",
+            Vector3(float(index), WorldGen.HUB_HEIGHT, 10.0))
+        shared_server.zombies[ledger_mob.id] = ledger_mob
+    shared_server.tick_count = 8
+    shared_server._budget_eqs_replans(shared_server.zombies.values(), 0.05)
+    var first_ledger: Variant = shared_server._eqs_tick_budget
+    if ledger_supported and budget_available and stepper_supported:
+        t.check(shared_server._eqs_tick_budget_active,
+            "large-crowd game server starts a shared native EQS ledger")
+        t.check(first_ledger != null, "native ledger is allocated once")
+        t.eq(int(first_ledger.get_remaining_us()), GameServer.AI_EQS_GLOBAL_QUOTA_US,
+            "regular work begins with the configured global CPU allowance")
+        t.eq(int(first_ledger.get_remaining_us(true)), GameServer.AI_EQS_GLOBAL_URGENT_US,
+            "urgent Smart Object recovery gets its own bounded CPU allowance")
+        for mob in shared_server.zombies.values():
+            t.check(mob.flank_tick_budget == first_ledger,
+                "all infected share one exact native ledger instance")
+        t.check(first_ledger.try_admit_step(),
+            "one ordinary EQS worker opens a grant")
+        t.check(first_ledger.record_step(GameServer.AI_EQS_GLOBAL_QUOTA_US),
+            "recorded native work charges the shared regular pool")
+        t.eq(int(first_ledger.get_remaining_us()), 0,
+            "ordinary EQS admission is exhausted across the whole group")
+        t.check(not first_ledger.try_admit_step(),
+            "second worker cannot bypass another worker's CPU debit")
+        t.check(first_ledger.try_admit_step(true),
+            "urgent recovery still admitted after ordinary pool exhaustion")
+        t.check(first_ledger.record_step(GameServer.AI_EQS_GLOBAL_URGENT_US),
+            "urgent charge closes only its own pool")
+        shared_server._budget_eqs_replans(shared_server.zombies.values(), 0.05)
+        t.eq(int(first_ledger.get_remaining_us()), 0,
+            "repeated scheduling in the SAME tick never refills a CPU pool")
+        shared_server.tick_count = 9
+        shared_server._budget_eqs_replans(shared_server.zombies.values(), 0.05)
+        t.check(shared_server._eqs_tick_budget == first_ledger,
+            "next tick reuses the native ledger without allocating a new one")
+        t.eq(int(first_ledger.get_remaining_us()), GameServer.AI_EQS_GLOBAL_QUOTA_US,
+            "new authoritative tick refreshes work quotas")
+    else:
+        t.check(not shared_server._eqs_tick_budget_active,
+            "old Cgame/stock Godot retains original unshared work admission")
+    shared_server.zombies.clear()
+    shared_server._budget_eqs_replans([], 0.05)
+    t.check(not shared_server._eqs_tick_budget_active,
+        "depopulation turns off shared EQS budgeting immediately")
+
     t.current = "EQS throttling never defers pursuit or overwrites an old lease"
     var gated := Zombie.new(867, "walker", Vector3.ZERO)
     gated.flank_replan_allowed = false

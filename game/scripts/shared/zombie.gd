@@ -705,6 +705,8 @@ var _flank_slot_id_cached: int = 0 # Validate cached goal against current server
 var flank_reservations: Variant = null # Shared server-owned smart-object lease pool.
 var flank_replan_allowed: bool = true # Only optional EQS geometry; combat remains unthrottled.
 var flank_incremental_enabled: bool = false # GameServer opts in for 64+ active infected.
+var flank_tick_budget: Variant = null # Optional shared, native per-tick EQS ledger.
+var flank_step_urgent: bool = false # Lease recovery uses a separate capped pool.
 var flank_last_step_us: int = 0 # Measured native score work in this AI tick.
 var flank_last_step_candidates: int = 0
 var flank_last_timed_steps: int = 0
@@ -805,8 +807,21 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 		_flank_query.has_method("get_incremental_top_indices")
 	var preferred := PackedVector3Array()
 	if incremental:
+		var global_admission: bool = flank_tick_budget != null and \
+			_flank_query.has_method("step_incremental_top_positions_timed") and \
+			flank_tick_budget.has_method("try_admit_step")
+		# Denied tactical work never blocks movement/attack or consumes a
+		# partial result; ordinary and urgent budgets are independent.
+		if global_admission and not bool(flank_tick_budget.try_admit_step(flank_step_urgent)):
+			return target
+		var step_time_us: int = FLANK_EQS_TIME_BUDGET_US
+		if global_admission:
+			step_time_us = mini(step_time_us, int(
+				flank_tick_budget.get_remaining_us(flank_step_urgent)))
 		if not _flank_incremental_running:
 			if not bool(_flank_query.call("begin_incremental_top_positions", top_count)):
+				if global_admission:
+					flank_tick_budget.cancel_pending_step()
 				return target
 			_flank_incremental_running = true
 			_flank_incremental_target_id = target_id
@@ -819,13 +834,16 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 			# 3-item batch and adapts up/down from observed microseconds.
 			# Actual wall clock is still checked between every candidate.
 			var budget: int = int(_flank_query.call("suggest_incremental_step_size",
-				FLANK_EQS_TIME_BUDGET_US, FLANK_EQS_MAX_CANDIDATES))
+				step_time_us, FLANK_EQS_MAX_CANDIDATES))
 			budget = clampi(budget, 1, FLANK_EQS_MAX_CANDIDATES)
 			done = bool(_flank_query.call("step_incremental_top_positions_timed",
-				FLANK_EQS_TIME_BUDGET_US, budget))
+				step_time_us, budget))
 			flank_last_step_us = int(_flank_query.call("get_incremental_last_step_us"))
 			flank_last_step_candidates = int(_flank_query.call("get_incremental_last_step_candidates"))
 			flank_last_timed_steps = 1
+			if global_admission:
+				# Debit the shared tick ledger before any next infected can start.
+				flank_tick_budget.record_step(flank_last_step_us)
 		else:
 			# Older Cgame builds retain the original strict 3-item
 			# deterministic count budget with identical final results.

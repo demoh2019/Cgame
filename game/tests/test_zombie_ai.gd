@@ -255,6 +255,38 @@ func run(t) -> void:
 		t.near(first_step.distance_to(sliced_goal), Zombie.FLANK_RING, 0.001,
 			"legacy engine retains original one-shot flanking")
 
+	t.current = "shared EQS budget blocks a second worker without changing direct chase"
+	if ClassDB.class_exists("EnvironmentQueryTickBudget") and \
+			ClassDB.class_exists("EnvironmentQuery3D"):
+		var budget = ClassDB.instantiate("EnvironmentQueryTickBudget")
+		t.check(budget.begin_tick(22, 1, 120), "one-microsecond budget begins a new frame")
+		var first_worker := Zombie.new(9141, "walker", Vector3.ZERO)
+		first_worker.flank_incremental_enabled = true
+		first_worker.flank_tick_budget = budget
+		var second_worker := Zombie.new(9142, "walker", Vector3.ZERO)
+		second_worker.flank_incremental_enabled = true
+		second_worker.flank_tick_budget = budget
+		var global_target := Vector2(10.0, 0.0)
+		t.eq(first_worker._flank_goal(Vector2.ZERO, global_target), global_target,
+			"first worker pursues directly while its incremental EQS is unfinished")
+		t.check(first_worker._flank_incremental_running,
+			"first worker genuinely started the native resumable scorer")
+		t.eq(int(budget.get_remaining_us()), 0,
+			"one completed scorer step debits and exhausts shared 1us quota")
+		t.eq(second_worker._flank_goal(Vector2.ZERO, global_target), global_target,
+			"second worker keeps chasing without starting over-budget EQS work")
+		t.check(not second_worker._flank_incremental_running,
+			"second worker cannot start an over-budget native snapshot")
+		second_worker.flank_step_urgent = true
+		t.eq(second_worker._flank_goal(Vector2.ZERO, global_target), global_target,
+			"urgent recovery has its own time pool but not a partial flank")
+		t.check(second_worker._flank_incremental_running,
+			"independent urgent pool can start the second worker's query")
+		t.check(int(budget.get_urgent_spent_us()) >= 1,
+			"urgent recovery is charged to its own capped pool")
+		t.check(not budget.is_pending(),
+			"each asynchronous logical query step closes its synchronous budget admission")
+
 	t.current = "runner is faster"
 	var runner := Zombie.new(3, "runner", Vector3(0, ground, 0))
 	var walker := Zombie.new(4, "walker", Vector3(0, ground, 0))

@@ -37,6 +37,7 @@ TEST_FORCE_LINK(test_environment_query_3d)
 #ifdef MODULE_ENVIRONMENT_QUERY_ENABLED
 
 #include "modules/environment_query/environment_query_3d.h"
+#include "modules/environment_query/environment_query_tick_budget.h"
 
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
@@ -1122,6 +1123,73 @@ TEST_CASE("[EnvironmentQuery3D] Timed EQS rejects invalid budgets and always pro
 	CHECK(q->get_incremental_last_step_candidates() >= 1);
 	CHECK(q->get_incremental_last_step_candidates() <= 4);
 	CHECK(q->get_incremental_top_indices().is_empty() == !q->is_incremental_top_complete());
+}
+
+TEST_CASE("[EnvironmentQueryTickBudget] Shares a real per-tick quota across several EQS workers") {
+	Ref<EnvironmentQueryTickBudget> budget;
+	budget.instantiate();
+	CHECK(!budget->try_admit_step());
+	REQUIRE(budget->begin_tick(15, 250, 60));
+	CHECK(budget->get_remaining_us() == 250);
+	REQUIRE(budget->try_admit_step());
+	CHECK(budget->is_pending());
+	CHECK(!budget->try_admit_step());
+	CHECK(budget->record_step(100));
+	CHECK(!budget->is_pending());
+	CHECK(budget->get_remaining_us() == 150);
+	CHECK(budget->get_regular_completed() == 1);
+	REQUIRE(budget->try_admit_step());
+	CHECK(budget->record_step(180)); // A candidate can exceed its remaining quota.
+	CHECK(budget->get_regular_spent_us() == 280);
+	CHECK(budget->get_remaining_us() == 0);
+	CHECK(!budget->try_admit_step());
+	CHECK(budget->get_denied_count() == 3);
+	CHECK(budget->begin_tick(15, 250, 60)); // Idempotent; no quota refill.
+	CHECK(budget->get_remaining_us() == 0);
+	REQUIRE(budget->try_admit_step(true)); // Separate urgent ownership recovery.
+	CHECK(budget->get_remaining_us(true) == 60);
+	CHECK(budget->record_step(70));
+	CHECK(budget->get_urgent_spent_us() == 70);
+	CHECK(budget->get_urgent_completed() == 1);
+	CHECK(!budget->try_admit_step(true));
+	REQUIRE(budget->begin_tick(16, 250, 60));
+	CHECK(budget->get_regular_spent_us() == 0);
+	CHECK(budget->get_urgent_spent_us() == 0);
+	CHECK(budget->get_denied_count() == 0);
+}
+
+TEST_CASE("[EnvironmentQueryTickBudget] Invalid admission, pending update and zero timer safety") {
+	Ref<EnvironmentQueryTickBudget> budget;
+	budget.instantiate();
+	ERR_PRINT_OFF
+	CHECK(!budget->begin_tick(-1, 300, 10));
+	CHECK(!budget->begin_tick(0, -1, 10));
+	CHECK(!budget->begin_tick(0, 1000001, 10));
+	CHECK(!budget->begin_tick(0, 300, 1000001));
+	CHECK(!budget->record_step(5));
+	ERR_PRINT_ON
+	REQUIRE(budget->begin_tick(0, 2, 0));
+	CHECK(!budget->try_admit_step(true));
+	REQUIRE(budget->try_admit_step());
+	ERR_PRINT_OFF
+	CHECK(!budget->record_step(-1));
+	CHECK(!budget->record_step(1000000001LL));
+	CHECK(!budget->begin_tick(1, 2, 0)); // Reject rollover with an open grant.
+	ERR_PRINT_ON
+	CHECK(budget->is_pending());
+	budget->cancel_pending_step();
+	CHECK(!budget->is_pending());
+	REQUIRE(budget->try_admit_step());
+	CHECK(budget->record_step(0)); // Clock granularity cannot make grants free.
+	CHECK(budget->get_regular_spent_us() == 1);
+	REQUIRE(budget->try_admit_step());
+	CHECK(budget->record_step(0));
+	CHECK(!budget->try_admit_step());
+	CHECK(budget->begin_tick(1, 0, 1));
+	CHECK(!budget->try_admit_step());
+	REQUIRE(budget->try_admit_step(true));
+	CHECK(budget->record_step(1));
+	CHECK(!budget->try_admit_step(true));
 }
 
 TEST_CASE("[EnvironmentQuery3D] Evaluation does not mutate input candidates") {
