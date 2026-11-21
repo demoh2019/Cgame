@@ -69,6 +69,7 @@ void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(BehaviorTreeRunner);
 	GDREGISTER_CLASS(AIVisualSensor2D);
 	GDREGISTER_CLASS(AIHearingSensor2D);
+	GDREGISTER_CLASS(AIStimulusHistory2D);
 	GDREGISTER_CLASS(AIExecutionProfiler);
 	GDREGISTER_CLASS(AISimulationLOD2D);
 	GDREGISTER_CLASS(AIUpdateScheduler);
