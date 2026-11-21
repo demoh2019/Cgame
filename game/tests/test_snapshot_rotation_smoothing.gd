@@ -74,18 +74,18 @@ func run(t) -> void:
 		native = ClassDB.instantiate("SnapshotRotationSmoothing3D")
 		t.check(native != null and native.has_method("interpolate_yaw"),
 			"native engine exposes the pure yaw smoothing policy")
-	for from_yaw in [0.0, 1.0, -2.0, deg_to_rad(179.0)]:
-		for to_yaw in [0.2, -1.0, 2.3, deg_to_rad(-179.0)]:
+	for initial_yaw in [0.0, 1.0, -2.0, deg_to_rad(179.0)]:
+		for final_yaw in [0.2, -1.0, 2.3, deg_to_rad(-179.0)]:
 			for v0 in [-35.0, -5.0, 0.0, 3.0, 40.0]:
 				for v1 in [-40.0, 0.0, 5.0, 35.0]:
 					for alpha in [0.0, 0.01, 0.25, 0.5, 0.75, 0.99, 1.0]:
 						var scripted: float = Smooth.interpolate_yaw(
-							from_yaw, to_yaw, v0, v1, 0.1, alpha)
+							initial_yaw, final_yaw, v0, v1, 0.1, alpha)
 						t.check(is_finite(scripted),
 							"scripted yaw remains finite")
 						if native != null:
 							var computed: float = float(native.call(
-								"interpolate_yaw", from_yaw, to_yaw,
+								"interpolate_yaw", initial_yaw, final_yaw,
 								v0, v1, 0.1, alpha))
 							t.near(computed, scripted, 0.000001,
 								"native/script yaw smoothing parity")
