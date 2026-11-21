@@ -61,6 +61,7 @@ class WorldPartition3D : public Node3D {
 	int max_concurrent_requests = 8;
 	bool streaming_enabled = true;
 	bool persist_rigid_bodies = false;
+	bool persist_streaming_objects = false;
 
 	HashMap<Vector2i, ObjectID> active_cells;
 	HashMap<Vector2i, String> pending_cells;
@@ -69,6 +70,7 @@ class WorldPartition3D : public Node3D {
 	HashSet<Vector2i> failed_cells;
 	HashMap<Vector2i, Dictionary> saved_cell_states;
 	HashMap<Vector2i, Dictionary> saved_cell_physics_states;
+	HashMap<Vector2i, Dictionary> saved_cell_object_states;
 
 	static bool _within_radius(const Vector2i &p_cell, const Vector2i &p_center, int p_radius);
 	void _append_source_center(const NodePath &p_path, Vector<Vector2i> &r_centers) const;
@@ -83,6 +85,9 @@ class WorldPartition3D : public Node3D {
 	void _restore_cell_physics_state(const Vector2i &p_cell, Node *p_instance);
 	static bool _valid_body_state(const Dictionary &p_state);
 	static bool _valid_body_path(const String &p_path);
+	static bool _valid_object_state(const Dictionary &p_state);
+	void _capture_cell_object_states(const Vector2i &p_cell, Node *p_instance);
+	void _restore_cell_object_states(const Vector2i &p_cell, Node *p_instance, bool p_reset_missing);
 	void _restore_cell_state(const Vector2i &p_cell, Node *p_instance);
 	void _unload_cell(const Vector2i &p_cell);
 	void _clear_active_cells();
@@ -172,6 +177,15 @@ public:
 	void load_cell_physics_states(const Dictionary &p_states);
 	void clear_cell_physics_states();
 	int get_cell_physics_state_count() const;
+
+	void set_persist_streaming_objects(bool p_enabled);
+	bool is_persisting_streaming_objects() const;
+	Dictionary get_cell_object_states(const Vector2i &p_cell) const;
+	Dictionary capture_cell_object_states(const Vector2i &p_cell);
+	Dictionary snapshot_cell_object_states();
+	void load_cell_object_states(const Dictionary &p_states);
+	void clear_cell_object_states();
+	int get_cell_object_state_count() const;
 
 	void set_cell_scenes(const Dictionary &p_cells);
 	Dictionary get_cell_scenes() const;

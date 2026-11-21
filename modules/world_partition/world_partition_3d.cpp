@@ -150,6 +150,7 @@ void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 	if (node != nullptr) {
 		// Capture motion BEFORE callbacks can freeze a body for deferred deletion.
 		_capture_cell_physics_state(p_cell, node);
+		_capture_cell_object_states(p_cell, node);
 		_notify_cell_deactivating(p_cell, node);
 		_capture_cell_state(p_cell, node);
 		node->queue_free();
@@ -251,6 +252,7 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 	// Restoring after _ready() allows scene scripts to create their visuals first.
 	_restore_cell_state(p_cell, instance);
 	_restore_cell_physics_state(p_cell, instance);
+	_restore_cell_object_states(p_cell, instance, false);
 	_notify_cell_activating(p_cell, instance);
 	emit_signal(SNAME("cell_loaded"), p_cell);
 	return true;
@@ -984,6 +986,204 @@ int WorldPartition3D::get_cell_physics_state_count() const {
 	return saved_cell_physics_states.size();
 }
 
+bool WorldPartition3D::_valid_object_state(const Dictionary &p_state) {
+	// Deliberately accept only small, serializable value-only records. Do not
+	// allow Node, Object, RID, Array or nested Dictionary instances in saves.
+	if (p_state.size() > 32) {
+		return false;
+	}
+	const Array keys = p_state.keys();
+	for (int i = 0; i < keys.size(); i++) {
+		const Variant key = keys[i];
+		if (key.get_type() != Variant::STRING) {
+			return false;
+		}
+		const String name = key;
+		if (name.is_empty() || name.length() > 64) {
+			return false;
+		}
+		const Variant value = p_state[key];
+		switch (value.get_type()) {
+			case Variant::NIL:
+			case Variant::BOOL:
+			case Variant::INT:
+			case Variant::VECTOR2I:
+			case Variant::VECTOR3I:
+				break;
+			case Variant::FLOAT:
+				if (!Math::is_finite(double(value))) {
+					return false;
+				}
+				break;
+			case Variant::STRING:
+				if (String(value).length() > 1024) {
+					return false;
+				}
+				break;
+			case Variant::VECTOR2: {
+				const Vector2 vec = value;
+				if (!vec.is_finite()) {
+					return false;
+				}
+			} break;
+			case Variant::VECTOR3: {
+				const Vector3 vec = value;
+				if (!vec.is_finite()) {
+					return false;
+				}
+			} break;
+			default:
+				return false;
+		}
+	}
+	return true;
+}
+
+void WorldPartition3D::_capture_cell_object_states(const Vector2i &p_cell, Node *p_instance) {
+	if (!persist_streaming_objects || p_instance == nullptr) {
+		return;
+	}
+	Dictionary captured;
+	Vector<Node *> stack;
+	stack.push_back(p_instance);
+	int visited = 0;
+	while (!stack.is_empty() && visited++ < 4096 && captured.size() < 128) {
+		Node *node = stack[stack.size() - 1];
+		stack.remove_at(stack.size() - 1);
+		if (node != p_instance && node->is_in_group(SNAME("streaming_stateful")) && node->has_method(SNAME("capture_streaming_object_state"))) {
+			const Variant result = node->call(SNAME("capture_streaming_object_state"));
+			if (result.get_type() == Variant::DICTIONARY) {
+				const Dictionary state = result;
+				const String path = String(p_instance->get_path_to(node));
+				if (!state.is_empty() && _valid_body_path(path) && _valid_object_state(state)) {
+					captured[path] = state.duplicate(true);
+				}
+			}
+		}
+		for (int i = 0; i < node->get_child_count(); i++) {
+			stack.push_back(node->get_child(i));
+		}
+	}
+	const Dictionary previous = get_cell_object_states(p_cell);
+	if (captured.is_empty()) {
+		saved_cell_object_states.erase(p_cell);
+	} else {
+		saved_cell_object_states.insert(p_cell, captured);
+	}
+	const Dictionary latest = get_cell_object_states(p_cell);
+	if (previous != latest) {
+		emit_signal(SNAME("cell_object_state_changed"), p_cell, latest);
+	}
+}
+
+void WorldPartition3D::_restore_cell_object_states(const Vector2i &p_cell, Node *p_instance, bool p_reset_missing) {
+	if (!persist_streaming_objects || p_instance == nullptr) {
+		return;
+	}
+	const Dictionary *saved = saved_cell_object_states.getptr(p_cell);
+	Vector<Node *> stack;
+	stack.push_back(p_instance);
+	int visited = 0;
+	while (!stack.is_empty() && visited++ < 4096) {
+		Node *node = stack[stack.size() - 1];
+		stack.remove_at(stack.size() - 1);
+		if (node != p_instance && node->is_in_group(SNAME("streaming_stateful")) && node->has_method(SNAME("restore_streaming_object_state"))) {
+			const String path = String(p_instance->get_path_to(node));
+			if (_valid_body_path(path) && saved != nullptr && saved->has(path)) {
+				const Variant value = (*saved)[path];
+				if (value.get_type() == Variant::DICTIONARY) {
+					const Dictionary record = value;
+					if (_valid_object_state(record)) {
+						node->call(SNAME("restore_streaming_object_state"), record.duplicate(true));
+					}
+				}
+			} else if (p_reset_missing) {
+				node->call(SNAME("restore_streaming_object_state"), Dictionary());
+			}
+		}
+		for (int i = 0; i < node->get_child_count(); i++) {
+			stack.push_back(node->get_child(i));
+		}
+	}
+}
+
+void WorldPartition3D::set_persist_streaming_objects(bool p_enabled) {
+	persist_streaming_objects = p_enabled;
+}
+
+bool WorldPartition3D::is_persisting_streaming_objects() const {
+	return persist_streaming_objects;
+}
+
+Dictionary WorldPartition3D::get_cell_object_states(const Vector2i &p_cell) const {
+	const Dictionary *state = saved_cell_object_states.getptr(p_cell);
+	return state != nullptr ? state->duplicate(true) : Dictionary();
+}
+
+Dictionary WorldPartition3D::capture_cell_object_states(const Vector2i &p_cell) {
+	_capture_cell_object_states(p_cell, get_cell_instance(p_cell));
+	return get_cell_object_states(p_cell);
+}
+
+Dictionary WorldPartition3D::snapshot_cell_object_states() {
+	// Explicit snapshot captures still-loaded interactive objects.
+	if (persist_streaming_objects) {
+		for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
+			Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(E.value));
+			_capture_cell_object_states(E.key, instance);
+		}
+	}
+	Dictionary result;
+	for (const KeyValue<Vector2i, Dictionary> &E : saved_cell_object_states) {
+		result[E.key] = E.value.duplicate(true);
+	}
+	return result;
+}
+
+void WorldPartition3D::load_cell_object_states(const Dictionary &p_states) {
+	HashMap<Vector2i, Dictionary> accepted;
+	const Array cells = p_states.keys();
+	for (int i = 0; i < cells.size(); i++) {
+		const Variant cell = cells[i];
+		if (cell.get_type() != Variant::VECTOR2I || p_states[cell].get_type() != Variant::DICTIONARY) {
+			continue;
+		}
+		const Dictionary source = p_states[cell];
+		Dictionary safe;
+		const Array names = source.keys();
+		for (int j = 0; j < names.size() && safe.size() < 128; j++) {
+			const Variant path = names[j];
+			if (path.get_type() != Variant::STRING || !_valid_body_path(String(path)) || source[path].get_type() != Variant::DICTIONARY) {
+				continue;
+			}
+			const Dictionary record = source[path];
+			if (!record.is_empty() && _valid_object_state(record)) {
+				safe[path] = record.duplicate(true);
+			}
+		}
+		if (!safe.is_empty()) {
+			accepted.insert(cell, safe);
+		}
+	}
+	saved_cell_object_states = accepted;
+	if (persist_streaming_objects) {
+		// Missing saved records actively reset loaded objects to their defaults,
+		// avoiding previous-session state leaking into a fresh checkpoint.
+		for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
+			Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(E.value));
+			_restore_cell_object_states(E.key, instance, true);
+		}
+	}
+}
+
+void WorldPartition3D::clear_cell_object_states() {
+	saved_cell_object_states.clear();
+}
+
+int WorldPartition3D::get_cell_object_state_count() const {
+	return saved_cell_object_states.size();
+}
+
 void WorldPartition3D::set_cell_state(const Vector2i &p_cell, const Dictionary &p_state) {
 	const Dictionary previous = get_cell_state(p_cell);
 	if (p_state.is_empty()) {
@@ -1295,6 +1495,14 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_cell_physics_states", "states"), &WorldPartition3D::load_cell_physics_states);
 	ClassDB::bind_method(D_METHOD("clear_cell_physics_states"), &WorldPartition3D::clear_cell_physics_states);
 	ClassDB::bind_method(D_METHOD("get_cell_physics_state_count"), &WorldPartition3D::get_cell_physics_state_count);
+	ClassDB::bind_method(D_METHOD("set_persist_streaming_objects", "enabled"), &WorldPartition3D::set_persist_streaming_objects);
+	ClassDB::bind_method(D_METHOD("is_persisting_streaming_objects"), &WorldPartition3D::is_persisting_streaming_objects);
+	ClassDB::bind_method(D_METHOD("get_cell_object_states", "cell"), &WorldPartition3D::get_cell_object_states);
+	ClassDB::bind_method(D_METHOD("capture_cell_object_states", "cell"), &WorldPartition3D::capture_cell_object_states);
+	ClassDB::bind_method(D_METHOD("snapshot_cell_object_states"), &WorldPartition3D::snapshot_cell_object_states);
+	ClassDB::bind_method(D_METHOD("load_cell_object_states", "states"), &WorldPartition3D::load_cell_object_states);
+	ClassDB::bind_method(D_METHOD("clear_cell_object_states"), &WorldPartition3D::clear_cell_object_states);
+	ClassDB::bind_method(D_METHOD("get_cell_object_state_count"), &WorldPartition3D::get_cell_object_state_count);
 	ClassDB::bind_method(D_METHOD("set_cell_scenes", "scenes"), &WorldPartition3D::set_cell_scenes);
 	ClassDB::bind_method(D_METHOD("get_cell_scenes"), &WorldPartition3D::get_cell_scenes);
 	ClassDB::bind_method(D_METHOD("set_cell_scene", "cell", "scene_path"), &WorldPartition3D::set_cell_scene);
@@ -1320,6 +1528,7 @@ void WorldPartition3D::_bind_methods() {
 	ADD_GROUP("Streaming", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "streaming_enabled"), "set_streaming_enabled", "is_streaming_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "persist_rigid_bodies"), "set_persist_rigid_bodies", "is_persisting_rigid_bodies");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "persist_streaming_objects"), "set_persist_streaming_objects", "is_persisting_streaming_objects");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "observer_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Node3D"), "set_observer_path", "get_observer_path");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "additional_observer_paths"), "set_additional_observer_paths", "get_additional_observer_paths");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "pinned_cells", PROPERTY_HINT_ARRAY_TYPE, "Vector2i"), "set_pinned_cells", "get_pinned_cells");
@@ -1335,6 +1544,7 @@ void WorldPartition3D::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("cell_loaded", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_unloaded", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_state_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::DICTIONARY, "state")));
+	ADD_SIGNAL(MethodInfo("cell_object_state_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::DICTIONARY, "states")));
 	ADD_SIGNAL(MethodInfo("layer_state_changed", PropertyInfo(Variant::STRING, "layer"), PropertyInfo(Variant::BOOL, "enabled")));
 }
 
