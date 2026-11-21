@@ -847,7 +847,7 @@ Array WorldPartition3D::find_cell_path(const Vector2i &p_from, const Vector2i &p
 					nz < std::numeric_limits<int32_t>::min() || nz > std::numeric_limits<int32_t>::max()) {
 				continue;
 			}
-			const Vector2i neighbor(int32_t(nx), int32_t(nz));
+			const Vector2i neighbor{ int32_t(nx), int32_t(nz) };
 			if (visited.has(neighbor) || _get_scene_path(neighbor).is_empty() || (p_loaded_only && !is_cell_loaded(neighbor))) {
 				continue;
 			}
