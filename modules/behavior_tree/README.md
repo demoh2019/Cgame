@@ -122,6 +122,20 @@ window, instead of overwriting the last-heard position on each report.
 Albion After calls the ranked method **only** when available; stock
 Godot and older Cgame continue their previous behavior.
 
+## Multi-source AI event memory
+
+`AIStimulusHistory2D` is a native RefCounted history for events **already confirmed by the game**. Each memory entry stores its sense (visual, sound, damage), source ID, position, normalized strength and expiry. Repeated identified sources update in place; anonymous sources remain independent. A 16-entry default / 64-entry maximum ensures predictable memory usage per agent.
+
+```gdscript
+var history := AIStimulusHistory2D.new()
+history.record_stimulus(AIStimulusHistory2D.SOUND, heard_at, 0.85, 3.5, peer_id)
+history.advance_time(0.2)
+var top_sound: Dictionary = history.get_best(AIStimulusHistory2D.SOUND)
+var recent: Array = history.get_recent(8) # Detached diagnostics
+```
+
+Ranking multiplies signal strength by its fraction of remaining lifetime; ties are broken deterministically by source ID and position. This is not an ambient automatic perception system: **no source enters the history unless the game explicitly records it**. See `game/docs/NATIVE_AI_PERCEPTION.md` for canonical Albion After integration, including investigation of an independently confirmed secondary sound.
+
 ## Native simulation LOD for crowds and server AI
 
 `AISimulationLOD2D` is a reusable RefCounted cadence policy inspired by the
