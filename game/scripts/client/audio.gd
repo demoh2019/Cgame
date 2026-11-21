@@ -7,6 +7,7 @@ const ReverbZones = preload("res://scripts/client/reverb_zones.gd")
 const AudioMix = preload("res://scripts/client/audio_mix.gd")
 const AudioSurfaces = preload("res://scripts/client/audio_surfaces.gd")
 const AudioVoices = preload("res://scripts/client/audio_voices.gd")
+const AudioVariants = preload("res://scripts/client/audio_variants.gd")
 const AudioSpatial = preload("res://scripts/client/audio_spatial.gd")
 const AudioDucking = preload("res://scripts/client/audio_ducking.gd")
 const AudioMixSnapshots = preload("res://scripts/client/audio_mix_snapshots.gd")
@@ -197,14 +198,21 @@ func set_footsteps(active: bool) -> void:
 const FLESH := [preload("res://assets/gore/flesh_1.ogg"), preload("res://assets/gore/flesh_2.ogg"), preload("res://assets/gore/flesh_3.ogg")]
 const BONE := [preload("res://assets/gore/bone_break_1.ogg"), preload("res://assets/gore/bone_break_2.ogg"),
 	preload("res://assets/gore/bone_break_3.ogg"), preload("res://assets/gore/bone_break_4.ogg")]
+# Independent random bags prevent immediate cosmetic sample repetition.
+var _flesh_variants = AudioVariants.new(PackedFloat64Array([1.0, 1.0, 1.0]))
+var _bone_variants = AudioVariants.new(PackedFloat64Array([1.0, 1.0, 1.0, 1.0]))
 
 
 func play_gore(bone: bool, position: Vector3, volume_db: float = -6.0) -> void:
 	if not enabled:
 		return
 	var pool: Array = BONE if bone else FLESH
+	var variants = _bone_variants if bone else _flesh_variants
+	var clip_index: int = variants.choose(randf())
+	if clip_index < 0:
+		return
 	var player := AudioStreamPlayer3D.new()
-	player.stream = pool[randi() % pool.size()]
+	player.stream = pool[clip_index]
 	player.volume_db = volume_db
 	player.pitch_scale = randf_range(0.88, 1.12)
 	player.unit_size = 10.0

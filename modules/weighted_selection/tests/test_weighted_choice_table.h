@@ -109,4 +109,50 @@ TEST_CASE("[WeightedChoiceTable] atomic validation, bounded draw and determinist
 	CHECK(table->get_option_count() == 2); // Previous table is still alive.
 }
 
+TEST_CASE("[WeightedChoiceTable] weighted selection without replacement") {
+	Ref<WeightedChoiceTable> table;
+	table.instantiate();
+	PackedFloat64Array weights;
+	weights.push_back(0.0);
+	weights.push_back(2.0);
+	weights.push_back(3.0);
+	weights.push_back(5.0);
+	REQUIRE(table->configure(weights));
+	PackedInt32Array excluded;
+	CHECK(table->sample_excluding(0.0, excluded) == table->sample_unit(0.0));
+	CHECK(table->sample_excluding(0.5, excluded) == table->sample_unit(0.5));
+	excluded.push_back(1); // Remaining weights: 3 at index 2, 5 at 3.
+	CHECK(table->sample_excluding(0.0, excluded) == 2);
+	CHECK(table->sample_excluding(0.3749, excluded) == 2);
+	CHECK(table->sample_excluding(0.375, excluded) == 3);
+	excluded.push_back(3);
+	CHECK(table->sample_excluding(0.999999, excluded) == 2);
+	excluded.push_back(3); // Repeated exclusions are harmless.
+	CHECK(table->sample_excluding(0.0, excluded) == 2);
+	excluded.push_back(2); // No positive weights remain.
+	CHECK(table->sample_excluding(0.0, excluded) == -1);
+	excluded.clear();
+	excluded.push_back(4);
+	CHECK(table->sample_excluding(0.4, excluded) == -1);
+	excluded.set(0, -1);
+	CHECK(table->sample_excluding(0.4, excluded) == -1);
+	excluded.clear();
+	CHECK(table->sample_excluding(-0.01, excluded) == -1);
+	CHECK(table->sample_excluding(1.0, excluded) == -1);
+	CHECK(table->sample_excluding(Math::NaN, excluded) == -1);
+	CHECK(table->sample_excluding(Math::INF, excluded) == -1);
+	CHECK(table->get_weights() == weights); // No mutation of configuration.
+	// Highest possible valid index exercises the last 64-bit mask word.
+	PackedFloat64Array large;
+	large.resize(4096);
+	large.set(0, 1.0);
+	large.set(4095, 1.0);
+	REQUIRE(table->configure(large));
+	excluded.push_back(4095);
+	CHECK(table->sample_excluding(0.999, excluded) == 0);
+	excluded.push_back(0);
+	CHECK(table->sample_excluding(0.0, excluded) == -1);
+	CHECK(table->get_weights() == large);
+}
+
 } // namespace TestWeightedChoiceTable
