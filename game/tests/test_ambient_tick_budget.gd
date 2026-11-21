@@ -81,3 +81,42 @@ func run(t) -> void:
 			native.call("reset")
 			t.eq(float(native.call("pressure_percent")), 0.0,
 				"Native reset clears pressure")
+
+	# Simulate the real game's fixed call order for four seconds at 60 FPS.
+	# A one-slot low-quality budget must not starve later ambient systems.
+	t.current = "fair ambient slots across fixed-order cosmetic systems"
+	var fair := AmbientTickBudget.new()
+	var native_fair: Object = null
+	if ClassDB.class_exists("FrameUpdateBudget"):
+		native_fair = ClassDB.instantiate("FrameUpdateBudget")
+		if native_fair != null:
+			for lane in AmbientTickBudget.LANES:
+				t.check(bool(native_fair.call("register_lane", StringName(lane))),
+					"Native fair scheduler registers %s" % lane)
+	var counts: Dictionary = {}
+	for lane in AmbientTickBudget.LANES:
+		counts[lane] = 0
+	var call_order: Array[String] = ["dust_devils", "dragonflies", "tumbleweeds", "dusk_bats"]
+	for frame in range(241):
+		fair.begin_frame(1.0 / 60.0, 0)
+		if native_fair != null:
+			native_fair.call("begin_frame", 1.0 / 60.0, 0)
+		for lane in call_order:
+			var interval: float = fair.consume(lane, 1.0 / 60.0)
+			if native_fair != null:
+				var native_interval: float = float(native_fair.call(
+					"consume", StringName(lane), 1.0 / 60.0))
+				t.near(native_interval, interval, 0.0000001,
+					"Native/script fair slot parity on frame %d for %s" % [frame, lane])
+			if frame > 0 and interval > 0.0:
+				counts[lane] = int(counts[lane]) + 1
+		if frame > 0:
+			t.check(fair.last_frame_counts().x <= 1, "Low-tier one-slot budget on frame %d" % frame)
+	var smallest: int = 100000
+	var largest: int = 0
+	for lane in AmbientTickBudget.LANES:
+		var updates: int = int(counts[lane])
+		t.check(updates >= 40, "%s is not starved" % lane)
+		smallest = mini(smallest, updates)
+		largest = maxi(largest, updates)
+	t.check(largest - smallest <= 2, "Fairness does not depend on registration or call order")

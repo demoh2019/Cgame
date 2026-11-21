@@ -8,6 +8,7 @@ on:
       - 'game/scripts/client/ambient_tick_budget.gd'
       - 'game/scripts/client/online_main.gd'
       - 'game/tests/test_ambient_tick_budget.gd'
+      - 'game/tests/run_ambient_budget.gd'
       - 'tests/scene/test_frame_update_budget_contract.py'
       - '.github/workflows/frame-update-budget-contract.yml'
   pull_request:
@@ -16,6 +17,7 @@ on:
       - 'game/scripts/client/ambient_tick_budget.gd'
       - 'game/scripts/client/online_main.gd'
       - 'game/tests/test_ambient_tick_budget.gd'
+      - 'game/tests/run_ambient_budget.gd'
       - 'tests/scene/test_frame_update_budget_contract.py'
       - '.github/workflows/frame-update-budget-contract.yml'
 
@@ -34,8 +36,55 @@ jobs:
             game/scripts/client/online_main.gd
             game/scripts/client/ambient_tick_budget.gd
             game/tests/test_ambient_tick_budget.gd
+            game/tests/run_ambient_budget.gd
             game/tests/run_all.gd
             tests/scene/test_frame_update_budget_contract.py
           sparse-checkout-cone-mode: false
       - name: Validate native and gameplay integration
         run: python3 -m unittest tests/scene/test_frame_update_budget_contract.py -v
+
+  native-and-game:
+    needs: contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Run native fair frame-budget C++ regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[FrameUpdateBudget]*" 2>&1 | tee native-frame-budget.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' native-frame-budget.log; then exit 1; fi
+      - name: Import Albion After game
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee ambient-import.log
+      - name: Run ambient fairness and stock-native parity game tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_ambient_budget.gd 2>&1 | tee ambient-fairness.log
+          grep -E '^AMBIENT FAIRNESS TOTAL: [0-9]+ checks, 0 failures$' ambient-fairness.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' ambient-fairness.log; then exit 1; fi
+      - name: Upload regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frame-budget-native-game-regression
+          if-no-files-found: ignore
+          path: |
+            native-frame-budget.log
+            ambient-import.log
+            ambient-fairness.log

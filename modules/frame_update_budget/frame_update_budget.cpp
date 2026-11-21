@@ -42,6 +42,7 @@ bool FrameUpdateBudget::unregister_lane(const StringName &p_lane) {
 	for (int i = 0; i < lanes.size(); i++) {
 		if (lanes[i].name == p_lane) {
 			lanes.remove_at(i);
+			reserved_lanes.clear(); // Indices shifted; never reuse a stale reservation.
 			return true;
 		}
 	}
@@ -84,6 +85,39 @@ void FrameUpdateBudget::begin_frame(double p_delta, int p_quality) {
 	}
 	const int reduction = pressure >= 0.8 ? 2 : (pressure >= 0.4 ? 1 : 0);
 	budget = CLAMP(slots[quality] - reduction, 1, MAX(1, lanes.size()));
+
+	// Score eligible lanes before consume() so fixed game-loop call order
+	// cannot permanently favor the first cosmetic effect. This is a
+	// data-only greedy selection; no callbacks and at most 64 lanes/slots.
+	reserved_lanes.clear();
+	if (lanes.is_empty() || quality_changed) {
+		tie_start = 0;
+		return; // A tier/profile change already forces all lanes to refresh.
+	}
+	tie_start = (tie_start + 1) % lanes.size();
+	if (!Math::is_finite(p_delta) || p_delta <= 0.0) {
+		return;
+	}
+	const double interval = 1.0 / rates[quality];
+	for (int slot = 0; slot < budget; slot++) {
+		int best = -1;
+		double best_elapsed = -1.0;
+		for (int offset = 0; offset < lanes.size(); offset++) {
+			const int index = (tie_start + offset) % lanes.size();
+			if (reserved_lanes.has(index)) {
+				continue;
+			}
+			const double elapsed = MIN(lanes[index].elapsed + p_delta, max_step);
+			if (elapsed + 0.000001 >= interval && elapsed > best_elapsed + 0.000000000001) {
+				best = index;
+				best_elapsed = elapsed;
+			}
+		}
+		if (best < 0) {
+			break;
+		}
+		reserved_lanes.push_back(best);
+	}
 }
 
 double FrameUpdateBudget::consume(const StringName &p_lane, double p_delta, bool p_force) {
@@ -110,12 +144,14 @@ double FrameUpdateBudget::consume(const StringName &p_lane, double p_delta, bool
 	}
 	lane.elapsed = elapsed;
 	const double interval = 1.0 / rates[MAX(quality, 0)];
-	if (elapsed + 0.000001 < interval || spent >= budget) {
+	if (elapsed + 0.000001 < interval || spent >= budget || !reserved_lanes.has(index)) {
 		last_skipped++;
 		total_skipped++;
 		return 0.0;
 	}
 	spent++;
+	// Never grant the same reservation twice within a frame.
+	reserved_lanes.remove_at(reserved_lanes.find(index));
 	lane.elapsed = 0.0;
 	record_update();
 	return elapsed;
@@ -137,4 +173,6 @@ void FrameUpdateBudget::reset() {
 	spent = 0;
 	last_updated = 0;
 	last_skipped = 0;
+	reserved_lanes.clear();
+	tie_start = 0;
 }

@@ -3,7 +3,7 @@
 	<brief_description>A bounded frame-rate scheduler for optional, main-thread gameplay presentation tasks.</brief_description>
 	<description>
 		Register up to 64 named lanes, call [method begin_frame] once per rendering frame, then call [method consume] for each lane that needs an update. A nonzero result is the elapsed time since that lane's last update, capped at 0.16 seconds. The caller performs the actual update on the main thread. This class never touches a [SceneTree], starts threads or executes callbacks.
-		Each quality tier (0 through 3) has a target frequency and a maximum number of updates per frame. Slow frames reduce the slot budget. Forced updates and quality changes bypass the slot limit so visibility changes are immediate.
+		Each quality tier (0 through 3) has a target frequency and a maximum number of updates per frame. Slow frames reduce the slot budget. Forced updates and quality changes bypass the slot limit so visibility changes are immediate. Due lanes are reserved at the start of a frame by accumulated time, with a rotating tiebreaker; this avoids starving late-called effects when the update budget is smaller than the number of registered lanes.
 	</description>
 	<methods>
 		<method name="register_lane">
@@ -29,14 +29,14 @@
 			<return type="void" />
 			<param index="0" name="delta" type="float" />
 			<param index="1" name="quality" type="int" />
-			<description>Begins a rendering frame. Validates elapsed time, updates the slow-frame pressure, and resets the used slots.</description>
+			<description>Begins a rendering frame. Validates elapsed time, updates slow-frame pressure, and reserves at most the allowed number of due lanes before the caller's update order can influence scheduling.</description>
 		</method>
 		<method name="consume">
 			<return type="float" />
 			<param index="0" name="lane" type="StringName" />
 			<param index="1" name="delta" type="float" />
 			<param index="2" name="force" type="bool" default="false" />
-			<description>Returns the bounded elapsed time when an update is allowed, or zero when the lane is not due. Forced updates bypass the budget.</description>
+			<description>Returns the bounded elapsed time when an update is allowed and its per-frame reservation is available, or zero otherwise. A regular reservation can be used once per frame. Forced updates bypass the budget.</description>
 		</method>
 		<method name="reset">
 			<return type="void" />
