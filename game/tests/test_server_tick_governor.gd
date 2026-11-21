@@ -80,8 +80,10 @@ func run(t) -> void:
 	server.incident_spawn_cap = 0
 	server.time = 1000.0
 	server.next_incident_at = 0.0
+	var zombies_before: int = server.zombies.size()
+	var events_before: int = server.events.size()
 	server._tick_world_incidents()
-	t.eq(server.zombies.size(), 0, "operator hard cap prevents new random enemies")
-	t.eq(server.events.size(), 0, "suppressed wave emits no fake incident")
+	t.eq(server.zombies.size(), zombies_before, "operator hard cap prevents new random enemies")
+	t.eq(server.events.size(), events_before, "suppressed wave emits no fake incident")
 	t.near(server.next_incident_at, 1000.0 + WorldIncidents.RETRY_SECONDS, 0.001,
 		"rejected wave retries later instead of checking every tick")
