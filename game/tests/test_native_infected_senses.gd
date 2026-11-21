@@ -209,6 +209,14 @@ func run(t) -> void:
                 "server trace reports nonnegative decision CPU microseconds")
         t.check(not bool(untraced.get_ai_trace_snapshot().get("enabled", false)),
             "other NPCs remain untraced independently")
+        var traced_visual: Dictionary = traced.get_ai_state_visual_snapshot()
+        var traced_visual_nodes: Array = traced_visual.get("nodes", [])
+        if traced_visual_nodes.size() == 8:
+            var selection_record: Dictionary = traced_visual_nodes[7]
+            t.check(bool(selection_record.get("executed", false)),
+                "visual inspector highlights an actually traced selection pass")
+            t.eq(int(selection_record.get("status", -1)), 0,
+                "visual inspector copies the native success status")
         t.check(traced.enable_ai_trace(false), "server can disable and release tracing")
         traced.think_timer = 0.0
         traced.think(world, trace_players, 0.1, rng)
@@ -242,8 +250,8 @@ func run(t) -> void:
         var scanned: Dictionary = visual_nodes[7]
         t.eq(scanned.get("path"), "root/6",
             "target selection is exposed as its own diagnostic phase")
-        t.eq(bool(scanned.get("executed", false)), native_trace,
-            "only a real native target-selection trace can appear as executed")
+        t.check(not bool(scanned.get("executed", false)),
+            "disabled native tracing leaves target selection visibly unvisited")
     var visual_debug: Dictionary = traced.get_ai_debug_snapshot().get("visual_tree", {})
     t.eq(int(visual_debug.get("node_count", -1)), visual_nodes.size(),
         "existing server diagnostics embed the same private inspector hierarchy")
