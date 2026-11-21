@@ -199,6 +199,7 @@ const SUITES := [
 	"res://tests/test_scenery_batches.gd",
 	"res://tests/test_pcg_scenery_spacing.gd",
 	"res://tests/test_pcg_surface_slope.gd",
+	"res://tests/test_pcg_surface_alignment.gd",
 	"res://tests/test_multimesh_resource_updates.gd",
 	"res://tests/test_resource_instance_initializer.gd",
 	"res://tests/test_resource_full_buffer.gd",
