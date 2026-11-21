@@ -33,7 +33,7 @@ TEST_CASE("[SpatialPointGrid3D] True 3D radius, early cap, invalid and empty bat
 	CHECK(grid->count_within(Vector3(), -1.0) == -1);
 	CHECK(grid->count_within(Vector3(), 75.0, 0) == -1);
 	CHECK(grid->count_within(Vector3(), 75.0, 8193) == -1);
-	CHECK(grid->get_stats()["points"] == 5);
+	CHECK(int(grid->get_stats()["points"]) == 5);
 
 	PackedVector3Array probes;
 	probes.push_back(Vector3());
@@ -49,7 +49,7 @@ TEST_CASE("[SpatialPointGrid3D] True 3D radius, early cap, invalid and empty bat
 	CHECK(grid->count_within_batch(PackedVector3Array(), 75.0).is_empty());
 	CHECK(grid->count_within_batch(probes, -1.0).is_empty());
 	CHECK(grid->count_within_batch(probes, 75.0, 0).is_empty());
-	CHECK(grid->get_stats()["batch_calls"] == 2);
+	CHECK(int(grid->get_stats()["batch_calls"]) == 2);
 }
 
 TEST_CASE("[SpatialPointGrid3D] Indexed mode remains exact across negative and vertical world cells") {
@@ -78,12 +78,12 @@ TEST_CASE("[SpatialPointGrid3D] Indexed mode remains exact across negative and v
 			CHECK(grid->count_within(center, radius, 2) == MIN(expected, 2));
 		}
 	}
-	CHECK(grid->get_stats()["candidate_checks"] < 2 * 90 * 4 * pts.size());
-	CHECK(grid->get_stats()["bucket_lookups"] > 0);
+	CHECK(int(grid->get_stats()["candidate_checks"]) < 2 * 90 * 4 * pts.size());
+	CHECK(int(grid->get_stats()["bucket_lookups"]) > 0);
 	const int64_t old_lookups = grid->get_stats()["bucket_lookups"];
 	CHECK(grid->set_cell_size(1.0));
 	CHECK(grid->count_within(Vector3(), 240.0, 8192) >= 0);
-	CHECK(grid->get_stats()["bucket_lookups"] == old_lookups); // 481^3 cells fall back to direct scan.
+	CHECK(int64_t(grid->get_stats()["bucket_lookups"]) == old_lookups); // 481^3 cells fall back to direct scan.
 	CHECK(grid->set_cell_size(64.0));
 	CHECK(grid->count_within(Vector3(), 75.0) >= 0);
 	CHECK_FALSE(grid->set_cell_size(0.0));
@@ -97,8 +97,8 @@ TEST_CASE("[SpatialPointGrid3D] Indexed mode remains exact across negative and v
 	CHECK(grid->get_point_count() == 96); // Atomic on size validation.
 	grid->clear();
 	CHECK(grid->get_point_count() == 0);
-	CHECK(grid->get_stats()["queries"] == 0);
-	CHECK(grid->get_stats()["occupied_cells"] == 0);
+	CHECK(int(grid->get_stats()["queries"]) == 0);
+	CHECK(int(grid->get_stats()["occupied_cells"]) == 0);
 }
 
 } // namespace TestSpatialPointGrid3D

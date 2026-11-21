@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<class name="SpatialPointGrid3D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../doc/class.xsd">
+<class name="SpatialPointGrid3D" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
 	<brief_description>Exact, capped 3D point-count queries accelerated by a deterministic spatial hash.</brief_description>
 	<description>
 		An opt-in data-only broadphase for server-authoritative proximity and PvE crowd pressure. This is a **3D** query: X, Y and Z contribute to exact squared distance, so actors above/below a cave or platform do not count as adjacent. Up to 8192 finite points are retained. At most 1024 probes may be submitted in one batch. For small crowds, outlier positions, very large radii or more than 4096 candidate buckets the engine falls back to an exact linear scan, never dropping valid points. Invalid queries return -1, invalid batch arguments return an empty array, invalid individual batch probe positions return zero, and count limits must be between 1 and 8192. A limit is an early-exit maximum; no actor IDs, scene nodes, network packets or authoritative state are owned by this class.
