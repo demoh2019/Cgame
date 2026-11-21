@@ -1,10 +1,15 @@
 extends RefCounted
 ## Opt-in procedural scene reuse: no expanded world residency, no budget bypass.
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
+const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 
 class CacheableChunk extends Node3D:
 	var restores := 0
 	var tier_changes: Array[bool] = []
+	var estimated_cost_bytes: int = 4 * 1048576
+
+	func get_streaming_cache_cost_bytes() -> int:
+		return estimated_cost_bytes
 
 	func can_cache_streaming_chunk() -> bool:
 		return true
@@ -15,6 +20,11 @@ class CacheableChunk extends Node3D:
 	func set_streaming_simulation_active(active: bool) -> void:
 		tier_changes.append(active)
 		set_process(active)
+
+
+class UnknownCostChunk extends Node3D:
+	func can_cache_streaming_chunk() -> bool:
+		return true
 
 
 var generated: Array[Vector3i] = []
@@ -29,6 +39,18 @@ func _make_cacheable(cell: Vector3i) -> Node:
 func _make_unsafe(cell: Vector3i) -> Node:
 	generated.append(cell)
 	return Node3D.new()
+
+
+func _make_unknown_cost(cell: Vector3i) -> Node:
+	generated.append(cell)
+	return UnknownCostChunk.new()
+
+
+func _make_oversized(cell: Vector3i) -> Node:
+	generated.append(cell)
+	var chunk := CacheableChunk.new()
+	chunk.estimated_cost_bytes = 50 * 1048576
+	return chunk
 
 
 func _streamer(method: String) -> WorldStreamer:
@@ -144,6 +166,60 @@ func run(t) -> void:
 	t.eq(lru.get_chunk_cache_eviction_count(), 0, "clear resets cache diagnostics")
 	lru.free()
 
+	t.current = "estimated scene cache bytes trim roots beyond budget"
+	generated.clear()
+	var sized := _streamer("_make_cacheable")
+	sized.max_cached_chunks = 3
+	sized.max_cached_chunk_bytes = 6 * 1048576
+	sized.refresh()
+	sized.focus_position = Vector3(40, 0, 8)
+	sized.refresh()
+	t.eq(sized.get_cached_chunk_count(), 1, "one four-MiB root fits")
+	t.eq(sized.get_cached_chunk_bytes(), 4 * 1048576,
+		"retained root reports its declared memory estimate")
+	sized.focus_position = Vector3(72, 0, 8)
+	sized.refresh()
+	t.eq(sized.get_cached_chunk_count(), 1,
+		"byte budget evicts oldest cached root even with free count slots")
+	t.eq(sized.get_cached_chunk_bytes(), 4 * 1048576,
+		"byte accounting is decremented on eviction")
+	t.check(sized.get_chunk_cache_eviction_count() > 0,
+		"byte pressure contributes to eviction metric")
+	sized.max_cached_chunk_bytes = 3 * 1048576
+	t.eq(sized.get_cached_chunk_count(), 0,
+		"reducing cache byte cap immediately trims retained roots")
+	t.eq(sized.get_cached_chunk_bytes(), 0,
+		"no phantom retained estimated cost after trimming")
+	sized.clear_cached_chunks()
+	t.eq(sized.get_cached_chunk_bytes(), 0, "manual cache clear resets cost")
+	sized.free()
+
+	t.current = "newly enabled byte cap invalidates legacy unpriced roots"
+	var migrate := _streamer("_make_cacheable")
+	migrate.max_cached_chunks = 2
+	migrate.refresh()
+	migrate.focus_position = Vector3(40, 0, 8)
+	migrate.refresh()
+	t.eq(migrate.get_cached_chunk_count(), 1, "legacy count-only cache works")
+	migrate.max_cached_chunk_bytes = 6 * 1048576
+	t.eq(migrate.get_cached_chunk_count(), 0,
+		"switching from unpriced legacy cache frees retained roots")
+	migrate.free()
+
+	t.current = "unknown and oversized cost must fail closed"
+	for factory in ["_make_unknown_cost", "_make_oversized"]:
+		var unsafe := _streamer(factory)
+		unsafe.max_cached_chunks = 2
+		unsafe.max_cached_chunk_bytes = 6 * 1048576
+		unsafe.refresh()
+		unsafe.focus_position = Vector3(40, 0, 8)
+		unsafe.refresh()
+		t.eq(unsafe.get_cached_chunk_count(), 0,
+			"%s cannot bypass estimated byte admission" % factory)
+		t.eq(unsafe.get_cached_chunk_bytes(), 0,
+			"invalid estimates cannot inflate cache bytes")
+		unsafe.free()
+
 	t.current = "generator safety and grid changes invalidate cache"
 	generated.clear()
 	var invalidation := _streamer("_make_cacheable")
@@ -179,6 +255,8 @@ func run(t) -> void:
 	var view := ChunkView.new()
 	t.check(view.can_cache_streaming_chunk(),
 		"real game scenery opts into immutable chunk reuse")
+	t.check(view.get_streaming_cache_cost_bytes() >= 8 * 1048576,
+		"actual ChunkView returns a conservative positive scene cost")
 	view.set_streaming_simulation_active(false)
 	view.on_streaming_cache_restored()
 	t.check(not view.is_processing(),
@@ -188,3 +266,14 @@ func run(t) -> void:
 	t.check(view.is_processing(),
 		"restored near-field chunk resumes client-only updates")
 	view.free()
+	t.current = "graphics tiers and game profiler apply native cache byte budget"
+	for tier in 4:
+		var budget: int = GraphicsQuality.streamed_chunk_cache_bytes_for_quality(tier)
+		t.check(budget > 0 and budget <= 268435456,
+			"each quality preset selects bounded positive cache bytes")
+	var graphics_source := FileAccess.get_file_as_string("res://scripts/client/graphics_quality.gd")
+	t.check(graphics_source.contains("set_max_cached_chunk_bytes"),
+		"graphics profile retunes engine estimated cache bytes")
+	var online_source := FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
+	t.check(online_source.contains("Albion/StreamCacheEstimatedBytes"),
+		"game profiler exposes estimated cache occupancy")
