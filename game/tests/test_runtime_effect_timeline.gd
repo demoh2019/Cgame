@@ -36,4 +36,29 @@ func run(t) -> void:
 		t.eq(Features.runtime_effect_remaining(actor, "Runtime.Status.Sundered"), 0.0, "snapshot removes effect")
 	else:
 		t.eq(Features.runtime_effect_remaining(actor, "Runtime.Status.Staggered", 1.5), 1.5, "stock Godot fallback")
+	if ClassDB.class_exists("GameplayEffectTimeline") and ClassDB.class_has_method(
+			"GameplayEffectTimeline", "set_periodic"):
+		t.current = "periodic native visual effects retain phase across snapshots"
+		zombie["sunder_seconds"] = 3.0
+		zombie["resolve_seconds"] = 2.0
+		zombie["resolve_stacks"] = 3
+		Features.sync_runtime_tags(actor, "zombie", zombie)
+		t.eq(Features.tick_runtime_effects(actor, 0.4), {},
+			"periodic effects do not emit before the first deadline")
+		Features.sync_runtime_tags(actor, "zombie", zombie)
+		var pulses: Dictionary = Features.tick_runtime_effects(actor, 0.4)
+		t.eq(int(pulses.get(StringName("Runtime.Status.Sundered"), 0)), 1,
+			"authoritative snapshot does not reset 0.75-second sunder phase")
+		t.eq(int(pulses.get(StringName("Runtime.Status.Resolve"), 0)), 0,
+			"longer resolve period remains independent")
+		pulses = Features.tick_runtime_effects(actor, 0.4)
+		t.eq(int(pulses.get(StringName("Runtime.Status.Resolve"), 0)), 1,
+			"resolve's periodic pulse is emitted without a new packet")
+		zombie["sunder_seconds"] = 0.0
+		Features.sync_runtime_tags(actor, "zombie", zombie)
+		t.eq(Features.tick_runtime_effects(actor, 0.8).get(StringName(
+			"Runtime.Status.Sundered"), 0), 0, "expired effect produces no further pulse")
+	else:
+		t.eq(Features.tick_runtime_effects(actor, 0.4), {},
+			"older engine binaries and stock Godot do not invent periodic triggers")
 	actor.free()

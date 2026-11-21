@@ -130,7 +130,13 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 	# Render-only native timers are independent from counted tag branches.
 	var timeline: Object = node.get_meta("effect_timeline", null) as Object
 	if timeline != null and timeline.has_method("replace_snapshot"):
-		timeline.call("replace_snapshot", runtime_effect_snapshot(kind, snapshot))
+		var effects: Dictionary = runtime_effect_snapshot(kind, snapshot)
+		if bool(timeline.call("replace_snapshot", effects)) and timeline.has_method("set_periodic"):
+			# Only cosmetic pulses: gameplay and timer ownership remain server-side.
+			if effects.has(StringName("Runtime.Status.Sundered")):
+				timeline.call("set_periodic", StringName("Runtime.Status.Sundered"), 0.75, false)
+			if effects.has(StringName("Runtime.Status.Resolve")):
+				timeline.call("set_periodic", StringName("Runtime.Status.Resolve"), 1.1, false)
 
 
 ## Presentation-only stack counts. The server remains authoritative for combat.
@@ -160,12 +166,15 @@ static func runtime_effect_snapshot(kind: String, snapshot: Dictionary) -> Dicti
 	return effects
 
 
-static func tick_runtime_effects(node: Node, delta: float) -> void:
+static func tick_runtime_effects(node: Node, delta: float) -> Dictionary:
 	if node == null or not is_finite(delta) or delta <= 0.0:
-		return
+		return {}
 	var timeline: Object = node.get_meta("effect_timeline", null) as Object
 	if timeline != null and timeline.has_method("tick"):
 		timeline.call("tick", delta)
+		if timeline.has_method("take_periodic_pulses"):
+			return timeline.call("take_periodic_pulses") as Dictionary
+	return {}
 
 
 static func runtime_effect_remaining(node: Node, tag: String, fallback: float = 0.0) -> float:

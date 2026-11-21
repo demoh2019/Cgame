@@ -227,4 +227,65 @@ TEST_CASE("[GameplayFX] timeline atomic snapshot rollback and validation") {
 	CHECK(timeline->replace_snapshot(cleared));
 	CHECK(timeline->is_empty());
 }
+TEST_CASE("[GameplayFX] timeline periodic pulses preserve phase across snapshots") {
+	Ref<GameplayEffectTimeline> timeline;
+	timeline.instantiate();
+	REQUIRE(timeline->set_effect("Status.Sundered", 3.0, 2));
+	CHECK(timeline->set_periodic("Status.Sundered", 0.5, false));
+	CHECK(timeline->tick(0.3).is_empty());
+	CHECK(timeline->take_periodic_pulses().is_empty());
+	Dictionary authoritative;
+	Dictionary timer;
+	timer["remaining"] = 2.7;
+	timer["stacks"] = 2;
+	authoritative["Status.Sundered"] = timer;
+	CHECK(timeline->replace_snapshot(authoritative)); // Must retain the 0.2s phase.
+	CHECK(timeline->tick(0.2).is_empty());
+	Dictionary pulses = timeline->take_periodic_pulses();
+	CHECK(int(pulses.get(StringName("Status.Sundered"), 0)) == 1);
+	CHECK(timeline->tick(1.1).is_empty());
+	pulses = timeline->take_periodic_pulses();
+	CHECK(int(pulses.get(StringName("Status.Sundered"), 0)) == 2);
+	const Dictionary saved = timeline->get_snapshot();
+	Ref<GameplayEffectTimeline> restored;
+	restored.instantiate();
+	CHECK(restored->replace_snapshot(saved));
+	CHECK(restored->get_periodic("Status.Sundered") == doctest::Approx(0.5));
+	CHECK(restored->get_remaining("Status.Sundered") == doctest::Approx(1.4));
+	CHECK(restored->tick(2.0).size() == 1);
+	pulses = restored->take_periodic_pulses();
+	CHECK(int(pulses.get(StringName("Status.Sundered"), 0)) == 3);
+	CHECK(restored->is_empty());
+}
+
+TEST_CASE("[GameplayFX] periodic policy, validation, coalescing, and rollback") {
+	Ref<GameplayEffectTimeline> timeline;
+	timeline.instantiate();
+	REQUIRE(timeline->set_effect("Status.Resolve", 100.0));
+	CHECK_FALSE(timeline->set_periodic("Status.Resolve", 0.01));
+	CHECK_FALSE(timeline->set_periodic("Status.Resolve", Math::NaN));
+	CHECK_FALSE(timeline->set_periodic("Missing", 1.0));
+	CHECK(timeline->set_periodic("Status.Resolve", 0.1, true));
+	CHECK(timeline->tick(0.08).is_empty());
+	CHECK(timeline->apply_effect("Status.Resolve", 1.0));
+	CHECK(timeline->tick(0.03).is_empty());
+	CHECK(timeline->take_periodic_pulses().is_empty()); // Reapply resets phase.
+	CHECK(timeline->tick(0.1).is_empty());
+	CHECK(int(timeline->take_periodic_pulses().get(StringName("Status.Resolve"), 0)) == 1);
+	CHECK(timeline->set_periodic("Status.Resolve", 0.05, false));
+	CHECK(timeline->tick(0.8).is_empty());
+	CHECK(int(timeline->take_periodic_pulses().get(StringName("Status.Resolve"), 0)) == 16);
+	CHECK(timeline->set_effect("Status.Resolve", 100.0));
+	CHECK(timeline->tick(10.0).is_empty());
+	CHECK(int(timeline->take_periodic_pulses().get(StringName("Status.Resolve"), 0)) == 32); // Bounded.
+	Dictionary saved = timeline->get_snapshot();
+	Dictionary effect = saved[StringName("Status.Resolve")];
+	effect["next_period"] = 1000.0;
+	CHECK_FALSE(timeline->replace_snapshot(saved));
+	CHECK(timeline->get_remaining("Status.Resolve") == doctest::Approx(90.0));
+	CHECK(timeline->get_periodic("Status.Resolve") == doctest::Approx(0.05));
+	CHECK(timeline->remove_effect("Status.Resolve"));
+	CHECK(timeline->take_periodic_pulses().is_empty());
+}
+
 } // namespace TestGameplayFX

@@ -4,7 +4,7 @@
 		Explicit-clock runtime for timed, stackable gameplay effects.
 	</brief_description>
 	<description>
-		A reusable timeline of exact gameplay tags with positive stack counts and remaining durations. Advance time through [method tick]; it never reads wall-clock time. Reapplications support refresh, extend and keep-duration policies inspired by Unreal Gameplay Effects. One timeline supports at most 256 effects, 65535 stacks per effect and durations up to seven days. Invalid or non-finite values fail without partial state changes. In multiplayer projects only an authoritative simulation may decide gameplay outcomes; client-side use should remain visual.
+		A reusable timeline of exact gameplay tags with positive stack counts and remaining durations. Optional periodic callbacks are accumulated in constant time and capped at 32 per tag between drains; they never directly apply damage. Bare authoritative snapshots preserve an existing periodic phase for matching effects, while full snapshots also serialize period, next_period and reset_on_reapply. Advance time through [method tick]; it never reads wall-clock time. Reapplications support refresh, extend and keep-duration policies inspired by Unreal Gameplay Effects. One timeline supports at most 256 effects, 65535 stacks per effect and durations up to seven days. Invalid or non-finite values fail without partial state changes. In multiplayer projects only an authoritative simulation may decide gameplay outcomes; client-side use should remain visual.
 	</description>
 	<methods>
 		<method name="apply_effect">
@@ -31,6 +31,22 @@
 		<method name="get_snapshot" qualifiers="const">
 			<return type="Dictionary" />
 			<description>Returns independent dictionaries of all active effects, safe to edit without changing the timeline.</description>
+		</method>
+		<method name="set_periodic">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="period" type="float" />
+			<param index="2" name="reset_on_reapply" type="bool" default="true" />
+			<description>Configures repeated pulses for an existing effect. Periods must be between 0.05 seconds and seven days, or zero to disable. Changing the interval resets its phase. If reset_on_reapply is true, a successful apply_effect restarts the next pulse countdown.</description>
+		</method>
+		<method name="get_periodic" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="tag" type="StringName" />
+			<description>Returns an exact effect's current period, or zero if missing or disabled.</description>
+		</method>
+		<method name="take_periodic_pulses">
+			<return type="Dictionary" />
+			<description>Returns and clears coalesced periodic trigger counts, keyed by exact tag. Each count is capped at 32 to avoid bursts after long frames. The caller chooses whether to show a visual or apply a server-authorized rule.</description>
 		</method>
 		<method name="tick">
 			<return type="PackedStringArray" />

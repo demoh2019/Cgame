@@ -26,14 +26,20 @@ public:
 	static constexpr int MAX_EFFECTS = 256;
 	static constexpr int MAX_STACKS = 65535;
 	static constexpr double MAX_DURATION = 604800.0;
+	static constexpr double MIN_PERIOD = 0.05;
+	static constexpr int MAX_PENDING_PULSES = 32;
 
 private:
 	struct Effect {
 		StringName tag;
 		double remaining = 0.0;
 		int stacks = 1;
+		double period = 0.0;
+		double next_period = 0.0;
+		bool reset_on_reapply = true;
 	};
 	Vector<Effect> effects;
+	Dictionary pending_pulses; // Aggregated and capped: no unbounded backlog.
 	int _find(const StringName &p_tag) const;
 	static bool _valid_tag(const StringName &p_tag);
 	static bool _valid_duration(double p_seconds);
@@ -45,6 +51,13 @@ protected:
 public:
 	bool set_effect(const StringName &p_tag, double p_seconds, int p_stacks = 1);
 	bool apply_effect(const StringName &p_tag, double p_seconds, int p_stacks = 1, int p_stack_limit = MAX_STACKS, ReapplyPolicy p_policy = REAPPLY_REFRESH);
+	// A zero period disables periodic execution; changing the period resets phase.
+	// If enabled, reapply may either restart the period or preserve elapsed phase.
+	bool set_periodic(const StringName &p_tag, double p_period, bool p_reset_on_reapply = true);
+	double get_periodic(const StringName &p_tag) const;
+	// Return and clear pulse counts for effects advanced by tick(). Counts are
+	// coalesced per tag (max 32), not individual per-frame allocations.
+	Dictionary take_periodic_pulses();
 	bool remove_effect(const StringName &p_tag);
 	void clear();
 	bool replace_snapshot(const Dictionary &p_effects);
