@@ -182,7 +182,7 @@ func record_cost(lane: String, elapsed_us: int) -> bool:
 	if elapsed_us > 0:
 		var previous: int = int(_estimates.get(lane, 0))
 		_estimates[lane] = elapsed_us if previous == 0 else \
-			(3 * previous + elapsed_us + 2) / 4
+			int((3 * previous + elapsed_us + 2) / 4)
 	_frame_cost_us = mini(1000000000, _frame_cost_us + elapsed_us)
 	return true
 
