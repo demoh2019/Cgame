@@ -79,7 +79,9 @@ TEST_CASE("[AIExecutionProfiler] Budget counts slow samples without losing timin
 	CHECK(profile->record_sample(SNAME("ai"), 150));
 	CHECK(profile->record_sample(SNAME("ai"), 151));
 	CHECK(profile->record_sample(SNAME("ai"), 300));
-	Dictionary entry = Dictionary(profile->get_snapshot()["categories"])[SNAME("ai")];
+	Dictionary snap = profile->get_snapshot();
+	Dictionary categories = snap["categories"];
+	Dictionary entry = categories[SNAME("ai")];
 	CHECK(entry["count"] == 3);
 	CHECK(entry["over_budget"] == 2);
 	CHECK(entry["max_usec"] == 300);
@@ -95,7 +97,9 @@ TEST_CASE("[AIExecutionProfiler] Manual spans use monotonic elapsed time") {
 	ERR_PRINT_ON;
 	CHECK(profile->end_sample(SNAME("navigation")) >= 0);
 	CHECK(profile->end_sample(SNAME("navigation")) == -1);
-	Dictionary entry = Dictionary(profile->get_snapshot()["categories"])[SNAME("navigation")];
+	Dictionary snap = profile->get_snapshot();
+	Dictionary categories = snap["categories"];
+	Dictionary entry = categories[SNAME("navigation")];
 	CHECK(entry["count"] == 1);
 	CHECK(int64_t(entry["last_usec"]) >= 0);
 }
@@ -110,7 +114,10 @@ TEST_CASE("[AIExecutionProfiler] Snapshot isolation and reset preserve settings"
 	Dictionary rows = old["categories"];
 	Dictionary brain = rows[SNAME("brain")];
 	brain["count"] = 777;
-	CHECK(Dictionary(profile->get_snapshot()["categories"])[SNAME("brain")]["count"] == 1);
+	Dictionary current = profile->get_snapshot();
+	Dictionary current_categories = current["categories"];
+	Dictionary current_brain = current_categories[SNAME("brain")];
+	CHECK(current_brain["count"] == 1);
 	profile->reset();
 	Dictionary reset = profile->get_snapshot();
 	CHECK(reset["total_samples"] == 0);
@@ -138,7 +145,7 @@ TEST_CASE("[AIExecutionProfiler] Bounded categories and disabled span reset") {
 	profile.instantiate();
 	profile->set_enabled(true);
 	for (int i = 0; i < 32; ++i) {
-		CHECK(profile->record_sample(StringName("phase_" + itos(i)), 1));
+		CHECK(profile->record_sample(StringName(String("phase_") + itos(i)), 1));
 	}
 	ERR_PRINT_OFF;
 	CHECK_FALSE(profile->record_sample(SNAME("phase_32"), 1));
@@ -165,7 +172,8 @@ TEST_CASE("[BehaviorTreeRunner] Opt-in profiling records decision ticks only") {
 	CHECK(runner->tick(0.2) == BehaviorTreeTask::SUCCESS);
 	Dictionary snap = runner->get_profile_snapshot();
 	CHECK(snap["total_samples"] == 2);
-	Dictionary row = Dictionary(snap["categories"])[SNAME("behavior_tree")];
+	Dictionary categories = snap["categories"];
+	Dictionary row = categories[SNAME("behavior_tree")];
 	CHECK(row["count"] == 2);
 	CHECK(runner->tick(0.1) == BehaviorTreeTask::SUCCESS);
 	CHECK(runner->get_profile_snapshot()["total_samples"] == 2);
