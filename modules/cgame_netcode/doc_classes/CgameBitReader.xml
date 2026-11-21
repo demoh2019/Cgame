@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameBitReader" inherits="RefCounted" api_type="core" keywords="network,bit,unpack,quantize,deserialization" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Reads values written by [CgameBitWriter].
+	</brief_description>
+	<description>
+		[CgameBitReader] consumes a [PackedByteArray] with bit granularity. Every [code]read_*[/code] method mirrors the [code]write_*[/code] method of [CgameBitWriter] with the same parameters.
+		Reading past the end of the data never errors: missing bits read as zero and [method is_overflowed] becomes [code]true[/code]. Check it after decoding untrusted packets.
+		[codeblock]
+		var r := CgameBitReader.create(packet)
+		var a := r.read_bits(3)
+		var x := r.read_float(-100.0, 100.0, 16)
+		var q := r.read_quaternion()
+		if r.is_overflowed():
+		    push_warning("truncated packet")
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="align_to_byte">
+			<return type="void" />
+			<description>
+				Skips to the next byte boundary.
+			</description>
+		</method>
+		<method name="create" qualifiers="static">
+			<return type="CgameBitReader" />
+			<param index="0" name="bytes" type="PackedByteArray" />
+			<description>
+				Creates a reader positioned at the start of [param bytes].
+			</description>
+		</method>
+		<method name="get_bit_position" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the index of the next bit to be read.
+			</description>
+		</method>
+		<method name="get_bits_remaining" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of unread bits, including padding bits of the last byte.
+			</description>
+		</method>
+		<method name="get_bytes" qualifiers="const">
+			<return type="PackedByteArray" />
+			<description>
+				Returns the underlying data.
+			</description>
+		</method>
+		<method name="is_overflowed" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if any read ran past the end of the data since the bytes were set.
+			</description>
+		</method>
+		<method name="read_angle">
+			<return type="float" />
+			<param index="0" name="bits" type="int" />
+			<description>
+				Reads an angle in [code][0, TAU)[/code] written by [method CgameBitWriter.write_angle].
+			</description>
+		</method>
+		<method name="read_bits">
+			<return type="int" />
+			<param index="0" name="bits" type="int" />
+			<description>
+				Reads [param bits] bits (0 to 64) as an unsigned value. With 64 bits the result is the raw two's complement integer.
+			</description>
+		</method>
+		<method name="read_bool">
+			<return type="bool" />
+			<description>
+				Reads a single bit.
+			</description>
+		</method>
+		<method name="read_bytes">
+			<return type="PackedByteArray" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Reads [param count] bytes. Stops early on overflow.
+			</description>
+		</method>
+		<method name="read_float">
+			<return type="float" />
+			<param index="0" name="min_value" type="float" />
+			<param index="1" name="max_value" type="float" />
+			<param index="2" name="bits" type="int" />
+			<description>
+				Reads a value quantized by [method CgameBitWriter.write_float].
+			</description>
+		</method>
+		<method name="read_float32">
+			<return type="float" />
+			<description>
+				Reads a raw 32-bit float.
+			</description>
+		</method>
+		<method name="read_quaternion">
+			<return type="Quaternion" />
+			<param index="0" name="bits_per_component" type="int" default="10" />
+			<description>
+				Reads a "smallest three" quaternion. The result is normalized and has a maximum component error of about half a quantum of the [code]±1/√2[/code] range.
+			</description>
+		</method>
+		<method name="read_signed_varint">
+			<return type="int" />
+			<description>
+				Reads a zigzag-encoded varint.
+			</description>
+		</method>
+		<method name="read_string">
+			<return type="String" />
+			<description>
+				Reads a string written by [method CgameBitWriter.write_string].
+			</description>
+		</method>
+		<method name="read_varint">
+			<return type="int" />
+			<description>
+				Reads an unsigned varint of at most ten groups.
+			</description>
+		</method>
+		<method name="read_vector3">
+			<return type="Vector3" />
+			<param index="0" name="min_value" type="float" />
+			<param index="1" name="max_value" type="float" />
+			<param index="2" name="bits_per_axis" type="int" />
+			<description>
+				Reads a [Vector3] written by [method CgameBitWriter.write_vector3].
+			</description>
+		</method>
+		<method name="set_bit_position">
+			<return type="void" />
+			<param index="0" name="position" type="int" />
+			<description>
+				Moves the read cursor to [param position], clamped to the data size.
+			</description>
+		</method>
+		<method name="set_bytes">
+			<return type="void" />
+			<param index="0" name="bytes" type="PackedByteArray" />
+			<description>
+				Replaces the data and resets the cursor and the overflow flag.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="bytes" type="PackedByteArray" setter="set_bytes" getter="get_bytes" default="PackedByteArray()">
+			The data being read. Setting it rewinds the reader.
+		</member>
+	</members>
+</class>

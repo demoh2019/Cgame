@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameBitWriter" inherits="RefCounted" api_type="core" keywords="network,bit,pack,quantize,serialization" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Packs integers, varints and quantized values into a bit stream.
+	</brief_description>
+	<description>
+		[CgameBitWriter] appends values to a byte buffer with bit granularity. Bits are written least-significant first, so values are not byte aligned unless [method align_to_byte] is called. The layout is identical to the [code]BitWriter[/code] used by the GDScript net schema.
+		Quantized helpers map floats to fixed-point integers over a known range. The maximum error of [method write_float] is half a quantum: [code](max - min) / (2^bits - 1) / 2[/code].
+		[codeblock]
+		var w := CgameBitWriter.new()
+		w.write_bits(5, 3)
+		w.write_float(12.5, -100.0, 100.0, 16)
+		w.write_quaternion(Quaternion(Vector3.UP, 1.0))
+		var packet: PackedByteArray = w.get_bytes()
+		[/codeblock]
+		Read the data back with [CgameBitReader].
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="align_to_byte">
+			<return type="void" />
+			<description>
+				Skips the remaining bits of the current byte so the next write starts on a byte boundary.
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Discards all written data.
+			</description>
+		</method>
+		<method name="get_bit_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of bits written so far.
+			</description>
+		</method>
+		<method name="get_byte_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of bytes occupied, rounding partial bytes up.
+			</description>
+		</method>
+		<method name="get_bytes" qualifiers="const">
+			<return type="PackedByteArray" />
+			<description>
+				Returns a copy of the written bytes. Unused bits of the last byte are zero.
+			</description>
+		</method>
+		<method name="write_angle">
+			<return type="void" />
+			<param index="0" name="radians" type="float" />
+			<param index="1" name="bits" type="int" />
+			<description>
+				Writes an angle wrapped into [code][0, TAU)[/code] using [param bits] bits (1 to 32) with no duplicate endpoint.
+			</description>
+		</method>
+		<method name="write_bits">
+			<return type="void" />
+			<param index="0" name="value" type="int" />
+			<param index="1" name="bits" type="int" />
+			<description>
+				Writes the lowest [param bits] bits (0 to 64) of [param value]. Higher bits are discarded.
+			</description>
+		</method>
+		<method name="write_bool">
+			<return type="void" />
+			<param index="0" name="value" type="bool" />
+			<description>
+				Writes a single bit.
+			</description>
+		</method>
+		<method name="write_bytes">
+			<return type="void" />
+			<param index="0" name="bytes" type="PackedByteArray" />
+			<description>
+				Writes every byte of [param bytes] as eight bits, without a length prefix.
+			</description>
+		</method>
+		<method name="write_float">
+			<return type="void" />
+			<param index="0" name="value" type="float" />
+			<param index="1" name="min_value" type="float" />
+			<param index="2" name="max_value" type="float" />
+			<param index="3" name="bits" type="int" />
+			<description>
+				Writes [param value] clamped to the range and quantized to [param bits] bits (1 to 32).
+			</description>
+		</method>
+		<method name="write_float32">
+			<return type="void" />
+			<param index="0" name="value" type="float" />
+			<description>
+				Writes the raw 32-bit IEEE 754 representation of [param value].
+			</description>
+		</method>
+		<method name="write_quaternion">
+			<return type="void" />
+			<param index="0" name="value" type="Quaternion" />
+			<param index="1" name="bits_per_component" type="int" default="10" />
+			<description>
+				Writes [param value] using the "smallest three" encoding: two bits identify the largest component, and the other three are quantized to [param bits_per_component] bits each in the range [code]±1/√2[/code]. The quaternion is normalized first; a zero quaternion becomes the identity.
+			</description>
+		</method>
+		<method name="write_signed_varint">
+			<return type="void" />
+			<param index="0" name="value" type="int" />
+			<description>
+				Writes a zigzag-encoded variable-length integer (groups of seven bits plus a continuation bit). Small magnitudes of either sign use few bytes.
+			</description>
+		</method>
+		<method name="write_string">
+			<return type="void" />
+			<param index="0" name="value" type="String" />
+			<description>
+				Writes an 8-bit byte length followed by the UTF-8 bytes. Longer strings are truncated to 255 bytes.
+			</description>
+		</method>
+		<method name="write_varint">
+			<return type="void" />
+			<param index="0" name="value" type="int" />
+			<description>
+				Writes [param value] as an unsigned variable-length integer (LEB128 groups of seven bits). Negative values use ten groups.
+			</description>
+		</method>
+		<method name="write_vector3">
+			<return type="void" />
+			<param index="0" name="value" type="Vector3" />
+			<param index="1" name="min_value" type="float" />
+			<param index="2" name="max_value" type="float" />
+			<param index="3" name="bits_per_axis" type="int" />
+			<description>
+				Writes each axis as in [method write_float] with the same range and [param bits_per_axis] bits.
+			</description>
+		</method>
+	</methods>
+</class>

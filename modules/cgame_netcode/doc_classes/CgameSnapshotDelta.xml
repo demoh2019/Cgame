@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameSnapshotDelta" inherits="RefCounted" api_type="core" keywords="network,snapshot,delta,baseline" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Computes and applies baseline deltas between snapshots of entity dictionaries.
+	</brief_description>
+	<description>
+		A snapshot is a [Dictionary] mapping an entity id (int) to a [Dictionary] of field name to value. [method diff] produces a delta with these keys:
+		- [code]changed[/code]: [code]{id: {field: value}}[/code] with only the fields that differ from the baseline.
+		- [code]added[/code]: [code]{id: entity}[/code] for entities absent from the baseline.
+		- [code]removed[/code]: [PackedInt64Array] of entity ids gone since the baseline.
+		- [code]dropped[/code]: [code]{id: Array}[/code] of field names deleted from a kept entity. Present only when non-empty.
+		Values are deep-copied, so neither the baseline nor the delta alias the result of [method apply]. All methods are static.
+		[codeblock]
+		var delta := CgameSnapshotDelta.diff(last_acked, current, {"pos": 0.01})
+		var rebuilt := CgameSnapshotDelta.apply(last_acked, delta)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="apply" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="baseline" type="Dictionary" />
+			<param index="1" name="delta" type="Dictionary" />
+			<description>
+				Returns a new snapshot made by applying [param delta] to [param baseline]. The baseline is not modified. Changes for entities that do not exist are ignored.
+			</description>
+		</method>
+		<method name="diff" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="baseline" type="Dictionary" />
+			<param index="1" name="current" type="Dictionary" />
+			<param index="2" name="tolerances" type="Dictionary" default="{}" />
+			<description>
+				Returns the delta that turns [param baseline] into [param current]. [param tolerances] maps a field name to a float epsilon; [float], [Vector2] and [Vector3] values within the epsilon of the baseline are not resent. Values of different types always count as changed.
+			</description>
+		</method>
+		<method name="is_empty" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="delta" type="Dictionary" />
+			<description>
+				Returns [code]true[/code] if [param delta] contains no changes.
+			</description>
+		</method>
+	</methods>
+</class>

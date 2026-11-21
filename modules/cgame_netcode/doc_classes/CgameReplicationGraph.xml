@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameReplicationGraph" inherits="RefCounted" api_type="core" keywords="network,replication,relevancy,bandwidth,priority" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Decides which entities to replicate to each connection under a bandwidth budget.
+	</brief_description>
+	<description>
+		[CgameReplicationGraph] tracks entities in a spatial grid on the X/Z plane. [method gather_for] returns the entities a connection should receive now:
+		- Entities flagged always relevant are candidates for every connection; owner-only entities are candidates only for their owner; all other entities must be within the connection's view radius.
+		- Dormant entities are skipped until [method wake] is called, which forces one replication to every connection with a large priority boost.
+		- Each class has a priority, a minimum update interval in seconds and an estimated size in bytes (see [method set_class_config]). Entities sent less than the interval ago are skipped.
+		- Candidates are sorted by priority (class priority, times proximity, times starvation) and sent until the connection's byte budget is used. Due entities skipped for budget reasons accumulate starvation, which multiplies their priority on later calls so they eventually get through.
+		Time only advances through [method advance]. The graph is meant for thousands of entities per tick; relevancy queries touch only the grid cells overlapping the view radius.
+		[codeblock]
+		var graph := CgameReplicationGraph.new()
+		graph.set_class_config("npc", 1.0, 0.1, 24)
+		graph.add_entity(42, "npc", Vector3(10, 0, 5))
+		graph.advance(delta)
+		var send := graph.gather_for({"id": 1, "position": player_pos, "view_radius": 150.0, "bandwidth_bytes": 1200})
+		for item in send:
+		    replicate(item["id"])
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_entity">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="entity_class" type="StringName" />
+			<param index="2" name="position" type="Vector3" />
+			<param index="3" name="owner_id" type="int" default="-1" />
+			<param index="4" name="always_relevant" type="bool" default="false" />
+			<param index="5" name="owner_only" type="bool" default="false" />
+			<description>
+				Registers an entity, replacing any existing entity with the same [param id]. [param owner_id] is the connection id that owns it, or [code]-1[/code] for none.
+			</description>
+		</method>
+		<method name="advance">
+			<return type="void" />
+			<param index="0" name="dt" type="float" />
+			<description>
+				Advances the internal clock by [param dt] seconds.
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Removes all entities and connection state. Class configuration and the clock are kept.
+			</description>
+		</method>
+		<method name="gather_for">
+			<return type="Array" />
+			<param index="0" name="connection" type="Dictionary" />
+			<description>
+				Returns the entities to replicate to a connection now and records them as sent. [param connection] has the keys [code]id[/code] (int), [code]position[/code] ([Vector3]), and optionally [code]view_radius[/code] (default [code]100.0[/code]) and [code]bandwidth_bytes[/code] (default effectively unlimited). Each result is a [Dictionary] with [code]id[/code], [code]class[/code], [code]priority[/code] and [code]bytes[/code], ordered by descending priority then ascending id.
+			</description>
+		</method>
+		<method name="get_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of occupied grid cells.
+			</description>
+		</method>
+		<method name="get_entity_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of registered entities.
+			</description>
+		</method>
+		<method name="get_position" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the position of an entity, or zero and an error if it does not exist.
+			</description>
+		</method>
+		<method name="has_entity" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns [code]true[/code] if the entity is registered.
+			</description>
+		</method>
+		<method name="is_dormant" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns [code]true[/code] if the entity exists and is dormant.
+			</description>
+		</method>
+		<method name="remove_connection">
+			<return type="void" />
+			<param index="0" name="connection_id" type="int" />
+			<description>
+				Forgets the send history and starvation of a connection.
+			</description>
+		</method>
+		<method name="remove_entity">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Removes an entity and its per-connection history. Unknown ids are ignored.
+			</description>
+		</method>
+		<method name="set_class_config">
+			<return type="void" />
+			<param index="0" name="entity_class" type="StringName" />
+			<param index="1" name="priority" type="float" />
+			<param index="2" name="interval" type="float" />
+			<param index="3" name="bytes" type="int" />
+			<description>
+				Sets the replication [param priority], the minimum [param interval] in seconds between sends to one connection, and the estimated packet size in [param bytes] for a class. Unconfigured classes use priority [code]1.0[/code], interval [code]0.0[/code] and [code]32[/code] bytes.
+			</description>
+		</method>
+		<method name="set_dormant">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="dormant" type="bool" />
+			<description>
+				Marks an entity dormant or active. Dormant entities are not replicated until woken.
+			</description>
+		</method>
+		<method name="set_position">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="position" type="Vector3" />
+			<description>
+				Moves an entity and updates the grid.
+			</description>
+		</method>
+		<method name="wake">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Clears dormancy and forces one replication to every connection (subject to relevancy and budget).
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="cell_size" type="float" setter="set_cell_size" getter="get_cell_size" default="64.0">
+			Edge length of a grid cell in world units. Changing it rebuilds the grid. Must be greater than zero.
+		</member>
+		<member name="clock" type="float" setter="set_clock" getter="get_clock" default="0.0">
+			Current time in seconds, advanced by [method advance].
+		</member>
+	</members>
+</class>

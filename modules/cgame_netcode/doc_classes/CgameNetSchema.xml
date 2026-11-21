@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameNetSchema" inherits="RefCounted" api_type="core" keywords="network,replication,schema,serialization,delta" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Describes replicated entity fields and serializes state to compact, delta-coded packets.
+	</brief_description>
+	<description>
+		[CgameNetSchema] is built from a [Dictionary] of the form [code]{"fields": [field, ...]}[/code]. Each field is a [Dictionary] with the keys [code]name[/code], [code]type[/code] ([code]"int"[/code], [code]"float"[/code], [code]"vec3"[/code], [code]"quat"[/code], [code]"bool"[/code], [code]"string"[/code] or [code]"enum"[/code]), [code]bits[/code], [code]min[/code], [code]max[/code] and [code]condition[/code]. Use [method make_field] to build entries.
+		Conditions: [code]"always"[/code] sends the field in every packet; [code]"on_change"[/code] sends it when its quantized value differs from the baseline (or the baseline lacks it); [code]"initial_only"[/code] sends it only when the baseline lacks it; [code]"owner_only"[/code] is delta-coded like [code]on_change[/code] but is skipped when [code]is_owner[/code] is [code]false[/code].
+		Wire layout: one mask bit per schema field, then the present fields in schema order, packed LSB first. Integers and enums are stored as [code]value - min[/code] clamped to [code]bits[/code] bits; floats and vectors are fixed-point over [code][min, max][/code]; quaternions use four components over [code][-1, 1][/code]; strings use an 8-bit length and UTF-8 bytes; booleans use one bit. This is byte-compatible with the GDScript [code]net_schema.gd[/code] implementation, including [method get_schema_hash].
+		[codeblock]
+		var schema := CgameNetSchema.new()
+		schema.set_schema({"fields": [
+		    CgameNetSchema.make_field("hp", "int", 8, 0, 255),
+		    CgameNetSchema.make_field("pos", "vec3", 16, -512, 512),
+		]})
+		var bytes := schema.serialize({"hp": 70, "pos": Vector3(1, 2, 3)}, baseline, true)
+		var state := schema.deserialize(bytes, baseline)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="bits_for_range" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="min_value" type="float" />
+			<param index="1" name="max_value" type="float" />
+			<description>
+				Returns the number of bits needed to store every integer from [param min_value] to [param max_value].
+			</description>
+		</method>
+		<method name="deserialize" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="bytes" type="PackedByteArray" />
+			<param index="1" name="baseline" type="Dictionary" />
+			<description>
+				Decodes [param bytes] on top of a shallow copy of [param baseline]. Fields absent from the packet keep their baseline value. Truncated packets decode missing bits as zero.
+			</description>
+		</method>
+		<method name="deserialize_versioned" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="bytes" type="PackedByteArray" />
+			<param index="1" name="baseline" type="Dictionary" />
+			<description>
+				Decodes a packet from [method serialize_versioned]. Returns [code]{"ok": bool, "state": Dictionary}[/code]; [code]ok[/code] is [code]false[/code] and [code]state[/code] empty when the packet is shorter than four bytes or its schema hash does not match.
+			</description>
+		</method>
+		<method name="get_field_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of fields in the current schema.
+			</description>
+		</method>
+		<method name="get_schema" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the normalized schema (all keys filled in).
+			</description>
+		</method>
+		<method name="get_schema_hash" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns a 32-bit hash of the schema (names, types, bits, ranges and conditions) for version checks.
+			</description>
+		</method>
+		<method name="make_field" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="type" type="String" />
+			<param index="2" name="bits" type="int" default="0" />
+			<param index="3" name="min_value" type="float" default="0.0" />
+			<param index="4" name="max_value" type="float" default="0.0" />
+			<param index="5" name="condition" type="String" default="&quot;on_change&quot;" />
+			<description>
+				Builds a field description Dictionary.
+			</description>
+		</method>
+		<method name="serialize" qualifiers="const">
+			<return type="PackedByteArray" />
+			<param index="0" name="state" type="Dictionary" />
+			<param index="1" name="baseline" type="Dictionary" />
+			<param index="2" name="is_owner" type="bool" />
+			<description>
+				Encodes [param state] relative to [param baseline] according to the field conditions. Pass an empty baseline for a full snapshot. Fields missing from [param state] are never sent.
+			</description>
+		</method>
+		<method name="serialize_versioned" qualifiers="const">
+			<return type="PackedByteArray" />
+			<param index="0" name="state" type="Dictionary" />
+			<param index="1" name="baseline" type="Dictionary" />
+			<param index="2" name="is_owner" type="bool" />
+			<description>
+				Like [method serialize] but prefixed with the little-endian 32-bit schema hash.
+			</description>
+		</method>
+		<method name="set_schema">
+			<return type="bool" />
+			<param index="0" name="schema" type="Dictionary" />
+			<description>
+				Replaces the schema. Returns [code]false[/code] (leaving an empty schema and printing an error) if [code]fields[/code] is missing or a field has an unknown type or condition. Missing [code]bits[/code], [code]min[/code], [code]max[/code] default to [code]0[/code] and [code]condition[/code] to [code]"on_change"[/code].
+			</description>
+		</method>
+	</methods>
+</class>
