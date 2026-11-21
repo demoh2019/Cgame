@@ -14,6 +14,17 @@
 			<param index="2" name="budget" type="int" />
 			<description>Returns at most [param budget] candidate indices ranked by descending priority and ascending nonnegative finite distance. [param priorities] must have the same length as [param distances] and values 0 through 3. [param budget] must be 0 through 128. No input state is mutated.</description>
 		</method>
+		<method name="select_effects_visible" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priorities" type="PackedByteArray" />
+			<param index="2" name="categories" type="PackedByteArray" />
+			<param index="3" name="visible" type="PackedByteArray" />
+			<param index="4" name="category_caps" type="PackedInt32Array" />
+			<param index="5" name="budget" type="int" />
+			<param index="6" name="max_distance" type="float" />
+			<description>Selects up to [param budget] cosmetic effect indices, ordering by priority (3 to 0), then visibility (1 before 0), distance, and original index. Input visibility values must be 0 or 1 and have the same length as the other arrays. Four category caps and an inclusive hard distance limit apply. Invalid inputs reject atomically; off-screen critical effects still compete within their priority tier. This does not perform occlusion queries or affect gameplay authority.</description>
+		</method>
 		<method name="select_top_priority_stable" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="distances" type="PackedFloat64Array" />

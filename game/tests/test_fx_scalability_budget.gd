@@ -53,6 +53,40 @@ func run(t) -> void:
 						"native parity quality %d sample %d" % [quality, sample])
 
 
+	t.current = "on-screen effects win slots only inside their priority tier"
+	var fd := PackedFloat64Array([5.0, 8.0, 1.0, 2.0, 141.0])
+	var fp := PackedByteArray([1, 1, 2, 1, 3])
+	var fg := PackedByteArray([0, 0, 1, 0, 1])
+	var fv := PackedByteArray([0, 1, 0, 1, 1])
+	var expected := PackedInt32Array([2, 3, 1, 0])
+	t.eq(FxPolicy.select_visible_indices(fd, fp, fg, fv, 3), expected,
+		"critical off-screen effect precedes less important on-screen effects")
+	t.eq(FxPolicy.select_visible_indices(fd, fp, fg,
+		PackedByteArray([0, 2, 0, 1, 1]), 3).size(), 0, "bad visibility fails closed")
+	t.eq(FxPolicy.select_visible_indices(fd, fp, fg,
+		PackedByteArray([0]), 3).size(), 0, "visibility length fails closed")
+	if ClassDB.class_exists("SignificanceBudgetPlanner"):
+		var visible_native = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if visible_native != null and visible_native.has_method("select_effects_visible"):
+			t.eq(FxPolicy.select_visible_indices(fd, fp, fg, fv, 3, visible_native),
+				expected, "native on-screen admission matches the fallback")
+			var rng_visible := RandomNumberGenerator.new()
+			rng_visible.seed = 88421
+			for quality in 4:
+				for sample in 12:
+					var vd := PackedFloat64Array()
+					var vp := PackedByteArray()
+					var vg := PackedByteArray()
+					var vv := PackedByteArray()
+					for i in 48:
+						vd.append(rng_visible.randf_range(0.0, 155.0))
+						vp.append(rng_visible.randi_range(0, 3))
+						vg.append(rng_visible.randi_range(0, 3))
+						vv.append(rng_visible.randi_range(0, 1))
+					t.eq(FxPolicy.select_visible_indices(vd, vp, vg, vv, quality, visible_native),
+						FxPolicy.select_visible_indices(vd, vp, vg, vv, quality),
+						"frustum native parity quality %d sample %d" % [quality, sample])
+
 	t.current = "game graphics tier scales total resident pool, not active effects"
 	for quality in 4:
 		t.check(FxPolicy.pool_resident_target(quality) > 0,

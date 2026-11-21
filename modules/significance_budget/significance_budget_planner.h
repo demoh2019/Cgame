@@ -34,6 +34,14 @@ public:
 			const PackedByteArray &p_priorities, const PackedByteArray &p_categories,
 			const PackedInt32Array &p_category_caps, int p_budget, double p_max_distance) const;
 
+	// View-frustum-aware VFX admission. Higher priority always wins; on-screen
+	// candidates win only within the same priority tier, before distance.
+	// 0 = off screen, 1 = in view. Range and category caps stay strict.
+	PackedInt32Array select_effects_visible(const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_priorities, const PackedByteArray &p_categories,
+			const PackedByteArray &p_visible, const PackedInt32Array &p_category_caps,
+			int p_budget, double p_max_distance) const;
+
 	// Priority-tier ranking with stable ID retention: only peers in the same
 	// priority tier compete via distance hysteresis, never bosses vs normals.
 	PackedInt32Array select_top_priority_stable(const PackedFloat64Array &p_distances,

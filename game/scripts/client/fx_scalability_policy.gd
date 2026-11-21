@@ -69,3 +69,48 @@ static func select_indices(distances: PackedFloat64Array,
 		used[group] += 1
 		output.append(index)
 	return output
+
+
+## Frustum-biased admission: render on-screen VFX first within the same
+## urgency tier. Off-screen critical feedback still beats nearby low-priority
+## effects; no gameplay authority, event or audio is discarded.
+static func select_visible_indices(distances: PackedFloat64Array,
+		priorities: PackedByteArray, categories: PackedByteArray,
+		visible: PackedByteArray, quality: int,
+		native: Object = null) -> PackedInt32Array:
+	var empty := PackedInt32Array()
+	var n: int = distances.size()
+	if n != priorities.size() or n != categories.size() or n != visible.size() or n > 16384:
+		return empty
+	for i in n:
+		if not is_finite(distances[i]) or distances[i] < 0.0 \
+				or priorities[i] > 3 or categories[i] > 3 or visible[i] > 1:
+			return empty
+	var caps: PackedInt32Array = caps_for(quality)
+	var budget: int = budget_for(quality)
+	if native != null and native.has_method("select_effects_visible"):
+		return native.call("select_effects_visible", distances, priorities,
+			categories, visible, caps, budget, MAX_DISTANCE)
+	var eligible: Array[int] = []
+	for i in n:
+		if distances[i] <= MAX_DISTANCE and caps[categories[i]] > 0:
+			eligible.append(i)
+	eligible.sort_custom(func(a: int, b: int) -> bool:
+		if priorities[a] != priorities[b]:
+			return priorities[a] > priorities[b]
+		if visible[a] != visible[b]:
+			return visible[a] > visible[b]
+		if distances[a] != distances[b]:
+			return distances[a] < distances[b]
+		return a < b)
+	var used := PackedInt32Array([0, 0, 0, 0])
+	var output := PackedInt32Array()
+	for index in eligible:
+		if output.size() >= budget:
+			break
+		var group: int = int(categories[index])
+		if used[group] >= caps[group]:
+			continue
+		used[group] += 1
+		output.append(index)
+	return output
