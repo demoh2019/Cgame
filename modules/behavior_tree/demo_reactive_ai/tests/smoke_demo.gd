@@ -48,6 +48,15 @@ func _run_checks() -> void:
     if debug_state.get("blackboard", {}).get("health") != 100:
         _fail("Native debug snapshot must include current health")
         return
+    var profile_data: Dictionary = demo.brain.get_profile_snapshot()
+    var profile_categories: Dictionary = profile_data.get("categories", {})
+    var behavior_timings: Dictionary = profile_categories.get("behavior_tree", {})
+    if not demo.brain.is_profiling_enabled() or int(behavior_timings.get("count", 0)) != 1:
+        _fail("Native behavior runner must profile its first AI tick")
+        return
+    if int(behavior_timings.get("last_usec", -1)) < 0:
+        _fail("Runner profiling must report a nonnegative time")
+        return
     if demo.brain.get_blackboard().get("action") != "chase":
         _fail("Visible player must cause chase behavior")
         return

@@ -427,10 +427,15 @@ void BehaviorTreeRunner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_finished"), &BehaviorTreeRunner::is_finished);
 	ClassDB::bind_method(D_METHOD("get_last_status"), &BehaviorTreeRunner::get_last_status);
 	ClassDB::bind_method(D_METHOD("get_debug_snapshot"), &BehaviorTreeRunner::get_debug_snapshot);
+	ClassDB::bind_method(D_METHOD("set_profiling_enabled", "enabled"), &BehaviorTreeRunner::set_profiling_enabled);
+	ClassDB::bind_method(D_METHOD("is_profiling_enabled"), &BehaviorTreeRunner::is_profiling_enabled);
+	ClassDB::bind_method(D_METHOD("get_profile_snapshot"), &BehaviorTreeRunner::get_profile_snapshot);
+	ClassDB::bind_method(D_METHOD("reset_profile"), &BehaviorTreeRunner::reset_profile);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "root_task", PROPERTY_HINT_RESOURCE_TYPE, "BehaviorTreeTask"), "set_root_task", "get_root_task");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "blackboard"), "set_blackboard", "get_blackboard");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_tick"), "set_auto_tick", "is_auto_tick_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "profiling_enabled"), "set_profiling_enabled", "is_profiling_enabled");
 	ADD_SIGNAL(MethodInfo("tree_finished", PropertyInfo(Variant::INT, "status", PROPERTY_HINT_ENUM, "Success,Failure,Running")));
 }
 
@@ -461,7 +466,16 @@ BehaviorTreeTask::Status BehaviorTreeRunner::tick(double p_delta) {
 	if (root_task.is_null()) {
 		return BehaviorTreeTask::FAILURE;
 	}
+	// Zero timing overhead on ordinary runners: no clock calls when profiling
+	// is disabled. This measures the root execution, including child tasks.
+	const bool profiling = execution_profiler.is_valid() && execution_profiler->is_enabled();
+	if (profiling) {
+		execution_profiler->begin_sample(SNAME("behavior_tree"));
+	}
 	last_status = root_task->execute(blackboard, execution_memory, "root", p_delta);
+	if (profiling) {
+		execution_profiler->end_sample(SNAME("behavior_tree"));
+	}
 	if (last_status != BehaviorTreeTask::RUNNING) {
 		finished = true;
 		execution_memory.clear();
@@ -482,6 +496,37 @@ Dictionary BehaviorTreeRunner::get_debug_snapshot() const {
 	result["blackboard"] = blackboard.duplicate(true);
 	result["execution_memory"] = execution_memory.duplicate(true);
 	return result;
+}
+
+void BehaviorTreeRunner::set_profiling_enabled(bool p_enabled) {
+	if (p_enabled && execution_profiler.is_null()) {
+		execution_profiler.instantiate();
+	}
+	if (execution_profiler.is_valid()) {
+		execution_profiler->set_enabled(p_enabled);
+	}
+}
+
+bool BehaviorTreeRunner::is_profiling_enabled() const {
+	return execution_profiler.is_valid() && execution_profiler->is_enabled();
+}
+
+Dictionary BehaviorTreeRunner::get_profile_snapshot() const {
+	if (execution_profiler.is_null()) {
+		Dictionary snapshot;
+		snapshot["enabled"] = false;
+		snapshot["budget_usec"] = int64_t(2000);
+		snapshot["total_samples"] = int64_t(0);
+		snapshot["categories"] = Dictionary();
+		return snapshot;
+	}
+	return execution_profiler->get_snapshot();
+}
+
+void BehaviorTreeRunner::reset_profile() {
+	if (execution_profiler.is_valid()) {
+		execution_profiler->reset();
+	}
 }
 
 void BehaviorTreeRunner::reset() {

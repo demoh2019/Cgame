@@ -56,6 +56,7 @@ var behavior: String = "roamer"
 var unseen_seconds: float = 0.0 # Hunter: how long the target has been out of sight.
 var _sight_check: float = 0.0
 var _native_senses: Variant = null # Lazy per-infected memory; optional on stock Godot.
+var _ai_profiler: Variant = null # Opt-in per-infected target selection profiling.
 var _howl_pending: bool = false
 var _howled_at: int = -1 # Howlers scream once per target.
 const HUNTER_MEMORY_SECONDS := 6.0 # A hunter keeps coming this long after losing sight of you.
@@ -88,6 +89,34 @@ func become_elite() -> void:
 	behavior = "hunter" # Champions never let go of their prey.
 
 
+## Opt-in timing on the authoritative server. Disabled in ordinary gameplay.
+## Returns false on stock Godot when this fork's profiler is unavailable.
+func enable_ai_profiling(enabled: bool) -> bool:
+	if not enabled:
+		if _ai_profiler != null:
+			_ai_profiler.set_enabled(false)
+		return true
+	if _ai_profiler == null:
+		if not ClassDB.class_exists("AIExecutionProfiler"):
+			return false
+		_ai_profiler = ClassDB.instantiate("AIExecutionProfiler")
+		if _ai_profiler == null:
+			return false
+	_ai_profiler.set_enabled(true)
+	return true
+
+
+func get_ai_profile_snapshot() -> Dictionary:
+	if _ai_profiler == null:
+		return {"enabled": false, "total_samples": 0, "categories": {}}
+	return _ai_profiler.get_snapshot()
+
+
+func reset_ai_profile() -> void:
+	if _ai_profiler != null:
+		_ai_profiler.reset()
+
+
 ## Server-side diagnostic query. Never include this in public game snapshots:
 ## it exposes AI target identity and last perceived target locations.
 func get_ai_debug_snapshot() -> Dictionary:
@@ -100,6 +129,7 @@ func get_ai_debug_snapshot() -> Dictionary:
 		"last_known_target": last_known_target,
 		"investigate_seconds": investigate_time,
 		"perception": _native_senses.get_debug_snapshot() if _native_senses != null else {},
+		"profiling": get_ai_profile_snapshot(),
 	}
 
 
@@ -148,7 +178,11 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 	# Pick or drop a target a few times a second, not every tick.
 	if think_timer <= 0.0:
 		think_timer = 0.25
+		if _ai_profiler != null and _ai_profiler.is_enabled():
+			_ai_profiler.begin_sample(&"target_selection")
 		_select_target(world, players, here)
+		if _ai_profiler != null and _ai_profiler.is_enabled():
+			_ai_profiler.end_sample(&"target_selection")
 
 	var result: Dictionary = {}
 	match state:
