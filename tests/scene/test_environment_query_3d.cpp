@@ -457,6 +457,46 @@ TEST_CASE("[EnvironmentQuery3D] Ring generation is deterministic") {
 	CHECK(a == b);
 }
 
+TEST_CASE("[EnvironmentQuery3D] Occupancy exclusion precedes stable separated selection") {
+	Ref<EnvironmentQuery3D> q = make_query({
+			Vector3(2, 0, 0), Vector3(4, 0, 0), Vector3(8, 0, 0), Vector3(12, 0, 0) });
+	const PackedVector3Array occupied = { Vector3(2, 0, 0) };
+	const PackedVector3Array output = q->query_spread_positions_avoiding(3, 3.5, occupied, 2.0);
+	REQUIRE(output.size() == 3);
+	CHECK(output[0] == Vector3(4, 0, 0)); // Exactly 2 m away remains valid.
+	CHECK(output[1] == Vector3(8, 0, 0));
+	CHECK(output[2] == Vector3(12, 0, 0));
+	CHECK(q->query_spread_positions_avoiding(4, 3.5, PackedVector3Array(), 0.0) ==
+			q->query_spread_positions(4, 3.5));
+	CHECK(q->get_candidates().size() == 4); // Evaluation never changes input.
+}
+
+TEST_CASE("[EnvironmentQuery3D] Occupancy follows horizontal-only and output limits") {
+	Ref<EnvironmentQuery3D> q = make_query({ Vector3(2, 12, 0), Vector3(8, 0, 0) });
+	q->set_max_results(1);
+	const PackedVector3Array occupied = { Vector3(2, 0, 0) };
+	// Full 3D clearance does not suppress an elevated candidate.
+	CHECK(q->query_spread_positions_avoiding(2, 1.0, occupied, 3.0).size() == 1);
+	q->set_horizontal_only(true);
+	const PackedVector3Array filtered = q->query_spread_positions_avoiding(2, 1.0, occupied, 3.0);
+	REQUIRE(filtered.size() == 1);
+	CHECK(filtered[0] == Vector3(8, 0, 0));
+	q->set_max_results(0);
+	CHECK(q->query_spread_positions_avoiding(2, 1.0, occupied, 0.0).size() == 2);
+}
+
+TEST_CASE("[EnvironmentQuery3D] Invalid occupied contexts do not produce partial results") {
+	Ref<EnvironmentQuery3D> q = make_query({ Vector3(2, 0, 0), Vector3(6, 0, 0) });
+	PackedVector3Array oversized;
+	oversized.resize(129);
+	ERR_PRINT_OFF
+	CHECK(q->query_spread_positions_avoiding(2, 1.0, oversized, 1.0).is_empty());
+	CHECK(q->query_spread_positions_avoiding(2, 1.0, PackedVector3Array(), -1.0).is_empty());
+	CHECK(q->query_spread_positions_avoiding(0, 1.0, PackedVector3Array(), 1.0).is_empty());
+	CHECK(q->query_spread_positions_avoiding(2, 1.0, PackedVector3Array(), 1.0).size() == 2);
+	ERR_PRINT_ON
+}
+
 TEST_CASE("[EnvironmentQuery3D] Ring phase rotates the first sample") {
 	PackedVector3Array p = EnvironmentQuery3D::sample_ring(Vector3(), 1, 4, Math::PI / 2.0);
 	REQUIRE(p.size() == 4);
