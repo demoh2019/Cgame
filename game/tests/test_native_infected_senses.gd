@@ -127,6 +127,7 @@ func run(t) -> void:
     var patrol_memory := NativeSenses.new()
     patrol_memory.record_confirmed_sound(Vector2(60, 0), Vector2(60, 0), 40.0, 201)
     patrol_memory.record_confirmed_sound(Vector2(60, 0), Vector2(72, 0), 40.0, 202)
+    patrol_memory.record_confirmed_sound(Vector2(60, 0), Vector2(77, 0), 40.0, 203)
     if patrol_memory.has_native_history() and patrol_memory.has_native_hearing():
         var ranked_sound: Array = patrol_memory.get_ranked_confirmed_stimuli(1, 2)
         t.eq(ranked_sound.size(), 2, "confirmed sound list contains both sources")
@@ -149,7 +150,7 @@ func run(t) -> void:
             patrol.position = Vector3(72, WorldGen.HUB_HEIGHT, 0)
             patrol.think(WorldGen.new(42), {}, 0.1, RandomNumberGenerator.new())
             t.eq(patrol.state, Zombie.State.WANDER,
-                "after two unique sound sites the infected stops searching")
+                "after two unique sound sites the infected stops despite a third memory")
         else:
             t.eq(patrol.state, Zombie.State.WANDER,
                 "older native history returns to baseline single-site search")

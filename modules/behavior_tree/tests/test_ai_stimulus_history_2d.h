@@ -213,7 +213,7 @@ TEST_CASE("[AIStimulusHistory2D] Ranked top-K returns stable decayed confidence"
 	CHECK(reverse_third["source_id"] == 9);
 	CHECK(first["score"] == real_t(0.6));
 	CHECK(third["score"] == real_t(0.95 * 0.5));
-	CHECK(a->get_best(AIStimulusHistory2D::SOUND)["source_id"] == Dictionary(ranked[0])["source_id"]);
+	CHECK(a->get_best(AIStimulusHistory2D::SOUND)["source_id"] == first["source_id"]);
 	CHECK(a->get_ranked(AIStimulusHistory2D::SOUND, 1).size() == 1);
 	CHECK(a->get_ranked(AIStimulusHistory2D::SOUND, 0).is_empty());
 	CHECK(a->get_ranked(AIStimulusHistory2D::DAMAGE).is_empty());

@@ -47,7 +47,7 @@ class RankedStimulusContract(unittest.TestCase):
         self.assertIn('func get_ranked_confirmed_stimuli(sense: int, limit: int = 8)', adapter)
         self.assertIn('_history.has_method("get_ranked")', adapter)
         self.assertIn('for event in _native_senses.get_ranked_confirmed_stimuli(1, 8)', zombie)
-        self.assertIn("_investigated_sound_sites.size() < 2", zombie)
+        self.assertIn("_investigated_sound_sites.is_empty()", zombie)
         self.assertIn('here.distance_to(candidate) > float(data["lose"])', zombie)
         self.assertIn("world.is_safe(candidate.x, candidate.y)", zombie)
         self.assertIn("world.is_water(candidate.x, candidate.y)", zombie)

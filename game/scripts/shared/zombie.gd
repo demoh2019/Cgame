@@ -295,7 +295,7 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 				stuck_time = 0.0
 			elif here.distance_to(last_known_target) < 0.8:
 				var next_sound := Vector2.INF
-				if _native_senses != null and _investigated_sound_sites.size() < 2:
+				if _native_senses != null and _investigated_sound_sites.is_empty():
 					_investigated_sound_sites.append(last_known_target)
 					for event in _native_senses.get_ranked_confirmed_stimuli(1, 8):
 						var candidate: Variant = event.get("position", Vector2.INF)
