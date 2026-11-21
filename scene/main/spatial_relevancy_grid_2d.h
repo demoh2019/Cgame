@@ -61,6 +61,7 @@ class SpatialRelevancyGrid2D : public RefCounted {
 	uint64_t candidate_checks = 0;
 	uint64_t bucket_lookups = 0;
 	uint64_t fallback_scans = 0;
+	uint64_t nearest_queries = 0;
 
 	Vector2i _cell_of(const Vector2 &p_point) const;
 	bool _safe_cell(const Vector2 &p_point) const;
@@ -72,6 +73,9 @@ protected:
 public:
 	bool rebuild(const PackedInt64Array &p_ids, const PackedVector2Array &p_positions);
 	PackedInt64Array query_ids(const Vector2 &p_center, double p_radius);
+	// Exactly bounded nearest-K IDs ordered by squared distance and ID.
+	// Other spatial queries continue to preserve original input order.
+	PackedInt64Array query_nearest_ids(const Vector2 &p_center, double p_radius, int p_max_results = 12);
 	// Each array entry corresponds to one viewer, preserving source entity
 	// order. One script/native boundary crossing for an entire broadcast.
 	Array query_many(const PackedVector2Array &p_centers, double p_radius);
