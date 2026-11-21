@@ -5,6 +5,7 @@ extends RefCounted
 
 const CELL_SIZE: float = 64.0
 const DIRECT_SCAN_THRESHOLD: int = 8
+const MAX_HASH_QUERY_RADIUS: float = 512.0 # Large generic queries fall back to exact scan.
 
 var _positions: Array[Vector2] = []
 var _cells: Dictionary = {} # Vector2i -> Array[Vector2]
@@ -20,9 +21,13 @@ func rebuild(positions: Array[Vector2]) -> void:
 	candidate_checks = 0
 	bucket_lookups = 0
 	for point in positions:
-		if not point.is_finite():
-			continue
-		_positions.append(point)
+		if point.is_finite():
+			_positions.append(point)
+	# Small sessions need no buckets at all. Rebuild from fresh server state
+	# once per maintenance pass, so teleports/disconnects never go stale.
+	if _positions.size() <= DIRECT_SCAN_THRESHOLD:
+		return
+	for point in _positions:
 		var key: Vector2i = cell_of(point)
 		if not _cells.has(key):
 			_cells[key] = []
@@ -37,7 +42,7 @@ func any_within(point: Vector2, radius: float, inclusive: bool = true) -> bool:
 		return false
 	query_count += 1
 	var radius_squared: float = radius * radius
-	if _positions.size() <= DIRECT_SCAN_THRESHOLD:
+	if _positions.size() <= DIRECT_SCAN_THRESHOLD or radius > MAX_HASH_QUERY_RADIUS:
 		for player_position in _positions:
 			candidate_checks += 1
 			var d: float = point.distance_squared_to(player_position)
