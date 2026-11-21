@@ -21,6 +21,8 @@ var combat_xp: Dictionary = {"melee": 0, "ranged": 0}
 var scavenging_xp: int = 0
 # Albion Destiny Board-style weapon line mastery: fame per weapon family ("spear", "club"...).
 var weapon_fame: Dictionary = {}
+# Albion-style focus points: a daily crafting budget (see return_rate.gd). New characters start full.
+var focus: float = 10000.0
 const MASTERY_MAX_LEVEL := 100
 const MASTERY_FAME_SCALE := 20.0 # level = sqrt(fame / 20): L10 = 2k fame, L100 = 200k fame.
 const MASTERY_IP_PER_LEVEL := 2 # Albion: specialization raises the item power of that line.
@@ -136,7 +138,7 @@ func levels() -> Dictionary:
 func to_dict() -> Dictionary:
 	return {"gathering": gathering_xp.duplicate(true),
 		"crafting": crafting_xp, "combat": combat_xp.duplicate(true),
-		"scavenging": scavenging_xp, "weapon_fame": weapon_fame.duplicate()}
+		"scavenging": scavenging_xp, "weapon_fame": weapon_fame.duplicate(), "focus": focus}
 
 
 static func _valid_xp(value: Variant) -> bool:
@@ -186,6 +188,9 @@ func load_dict(data: Variant) -> bool:
 	combat_xp = clean_combat
 	scavenging_xp = int(scavenging_raw)
 	load_weapon_fame(data.get("weapon_fame", {}))
+	var saved_focus: Variant = data.get("focus", 10000.0)
+	if (saved_focus is float or saved_focus is int) and is_finite(float(saved_focus)):
+		focus = clampf(float(saved_focus), 0.0, 10000.0)
 	return true
 
 

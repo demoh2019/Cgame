@@ -105,6 +105,7 @@ const Combat = preload("res://scripts/shared/combat.gd")
 const GearDurability = preload("res://scripts/shared/gear_durability.gd")
 const Enchanting = preload("res://scripts/shared/enchanting.gd")
 const GearSkills = preload("res://scripts/shared/gear_skills.gd")
+const ReturnRate = preload("res://scripts/shared/return_rate.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
 const WoundSealant = preload("res://scripts/shared/wound_sealant.gd")
@@ -1388,7 +1389,7 @@ func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
 
 
 func cmd_craft(peer_id: int, recipe_id: String, times: int = 1,
-		from_stash: bool = false) -> Dictionary:
+		from_stash: bool = false, use_focus: bool = false) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
@@ -1407,6 +1408,12 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1,
 	var recipe_tier: int = maxi(1, Defs.tier_of(String(recipe["output"])))
 	if not player.progression.can_craft_tier(recipe_tier):
 		return {"ok": false, "reason": "need_skill", "skill": "crafting", "tier": recipe_tier}
+	var focus_needed: int = ReturnRate.focus_cost(String(recipe["output"]), recipe_tier, times) if use_focus else 0
+	if use_focus:
+		if not (player.position.is_finite() and _is_safe(player.position) and _at_workbench(Vector2(player.position.x, player.position.z))):
+			return {"ok": false, "reason": "focus_needs_city"}
+		if player.progression.focus < float(focus_needed):
+			return {"ok": false, "reason": "need_focus", "focus": int(player.progression.focus), "cost": focus_needed}
 	var at_bench: bool = player.position.is_finite() and (
 		_at_workbench(Vector2(player.position.x, player.position.z))
 		or territory.has_field_workbench(peer_id, players, parties, time)
@@ -1425,6 +1432,21 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1,
 		for batch in times:
 			if not input_ids.is_empty() and rng.randf() < player.skills.bonus("craft_refund"):
 				player.inventory.add(String(input_ids[rng.randi() % input_ids.size()]), 1)
+		# Albion-style focus: crafting with focus at a city workbench returns part of the materials.
+		var in_settlement: bool = player.position.is_finite() and _is_safe(player.position) \
+			and _at_workbench(Vector2(player.position.x, player.position.z))
+		var spent: Dictionary = {}
+		for input_id in recipe["inputs"]:
+			spent[input_id] = int(recipe["inputs"][input_id]) * times
+		var returned: Dictionary = {}
+		if use_focus and in_settlement:
+			returned = ReturnRate.returned(spent, ReturnRate.FOCUS_RATE, rng)
+			player.progression.focus = maxf(0.0, player.progression.focus - float(focus_needed))
+		for input_id in returned:
+			var target_bag = player.stash if from_stash else player.inventory
+			var overflow: int = target_bag.add(String(input_id), int(returned[input_id]))
+			if overflow > 0 and target_bag != player.inventory:
+				player.inventory.add(String(input_id), overflow)
 		# Quality: each crafted piece of gear rolls Normal..Masterpiece; higher crafting rank helps.
 		var output: String = String(recipe["output"])
 		var best: int = 1
@@ -1445,7 +1467,7 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1,
 			player.dirty_stash = true
 		player.dirty_character = true
 		return {"ok": true, "recipe": recipe_id, "times": times,
-			"from_stash": from_stash, "best_quality": best}
+			"from_stash": from_stash, "best_quality": best, "returned": returned}
 	return {"ok": false, "reason": ["ok", "unknown_recipe", "missing_inputs", "no_station", "no_space"][status],
 		"from_stash": from_stash}
 
@@ -6905,6 +6927,7 @@ func _tick_players(delta: float) -> void:
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
 		player.skill_timer = maxf(player.skill_timer - delta, 0.0)
 		player.ultimate_timer = maxf(player.ultimate_timer - delta, 0.0)
+		player.progression.focus = minf(ReturnRate.MAX_FOCUS, player.progression.focus + ReturnRate.REGEN_PER_SECOND * maxf(0.0, delta))
 		for gear_slot in player.gear_skill_timers.keys():
 			player.gear_skill_timers[gear_slot] = maxf(float(player.gear_skill_timers[gear_slot]) - delta, 0.0)
 		if player.sprint_buff_seconds > 0.0:
@@ -8733,6 +8756,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"scavenging_level": player.progression.scavenging_level(),
 			"scavenging_xp": player.progression.scavenging_xp,
 			"combat_levels": player.progression.combat_levels(),
+			"focus": int(player.progression.focus),
 			"weapon_mastery": {"family": Progression.weapon_family(player.inventory.weapon),
 				"level": player.progression.weapon_mastery_level(player.inventory.weapon),
 				"fame": int(player.progression.weapon_fame.get(Progression.weapon_family(player.inventory.weapon), 0)),

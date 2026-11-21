@@ -2,6 +2,7 @@ extends CanvasLayer
 ## All of the interface, built in code: vitals, zone, inventory, crafting and a message log.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const ReturnRate = preload("res://scripts/shared/return_rate.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
@@ -2609,6 +2610,20 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "craft":
+		match str(data.get("reason", "")):
+			"focus_needs_city":
+				say("Focus crafting works only at a safe settlement workbench.")
+				return
+			"need_focus":
+				say("Not enough focus: %d needed, %d left (refills over a day)." % [int(data.get("cost", 0)), int(data.get("focus", 0))])
+				return
+		var back: Dictionary = data.get("returned", {})
+		if bool(data.get("ok", false)) and not back.is_empty():
+			var parts: Array = []
+			for id in back:
+				parts.append("%d %s" % [int(back[id]), str(Defs.item(str(id)).get("name", id))])
+			say("Focus returned: %s." % ", ".join(parts))
 	if (kind == "stash" or kind == "stash_bulk") and bool(data.get("ok", false)):
 		FirstSteps.note_deposit()
 	if kind == "door" and not bool(data.get("ok", false)):
@@ -4598,6 +4613,14 @@ func _refresh_crafting() -> void:
 				else:
 					client.craft(recipe_id, amount_max))
 			row.add_child(max_button)
+		if ready and not use_bank and station == "workbench":
+			var focus_button := Button.new()
+			focus_button.text = "Focus"
+			focus_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			focus_button.tooltip_text = "Craft with focus at a city workbench: 35%% of the materials come back. Costs %d focus (you have %d; it refills over a day)." % [
+				ReturnRate.focus_cost(output_id, maxi(1, Defs.tier_of(output_id)), 1), int(client.you.get("focus", 0))]
+			focus_button.pressed.connect(func() -> void: client.craft_focus(recipe_id, 1))
+			row.add_child(focus_button)
 		var divider := VBoxContainer.new()
 		divider.add_theme_constant_override("separation", 6)
 		divider.add_child(row)

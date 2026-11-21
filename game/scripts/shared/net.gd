@@ -506,6 +506,13 @@ func c_repair_gear() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_craft_focus(recipe: String, times: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "craft", sim.cmd_craft(peer, str(recipe), times, false, true))
+
+
+@rpc("any_peer", "reliable")
 func c_craft(recipe: String, times: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

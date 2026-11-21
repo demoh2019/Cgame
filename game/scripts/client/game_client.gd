@@ -308,6 +308,11 @@ func craft(recipe: String, times: int = 1) -> void:
 	net.c_craft.rpc_id(1, recipe, times)
 
 
+## Albion-style focus craft: spends focus at a city workbench to get materials back.
+func craft_focus(recipe: String, times: int = 1) -> void:
+	net.c_craft_focus.rpc_id(1, recipe, times)
+
+
 func craft_from_stash(recipe: String, times: int = 1) -> void:
 	net.c_craft_from_stash.rpc_id(1, recipe, times)
 
