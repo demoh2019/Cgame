@@ -97,3 +97,26 @@ References:
 - https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine
 - https://docs.unity.com/en-us/engine/7000.0/script-reference/unityengine/application/backgroundloadingpriority
 - https://docs.godotengine.org/en/stable/classes/class_multimesh.html
+
+## Cosmetic simulation Data Layers (Unreal-inspired)
+
+The native `WorldStreamer` can now separately enable/disable up to 16
+named **cosmetic simulation layers** via
+`set_simulation_layer_enabled(layer: StringName, enabled: bool)`.
+Loaded scene roots opt in with `get_streaming_simulation_layer()`.
+A missing layer is enabled by default. Each root retains its identity,
+terrain geometry and collision resources regardless of layer state.
+Only `set_streaming_simulation_active` is called, bounded by the
+existing `max_simulation_transitions_per_update` scheduling budget.
+Invalid names are refused; layers are never implicitly created for chunks.
+
+Albion After uses `SurfaceCosmetics` for the procedural `ChunkView` idle
+loop (grass updates, decor updates, shadow updates and windmill rotations).
+When the player enters the dungeon, the client disables that layer and
+re-enables it when returning outdoors. No server process, player detection,
+loot/collision, terrain generation, scene residency or network code is
+affected. Existing builds without the API continue using ordinary distance LOD.
+
+This is a **small subset** of Unreal World Partition Data Layers: it
+controls opt-in script simulation, not independent streamed actor packages,
+navigation maps, memory-mapped asset groups or full editor authoring.
