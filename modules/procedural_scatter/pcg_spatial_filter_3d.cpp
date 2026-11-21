@@ -8,9 +8,11 @@
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
 #include "core/templates/hash_map.h"
+#include "core/templates/hash_set.h"
 #include "core/templates/vector.h"
 
 #include <algorithm>
+#include <cstdint>
 
 void PCGSpatialFilter3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("filter_indices", "candidates", "min_spacing", "max_selected"),
@@ -21,6 +23,8 @@ void PCGSpatialFilter3D::_bind_methods() {
 			&PCGSpatialFilter3D::filter_indices_excluding, DEFVAL(MAX_SELECTED));
 	ClassDB::bind_method(D_METHOD("filter_indices_excluding_volumes", "candidates", "exclusion_centers", "exclusion_radii", "box_mins", "box_maxs", "min_spacing", "max_selected"),
 			&PCGSpatialFilter3D::filter_indices_excluding_volumes, DEFVAL(MAX_SELECTED));
+	ClassDB::bind_method(D_METHOD("filter_indices_density", "candidates", "densities", "stable_ids", "seed", "max_selected"),
+			&PCGSpatialFilter3D::filter_indices_density, DEFVAL(MAX_SELECTED));
 }
 
 PackedInt32Array PCGSpatialFilter3D::filter_indices(const PackedVector3Array &p_candidates,
@@ -336,6 +340,54 @@ PackedInt32Array PCGSpatialFilter3D::filter_indices_excluding_volumes(
 	result.resize(local.size());
 	for (int i = 0; i < local.size(); ++i) {
 		result.set(i, original_indices[local[i]]);
+	}
+	return result;
+}
+
+PackedInt32Array PCGSpatialFilter3D::filter_indices_density(
+		const PackedVector3Array &p_candidates,
+		const PackedFloat32Array &p_densities,
+		const PackedInt32Array &p_stable_ids, int64_t p_seed,
+		int p_max_selected) const {
+	PackedInt32Array result;
+	constexpr uint64_t MODULUS = 2147483647ULL;
+	if (p_candidates.size() > MAX_CANDIDATES ||
+			p_candidates.size() != p_densities.size() ||
+			p_candidates.size() != p_stable_ids.size() ||
+			p_max_selected < 0 || p_max_selected > MAX_SELECTED ||
+			p_seed < 0 || uint64_t(p_seed) >= MODULUS) {
+		return result;
+	}
+	// Validate *all* inputs before admitting even one point. This includes
+	// points at density zero and values beyond the output cap.
+	HashSet<int32_t> seen_ids;
+	for (int i = 0; i < p_candidates.size(); ++i) {
+		const Vector3 point = p_candidates[i];
+		const double density = double(p_densities[i]);
+		const int32_t stable_id = p_stable_ids[i];
+		if (!point.is_finite() || Math::abs(double(point.x)) > MAX_COORDINATE ||
+				Math::abs(double(point.y)) > MAX_COORDINATE ||
+				Math::abs(double(point.z)) > MAX_COORDINATE ||
+				!Math::is_finite(density) || density < 0.0 || density > 1.0 ||
+				stable_id < 0 || seen_ids.has(stable_id)) {
+			return PackedInt32Array();
+		}
+		seen_ids.insert(stable_id);
+	}
+	if (p_max_selected == 0) {
+		return result;
+	}
+	// 31-bit prime-modulus mixing is exact in both C++ integer arithmetic
+	// and GDScript's signed 64-bit ints (largest intermediate < 2^53).
+	// IDs, not array offsets or global RNG state, decide admission.
+	for (int i = 0; i < p_candidates.size() && result.size() < p_max_selected; ++i) {
+		const uint64_t id = uint64_t(p_stable_ids[i]);
+		uint64_t hash = (id * 48271ULL + uint64_t(p_seed) * 69621ULL + 1729ULL) % MODULUS;
+		hash = (hash * 16807ULL + 13ULL) % MODULUS;
+		const double unit = double(hash) / double(MODULUS);
+		if (unit < double(p_densities[i])) {
+			result.push_back(i);
+		}
 	}
 	return result;
 }
