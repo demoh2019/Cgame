@@ -390,6 +390,8 @@ var last_crowd_separation_stats: Dictionary = {"enabled": false, "population": 0
 const AI_CUE_NATIVE_MIN_NPCS := 32
 const AI_CUE_NATIVE_MIN_SOURCES := 4
 var last_ai_cue_query_stats: Dictionary = {"native": false, "channel": "", "sources": 0, "cues": 0}
+# Native Mass-style cylinder counts for simultaneously armed camp sentries.
+var last_camp_alarm_query_stats: Dictionary = {"native": false, "centers": 0, "targets": 0}
 # Cross-set Mass/Chaos-style native broadphase for PvE snares; script owns exact hits.
 const AI_SNARE_BROADPHASE_MIN_NPCS := 32
 const AI_SNARE_BROADPHASE_MIN_TRAPS := 8
@@ -9055,6 +9057,60 @@ func _tick_caravan_ambush() -> void:
 		return # One encounter per check interval, not an unbounded global burst.
 
 
+## Build one native XZ spatial hash for every camp alarm ready to scan.
+## This is a purely server-owned optimization; CampAlarm.scan still enforces
+## fuel, expiration, 2s scan cadence, cooldown and private event limits.
+func get_camp_alarm_query_stats() -> Dictionary:
+	return last_camp_alarm_query_stats.duplicate(true)
+
+
+func _native_camp_alarm_counts() -> Dictionary:
+	last_camp_alarm_query_stats = {"native": false, "centers": 0, "targets": 0}
+	if zombies.size() < 32 or zombies.size() > 8192:
+		return {}
+	if _pack_spatial_grid == null and ClassDB.class_exists("AIProximityGrid2D"):
+		_pack_spatial_grid = ClassDB.instantiate("AIProximityGrid2D")
+	if _pack_spatial_grid == null or not _pack_spatial_grid.has_method("query_cylinder_counts_batch"):
+		return {}
+	var ids := PackedInt64Array()
+	var centers := PackedVector3Array()
+	for id in campfires:
+		var fire: Dictionary = campfires[id]
+		if CampAlarm.seconds_left(fire, time) <= 0.0 \
+				or time < float(fire.get("alarm_next_scan", INF)):
+			continue
+		var owner: Player = players.get(int(fire.get("alarm_owner", -1)))
+		if owner == null or not _alive(owner):
+			continue
+		var center := Vector3(float(fire.get("x", NAN)),
+			float(fire.get("y", NAN)), float(fire.get("z", NAN)))
+		if not center.is_finite():
+			return {}
+		ids.append(int(id))
+		centers.append(center)
+	if centers.size() < 4 or centers.size() > 4096:
+		return {}
+	var targets := PackedVector3Array()
+	for infected in zombies.values():
+		if infected != null and infected.is_alive() and infected.position.is_finite():
+			targets.append(infected.position)
+	var matches: PackedInt32Array = _pack_spatial_grid.query_cylinder_counts_batch(
+		centers, targets, CampAlarm.DETECTION_RADIUS,
+		CampAlarm.DETECTION_HEIGHT, CampAlarm.MAX_DETECTED)
+	if matches.size() != centers.size():
+		return {}
+	# Validate the complete native output before any alarm state changes.
+	for value in matches:
+		if value < 0 or value > CampAlarm.MAX_DETECTED:
+			return {}
+	var result: Dictionary = {}
+	for i in range(ids.size()):
+		result[int(ids[i])] = int(matches[i])
+	last_camp_alarm_query_stats = {"native": true, "centers": centers.size(),
+		"targets": targets.size()}
+	return result
+
+
 func _tick_world(delta: float) -> void:
 	for id in fish_traps.keys():
 		if time >= float(fish_traps[id]["expires"]):
@@ -9081,6 +9137,9 @@ func _tick_world(delta: float) -> void:
 	for id in shelters.keys():
 		if time >= float(shelters[id]["expires"]):
 			shelters.erase(id)
+	# Snapshot only the count candidates; fuel/weather and alarm cooldown are
+	# checked again per live campfire immediately before any notification.
+	var alarm_native_counts: Dictionary = _native_camp_alarm_counts()
 	for id in campfires.keys():
 		var fire: Dictionary = campfires[id]
 		if time >= float(fire["expires"]):
@@ -9104,7 +9163,8 @@ func _tick_world(delta: float) -> void:
 		var observer: Player = players.get(alarm_owner)
 		if observer == null or not _alive(observer):
 			continue
-		var detected: int = CampAlarm.scan(fire, zombies, time)
+		var detected: int = CampAlarm.scan(fire, zombies, time,
+			int(alarm_native_counts.get(id, -1)))
 		if detected > 0:
 			events.append({"type": "camp_alarm", "peer": alarm_owner,
 				"group": int(fire.get("alarm_group", 0)),
