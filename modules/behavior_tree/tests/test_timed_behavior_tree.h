@@ -186,7 +186,7 @@ TEST_CASE("[BehaviorTreeTimed] Task graph cycles are rejected through timed deco
 	cooldown->set_task(timeout);
 	ERR_PRINT_ON;
 	CHECK(cooldown->get_task().is_null());
-	CHECK(timeout->get_task() == cooldown);
+	CHECK(timeout->get_task().ptr() == cooldown.ptr());
 }
 
 TEST_CASE("[BehaviorTreeTimed] Invalid duration and missing children fail safely") {
