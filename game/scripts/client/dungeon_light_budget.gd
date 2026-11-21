@@ -18,6 +18,15 @@ const PRESETS := [
 static var _quality := 1
 var _elapsed := 0.0
 var _active: Array[OmniLight3D] = []
+var _native_significance: Object = null
+
+
+func _ready() -> void:
+	if ClassDB.class_exists("SignificanceBudgetPlanner"):
+		var planner: Object = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if planner != null and planner.has_method("select_top_stable"):
+			_native_significance = planner
+
 
 
 static func settings(quality: int) -> Dictionary:
@@ -55,6 +64,59 @@ static func nearest(candidates: Array, maximum: int, radius: float) -> Array:
 	return eligible
 
 
+
+## Unreal-style significance retention: keep a currently active torch until a
+## challenger is meaningfully closer, but never past the hard radius.
+## All choices are render-only; gameplay and AI lights remain unchanged.
+static func stable_nearest(candidates: Array, maximum: int, radius: float,
+		retained: Array = [], hysteresis: float = 4.0, native: Object = null) -> Array:
+	if maximum <= 0 or not is_finite(radius) or radius <= 0.0:
+		return []
+	var limit: int = mini(maximum, 128)
+	var bonus: float = clampf(hysteresis, 0.0, radius) if is_finite(hysteresis) else 0.0
+	var eligible: Array = []
+	var distances := PackedFloat64Array()
+	var ids := PackedInt64Array()
+	var previous := PackedInt64Array()
+	for old_id in retained:
+		if int(old_id) > 0 and previous.size() < 128:
+			previous.append(int(old_id))
+	for entry in candidates:
+		var dsq: float = float(entry.get("distance_sq", INF))
+		var id: int = int(entry.get("id", 0))
+		if not is_finite(dsq) or dsq < 0.0 or dsq > radius * radius or id <= 0:
+			continue
+		var distance: float = sqrt(dsq)
+		var score: float = maxf(0.0, distance - (bonus if retained.has(id) else 0.0))
+		var record: Dictionary = {"entry": entry, "distance": distance, "score": score, "id": id}
+		eligible.append(record)
+		distances.append(distance)
+		ids.append(id)
+	if eligible.is_empty():
+		return []
+	if native != null and native.has_method("select_top_stable"):
+		var indices: PackedInt32Array = native.call("select_top_stable",
+			distances, ids, previous, limit, radius, bonus)
+		if not indices.is_empty():
+			var selected: Array = []
+			for index in indices:
+				selected.append(eligible[index]["entry"])
+			return selected
+	eligible.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if a["score"] != b["score"]:
+			return a["score"] < b["score"]
+		if a["distance"] != b["distance"]:
+			return a["distance"] < b["distance"]
+		if a["id"] != b["id"]:
+			return a["id"] < b["id"]
+		return false)
+	var count: int = mini(limit, eligible.size())
+	var result: Array = []
+	for i in range(count):
+		result.append(eligible[i]["entry"])
+	return result
+
+
 ## Soft fading keeps the room light from popping at the budget range.
 static func intensity(distance: float, radius: float, time: float,
 		seed: float, flicker_amount: float) -> float:
@@ -89,7 +151,12 @@ func _process(delta: float) -> void:
 		if dist_sq < radius * radius:
 			candidates.append({"node": light, "distance_sq": dist_sq, "id": light.get_instance_id()})
 	var renderer: String = str(RenderingServer.get_current_rendering_method())
-	var selected: Array = nearest(candidates, effective_max(_quality, renderer), radius)
+	var previous: Array = []
+	for torch in _active:
+		if is_instance_valid(torch):
+			previous.append(torch.get_instance_id())
+	var selected: Array = stable_nearest(candidates,
+		effective_max(_quality, renderer), radius, previous, 4.0, _native_significance)
 	var keep: Dictionary = {}
 	var seconds: float = float(Time.get_ticks_msec()) * 0.001
 	var updated: Array[OmniLight3D] = []

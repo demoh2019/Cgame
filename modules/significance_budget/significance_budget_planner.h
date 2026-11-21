@@ -27,6 +27,12 @@ public:
 	PackedInt32Array select_top(const PackedFloat64Array &p_distances,
 			const PackedByteArray &p_priorities, int p_budget) const;
 
+	// Stable-ID top-K for temporal presentation budgets. Prior selection gets
+	// only a distance bonus; objects outside max_distance cannot be retained.
+	PackedInt32Array select_top_stable(const PackedFloat64Array &p_distances,
+			const PackedInt64Array &p_ids, const PackedInt64Array &p_retained_ids,
+			int p_budget, double p_max_distance, double p_hysteresis = 0.0) const;
+
 	// Convenience for multi-viewer worlds. Only candidates within inclusive
 	// p_max_distance of at least one viewer are eligible.
 	PackedInt32Array select_world(const PackedVector3Array &p_positions,
