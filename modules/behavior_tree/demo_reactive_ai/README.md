@@ -14,6 +14,7 @@ The game uses:
 - `BehaviorTreeRunner` (Node) with `BehaviorTreeReactiveSelector` and `BehaviorTreeReactiveSequence` (Resource tasks);
 - `BehaviorTreeBlackboardCheck`, `BehaviorTreeBlackboardCompare`, `BehaviorTreeBlackboardSet`, and `BehaviorTreeWait` (time-based waits);
 - `AIVisualSensor2D`, `AIHearingSensor2D` (native reusable sensors);
+- `AIUpdateScheduler` (native deterministic NPC update slots) and `AIExecutionProfiler` (native timings for actual A* route recalculations);
 - Godot `AStarGrid2D` with an inflated four-way grid for obstacle navigation;
 - a `StaticBody2D` and `PhysicsRayQueryParameters2D` for line-of-sight.
 
