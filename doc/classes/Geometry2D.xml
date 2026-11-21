@@ -108,6 +108,17 @@
 				Output dimensions must be 1–2046 per axis, input heights must be finite and sized correctly, spacing and inverse squared spacing must be positive and representable, and ramp intervals must be finite, increasing and nonnegative. An invalid input yields an empty array. Only CPU colors are returned; upload them separately with [method ChunkedTerrain3D.set_color_data] or another mesh API. This is a reusable curvature attribute baker, not a GPU distance field or screen-space AO effect.
 			</description>
 		</method>
+		<method name="sample_scalar_grid_wrapped">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="grid" type="PackedFloat32Array" />
+			<param index="1" name="size" type="Vector2i" />
+			<param index="2" name="uvs" type="PackedVector2Array" />
+			<param index="3" name="smooth" type="bool" default="true" />
+			<description>
+				Cgame extension: sample a periodic row-major scalar grid at a batch of normalized [param uvs]. Each integer change in U or V repeats the same data, so negative and greater-than-one UVs are supported. The 4 closest lattice values are interpolated bilinearly, wrapping both axes; if [param smooth] is [code]true[/code], each fractional coordinate is first mapped through the cubic [code]t*t*(3-2*t)[/code] smoothstep ease. If [code]false[/code], ordinary bilinear weights are used. The grid represents lattice vertices at normalized integer texel locations, not samples shifted by half a texel.
+				Returns one float per queried coordinate, in the original query order. The input grid and coordinates are not modified. Width and height must each be between 1 and 2048, the grid length must equal width times height, all grid values and UVs must be finite, and at most 65536 UVs can be queried per call. Zero queries return an empty array. Invalid data or non-representable results return an empty array and report an error. This is a CPU batch sampler, not a GPU image texture or a full PCG graph.
+			</description>
+		</method>
 		<method name="heightfield_gradients">
 			<return type="PackedVector2Array" />
 			<param index="0" name="heights" type="PackedFloat32Array" />

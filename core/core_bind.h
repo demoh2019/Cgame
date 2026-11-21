@@ -347,6 +347,7 @@ public:
 	PackedByteArray distance_transform_8(const PackedByteArray &p_mask, const Vector2i &p_size, int p_max_distance);
 	PackedByteArray max_filter_mask(const PackedByteArray &p_mask, const Vector2i &p_size, int p_radius);
 	Vector<Vector2> heightfield_gradients(const Vector<float> &p_heights, const Vector2i &p_size, real_t p_cell_spacing);
+	Vector<float> sample_scalar_grid_wrapped(const Vector<float> &p_grid, const Vector2i &p_size, const Vector<Vector2> &p_uvs, bool p_smooth = true);
 	Vector<Color> bake_heightfield_curvature_colors(const Vector<float> &p_padded_heights, const Vector2i &p_size, real_t p_cell_spacing,
 			real_t p_cavity_start = 0.015, real_t p_cavity_end = 0.32, real_t p_ridge_start = 0.015, real_t p_ridge_end = 0.42);
 	bool point_is_inside_triangle(const Vector2 &p_s, const Vector2 &p_a, const Vector2 &p_b, const Vector2 &p_c) const;

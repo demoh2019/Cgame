@@ -148,6 +148,66 @@ TEST_CASE("[CoreBind] Geometry2D heightfield gradients match central differences
 }
 
 
+
+TEST_CASE("[CoreBind] Geometry2D wrapped scalar grid batch sampling") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+	Vector<float> grid;
+	grid.push_back(0.0f);
+	grid.push_back(1.0f);
+	grid.push_back(2.0f);
+	grid.push_back(3.0f);
+	Vector<Vector2> uvs;
+	uvs.push_back(Vector2(0.0, 0.0));
+	uvs.push_back(Vector2(0.25, 0.25));
+	uvs.push_back(Vector2(0.5, 0.5));
+	uvs.push_back(Vector2(0.75, 0.75));
+	uvs.push_back(Vector2(1.25, -0.75));
+	uvs.push_back(Vector2(-2.0, 3.0));
+	Vector<float> samples = api->sample_scalar_grid_wrapped(grid, Vector2i(2, 2), uvs);
+	REQUIRE(samples.size() == uvs.size());
+	CHECK(samples[0] == doctest::Approx(0.0));
+	CHECK(samples[1] == doctest::Approx(1.5));
+	CHECK(samples[2] == doctest::Approx(3.0));
+	CHECK(samples[3] == doctest::Approx(1.5));
+	CHECK(samples[4] == doctest::Approx(samples[1]));
+	CHECK(samples[5] == doctest::Approx(0.0));
+
+	Vector<Vector2> skew;
+	skew.push_back(Vector2(0.125, 0.25)); // Ordinary U fraction = 0.25.
+	Vector<float> linear = api->sample_scalar_grid_wrapped(grid, Vector2i(2, 2), skew, false);
+	Vector<float> eased = api->sample_scalar_grid_wrapped(grid, Vector2i(2, 2), skew, true);
+	REQUIRE(linear.size() == 1);
+	REQUIRE(eased.size() == 1);
+	CHECK(linear[0] == doctest::Approx(1.25));
+	CHECK(eased[0] == doctest::Approx(1.15625));
+	CHECK(grid[0] == doctest::Approx(0.0));
+	CHECK(grid[3] == doctest::Approx(3.0));
+
+	Vector<float> one;
+	one.push_back(0.7f);
+	Vector<float> single = api->sample_scalar_grid_wrapped(one, Vector2i(1, 1), uvs);
+	REQUIRE(single.size() == uvs.size());
+	for (int i = 0; i < single.size(); i++) {
+		CHECK(single[i] == doctest::Approx(0.7f));
+	}
+	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(2, 2), Vector<Vector2>()).is_empty());
+	ERR_PRINT_OFF;
+	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(3, 2), uvs).is_empty());
+	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(0, 2), uvs).is_empty());
+	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(2049, 1), uvs).is_empty());
+	Vector<float> bad_grid = grid;
+	bad_grid.set(2, Math_INF);
+	CHECK(api->sample_scalar_grid_wrapped(bad_grid, Vector2i(2, 2), uvs).is_empty());
+	Vector<Vector2> bad_uv = uvs;
+	bad_uv.push_back(Vector2(Math_NAN, 0.0));
+	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(2, 2), bad_uv).is_empty());
+	Vector<Vector2> oversized;
+	oversized.resize(65537);
+	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(2, 2), oversized).is_empty());
+	ERR_PRINT_ON;
+}
+
 TEST_CASE("[CoreBind] Geometry2D grayscale mask max-filter morphology") {
 	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
 	REQUIRE(api != nullptr);
