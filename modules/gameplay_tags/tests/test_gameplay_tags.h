@@ -143,7 +143,7 @@ TEST_CASE("[GameplayTags] counted tags, hierarchy and bounded deltas") {
 	CHECK(c->get_stack_count("Runtime.Status") == 3);
 	CHECK(c->get_stack_count("Runtime") == 4);
 	CHECK(c->get_stack_count("Runtime.St") == 0); // Dotted boundary, not prefix.
-	CHECK_FALSE(c->has_tag("Runtime.Status.Resolve", true) == false);
+	CHECK(c->has_tag("Runtime.Status.Resolve", true));
 	CHECK_FALSE(c->add_stacks("Runtime.Status.Resolve", 65535)); // Overflow.
 	CHECK_FALSE(c->add_stacks("Runtime..Broken"));
 	CHECK_FALSE(c->add_stacks("Runtime.Status.Resolve", -2));
