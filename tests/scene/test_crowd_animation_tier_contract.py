@@ -381,6 +381,66 @@ class TestCrowdPlanner(unittest.TestCase):
                 self.assertGreaterEqual(value, min(previous, sample))
                 self.assertLessEqual(value, max(previous, sample))
 
+    def test_generic_skeleton_modifier_cpu_profiling_contract(self):
+        base_header = (ROOT / "scene/3d/skeleton_modifier_3d.h").read_text()
+        base_cpp = (ROOT / "scene/3d/skeleton_modifier_3d.cpp").read_text()
+        base_doc = ET.parse(ROOT / "doc/classes/SkeletonModifier3D.xml").getroot()
+        model = (ROOT / "game/scripts/client/character_model.gd").read_text()
+        script_modifier = (ROOT / "game/scripts/client/character_anim_modifier.gd").read_text()
+        game_tests = GAME_TEST.read_text()
+        cpp_tests = (ROOT / "tests/scene/test_skeleton_3d.cpp").read_text()
+
+        self.assertIn("bool modifier_profiling_enabled = false", base_header)
+        self.assertIn("get_modifier_estimated_update_us() const", base_header)
+        self.assertIn("get_modifier_profile_sample_count() const", base_header)
+        self.assertIn("void reset_modifier_profile()", base_header)
+        self.assertIn("#include \"core/os/time.h\"", base_cpp)
+        self.assertIn("if (modifier_profiling_enabled) {", base_cpp)
+        self.assertIn("const uint64_t started_us = Time::get_singleton()->get_ticks_usec()", base_cpp)
+        self.assertIn("const uint64_t finished_us = Time::get_singleton()->get_ticks_usec()", base_cpp)
+        self.assertIn("modifier_profile_sample_count = MIN(", base_cpp)
+        self.assertIn("modifier_estimated_update_us = smooth_modifier_cost_us(", base_cpp)
+        self.assertIn("} else {\n\t\t_process_modification(p_delta);", base_cpp)
+        self.assertLess(base_cpp.index("modifier_profile_sample_count = MIN("),
+                        base_cpp.index('emit_signal(SNAME("modification_processed"))'))
+        self.assertIn('D_METHOD("set_modifier_profiling_enabled"', base_cpp)
+        self.assertIn('D_METHOD("get_modifier_estimated_update_us"', base_cpp)
+
+        self.assertIn("modifier_profiling_enabled", [
+            member.get("name") for member in base_doc.find("members")])
+        self.assertTrue(any(method.get("name") == "smooth_modifier_cost_us"
+                            for method in base_doc.find("methods")))
+        self.assertIn('get_modifier_profile_sample_count', model)
+        self.assertIn('get_modifier_estimated_update_us', model)
+        self.assertIn('func animation_modifier_profile() -> Dictionary:', model)
+        self.assertIn('set_modifier_profiling_enabled", tier == 0 and not _dead)', model)
+        self.assertIn('existing.call("set_profiling_enabled", false)', model)
+        self.assertIn('not use_engine_profile_timing', script_modifier)
+        self.assertIn("general SkeletonModifier CPU profiling", game_tests)
+        self.assertIn("universal CPU profiler is opt-in", cpp_tests)
+
+    def test_generic_skeleton_modifier_cost_ema_reference(self):
+        def smooth(prev, sample):
+            if not 0 <= prev <= 100000 or not 1 <= sample <= 100000:
+                return -1
+            return sample if prev == 0 else (3 * prev + sample + 2) // 4
+
+        self.assertEqual(smooth(0, 100), 100)
+        self.assertEqual(smooth(400, 100), 325)
+        self.assertEqual(smooth(325, 100), 269)
+        for prev, sample in ((-1, 100), (100001, 1), (1, 0), (0, 100001)):
+            self.assertEqual(smooth(prev, sample), -1)
+        rng = random.Random(996212)
+        for _ in range(2500):
+            previous = rng.randint(0, 100000)
+            sample = rng.randint(1, 100000)
+            value = smooth(previous, sample)
+            self.assertGreaterEqual(value, 1)
+            self.assertLessEqual(value, 100000)
+            if previous:
+                self.assertGreaterEqual(value, min(previous, sample))
+                self.assertLessEqual(value, max(previous, sample))
+
     def test_reject_corrupt_inputs(self):
         self.assertEqual(plan([1, 2], [1], 1, 1), [])
         self.assertEqual(plan([float("nan")], [1], 1, 1), [])

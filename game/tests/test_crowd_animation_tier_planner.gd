@@ -413,3 +413,44 @@ func run(t) -> void:
 		model_source_native.contains('set("active", _lod_tier == 0 and not _dead)') and
 		model_source_native.contains('_native_foot_modifier = null'),
 		"native IK tier gates, deferred enable and model reuse are all handled")
+
+
+	t.current = "general SkeletonModifier CPU profiling supports the game and older engines"
+	var unbound_modifier: Object = CharacterAnimModifier.new()
+	t.eq(unbound_modifier.get("use_engine_profile_timing"), false,
+		"stock Godot and old Cgame default to the local procedural stopwatch")
+	if unbound_modifier.has_method("set_modifier_profiling_enabled"):
+		unbound_modifier.call("set_modifier_profiling_enabled", true)
+		t.eq(unbound_modifier.call("is_modifier_profiling_enabled"), true,
+			"engine-wide profiling explicitly enabled per native or script modifier")
+		t.eq(unbound_modifier.call("get_modifier_profile_sample_count"), 0,
+			"unattached modifier does not fabricate a work-unit sample")
+		t.eq(unbound_modifier.call("get_modifier_estimated_update_us"), 0,
+			"no update means no CPU sample yet")
+		unbound_modifier.call("set_modifier_profiling_enabled", false)
+		t.eq(unbound_modifier.call("is_modifier_profiling_enabled"), false,
+			"modifier timer may be paused when tier 0 is not granted")
+		unbound_modifier.call("reset_modifier_profile")
+		t.eq(unbound_modifier.call("get_modifier_last_update_us"), 0,
+			"explicit reset clears the generic work-unit history")
+	unbound_modifier.free()
+
+	var no_profile_actor: Object = CharacterModel.new()
+	t.eq(no_profile_actor.call("animation_modifier_profile"), {},
+		"developer diagnostics are empty for a character without a loaded skeleton")
+	no_profile_actor.free()
+	var profiler_source := FileAccess.get_file_as_string(
+		"res://scripts/client/character_model.gd")
+	var modifier_profile_source := FileAccess.get_file_as_string(
+		"res://scripts/client/character_anim_modifier.gd")
+	t.check(profiler_source.contains('set_modifier_profiling_enabled') and
+		profiler_source.contains('get_modifier_estimated_update_us') and
+		profiler_source.contains('get_modifier_profile_sample_count') and
+		profiler_source.contains('func animation_modifier_profile() -> Dictionary:'),
+		"engine-wide profiler is integrated into Albion character pose budgets and diagnostics")
+	t.check(profiler_source.contains('existing.call("set_profiling_enabled", false)') and
+		profiler_source.contains('elif modifier.has_method("set_profiling_enabled")'),
+		"native FootPlacement specific timers are not duplicated on new engines")
+	t.check(modifier_profile_source.contains(
+		'var measure_pose: bool = look_at_enabled and not use_engine_profile_timing'),
+		"native modifier stopwatch supersedes redundant script-level timing")
