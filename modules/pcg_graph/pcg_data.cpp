@@ -298,6 +298,8 @@ void PCGPointData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("duplicate_points"), &PCGPointData::duplicate_points);
 	ClassDB::bind_method(D_METHOD("get_point_transform", "index", "align_to_normal"), &PCGPointData::get_point_transform, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_bounds"), &PCGPointData::get_bounds);
+	ClassDB::bind_method(D_METHOD("to_dictionary"), &PCGPointData::to_dictionary);
+	ClassDB::bind_static_method("PCGPointData", D_METHOD("from_dictionary", "data"), &PCGPointData::from_dictionary);
 }
 
 // --- Splines -----------------------------------------------------------------------------------------------------
@@ -398,4 +400,43 @@ void PCGParamData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_value", "key", "value"), &PCGParamData::set_value);
 	ClassDB::bind_method(D_METHOD("get_value", "key", "default"), &PCGParamData::get_value, DEFVAL(Variant()));
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "values"), "set_values", "get_values");
+}
+
+Dictionary PCGPointData::to_dictionary() const {
+	Dictionary data;
+	data["format"] = 1;
+	data["positions"] = positions;
+	data["normals"] = normals;
+	data["density"] = density;
+	data["yaw"] = yaw;
+	data["scale"] = scale;
+	data["seeds"] = seeds;
+	data["attributes"] = attributes;
+	return data;
+}
+
+Ref<PCGPointData> PCGPointData::from_dictionary(const Dictionary &p_data) {
+	if (int(p_data.get("format", 0)) != 1) {
+		return Ref<PCGPointData>();
+	}
+	Ref<PCGPointData> out;
+	out.instantiate();
+	out->positions = p_data.get("positions", PackedVector3Array());
+	out->normals = p_data.get("normals", PackedVector3Array());
+	out->density = p_data.get("density", PackedFloat32Array());
+	out->yaw = p_data.get("yaw", PackedFloat32Array());
+	out->scale = p_data.get("scale", PackedFloat32Array());
+	out->seeds = p_data.get("seeds", PackedInt64Array());
+	out->attributes = p_data.get("attributes", Dictionary());
+	const int n = out->positions.size();
+	if (out->normals.size() != n || out->density.size() != n || out->yaw.size() != n || out->scale.size() != n || out->seeds.size() != n) {
+		return Ref<PCGPointData>();
+	}
+	Array keys = out->attributes.keys();
+	for (int k = 0; k < keys.size(); k++) {
+		if (out->attributes[keys[k]].get_type() != Variant::PACKED_FLOAT32_ARRAY || PackedFloat32Array(out->attributes[keys[k]]).size() != n) {
+			return Ref<PCGPointData>();
+		}
+	}
+	return out;
 }

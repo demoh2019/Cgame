@@ -2513,6 +2513,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		_profiler.visible = not _profiler.visible
 		get_viewport().set_input_as_handled()
 		return
+	# Ctrl+Shift+F9: PCG debugging — crosses at every procedurally placed point, coloured by asset.
+	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.shift_pressed \
+			and event.keycode == KEY_F9 and _pcg_dressing != null:
+		_pcg_dressing.set_debug_draw(not PcgWorldDressing.debug_draw)
+		if hud != null:
+			hud.say("PCG debug points: %s" % ("on" if PcgWorldDressing.debug_draw else "off"))
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_F11:
 		_set_auto_graphics(false)
 		GraphicsQuality.cycle()

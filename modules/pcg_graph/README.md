@@ -40,3 +40,23 @@ Utility: `PCGMergeNode`, `PCGClusterNode` (`cluster` attribute),
 
 Tests: `modules/pcg_graph/tests/test_pcg_graph.h`
 (`bin/godot.* --headless --test --test-case="*PCGGraph*,*PCGComponent3D*"`).
+
+## Runtime features
+
+* **Async with script samplers** — `PCGContext.bake_environment(area, step)` reads the
+  height/water/biome samplers into grids on the main thread; sampling inside the area
+  then never calls scripts, so `execute_async` is thread-safe. `PCGComponent3D.bake_step`
+  (default 2 m) does this per async cell. Heights are bilinear between samples.
+* **Exclusion volumes** — `PCGExclusionVolume3D` (box or vertical cylinder) in the
+  `pcg_exclusion_volumes` group; components gather the volumes overlapping each cell
+  (`use_scene_exclusion_volumes`).
+* **Persistent procedural cache** — `persistent_cache_dir` (e.g. `user://pcg_cache`)
+  stores finished cells (`.pcgcell`, `FileAccess.store_var`); the key covers the graph
+  fingerprint, seed, cell, overrides, user data, exclusions and `cache_version`. Script
+  samplers cannot be fingerprinted: bump `cache_version` when they change meaning.
+  `get_cache_stats()`, `clear_persistent_cache()`.
+* **HLOD** — `asset_proxy_meshes` per asset are drawn from `visibility_range_end` to
+  `proxy_range_end` (no shadows, cross-faded), per cluster.
+* **Runtime debugging** — `debug_draw` draws a cross per point, coloured by asset.
+
+Tests: `tests/test_pcg_runtime_features.h` (`--test-case="*PCGRuntime*"`).

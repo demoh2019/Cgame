@@ -62,4 +62,6 @@ public:
 	// Overrides merged on top of the parameter defaults.
 	Dictionary resolve_parameters(const Dictionary &p_overrides) const;
 	PackedStringArray validate() const; // Human-readable problems (cycles, dangling links, bad bindings).
+	// Stable across runs: node classes, parameters (defaults, no overrides), ids and connections.
+	int64_t compute_fingerprint() const;
 };

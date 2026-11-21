@@ -344,9 +344,34 @@ void PCGGraph::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remove_parameter", "name"), &PCGGraph::remove_parameter);
 	ClassDB::bind_method(D_METHOD("resolve_parameters", "overrides"), &PCGGraph::resolve_parameters);
 	ClassDB::bind_method(D_METHOD("validate"), &PCGGraph::validate);
+	ClassDB::bind_method(D_METHOD("compute_fingerprint"), &PCGGraph::compute_fingerprint);
 
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "nodes", PROPERTY_HINT_ARRAY_TYPE, "PCGNode"), "set_nodes", "get_nodes");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "connections"), "set_connections", "get_connections");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "parameters"), "set_parameters", "get_parameters");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "output_node_id"), "set_output_node_id", "get_output_node_id");
+}
+
+int64_t PCGGraph::compute_fingerprint() const {
+	uint64_t h = pcg_mix64(0x504347475246ULL, (uint64_t)nodes.size());
+	const PackedInt32Array ids = get_node_ids();
+	Ref<PCGContext> none;
+	for (int i = 0; i < ids.size(); i++) {
+		Ref<PCGNode> node = get_node_by_id(ids[i]);
+		h = pcg_mix64(h, (uint64_t)ids[i]);
+		h = pcg_mix64(h, node->compute_param_hash(none));
+	}
+	for (int i = 0; i < connections.size(); i++) {
+		Dictionary c = connections[i];
+		h = pcg_mix64(h, (uint64_t)int(c.get("from", -1)));
+		h = pcg_mix64(h, (uint64_t)int(c.get("to", -1)));
+		h = pcg_mix64(h, (uint64_t)int(c.get("to_port", 0)));
+	}
+	Array keys = parameters.keys();
+	keys.sort();
+	for (int i = 0; i < keys.size(); i++) {
+		h = pcg_mix64(h, (uint64_t)String(keys[i]).hash());
+		h = pcg_mix64(h, (uint64_t)parameters[keys[i]].hash());
+	}
+	return (int64_t)pcg_mix64(h, (uint64_t)output_node_id);
 }

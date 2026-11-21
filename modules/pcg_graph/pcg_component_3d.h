@@ -53,6 +53,21 @@ class PCGComponent3D : public Node3D {
 	bool cast_shadows = true;
 	bool align_to_normal = false;
 
+	float bake_step = 2.0; // > 0: bake samplers into grids on the main thread so async jobs never call scripts.
+	bool use_scene_exclusion_volumes = true;
+	String persistent_cache_dir; // Empty = off. e.g. "user://pcg_cache".
+	int64_t cache_version = 0; // Part of the on-disk key: bump when sampler meaning changes.
+	TypedArray<Mesh> asset_proxy_meshes; // HLOD: low-detail mesh per asset shown past visibility_range_end.
+	float proxy_range_end = 0.0; // 0 = proxies never fade out.
+	bool debug_draw = false;
+	int cache_loads = 0;
+	int cache_saves = 0;
+
+	String _cache_path(const Vector2i &p_cell) const;
+	Ref<PCGPointData> _load_cached_cell(const Vector2i &p_cell) const;
+	void _save_cached_cell(const Vector2i &p_cell, const Ref<PCGPointData> &p_points);
+	void _build_cell_visuals(Node3D *p_root, const Ref<PCGPointData> &p_points);
+
 	HashMap<Vector2i, Cell> cells;
 	HashMap<int64_t, Vector2i> pending_jobs;
 	Dictionary last_profile;
@@ -121,6 +136,26 @@ public:
 	void set_align_to_normal(bool p_enabled) { align_to_normal = p_enabled; }
 	bool is_align_to_normal() const { return align_to_normal; }
 	Ref<PCGGraphExecutor> get_executor();
+	void set_bake_step(float p_step) { bake_step = MAX(0.0f, p_step); }
+	float get_bake_step() const { return bake_step; }
+	void set_use_scene_exclusion_volumes(bool p_enabled) { use_scene_exclusion_volumes = p_enabled; }
+	bool is_use_scene_exclusion_volumes() const { return use_scene_exclusion_volumes; }
+	void set_persistent_cache_dir(const String &p_dir) { persistent_cache_dir = p_dir; }
+	String get_persistent_cache_dir() const { return persistent_cache_dir; }
+	void set_cache_version(int64_t p_version) { cache_version = p_version; }
+	int64_t get_cache_version() const { return cache_version; }
+	void set_asset_proxy_meshes(const TypedArray<Mesh> &p_meshes) { asset_proxy_meshes = p_meshes; }
+	TypedArray<Mesh> get_asset_proxy_meshes() const { return asset_proxy_meshes; }
+	void set_proxy_range_end(float p_distance) { proxy_range_end = MAX(0.0f, p_distance); }
+	float get_proxy_range_end() const { return proxy_range_end; }
+	void set_debug_draw(bool p_enabled) { debug_draw = p_enabled; }
+	bool is_debug_draw() const { return debug_draw; }
+	// {"loads": int, "saves": int} for the on-disk cache since the component was created.
+	Dictionary get_cache_stats() const;
+	// Deletes every cached cell file for this component (all graphs and seeds share the directory).
+	int clear_persistent_cache();
+	// The on-disk key for a cell: graph fingerprint, seed, cell geometry, overrides, user data, volumes, versions.
+	int64_t compute_cell_cache_key(const Vector2i &p_cell) const;
 
 	// One-shot generation of the component's own bounds (synchronous). Returns the executor result.
 	Dictionary generate();

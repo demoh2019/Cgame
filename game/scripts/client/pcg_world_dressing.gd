@@ -14,9 +14,15 @@ const CELL_SIZE := 64.0
 const SETTLEMENT_KINDS := ["village", "farm", "outpost", "camp", "dock", "lighthouse", "tower"]
 const REGION_REACH := 13 # Regions -13..12 on both axes: the whole island (as WorldRoads).
 const HUB_CLEARANCE := 25.0 # Added to the hub's safe radius: no clutter on the plaza.
-## The world's terrain functions are not thread-safe (cached region state), so cells are generated on the main thread, one
-## per component and frame, instead of on the worker pool. Flip once a thread-safe sampler exists.
-const ASYNC_CELLS := false
+## The world's terrain functions are not thread-safe (cached region state), so the component bakes height, water and
+## biome into grids on the main thread (BAKE_STEP metres) and the graph then runs on the worker pool reading only the
+## grids. Engines without baking (older pcg_graph) fall back to main-thread cells.
+const ASYNC_CELLS := true
+const BAKE_STEP := 2.0
+## Finished cells are written to disk and reloaded on the next run instead of regenerating. Bump CACHE_VERSION whenever
+## world generation (heights, biomes, roads) or the graphs change meaning without changing their parameters.
+const CACHE_DIR := "user://pcg_cache"
+const CACHE_VERSION := 1
 const REPOSITION_STEP := 8.0 # The streaming anchor follows the player in steps, not every frame.
 const LEVEL_POLL_SECONDS := 2.0
 
@@ -38,6 +44,8 @@ var _user_data: Dictionary = {}
 var _exclusions: Array = []
 var _last_anchor := Vector3(1.0e9, 0.0, 1.0e9)
 static var _fallback_cache: Dictionary = {}
+## Runtime PCG debugging: crosses at every generated point, coloured by asset (toggle with set_debug_draw).
+static var debug_draw := false
 
 
 ## The budget of a quality level ({} = off). Pure: also used by tests.
@@ -110,10 +118,16 @@ func _make_component(key: String, graph, meshes: Array[Mesh], tier: Dictionary, 
 	c.set_water_sampler(Callable(world, "is_water"))
 	c.set_user_data(_user_data)
 	c.set_exclusions(_exclusions)
-	c.set_async(ASYNC_CELLS)
+	var can_bake: bool = c.has_method("set_bake_step")
+	c.set_async(ASYNC_CELLS and can_bake)
+	if can_bake:
+		c.set_bake_step(BAKE_STEP)
+		c.set_persistent_cache_dir(CACHE_DIR)
+		c.set_cache_version(CACHE_VERSION)
+		c.set_debug_draw(debug_draw)
 	c.set_cell_size(CELL_SIZE)
 	c.set_streaming_radius(int(tier["radius"]))
-	c.set_max_cells_per_frame(1)
+	c.set_max_cells_per_frame(2 if (ASYNC_CELLS and can_bake) else 1)
 	c.set_asset_meshes(meshes)
 	c.set_cluster_instances(true)
 	c.set_visibility_range_end(float(tier["range"]))
@@ -217,3 +231,13 @@ static func _fallback(kind: String) -> Mesh:
 	mesh.material = material
 	_fallback_cache[kind] = mesh
 	return mesh
+
+
+## Shows or hides the PCG debug points on every dressing component (regenerates the loaded cells).
+func set_debug_draw(enabled: bool) -> void:
+	debug_draw = enabled
+	for key in _components:
+		var c = _components[key]
+		if c.has_method("set_debug_draw"):
+			c.set_debug_draw(enabled)
+			c.clear()

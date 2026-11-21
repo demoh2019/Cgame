@@ -9,6 +9,7 @@
 #include "pcg_component_3d.h"
 #include "pcg_core_nodes.h"
 #include "pcg_data.h"
+#include "pcg_exclusion_volume_3d.h"
 #include "pcg_graph.h"
 #include "pcg_graph_executor.h"
 #include "pcg_terrain_nodes.h"
@@ -40,6 +41,7 @@ void initialize_pcg_graph_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PCGGraph);
 	GDREGISTER_CLASS(PCGGraphExecutor);
 	GDREGISTER_CLASS(PCGComponent3D);
+	GDREGISTER_CLASS(PCGExclusionVolume3D);
 
 	GDREGISTER_CLASS(PCGSurfaceSamplerNode);
 	GDREGISTER_CLASS(PCGDensityNoiseNode);

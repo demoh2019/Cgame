@@ -33,6 +33,17 @@ class PCGContext : public RefCounted {
 	bool debug = false;
 	int64_t environment_version = 0; // Bump when samplers change meaning, to invalidate caches.
 
+	// Baked environment grids (thread-safe sampling for async graphs). Cell centres at origin + (i, j) * step.
+	Vector2 grid_origin;
+	float grid_step = 0.0; // 0 = no baked grids.
+	Vector2i grid_size;
+	PackedFloat32Array height_grid;
+	PackedByteArray water_grid;
+	PackedInt32Array biome_grid; // Index into biome_names.
+	PackedStringArray biome_names;
+
+	bool _grid_index(float p_x, float p_z, int &r_i, int &r_j) const;
+
 protected:
 	static void _bind_methods();
 
@@ -59,6 +70,16 @@ public:
 	bool is_debug() const { return debug; }
 	void set_environment_version(int64_t p_version) { environment_version = p_version; }
 	int64_t get_environment_version() const { return environment_version; }
+
+	// Samples the height/water/biome samplers over `p_area` every `p_step` metres (call on the main thread),
+	// after which sampling inside the area reads only the grids and is safe on worker threads.
+	// The area is grown by two steps so normals at the edge still sample inside.
+	void bake_environment(const Rect2 &p_area, float p_step);
+	void clear_baked_environment();
+	// Full copy, baked grids included (the executor layers parameter overrides on a copy).
+	Ref<PCGContext> duplicate_context() const;
+	bool has_baked_environment() const { return grid_step > 0.0 && !height_grid.is_empty(); }
+	Rect2 get_baked_area() const;
 
 	float sample_height(float p_x, float p_z) const;
 	String sample_biome(float p_x, float p_z) const;

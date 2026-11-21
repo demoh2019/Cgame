@@ -6,9 +6,16 @@
 
 #include "pcg_component_3d.h"
 
+#include "pcg_exclusion_volume_3d.h"
+
+#include "core/io/dir_access.h"
+#include "core/io/file_access.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
+#include "scene/3d/mesh_instance_3d.h"
 #include "scene/3d/multimesh_instance_3d.h"
+#include "scene/resources/immediate_mesh.h"
+#include "scene/resources/material.h"
 #include "scene/resources/multimesh.h"
 
 Vector2i PCGComponent3D::cell_of(const Vector3 &p_position, float p_cell_size) {
@@ -60,10 +67,91 @@ Ref<PCGContext> PCGComponent3D::_make_context(const AABB &p_bounds, const Vector
 	context->set_height_sampler(height_sampler);
 	context->set_biome_sampler(biome_sampler);
 	context->set_water_sampler(water_sampler);
-	context->set_exclusions(exclusions);
+	Array all_exclusions = exclusions.duplicate();
+	if (use_scene_exclusion_volumes && is_inside_tree()) {
+		// Only volumes touching this cell, so moving one volume invalidates only nearby cells.
+		all_exclusions.append_array(PCGExclusionVolume3D::gather(get_tree(), p_bounds, 1.0));
+	}
+	context->set_exclusions(all_exclusions);
 	context->set_user_data(user_data);
 	context->set_debug(debug);
 	return context;
+}
+
+int64_t PCGComponent3D::compute_cell_cache_key(const Vector2i &p_cell) const {
+	uint64_t h = pcg_mix64(0x5043474345ULL, graph.is_valid() ? (uint64_t)graph->compute_fingerprint() : 0);
+	h = pcg_mix64(h, (uint64_t)generation_seed);
+	h = pcg_mix64(pcg_mix64(h, (uint64_t)(int64_t)p_cell.x), (uint64_t)(int64_t)p_cell.y);
+	h = pcg_hash_double(h, streaming_enabled ? cell_size : 0.0);
+	h = pcg_hash_double(pcg_hash_double(pcg_hash_double(h, extents.x), extents.y), extents.z);
+	h = pcg_mix64(h, (uint64_t)overrides.hash());
+	h = pcg_mix64(h, (uint64_t)user_data.hash());
+	h = pcg_mix64(h, (uint64_t)exclusions.hash());
+	if (use_scene_exclusion_volumes && is_inside_tree()) {
+		h = pcg_mix64(h, (uint64_t)PCGExclusionVolume3D::gather(get_tree(), _cell_bounds(p_cell), 1.0).hash());
+	}
+	return (int64_t)pcg_mix64(h, (uint64_t)cache_version);
+}
+
+String PCGComponent3D::_cache_path(const Vector2i &p_cell) const {
+	return persistent_cache_dir.path_join(String::num_uint64((uint64_t)compute_cell_cache_key(p_cell), 16) + ".pcgcell");
+}
+
+Ref<PCGPointData> PCGComponent3D::_load_cached_cell(const Vector2i &p_cell) const {
+	if (persistent_cache_dir.is_empty() || graph.is_null()) {
+		return Ref<PCGPointData>();
+	}
+	const String path = _cache_path(p_cell);
+	if (!FileAccess::exists(path)) {
+		return Ref<PCGPointData>();
+	}
+	Ref<FileAccess> file = FileAccess::open(path, FileAccess::READ);
+	if (file.is_null()) {
+		return Ref<PCGPointData>();
+	}
+	const Variant data = file->get_var(false);
+	if (data.get_type() != Variant::DICTIONARY) {
+		return Ref<PCGPointData>();
+	}
+	return PCGPointData::from_dictionary(data);
+}
+
+void PCGComponent3D::_save_cached_cell(const Vector2i &p_cell, const Ref<PCGPointData> &p_points) {
+	if (persistent_cache_dir.is_empty() || graph.is_null() || p_points.is_null()) {
+		return;
+	}
+	DirAccess::make_dir_recursive_absolute(persistent_cache_dir);
+	Ref<FileAccess> file = FileAccess::open(_cache_path(p_cell), FileAccess::WRITE);
+	if (file.is_null()) {
+		return;
+	}
+	file->store_var(p_points->to_dictionary(), false);
+	cache_saves++;
+}
+
+Dictionary PCGComponent3D::get_cache_stats() const {
+	Dictionary stats;
+	stats["loads"] = cache_loads;
+	stats["saves"] = cache_saves;
+	return stats;
+}
+
+int PCGComponent3D::clear_persistent_cache() {
+	if (persistent_cache_dir.is_empty()) {
+		return 0;
+	}
+	Ref<DirAccess> dir = DirAccess::open(persistent_cache_dir);
+	if (dir.is_null()) {
+		return 0;
+	}
+	int removed = 0;
+	const PackedStringArray files = dir->get_files();
+	for (const String &name : files) {
+		if (name.ends_with(".pcgcell") && dir->remove(name) == OK) {
+			removed++;
+		}
+	}
+	return removed;
 }
 
 AABB PCGComponent3D::_cell_bounds(const Vector2i &p_cell) const {
@@ -77,8 +165,23 @@ void PCGComponent3D::_request_cell(const Vector2i &p_cell) {
 	_ensure_executor();
 	Cell cell;
 	cells[p_cell] = cell;
+	// Procedural cache on disk: a finished cell loads instead of running the graph.
+	Ref<PCGPointData> cached = _load_cached_cell(p_cell);
+	if (cached.is_valid()) {
+		cache_loads++;
+		Dictionary result;
+		result["output"] = cached;
+		result["from_disk_cache"] = true;
+		_apply_cell(p_cell, result);
+		return;
+	}
 	Ref<PCGContext> context = _make_context(_cell_bounds(p_cell), p_cell);
 	if (async && is_inside_tree()) {
+		if (bake_step > 0.0f) {
+			// Scripts' samplers are not thread-safe: read them here, let the worker read the grids.
+			const AABB bounds = context->get_bounds();
+			context->bake_environment(Rect2(bounds.position.x, bounds.position.z, bounds.size.x, bounds.size.z), bake_step);
+		}
 		const int64_t job = executor->execute_async(graph, context);
 		cells[p_cell].job_id = job;
 		pending_jobs[job] = p_cell;
@@ -120,45 +223,104 @@ void PCGComponent3D::_apply_cell(const Vector2i &p_cell, const Dictionary &p_res
 		cell.root->queue_free();
 		cell.root = nullptr;
 	}
-	if (!asset_meshes.is_empty() && is_inside_tree()) {
+	if ((!asset_meshes.is_empty() || debug_draw) && is_inside_tree()) {
 		Node3D *root = memnew(Node3D);
 		root->set_name(vformat("PCGCell_%d_%d", p_cell.x, p_cell.y));
 		add_child(root, false, INTERNAL_MODE_FRONT);
 		cell.root = root;
-		const Transform3D to_local = get_global_transform().affine_inverse();
-		const Dictionary groups = group_instances(points, cluster_instances);
-		Array keys = groups.keys();
-		keys.sort();
-		for (int g = 0; g < keys.size(); g++) {
-			const int asset = String(keys[g]).get_slicec(':', 0).to_int();
-			if (asset < 0 || asset >= asset_meshes.size()) {
+		_build_cell_visuals(root, points);
+	}
+	if (!bool(p_result.get("from_disk_cache", false)) && !p_result.has("error")) {
+		_save_cached_cell(p_cell, points);
+	}
+	emit_signal(SNAME("cell_generated"), p_cell, points);
+}
+
+void PCGComponent3D::_build_cell_visuals(Node3D *p_root, const Ref<PCGPointData> &p_points) {
+	const Transform3D to_local = get_global_transform().affine_inverse();
+	const Dictionary groups = group_instances(p_points, cluster_instances);
+	Array keys = groups.keys();
+	keys.sort();
+	for (int g = 0; g < keys.size(); g++) {
+		const int asset = String(keys[g]).get_slicec(':', 0).to_int();
+		const PackedInt32Array indices = groups[keys[g]];
+		// Level 0: the real mesh up to visibility_range_end; level 1 (HLOD): the proxy beyond it.
+		for (int level = 0; level < 2; level++) {
+			const TypedArray<Mesh> &meshes = level == 0 ? asset_meshes : asset_proxy_meshes;
+			if (level == 1 && visibility_range_end <= 0.0f) {
+				break;
+			}
+			if (asset < 0 || asset >= meshes.size()) {
 				continue;
 			}
-			Ref<Mesh> mesh = asset_meshes[asset];
+			Ref<Mesh> mesh = meshes[asset];
 			if (mesh.is_null()) {
 				continue;
 			}
-			const PackedInt32Array indices = groups[keys[g]];
 			Ref<MultiMesh> multimesh;
 			multimesh.instantiate();
 			multimesh->set_transform_format(MultiMesh::TRANSFORM_3D);
 			multimesh->set_mesh(mesh);
 			multimesh->set_instance_count(indices.size());
 			for (int i = 0; i < indices.size(); i++) {
-				multimesh->set_instance_transform(i, to_local * points->get_point_transform(indices[i], align_to_normal));
+				multimesh->set_instance_transform(i, to_local * p_points->get_point_transform(indices[i], align_to_normal));
 			}
 			MultiMeshInstance3D *instance = memnew(MultiMeshInstance3D);
+			instance->set_name(level == 0 ? String(keys[g]) : String(keys[g]) + "_hlod");
 			instance->set_multimesh(multimesh);
-			instance->set_cast_shadows_setting(cast_shadows ? GeometryInstance3D::SHADOW_CASTING_SETTING_ON : GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-			if (visibility_range_end > 0.0) {
-				instance->set_visibility_range_end(visibility_range_end);
-				instance->set_visibility_range_end_margin(MIN(visibility_range_end * 0.1f, 16.0f));
+			const float margin = MIN(visibility_range_end * 0.1f, 16.0f);
+			if (level == 0) {
+				instance->set_cast_shadows_setting(cast_shadows ? GeometryInstance3D::SHADOW_CASTING_SETTING_ON : GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+				if (visibility_range_end > 0.0f) {
+					instance->set_visibility_range_end(visibility_range_end);
+					instance->set_visibility_range_end_margin(margin);
+					instance->set_visibility_range_fade_mode(GeometryInstance3D::VISIBILITY_RANGE_FADE_SELF);
+				}
+			} else {
+				// Proxies cast no shadows (distant shadow cascades are coarse anyway) and cross-fade in.
+				instance->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+				instance->set_visibility_range_begin(visibility_range_end);
+				instance->set_visibility_range_begin_margin(margin);
+				if (proxy_range_end > visibility_range_end) {
+					instance->set_visibility_range_end(proxy_range_end);
+					instance->set_visibility_range_end_margin(MIN(proxy_range_end * 0.1f, 32.0f));
+				}
 				instance->set_visibility_range_fade_mode(GeometryInstance3D::VISIBILITY_RANGE_FADE_SELF);
 			}
-			root->add_child(instance);
+			p_root->add_child(instance);
 		}
 	}
-	emit_signal(SNAME("cell_generated"), p_cell, points);
+	if (debug_draw && p_points->get_point_count() > 0) {
+		// Runtime PCG debugging: a small cross per point, hue by asset index (grey when unassigned).
+		Ref<ImmediateMesh> lines;
+		lines.instantiate();
+		Ref<StandardMaterial3D> material;
+		material.instantiate();
+		material->set_shading_mode(BaseMaterial3D::SHADING_MODE_UNSHADED);
+		material->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+		material->set_flag(BaseMaterial3D::FLAG_DISABLE_DEPTH_TEST, true);
+		lines->surface_begin(Mesh::PRIMITIVE_LINES, material);
+		const bool has_asset = p_points->has_attribute("asset");
+		for (int i = 0; i < p_points->get_point_count(); i++) {
+			const int asset = has_asset ? (int)p_points->get_attribute_value("asset", i) : -1;
+			const Color color = asset < 0 ? Color(0.7, 0.7, 0.7) : Color::from_hsv(Math::fmod(asset * 0.161803f, 1.0f), 0.85, 1.0);
+			const Vector3 p = to_local.xform(p_points->get_position(i));
+			const float s = 0.35f * MAX(0.2f, p_points->get_scale(i));
+			const Vector3 axes[3] = { Vector3(s, 0, 0), Vector3(0, s * 2.0f, 0), Vector3(0, 0, s) };
+			for (int a = 0; a < 3; a++) {
+				lines->surface_set_color(color);
+				lines->surface_add_vertex(p - (a == 1 ? Vector3() : axes[a]));
+				lines->surface_set_color(color);
+				lines->surface_add_vertex(p + axes[a]);
+			}
+		}
+		lines->surface_end();
+		MeshInstance3D *debug_instance = memnew(MeshInstance3D);
+		debug_instance->set_name("PCGDebugPoints");
+		debug_instance->set_mesh(lines);
+		debug_instance->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+		p_root->add_child(debug_instance);
+	}
 }
 
 void PCGComponent3D::_free_cell(const Vector2i &p_cell) {
@@ -394,6 +556,23 @@ void PCGComponent3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_align_to_normal", "enabled"), &PCGComponent3D::set_align_to_normal);
 	ClassDB::bind_method(D_METHOD("is_align_to_normal"), &PCGComponent3D::is_align_to_normal);
 	ClassDB::bind_method(D_METHOD("get_executor"), &PCGComponent3D::get_executor);
+	ClassDB::bind_method(D_METHOD("set_bake_step", "step"), &PCGComponent3D::set_bake_step);
+	ClassDB::bind_method(D_METHOD("get_bake_step"), &PCGComponent3D::get_bake_step);
+	ClassDB::bind_method(D_METHOD("set_use_scene_exclusion_volumes", "enabled"), &PCGComponent3D::set_use_scene_exclusion_volumes);
+	ClassDB::bind_method(D_METHOD("is_use_scene_exclusion_volumes"), &PCGComponent3D::is_use_scene_exclusion_volumes);
+	ClassDB::bind_method(D_METHOD("set_persistent_cache_dir", "dir"), &PCGComponent3D::set_persistent_cache_dir);
+	ClassDB::bind_method(D_METHOD("get_persistent_cache_dir"), &PCGComponent3D::get_persistent_cache_dir);
+	ClassDB::bind_method(D_METHOD("set_cache_version", "version"), &PCGComponent3D::set_cache_version);
+	ClassDB::bind_method(D_METHOD("get_cache_version"), &PCGComponent3D::get_cache_version);
+	ClassDB::bind_method(D_METHOD("set_asset_proxy_meshes", "meshes"), &PCGComponent3D::set_asset_proxy_meshes);
+	ClassDB::bind_method(D_METHOD("get_asset_proxy_meshes"), &PCGComponent3D::get_asset_proxy_meshes);
+	ClassDB::bind_method(D_METHOD("set_proxy_range_end", "distance"), &PCGComponent3D::set_proxy_range_end);
+	ClassDB::bind_method(D_METHOD("get_proxy_range_end"), &PCGComponent3D::get_proxy_range_end);
+	ClassDB::bind_method(D_METHOD("set_debug_draw", "enabled"), &PCGComponent3D::set_debug_draw);
+	ClassDB::bind_method(D_METHOD("is_debug_draw"), &PCGComponent3D::is_debug_draw);
+	ClassDB::bind_method(D_METHOD("get_cache_stats"), &PCGComponent3D::get_cache_stats);
+	ClassDB::bind_method(D_METHOD("clear_persistent_cache"), &PCGComponent3D::clear_persistent_cache);
+	ClassDB::bind_method(D_METHOD("compute_cell_cache_key", "cell"), &PCGComponent3D::compute_cell_cache_key);
 	ClassDB::bind_method(D_METHOD("generate"), &PCGComponent3D::generate);
 	ClassDB::bind_method(D_METHOD("generate_cell", "cell"), &PCGComponent3D::generate_cell);
 	ClassDB::bind_method(D_METHOD("regenerate"), &PCGComponent3D::regenerate);
@@ -414,6 +593,11 @@ void PCGComponent3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "generate_on_ready"), "set_generate_on_ready", "is_generate_on_ready");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "async"), "set_async", "is_async");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug"), "set_debug", "is_debug");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw"), "set_debug_draw", "is_debug_draw");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bake_step", PROPERTY_HINT_RANGE, "0,16,0.25,suffix:m"), "set_bake_step", "get_bake_step");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_scene_exclusion_volumes"), "set_use_scene_exclusion_volumes", "is_use_scene_exclusion_volumes");
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "persistent_cache_dir", PROPERTY_HINT_DIR), "set_persistent_cache_dir", "get_persistent_cache_dir");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "cache_version"), "set_cache_version", "get_cache_version");
 	ADD_GROUP("Streaming", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "streaming_enabled"), "set_streaming_enabled", "is_streaming_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cell_size", PROPERTY_HINT_RANGE, "1,1024,1,or_greater"), "set_cell_size", "get_cell_size");
@@ -426,6 +610,8 @@ void PCGComponent3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "visibility_range_end", PROPERTY_HINT_RANGE, "0,4096,1,or_greater,suffix:m"), "set_visibility_range_end", "get_visibility_range_end");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "cast_shadows"), "set_cast_shadows", "is_cast_shadows");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "align_to_normal"), "set_align_to_normal", "is_align_to_normal");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "asset_proxy_meshes", PROPERTY_HINT_ARRAY_TYPE, "Mesh"), "set_asset_proxy_meshes", "get_asset_proxy_meshes");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "proxy_range_end", PROPERTY_HINT_RANGE, "0,8192,1,or_greater,suffix:m"), "set_proxy_range_end", "get_proxy_range_end");
 
 	ADD_SIGNAL(MethodInfo("cell_generated", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::OBJECT, "points", PROPERTY_HINT_RESOURCE_TYPE, "PCGPointData")));
 	ADD_SIGNAL(MethodInfo("cell_unloaded", PropertyInfo(Variant::VECTOR2I, "cell")));

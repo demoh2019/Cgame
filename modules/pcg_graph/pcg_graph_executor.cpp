@@ -34,17 +34,7 @@ Dictionary PCGGraphExecutor::execute(const Ref<PCGGraph> &p_graph, const Ref<PCG
 	// Exposed parameter defaults under the caller's overrides.
 	Ref<PCGContext> run_context = context;
 	if (!p_graph->get_parameters().is_empty()) {
-		run_context = Ref<PCGContext>(memnew(PCGContext));
-		run_context->set_seed(context->get_seed());
-		run_context->set_bounds(context->get_bounds());
-		run_context->set_cell(context->get_cell());
-		run_context->set_height_sampler(context->get_height_sampler());
-		run_context->set_biome_sampler(context->get_biome_sampler());
-		run_context->set_water_sampler(context->get_water_sampler());
-		run_context->set_exclusions(context->get_exclusions());
-		run_context->set_user_data(context->get_user_data());
-		run_context->set_debug(context->is_debug());
-		run_context->set_environment_version(context->get_environment_version());
+		run_context = context->duplicate_context();
 		run_context->set_overrides(p_graph->resolve_parameters(context->get_overrides()));
 	}
 	const uint64_t environment_hash = run_context->compute_environment_hash();

@@ -103,6 +103,11 @@ public:
 	// Transform per point: position, yaw about Y, uniform scale, tilted to the normal when requested.
 	Transform3D get_point_transform(int p_index, bool p_align_to_normal = false) const;
 	AABB get_bounds() const;
+
+	// Plain-Variant form for the on-disk cell cache (FileAccess::store_var), and back. from_dictionary
+	// returns null when the arrays disagree in length (corrupt or foreign cache file).
+	Dictionary to_dictionary() const;
+	static Ref<PCGPointData> from_dictionary(const Dictionary &p_data);
 };
 
 // One or more polylines (roads, rivers, walls). Unreal "PCGSplineData".

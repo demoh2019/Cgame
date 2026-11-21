@@ -7,10 +7,103 @@
 #include "pcg_node.h"
 
 #include "core/object/class_db.h"
+#include "core/templates/hash_map.h"
 
 // --- Context -----------------------------------------------------------------------------------------------------
 
+bool PCGContext::_grid_index(float p_x, float p_z, int &r_i, int &r_j) const {
+	if (grid_step <= 0.0f || grid_size.x <= 0 || grid_size.y <= 0) {
+		return false;
+	}
+	const float fx = (p_x - grid_origin.x) / grid_step;
+	const float fz = (p_z - grid_origin.y) / grid_step;
+	if (fx < 0.0f || fz < 0.0f || fx > float(grid_size.x - 1) || fz > float(grid_size.y - 1)) {
+		return false;
+	}
+	r_i = CLAMP((int)Math::round(fx), 0, grid_size.x - 1);
+	r_j = CLAMP((int)Math::round(fz), 0, grid_size.y - 1);
+	return true;
+}
+
+void PCGContext::bake_environment(const Rect2 &p_area, float p_step) {
+	ERR_FAIL_COND(p_step <= 0.0f);
+	const Rect2 area = p_area.grow(p_step * 2.0f);
+	grid_step = p_step;
+	grid_origin = area.position;
+	grid_size = Vector2i((int)Math::ceil(area.size.x / p_step) + 1, (int)Math::ceil(area.size.y / p_step) + 1);
+	ERR_FAIL_COND_MSG(int64_t(grid_size.x) * grid_size.y > 4000000, "PCG bake area too large for the step.");
+	const int count = grid_size.x * grid_size.y;
+	height_grid.resize(height_sampler.is_valid() ? count : 0);
+	water_grid.resize(water_sampler.is_valid() ? count : 0);
+	biome_grid.resize(biome_sampler.is_valid() ? count : 0);
+	biome_names.clear();
+	HashMap<String, int> biome_index;
+	for (int j = 0; j < grid_size.y; j++) {
+		for (int i = 0; i < grid_size.x; i++) {
+			const float x = grid_origin.x + i * p_step;
+			const float z = grid_origin.y + j * p_step;
+			const int k = j * grid_size.x + i;
+			if (height_sampler.is_valid()) {
+				height_grid.set(k, float(height_sampler.call(x, z)));
+			}
+			if (water_sampler.is_valid()) {
+				water_grid.set(k, bool(water_sampler.call(x, z)) ? 1 : 0);
+			}
+			if (biome_sampler.is_valid()) {
+				const String biome = biome_sampler.call(x, z);
+				if (!biome_index.has(biome)) {
+					biome_index[biome] = biome_names.size();
+					biome_names.push_back(biome);
+				}
+				biome_grid.set(k, biome_index[biome]);
+			}
+		}
+	}
+	if (height_grid.is_empty()) {
+		// Keep has_baked_environment() meaningful: a flat zero grid when there is no height sampler.
+		height_grid.resize(count);
+		height_grid.fill(0.0);
+	}
+}
+
+void PCGContext::clear_baked_environment() {
+	grid_step = 0.0;
+	grid_size = Vector2i();
+	height_grid.clear();
+	water_grid.clear();
+	biome_grid.clear();
+	biome_names.clear();
+}
+
+Rect2 PCGContext::get_baked_area() const {
+	if (!has_baked_environment()) {
+		return Rect2();
+	}
+	return Rect2(grid_origin, Vector2(grid_size.x - 1, grid_size.y - 1) * grid_step);
+}
+
 float PCGContext::sample_height(float p_x, float p_z) const {
+	if (has_baked_environment()) {
+		const float fx = (p_x - grid_origin.x) / grid_step;
+		const float fz = (p_z - grid_origin.y) / grid_step;
+		if (fx >= 0.0f && fz >= 0.0f && fx <= float(grid_size.x - 1) && fz <= float(grid_size.y - 1)) {
+			// Bilinear between the four baked samples.
+			const int i0 = MIN((int)Math::floor(fx), grid_size.x - 2);
+			const int j0 = MIN((int)Math::floor(fz), grid_size.y - 2);
+			const int i1 = MAX(0, i0);
+			const int j1 = MAX(0, j0);
+			const float tx = CLAMP(fx - i1, 0.0f, 1.0f);
+			const float tz = CLAMP(fz - j1, 0.0f, 1.0f);
+			const int w = grid_size.x;
+			const int i2 = MIN(i1 + 1, grid_size.x - 1);
+			const int j2 = MIN(j1 + 1, grid_size.y - 1);
+			const float a = height_grid[j1 * w + i1];
+			const float b = height_grid[j1 * w + i2];
+			const float c = height_grid[j2 * w + i1];
+			const float d = height_grid[j2 * w + i2];
+			return Math::lerp(Math::lerp(a, b, tx), Math::lerp(c, d, tx), tz);
+		}
+	}
 	if (!height_sampler.is_valid()) {
 		return 0.0;
 	}
@@ -18,6 +111,10 @@ float PCGContext::sample_height(float p_x, float p_z) const {
 }
 
 String PCGContext::sample_biome(float p_x, float p_z) const {
+	int i, j;
+	if (!biome_grid.is_empty() && _grid_index(p_x, p_z, i, j)) {
+		return biome_names[biome_grid[j * grid_size.x + i]];
+	}
 	if (!biome_sampler.is_valid()) {
 		return String();
 	}
@@ -25,6 +122,10 @@ String PCGContext::sample_biome(float p_x, float p_z) const {
 }
 
 bool PCGContext::sample_water(float p_x, float p_z) const {
+	int i, j;
+	if (!water_grid.is_empty() && _grid_index(p_x, p_z, i, j)) {
+		return water_grid[j * grid_size.x + i] != 0;
+	}
 	if (!water_sampler.is_valid()) {
 		return false;
 	}
@@ -32,7 +133,7 @@ bool PCGContext::sample_water(float p_x, float p_z) const {
 }
 
 Vector3 PCGContext::sample_normal(float p_x, float p_z, float p_step) const {
-	if (!height_sampler.is_valid()) {
+	if (!height_sampler.is_valid() && !has_baked_environment()) {
 		return Vector3(0, 1, 0);
 	}
 	const float hl = sample_height(p_x - p_step, p_z);
@@ -76,6 +177,13 @@ uint64_t PCGContext::compute_environment_hash() const {
 	h = pcg_mix64(h, height_sampler.is_valid() ? (uint64_t)height_sampler.hash() : 0);
 	h = pcg_mix64(h, biome_sampler.is_valid() ? (uint64_t)biome_sampler.hash() : 0);
 	h = pcg_mix64(h, water_sampler.is_valid() ? (uint64_t)water_sampler.hash() : 0);
+	if (has_baked_environment()) {
+		h = pcg_hash_double(pcg_hash_double(h, grid_origin.x), grid_origin.y);
+		h = pcg_mix64(pcg_hash_double(h, grid_step), ((uint64_t)grid_size.x << 32) ^ (uint64_t)grid_size.y);
+		h = pcg_mix64(h, (uint64_t)Variant(height_grid).hash());
+		h = pcg_mix64(h, (uint64_t)Variant(water_grid).hash());
+		h = pcg_mix64(h, (uint64_t)Variant(biome_grid).hash());
+	}
 	return h;
 }
 
@@ -102,6 +210,11 @@ void PCGContext::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_debug"), &PCGContext::is_debug);
 	ClassDB::bind_method(D_METHOD("set_environment_version", "version"), &PCGContext::set_environment_version);
 	ClassDB::bind_method(D_METHOD("get_environment_version"), &PCGContext::get_environment_version);
+	ClassDB::bind_method(D_METHOD("bake_environment", "area", "step"), &PCGContext::bake_environment);
+	ClassDB::bind_method(D_METHOD("clear_baked_environment"), &PCGContext::clear_baked_environment);
+	ClassDB::bind_method(D_METHOD("duplicate_context"), &PCGContext::duplicate_context);
+	ClassDB::bind_method(D_METHOD("has_baked_environment"), &PCGContext::has_baked_environment);
+	ClassDB::bind_method(D_METHOD("get_baked_area"), &PCGContext::get_baked_area);
 	ClassDB::bind_method(D_METHOD("sample_height", "x", "z"), &PCGContext::sample_height);
 	ClassDB::bind_method(D_METHOD("sample_biome", "x", "z"), &PCGContext::sample_biome);
 	ClassDB::bind_method(D_METHOD("sample_water", "x", "z"), &PCGContext::sample_water);
@@ -263,4 +376,28 @@ void PCGNode::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "seed_offset"), "set_seed_offset", "get_seed_offset");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_output"), "set_debug_output", "is_debug_output");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "parameter_bindings"), "set_parameter_bindings", "get_parameter_bindings");
+}
+
+Ref<PCGContext> PCGContext::duplicate_context() const {
+	Ref<PCGContext> copy;
+	copy.instantiate();
+	copy->seed = seed;
+	copy->bounds = bounds;
+	copy->cell = cell;
+	copy->overrides = overrides.duplicate();
+	copy->height_sampler = height_sampler;
+	copy->biome_sampler = biome_sampler;
+	copy->water_sampler = water_sampler;
+	copy->exclusions = exclusions;
+	copy->user_data = user_data;
+	copy->debug = debug;
+	copy->environment_version = environment_version;
+	copy->grid_origin = grid_origin;
+	copy->grid_step = grid_step;
+	copy->grid_size = grid_size;
+	copy->height_grid = height_grid;
+	copy->water_grid = water_grid;
+	copy->biome_grid = biome_grid;
+	copy->biome_names = biome_names;
+	return copy;
 }
