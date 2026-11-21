@@ -30,6 +30,7 @@ const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection
 const OutdoorReflectionBudget = preload("res://scripts/client/outdoor_reflection_budget.gd")
 const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
+const SceneryDensityLod = preload("res://scripts/client/scenery_density_lod.gd")
 const CampfireFx = preload("res://scripts/client/campfire_fx.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
@@ -270,6 +271,10 @@ static var _decor_pending: Array[WeakRef] = []
 static var _decor_last_frame := -1
 static var decor_budget_usec := 1500
 var _grass_tiles: Array[MultiMeshInstance3D] = []
+## Density-scalable decorative flowers/grass only; no gameplay nodes.
+var _density_scenery_batches: Array[MultiMeshInstance3D] = []
+var _density_lod_elapsed := 0.0
+const DENSITY_LOD_INTERVAL := 0.6
 var _grass_lod_elapsed := 0.0
 var _grass_last_eye := Vector2.ZERO
 var _grass_last_scale := -1.0
@@ -1366,6 +1371,7 @@ func set_streaming_simulation_active(active: bool) -> void:
 	if active:
 		# Re-evaluate blades and cosmetic rate immediately after LOD recovery.
 		_grass_lod_elapsed = GRASS_LOD_INTERVAL
+		_density_lod_elapsed = DENSITY_LOD_INTERVAL
 		_streaming_tick_accumulated = _streaming_tick_interval
 
 
@@ -1385,12 +1391,28 @@ func _process(delta: float) -> void:
 	if _grass_lod_elapsed >= GRASS_LOD_INTERVAL:
 		_grass_lod_elapsed = 0.0
 		_update_grass_lods()
+	_density_lod_elapsed += delta
+	if _density_lod_elapsed >= DENSITY_LOD_INTERVAL:
+		_density_lod_elapsed = 0.0
+		_update_decor_density_lods()
 	_shadow_timer += delta
 	if _shadow_timer >= SHADOW_INTERVAL:
 		_shadow_timer = 0.0
 		_update_shadow_casters()
 	for sail in _sails:
 		(sail["node"] as Node3D).rotate_object_local(sail["axis"], sail["speed"] * delta)
+
+
+## Update only visual foliage instance counts: no GPU buffer rebuilds, scene
+## removals or changes to collectible/interactive world resources.
+func _update_decor_density_lods() -> void:
+	if _density_scenery_batches.is_empty():
+		return
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	SceneryDensityLod.update_instances(_density_scenery_batches,
+		camera.global_position, scenery_quality)
 
 
 ## Weak-reference global queue. Newly near-camera chunks take precedence, and
@@ -1875,11 +1897,19 @@ func _build_nature_decor_entry(entry: Dictionary) -> void:
 			alignment_normals.append(_world.normal_at(point.x, point.y))
 		transforms = SceneryBatches.align_cosmetic_transforms_surface(
 			transforms, alignment_normals, float(entry["max_surface_tilt"]))
+	# Only small cosmetic plants use density scaling. Pebbles, large bushes,
+	# mushrooms and gatherable vegetation retain their full visual presence.
+	var density_scalable: bool = file.begins_with("Flower") or \
+		file.begins_with("Grass") or file.begins_with("Fern") or \
+		file.begins_with("Petal")
 	# Dense vegetation is split into camera-cullable cells, sparse props remain one draw call.
 	for decor_batch in SceneryBatches.add(self, mesh, transforms,
 			float(entry["range"]), file.begins_with("Bush"), 8.0,
-			tint_plant, origin):
+			tint_plant, origin, density_scalable):
 		register_scenery(decor_batch, "decor:" + file, float(entry["range"]))
+		if density_scalable:
+			_density_scenery_batches.append(decor_batch)
+			_density_lod_elapsed = DENSITY_LOD_INTERVAL
 		if file.begins_with("Bush"):
 			_shadow_casters.append({"node": decor_batch, "role": "bush", "bounds": decor_batch.custom_aabb})
 
