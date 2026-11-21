@@ -821,7 +821,7 @@ Array WorldPartition3D::find_cell_path(const Vector2i &p_from, const Vector2i &p
 	if (_get_scene_path(p_from).is_empty() || _get_scene_path(p_to).is_empty()) {
 		return result;
 	}
-	if (p_loaded_only && (!is_cell_loaded(p_from) || !is_cell_loaded(p_to))) {
+	if (p_loaded_only && (get_cell_instance(p_from) == nullptr || get_cell_instance(p_to) == nullptr)) {
 		return result;
 	}
 	if (p_from == p_to) {
@@ -848,7 +848,7 @@ Array WorldPartition3D::find_cell_path(const Vector2i &p_from, const Vector2i &p
 				continue;
 			}
 			const Vector2i neighbor{ int32_t(nx), int32_t(nz) };
-			if (visited.has(neighbor) || _get_scene_path(neighbor).is_empty() || (p_loaded_only && !is_cell_loaded(neighbor))) {
+			if (visited.has(neighbor) || _get_scene_path(neighbor).is_empty() || (p_loaded_only && get_cell_instance(neighbor) == nullptr)) {
 				continue;
 			}
 			if (visited.size() >= MAX_PATH_SEARCH_CELLS) {
