@@ -151,4 +151,73 @@ TEST_CASE("[PCGSpatialFilter3D] scaled 5x5x5 bucket boundaries and all-or-nothin
 	ERR_PRINT_ON
 }
 
+TEST_CASE("[PCGSpatialFilter3D] exclusion spheres apply before spacing and preserve source IDs") {
+	Ref<PCGSpatialFilter3D> filter;
+	filter.instantiate();
+	const PackedVector3Array candidates = {
+		Vector3(0, 0, 0), Vector3(2, 0, 0), Vector3(4, 0, 0),
+		Vector3(6, 0, 0), Vector3(0, 3, 0), Vector3(1, 0, 0),
+		Vector3(8, 0, 0)
+	};
+	const PackedVector3Array centers = { Vector3(0, 0, 0), Vector3(5, 0, 0) };
+	const PackedFloat64Array radii = { 1.0, 1.0 };
+	const PackedInt32Array expected = { 1, 4, 6 };
+	CHECK(filter->filter_indices_excluding(candidates, centers, radii, 3.0) == expected);
+	CHECK(filter->filter_indices_excluding(candidates, centers, radii, 3.0) == expected);
+	CHECK(filter->filter_indices_excluding(candidates, {}, {}, 3.0) ==
+			filter->filter_indices(candidates, 3.0));
+	CHECK(filter->filter_indices_excluding(candidates, centers, radii, 3.0, 2).size() == 2);
+	CHECK(filter->filter_indices_excluding(candidates, centers, radii, 0.0) == expected);
+	CHECK(candidates[0] == Vector3(0, 0, 0));
+	CHECK(centers[1] == Vector3(5, 0, 0));
+	// Excluded points must never occupy spatial hash cells.
+	const PackedInt32Array unblocked = { 1, 2 };
+	CHECK(filter->filter_indices_excluding(
+			{ Vector3(0, 0, 0), Vector3(0.75, 0, 0), Vector3(2.75, 0, 0) },
+			{ Vector3(0, 0, 0) }, { 0.5 }, 2.0) == unblocked);
+	// Full 3D radius: an elevated point is outside an exclusion beneath it.
+	const PackedInt32Array elevated = { 1 };
+	CHECK(filter->filter_indices_excluding(
+			{ Vector3(0, 0, 0), Vector3(0, 3, 0) },
+			{ Vector3(0, 0, 0) }, { 2.0 }, 2.0) == elevated);
+}
+
+TEST_CASE("[PCGSpatialFilter3D] exclusions validate complete batch atomically") {
+	Ref<PCGSpatialFilter3D> filter;
+	filter.instantiate();
+	const PackedVector3Array candidates = { Vector3(0, 0, 0), Vector3(3, 0, 0) };
+	const PackedVector3Array centers = { Vector3(0, 0, 0) };
+	const PackedFloat64Array radii = { 1.0 };
+	CHECK(filter->filter_indices_excluding(candidates, centers, radii, 1.0).size() == 1);
+	CHECK(filter->filter_indices_excluding(candidates, centers, {}, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding(candidates, centers, { -1.0 }, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding(candidates, centers, { Math::NaN }, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding(candidates, centers, { Math::INF }, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding(candidates, centers, { 10001.0 }, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding(candidates,
+			{ Vector3(Math::INF, 0, 0) }, radii, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding(candidates,
+			{ Vector3(10000001, 0, 0) }, radii, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding(
+			{ Vector3(0, 0, 0), Vector3(Math::NaN, 0, 0) },
+			centers, radii, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding(candidates, centers, radii, -1.0).is_empty());
+	CHECK(filter->filter_indices_excluding(candidates, centers, radii, 0.01).is_empty());
+	CHECK(filter->filter_indices_excluding(candidates, centers, radii, 1.0, -1).is_empty());
+	CHECK(filter->filter_indices_excluding(candidates, centers, radii, 1.0, 4097).is_empty());
+	PackedVector3Array many_centers;
+	PackedFloat64Array many_radii;
+	for (int i = 0; i < 129; ++i) {
+		many_centers.push_back(Vector3(i, 0, 0));
+		many_radii.push_back(1.0);
+	}
+	CHECK(filter->filter_indices_excluding(
+			candidates, many_centers, many_radii, 1.0).is_empty());
+	many_centers.resize(128);
+	many_radii.resize(128);
+	CHECK(filter->filter_indices_excluding(
+			candidates, many_centers, many_radii, 1.0).is_empty()); // Both candidates excluded.
+	CHECK(filter->filter_indices_excluding(candidates, {}, {}, 1.0, 0).is_empty());
+}
+
 } // namespace TestPCGSpatialFilter3D

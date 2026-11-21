@@ -44,6 +44,36 @@ func _smoke() -> void:
             push_error("Visual LOD did not restore nearby fragments")
             ok = false
 
+    var foliage := game.get_node_or_null("FoliageScatter") as MultiMeshInstance3D
+    if foliage == null or foliage.multimesh == null:
+        push_error("Missing exclusion-aware instanced foliage")
+        ok = false
+    else:
+        var positions: PackedVector3Array = foliage.call("get_selected_positions")
+        var centers: PackedVector3Array = foliage.call("get_exclusion_centers")
+        var radii: PackedFloat64Array = foliage.call("get_exclusion_radii")
+        if positions.size() == 0 or positions.size() > 160 or foliage.multimesh.instance_count != positions.size():
+            push_error("PCG foliage did not create a bounded instancing batch")
+            ok = false
+        for i in range(positions.size()):
+            for zone in range(centers.size()):
+                if positions[i].distance_squared_to(centers[zone]) <= radii[zone] * radii[zone]:
+                    push_error("PCG foliage appeared inside an exclusion sphere")
+                    ok = false
+                    break
+            for previous in range(i):
+                if positions[i].distance_squared_to(positions[previous]) < 2.1 * 2.1 - 0.0001:
+                    push_error("PCG foliage violated minimum spacing")
+                    ok = false
+                    break
+        if not bool(foliage.call("verify_native_fallback_parity")):
+            push_error("Native PCG exclusion filter diverged from GDScript fallback")
+            ok = false
+        foliage.call("regenerate")
+        if positions != foliage.call("get_selected_positions"):
+            push_error("PCG foliage placement was not deterministic")
+            ok = false
+
     var state = game.get("state")
     var pickups := get_nodes_in_group("days_after_pickup")
     if pickups.size() < 4:
@@ -137,5 +167,5 @@ func _smoke() -> void:
     game.queue_free()
     await process_frame
     if ok:
-        print("PASS: scene, bounded visual LOD, scavenging, gathering, XP, crafting, gear, combat and survival")
+        print("PASS: scene, bounded visual LOD, exclusion-safe PCG foliage, scavenging, gathering, XP, crafting, gear, combat and survival")
     quit(0 if ok else 1)

@@ -8,6 +8,7 @@ const STATE_SCRIPT = preload("res://survival_state.gd")
 const RESOURCE_SCRIPT = preload("res://resource_node.gd")
 const ENEMY_SCRIPT = preload("res://enemy.gd")
 const DEBRIS_LOD_SCRIPT = preload("res://debris_lod.gd")
+const FOLIAGE_SCATTER_SCRIPT = preload("res://foliage_scatter.gd")
 
 var state = STATE_SCRIPT.new()
 var player
@@ -26,6 +27,9 @@ func _ready() -> void:
     debris_lod.name = "DebrisLOD"
     add_child(debris_lod)
     debris_lod.set_viewer(player)
+    var foliage = FOLIAGE_SCATTER_SCRIPT.new()
+    foliage.name = "FoliageScatter"
+    add_child(foliage)
     _build_hud()
 
 

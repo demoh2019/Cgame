@@ -18,6 +18,7 @@ protected:
 public:
 	static constexpr int MAX_CANDIDATES = 16384;
 	static constexpr int MAX_SELECTED = 4096;
+	static constexpr int MAX_EXCLUSION_ZONES = 128;
 	static constexpr double MAX_COORDINATE = 10000000.0;
 	static constexpr double MIN_SPACING = 0.05;
 	static constexpr double MAX_SPACING = 10000.0;
@@ -30,4 +31,10 @@ public:
 
 	PackedInt32Array filter_indices(const PackedVector3Array &p_candidates,
 			double p_min_spacing, int p_max_selected = MAX_SELECTED) const;
+	// Exclude points in inclusive spheres before spacing, so rejected points
+	// never occupy a spatial-hash cell. All input is validated atomically.
+	PackedInt32Array filter_indices_excluding(const PackedVector3Array &p_candidates,
+			const PackedVector3Array &p_exclusion_centers,
+			const PackedFloat64Array &p_exclusion_radii, double p_min_spacing,
+			int p_max_selected = MAX_SELECTED) const;
 };

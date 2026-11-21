@@ -27,5 +27,16 @@
 				Returns original candidate indices in stable order. Exact minimum distance is inclusive; zero spacing returns the first max_selected indices. Validation occurs before selection, so no partial output is produced.
 			</description>
 		</method>
+	<method name="filter_indices_excluding" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="candidates" type="PackedVector3Array" />
+			<param index="1" name="exclusion_centers" type="PackedVector3Array" />
+			<param index="2" name="exclusion_radii" type="PackedFloat64Array" />
+			<param index="3" name="min_spacing" type="float" />
+			<param index="4" name="max_selected" type="int" default="4096" />
+			<description>
+				First excludes every candidate inside or exactly on any spherical zone, then applies full 3D minimum spacing to surviving points. Returns original input indices, deterministically ordered. Excluded points do not occupy spacing cells. Accepts up to 128 zones with finite centers within +/- 10,000,000 and radii from 0 to 10,000, plus the same candidate, spacing and output limits as [method filter_indices]. All inputs are validated before filtering, even points that would be excluded; malformed batches return empty. No physics, scene or random-number work is performed.
+			</description>
+		</method>
 	</methods>
 </class>

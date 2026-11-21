@@ -17,6 +17,8 @@ void PCGSpatialFilter3D::_bind_methods() {
 			&PCGSpatialFilter3D::filter_indices, DEFVAL(MAX_SELECTED));
 	ClassDB::bind_method(D_METHOD("filter_indices_scaled", "candidates", "scales", "min_spacing", "max_selected", "largest_first"),
 			&PCGSpatialFilter3D::filter_indices_scaled, DEFVAL(MAX_SELECTED), DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("filter_indices_excluding", "candidates", "exclusion_centers", "exclusion_radii", "min_spacing", "max_selected"),
+			&PCGSpatialFilter3D::filter_indices_excluding, DEFVAL(MAX_SELECTED));
 }
 
 PackedInt32Array PCGSpatialFilter3D::filter_indices(const PackedVector3Array &p_candidates,
@@ -181,6 +183,79 @@ PackedInt32Array PCGSpatialFilter3D::filter_indices_scaled(const PackedVector3Ar
 	}
 	if (p_largest_first) {
 		result.sort(); // Preserve original MultiMesh transform order.
+	}
+	return result;
+}
+
+
+PackedInt32Array PCGSpatialFilter3D::filter_indices_excluding(
+		const PackedVector3Array &p_candidates, const PackedVector3Array &p_exclusion_centers,
+		const PackedFloat64Array &p_exclusion_radii, double p_min_spacing,
+		int p_max_selected) const {
+	PackedInt32Array empty;
+	const int zone_count = p_exclusion_centers.size();
+	if (p_candidates.size() > MAX_CANDIDATES || zone_count != p_exclusion_radii.size() ||
+			zone_count > MAX_EXCLUSION_ZONES || p_max_selected < 0 ||
+			p_max_selected > MAX_SELECTED || !Math::is_finite(p_min_spacing) ||
+			p_min_spacing < 0.0 || p_min_spacing > MAX_SPACING ||
+			(p_min_spacing > 0.0 && p_min_spacing < MIN_SPACING)) {
+		return empty;
+	}
+
+	// Validate *all* candidates, including points that would be excluded.
+	// A malformed late point cannot silently become valid due to masking.
+	for (const Vector3 &point : p_candidates) {
+		if (!point.is_finite() || Math::abs(double(point.x)) > MAX_COORDINATE ||
+				Math::abs(double(point.y)) > MAX_COORDINATE ||
+				Math::abs(double(point.z)) > MAX_COORDINATE) {
+			return empty;
+		}
+	}
+	Vector<double> radius_squared;
+	radius_squared.resize(zone_count);
+	for (int i = 0; i < zone_count; ++i) {
+		const Vector3 center = p_exclusion_centers[i];
+		const double radius = p_exclusion_radii[i];
+		if (!center.is_finite() || Math::abs(double(center.x)) > MAX_COORDINATE ||
+				Math::abs(double(center.y)) > MAX_COORDINATE ||
+				Math::abs(double(center.z)) > MAX_COORDINATE ||
+				!Math::is_finite(radius) || radius < 0.0 || radius > MAX_SPACING) {
+			return empty;
+		}
+		radius_squared.write[i] = radius * radius;
+	}
+	if (p_max_selected == 0) {
+		return empty;
+	}
+
+	// O(N * zones) prefilter with at most 128 zones. Reuse the existing
+	// O(N) expected spatial-hash thinning and map indices back to source
+	// candidates. No scene nodes, physics or callbacks are ever touched.
+	PackedVector3Array eligible;
+	PackedInt32Array original_indices;
+	for (int i = 0; i < p_candidates.size(); ++i) {
+		const Vector3 point = p_candidates[i];
+		bool excluded = false;
+		for (int zone = 0; zone < zone_count; ++zone) {
+			const Vector3 center = p_exclusion_centers[zone];
+			const double dx = double(point.x) - double(center.x);
+			const double dy = double(point.y) - double(center.y);
+			const double dz = double(point.z) - double(center.z);
+			if (dx * dx + dy * dy + dz * dz <= radius_squared[zone]) {
+				excluded = true;
+				break;
+			}
+		}
+		if (!excluded) {
+			eligible.push_back(point);
+			original_indices.push_back(i);
+		}
+	}
+	const PackedInt32Array local = filter_indices(eligible, p_min_spacing, p_max_selected);
+	PackedInt32Array result;
+	result.resize(local.size());
+	for (int i = 0; i < local.size(); ++i) {
+		result.set(i, original_indices[local[i]]);
 	}
 	return result;
 }
