@@ -1,0 +1,62 @@
+name: World Partition demo headless tests
+
+on:
+  pull_request:
+    paths:
+      - "modules/world_partition/demo/**"
+      - ".github/workflows/world-partition-demo-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gdscript-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            modules/world_partition/demo
+          sparse-checkout-cone-mode: true
+      - uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: false
+      - name: Import demo and verify GDScript parsing
+        run: godot --headless --path modules/world_partition/demo --import --quit
+      - name: Check quality controller hysteresis and unload budgets
+        run: godot --headless --path modules/world_partition/demo --script res://tests/quality_controller_test.gd
+      - name: Check HLOD blend transitions
+        run: godot --headless --path modules/world_partition/demo --script res://tests/hlod_blend_test.gd
+      - name: Verify gameplay cell capture and restore callbacks
+        run: godot --headless --path modules/world_partition/demo --script res://tests/cell_state_contract_test.gd
+      - name: Verify independent streamed chest, switch and gate state callbacks
+        run: godot --headless --path modules/world_partition/demo --script res://tests/stateful_interactables_test.gd
+      - name: Verify streamed collision and navigation pathfinding contracts
+        run: godot --headless --path modules/world_partition/demo --script res://tests/physics_navigation_lifecycle_test.gd
+      - name: Verify opt-in RigidBody3D gameplay dynamics and persistence contract
+        run: godot --headless --path modules/world_partition/demo --script res://tests/physics_persistence_scene_test.gd
+      - name: Exercise AI patrol across adjacent nav regions and route ownership
+        run: godot --headless --path modules/world_partition/demo --script res://tests/route_patrol_test.gd
+      - name: Verify world event progression logic
+        run: godot --headless --path modules/world_partition/demo --script res://tests/world_event_rules_test.gd
+      - name: Bake 3x3 deterministic HLOD proxy scenes
+        run: godot --headless --path modules/world_partition/demo --script res://tools/bake_hlod_proxies.gd -- --radius=1 --stride=8
+      - name: Verify incremental baker skips unchanged proxy assets
+        shell: bash
+        run: |
+          output=$(godot --headless --path modules/world_partition/demo --script res://tools/bake_hlod_proxies.gd -- --radius=1 --stride=8)
+          echo "$output"
+          grep -q "Baked 0, skipped 9" <<< "$output"
+      - name: Verify stale proxy is rebuilt without touching other cells
+        shell: bash
+        run: |
+          printf '\n; intentional checksum change\n' >> modules/world_partition/demo/generated/forest_proxy_0_0.tscn
+          output=$(godot --headless --path modules/world_partition/demo --script res://tools/bake_hlod_proxies.gd -- --radius=1 --stride=8)
+          echo "$output"
+          grep -q "Baked 1, skipped 8" <<< "$output"
+      - name: Verify generated proxy geometry, signatures and cell determinism
+        run: godot --headless --path modules/world_partition/demo --script res://tests/hlod_bake_test.gd

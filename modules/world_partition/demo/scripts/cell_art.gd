@@ -1,0 +1,427 @@
+extends Node3D
+
+# Authorable placeholder art: same scene contracts as imported low/high-detail assets.
+# Geometry is deterministic, with MultiMesh draw-call batching per cell.
+@export var proxy: bool = false
+
+const CELL_SIZE := 128.0
+const TREE_COUNT := 160
+const PROXY_STRIDE := 8
+const QUEST_HUB := Vector2i(0, 0)
+const COMBAT_ARENA := Vector2i(4, 2)
+const CHAMPION_SHRINE := Vector2i(5, 3)
+const PATROL_PASS := Vector2i(1, 0)
+const INTERACTABLE_SCRIPT := preload("res://scripts/streamed_interactable.gd")
+
+var cell_coords: Vector2i = Vector2i(9999, 9999)
+var hub_reward_claimed := false
+var arena_wins := 0
+var champion_reward_claimed := false
+var streaming_activation_count := 0
+var streaming_deactivation_count := 0
+
+static var _trunk_mesh: CylinderMesh
+static var _crown_detail_mesh: SphereMesh
+static var _crown_proxy_mesh: SphereMesh
+static var _ground_mesh: PlaneMesh
+static var _collision_shape_resource: BoxShape3D
+static var _flat_navigation_mesh: NavigationMesh
+static var _patrol_hub_navigation_mesh: NavigationMesh
+static var _patrol_pass_navigation_mesh: NavigationMesh
+static var _trunk_material: StandardMaterial3D
+static var _leaf_material: StandardMaterial3D
+static var _ground_material: StandardMaterial3D
+
+func _ready() -> void:
+    _ensure_shared_resources()
+
+    var ground := MeshInstance3D.new()
+    ground.name = "Ground"
+    ground.mesh = _ground_mesh
+    ground.position = Vector3(CELL_SIZE / 2.0, -0.07 if proxy else -0.03, CELL_SIZE / 2.0)
+    add_child(ground)
+
+    var count: int = int(TREE_COUNT / PROXY_STRIDE) if proxy else TREE_COUNT
+    var trunks := _build_multimesh(_trunk_mesh, count)
+    var crowns := _build_multimesh(_crown_proxy_mesh if proxy else _crown_detail_mesh, count)
+    var grid := Vector2i(roundi(position.x / CELL_SIZE), roundi(position.z / CELL_SIZE))
+    cell_coords = grid
+    var rng := RandomNumberGenerator.new()
+    rng.seed = int(500003 + (grid.x + 1000) * 73856093 + (grid.y + 1000) * 19349663)
+    var output_index := 0
+    for i in TREE_COUNT:
+        var x := rng.randf_range(4.0, 124.0)
+        var z := rng.randf_range(4.0, 124.0)
+        var height := rng.randf_range(4.0, 8.0)
+        var width := rng.randf_range(0.70, 1.12)
+        if proxy and i % PROXY_STRIDE != 0:
+            continue
+        trunks.set_instance_transform(
+            output_index,
+            Transform3D(Basis().scaled(Vector3(0.65 * width, height, 0.65 * width)), Vector3(x, height / 2.0, z))
+        )
+        crowns.set_instance_transform(
+            output_index,
+            Transform3D(Basis().scaled(Vector3(3.3 * width, 3.6, 3.3 * width)), Vector3(x, height + 1.9, z))
+        )
+        output_index += 1
+
+    _add_instances("Trunks", trunks)
+    _add_instances("Canopies", crowns)
+
+    # Only close detail scenes contribute to PhysicsServer3D/NavigationServer3D.
+    # HLOD proxy scenes are intentionally visual-only, including prebaked ones.
+    if not proxy:
+        _create_streamed_simulation_components()
+        if grid == QUEST_HUB or grid == PATROL_PASS:
+            _create_patrol_navigation_track(grid)
+
+    # Gameplay landmarks belong to detailed scenes only. The demo's native
+    # pinning API allows the hub and event arena to remain resident offscreen.
+    if not proxy:
+        if grid == QUEST_HUB or grid == COMBAT_ARENA:
+            _add_gameplay_landmark(grid == QUEST_HUB)
+            _create_persistent_crate()
+            if grid == QUEST_HUB:
+                _create_interactable("TreasureChest", "chest")
+            else:
+                _create_interactable("ArenaSwitch", "switch")
+            _refresh_landmark()
+        elif grid == CHAMPION_SHRINE:
+            _add_champion_shrine()
+            _create_interactable("ChampionGate", "gate")
+            _refresh_landmark()
+        elif grid == PATROL_PASS:
+            # The link between two streamed regions is controlled by a
+            # reusable interactive switch in the destination cell.
+            _create_interactable("PatrolGate", "patrol_gate", true)
+
+func _create_interactable(node_name: String, object_kind: String, default_active: bool = false) -> void:
+    var interactable := INTERACTABLE_SCRIPT.new() as Node3D
+    interactable.name = node_name
+    interactable.call("configure", object_kind, default_active)
+    interactable.position = (
+        Vector3(16.0, 0.0, CELL_SIZE * 0.5) if object_kind == "patrol_gate"
+        else Vector3(CELL_SIZE * 0.5 - 10.0, 0.0, CELL_SIZE * 0.5 + 9.0)
+    )
+    add_child(interactable)
+
+func get_interactable() -> Node3D:
+    if proxy:
+        return null
+    if cell_coords == QUEST_HUB:
+        return get_node_or_null("TreasureChest") as Node3D
+    if cell_coords == COMBAT_ARENA:
+        return get_node_or_null("ArenaSwitch") as Node3D
+    if cell_coords == CHAMPION_SHRINE:
+        return get_node_or_null("ChampionGate") as Node3D
+    if cell_coords == PATROL_PASS:
+        return get_node_or_null("PatrolGate") as Node3D
+    return null
+
+func interact_world_object() -> bool:
+    var target := get_interactable()
+    return target != null and bool(target.call("interact"))
+
+func _create_persistent_crate() -> void:
+    # WorldPartition3D persists only opt-in RigidBody3D descendants.
+    # This is a real dynamic PhysicsServer3D object, not a visual transform.
+    var crate := RigidBody3D.new()
+    crate.name = "StreamingCrate"
+    crate.set_meta("streaming_persistent", true)
+    crate.mass = 4.0
+    crate.position = Vector3(CELL_SIZE * 0.5 + 9.0, 3.5, CELL_SIZE * 0.5)
+    crate.linear_damp = 0.25
+    crate.angular_damp = 0.2
+    add_child(crate)
+
+    var collision := CollisionShape3D.new()
+    collision.name = "CrateCollision"
+    var shape := BoxShape3D.new()
+    shape.size = Vector3(2.0, 2.0, 2.0)
+    collision.shape = shape
+    crate.add_child(collision)
+
+    var visual := MeshInstance3D.new()
+    visual.name = "CrateVisual"
+    var mesh := BoxMesh.new()
+    mesh.size = shape.size
+    var material := StandardMaterial3D.new()
+    material.albedo_color = Color(0.93, 0.57, 0.15)
+    material.metallic = 0.25
+    material.roughness = 0.5
+    mesh.material = material
+    visual.mesh = mesh
+    crate.add_child(visual)
+
+func kick_persistent_crate() -> bool:
+    var crate := get_node_or_null("StreamingCrate") as RigidBody3D
+    if crate == null:
+        return false
+    crate.sleeping = false
+    crate.apply_central_impulse(Vector3(15.0, 11.0, 5.0))
+    return true
+
+func _create_patrol_navigation_track(grid: Vector2i) -> void:
+    # A narrow, purpose-authored patrol navigation layer. Its two islands
+    # are NOT connected by ordinary mesh edges; only the streamed bridge
+    # NavigationLink3D joins them. The normal walkable world stays layer 1.
+    var track := NavigationRegion3D.new()
+    track.name = "PatrolTrack"
+    track.navigation_layers = 2
+    track.navigation_mesh = (
+        _patrol_hub_navigation_mesh if grid == QUEST_HUB
+        else _patrol_pass_navigation_mesh
+    )
+    add_child(track)
+    if grid != QUEST_HUB:
+        return
+
+    var bridge := NavigationLink3D.new()
+    bridge.name = "PatrolBridgeLink"
+    bridge.navigation_layers = 2
+    bridge.bidirectional = true
+    bridge.start_position = Vector3(123.0, 0.0, 64.0)
+    # End is expressed relative to hub root and reaches into neighbor
+    # (1,0), where the walkable strip begins at global x=132.
+    bridge.end_position = Vector3(133.0, 0.0, 64.0)
+    bridge.enabled = true
+    add_child(bridge)
+
+func _create_streamed_simulation_components() -> void:
+    # Collision is deliberately coarse, not generated from all 160 tree meshes.
+    # This keeps the physics cost bounded as detailed cells enter the world.
+    var physics := StaticBody3D.new()
+    physics.name = "TerrainPhysics"
+    physics.collision_layer = 1
+    physics.collision_mask = 0
+    add_child(physics)
+
+    var ground_collision := CollisionShape3D.new()
+    ground_collision.name = "GroundShape"
+    ground_collision.shape = _collision_shape_resource
+    ground_collision.position = Vector3(CELL_SIZE * 0.5, -0.1, CELL_SIZE * 0.5)
+    physics.add_child(ground_collision)
+
+    # A tiny, pre-authored navigation polygon resource is shared by cells.
+    # We do not invoke runtime NavigationMesh baking on the rendering thread.
+    var navigation := NavigationRegion3D.new()
+    navigation.name = "WalkableRegion"
+    navigation.navigation_mesh = _flat_navigation_mesh
+    navigation.navigation_layers = 1
+    navigation.enabled = true
+    add_child(navigation)
+
+# Called by the native streamer AFTER _ready() and after restoring gameplay
+# state. NavigationServer3D still needs a physics frame to synchronize regions.
+func streaming_activated(_cell: Vector2i) -> void:
+    streaming_activation_count += 1
+    if proxy:
+        return
+    var collision := get_node_or_null("TerrainPhysics/GroundShape") as CollisionShape3D
+    if collision != null:
+        collision.disabled = false
+    var navigation := get_node_or_null("WalkableRegion") as NavigationRegion3D
+    if navigation != null:
+        navigation.enabled = true
+
+# Called BEFORE state capture and queue_free(). Disabling registration here
+# avoids a stale collision or pathfinding region until deferred deletion.
+func streaming_deactivating(_cell: Vector2i) -> void:
+    streaming_deactivation_count += 1
+    if proxy:
+        return
+    var navigation := get_node_or_null("WalkableRegion") as NavigationRegion3D
+    if navigation != null:
+        navigation.enabled = false
+    var collision := get_node_or_null("TerrainPhysics/GroundShape") as CollisionShape3D
+    if collision != null:
+        collision.disabled = true
+
+# The native WorldPartition3D streamer invokes these optional scene-root hooks.
+# Only gameplay cells retain state; uninteresting procedural foliage returns {}.
+func capture_streaming_state() -> Dictionary:
+    if proxy:
+        return {}
+    if cell_coords == QUEST_HUB:
+        return {"reward_claimed": hub_reward_claimed}
+    if cell_coords == COMBAT_ARENA:
+        return {"arena_wins": arena_wins}
+    if cell_coords == CHAMPION_SHRINE:
+        return {"champion_reward_claimed": champion_reward_claimed}
+    return {}
+
+func restore_streaming_state(state: Dictionary) -> void:
+    if cell_coords == QUEST_HUB:
+        hub_reward_claimed = bool(state.get("reward_claimed", false))
+    elif cell_coords == COMBAT_ARENA:
+        arena_wins = maxi(0, int(state.get("arena_wins", 0)))
+    elif cell_coords == CHAMPION_SHRINE:
+        champion_reward_claimed = bool(state.get("champion_reward_claimed", false))
+    _refresh_landmark()
+
+func claim_hub_reward() -> bool:
+    if proxy or cell_coords != QUEST_HUB or hub_reward_claimed:
+        return false
+    hub_reward_claimed = true
+    _refresh_landmark()
+    return true
+
+func win_arena_round() -> int:
+    if proxy or cell_coords != COMBAT_ARENA:
+        return -1
+    arena_wins += 1
+    _refresh_landmark()
+    return arena_wins
+
+func claim_champion_reward() -> bool:
+    if proxy or cell_coords != CHAMPION_SHRINE or champion_reward_claimed:
+        return false
+    champion_reward_claimed = true
+    _refresh_landmark()
+    return true
+
+func _refresh_landmark() -> void:
+    if cell_coords == QUEST_HUB:
+        var label := get_node_or_null("QuestHub/StateLabel") as Label3D
+        if label != null:
+            label.text = "HUB REWARD CLAIMED" if hub_reward_claimed else "HUB REWARD READY  [C]"
+    elif cell_coords == COMBAT_ARENA:
+        var label := get_node_or_null("CombatArena/StateLabel") as Label3D
+        if label != null:
+            label.text = "ARENA WINS: %d  [B]" % arena_wins
+    elif cell_coords == CHAMPION_SHRINE:
+        var label := get_node_or_null("ChampionShrine/StateLabel") as Label3D
+        if label != null:
+            label.text = "CHAMPION REWARD CLAIMED" if champion_reward_claimed else "CHAMPION REWARD  [V]"
+
+func _add_champion_shrine() -> void:
+    var anchor := Node3D.new()
+    anchor.name = "ChampionShrine"
+    anchor.position = Vector3(CELL_SIZE * 0.5, 0.0, CELL_SIZE * 0.5)
+    add_child(anchor)
+    var monument := MeshInstance3D.new()
+    monument.name = "Monument"
+    var shape := CylinderMesh.new()
+    shape.height = 16.0
+    shape.top_radius = 0.9
+    shape.bottom_radius = 2.5
+    var material := StandardMaterial3D.new()
+    material.albedo_color = Color(0.55, 0.20, 0.93)
+    material.emission_enabled = true
+    material.emission = material.albedo_color
+    material.emission_energy_multiplier = 1.8
+    shape.material = material
+    monument.mesh = shape
+    monument.position.y = 8.0
+    anchor.add_child(monument)
+    var nameplate := Label3D.new()
+    nameplate.name = "StateLabel"
+    nameplate.font_size = 64
+    nameplate.pixel_size = 0.01
+    nameplate.position.y = 19.0
+    anchor.add_child(nameplate)
+
+func _add_gameplay_landmark(is_hub: bool) -> void:
+    var anchor := Node3D.new()
+    anchor.name = "QuestHub" if is_hub else "CombatArena"
+    anchor.position = Vector3(CELL_SIZE * 0.5, 0.0, CELL_SIZE * 0.5)
+    add_child(anchor)
+
+    var column := MeshInstance3D.new()
+    column.name = "Landmark"
+    var shape := CylinderMesh.new()
+    shape.top_radius = 0.7
+    shape.bottom_radius = 1.4
+    shape.height = 12.0
+    var material := StandardMaterial3D.new()
+    material.albedo_color = Color(0.08, 0.75, 0.44) if is_hub else Color(0.85, 0.21, 0.12)
+    material.emission_enabled = true
+    material.emission = material.albedo_color
+    material.emission_energy_multiplier = 1.5
+    shape.material = material
+    column.mesh = shape
+    column.position.y = 6.0
+    anchor.add_child(column)
+
+    var nameplate := Label3D.new()
+    nameplate.name = "StateLabel"
+    nameplate.text = "QUEST HUB  [H]" if is_hub else "COMBAT ARENA  [G]"
+    nameplate.font_size = 64
+    nameplate.pixel_size = 0.01
+    nameplate.position.y = 14.0
+    anchor.add_child(nameplate)
+
+func _build_multimesh(mesh: Mesh, count: int) -> MultiMesh:
+    var mm := MultiMesh.new()
+    mm.transform_format = MultiMesh.TRANSFORM_3D
+    mm.mesh = mesh
+    mm.instance_count = count
+    return mm
+
+func _add_instances(name: String, mm: MultiMesh) -> void:
+    var instance := MultiMeshInstance3D.new()
+    instance.name = name
+    instance.multimesh = mm
+    add_child(instance)
+
+func _ensure_shared_resources() -> void:
+    if _trunk_mesh != null:
+        return
+    _trunk_material = StandardMaterial3D.new()
+    _trunk_material.albedo_color = Color(0.29, 0.22, 0.16)
+    _trunk_material.roughness = 1.0
+    _leaf_material = StandardMaterial3D.new()
+    _leaf_material.albedo_color = Color(0.08, 0.27, 0.13)
+    _leaf_material.roughness = 0.95
+    _ground_material = StandardMaterial3D.new()
+    _ground_material.albedo_color = Color(0.19, 0.31, 0.20)
+    _ground_material.roughness = 1.0
+
+    _trunk_mesh = CylinderMesh.new()
+    _trunk_mesh.top_radius = 0.4
+    _trunk_mesh.bottom_radius = 0.5
+    _trunk_mesh.height = 1.0
+    _trunk_mesh.material = _trunk_material
+
+    _crown_detail_mesh = SphereMesh.new()
+    _crown_detail_mesh.radial_segments = 12
+    _crown_detail_mesh.rings = 6
+    _crown_detail_mesh.material = _leaf_material
+
+    _crown_proxy_mesh = SphereMesh.new()
+    _crown_proxy_mesh.radial_segments = 6
+    _crown_proxy_mesh.rings = 3
+    _crown_proxy_mesh.material = _leaf_material
+
+    _collision_shape_resource = BoxShape3D.new()
+    _collision_shape_resource.size = Vector3(CELL_SIZE, 0.2, CELL_SIZE)
+
+    # Consistent winding produces an upward-facing walkable quad in X/Z.
+    _flat_navigation_mesh = NavigationMesh.new()
+    _flat_navigation_mesh.vertices = PackedVector3Array([
+        Vector3(0, 0, 0),
+        Vector3(CELL_SIZE, 0, 0),
+        Vector3(CELL_SIZE, 0, CELL_SIZE),
+        Vector3(0, 0, CELL_SIZE),
+    ])
+    _flat_navigation_mesh.add_polygon(PackedInt32Array([0, 3, 2, 1]))
+
+    # Two isolated patrol-only navigation polygons, separated by an 8m
+    # world-space gap. Changing the link affects only navigation layer 2.
+    _patrol_hub_navigation_mesh = NavigationMesh.new()
+    _patrol_hub_navigation_mesh.vertices = PackedVector3Array([
+        Vector3(106.0, 0, 58.0), Vector3(124.0, 0, 58.0),
+        Vector3(124.0, 0, 70.0), Vector3(106.0, 0, 70.0),
+    ])
+    _patrol_hub_navigation_mesh.add_polygon(PackedInt32Array([0, 3, 2, 1]))
+    _patrol_pass_navigation_mesh = NavigationMesh.new()
+    _patrol_pass_navigation_mesh.vertices = PackedVector3Array([
+        Vector3(4.0, 0, 58.0), Vector3(24.0, 0, 58.0),
+        Vector3(24.0, 0, 70.0), Vector3(4.0, 0, 70.0),
+    ])
+    _patrol_pass_navigation_mesh.add_polygon(PackedInt32Array([0, 3, 2, 1]))
+
+    _ground_mesh = PlaneMesh.new()
+    _ground_mesh.size = Vector2(CELL_SIZE, CELL_SIZE)
+    _ground_mesh.material = _ground_material

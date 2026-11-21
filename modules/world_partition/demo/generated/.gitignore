@@ -1,0 +1,3 @@
+# Generated at authoring time; avoid committing per-cell assets and build metadata.
+*.tscn
+hlod_manifest.json
