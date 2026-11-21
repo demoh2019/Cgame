@@ -4,6 +4,18 @@ extends RefCounted
 
 const MAX_DISTANCE := 140.0
 const FRAME_BUDGET := [8, 12, 18, 24]
+## Resident particle instances include live emitters, not only idle cache.
+## Idle cache can shrink gradually after reducing the graphics quality.
+const POOL_RESIDENT_TARGET := [2, 4, 8, 12]
+const POOL_CHANGES_PER_FRAME := [1, 1, 2, 2]
+
+
+static func pool_resident_target(quality: int) -> int:
+	return POOL_RESIDENT_TARGET[clampi(quality, 0, 3)]
+
+
+static func pool_changes_per_frame(quality: int) -> int:
+	return POOL_CHANGES_PER_FRAME[clampi(quality, 0, 3)]
 const CAPS := [
 	[1, 4, 5, 4],
 	[2, 6, 8, 6],
