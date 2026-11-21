@@ -42,3 +42,8 @@ runtime measurements and green builds.
 
 Unreal design reference:
 https://dev.epicgames.com/documentation/unreal-engine/detailed-actor-replication-flow-in-unreal-engine
+
+The actual `EntityView` initializes its buffer with
+`Defs.SNAPSHOT_RATE` rather than hard-coding a 10Hz sampling interval,
+so if the game's server tick profile changes, the visual jitter detector
+still measures missing packets against the correct cadence.

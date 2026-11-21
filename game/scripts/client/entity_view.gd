@@ -65,6 +65,13 @@ const INTERPOLATION_DELAY := 0.12 # Baseline for 10 server snapshots per second.
 const TELEPORT_DISTANCE := 8.0
 
 
+func _init() -> void:
+	# Match the dedicated server's actual snapshot rate. Configuration
+	# only resets this local presentation buffer, never server simulation.
+	_snapshot_buffer.configure(INTERPOLATION_DELAY, NetworkJitterBuffer.MAX_DELAY,
+		1.0 / float(Defs.SNAPSHOT_RATE))
+
+
 ## House piece models (Kenney Fantasy Town Kit, CC0), sized to the 3 m building grid. Upgraded
 ## walls (tier 2+) turn from timber to stone.
 const PIECE_DIR := "res://assets/models/kenney_building/town/"

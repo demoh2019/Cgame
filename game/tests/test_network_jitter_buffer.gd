@@ -161,4 +161,7 @@ func run(t) -> void:
 		"player and infected render paths use the correct smoothing backend")
 	t.check(live.network_jitter_stats().has("accepted_packets"),
 		"game exposes local network diagnostics without server changes")
+	t.near(float(live.network_jitter_stats()["expected_snapshot_step"]),
+		1.0 / float(preload("res://scripts/shared/defs.gd").SNAPSHOT_RATE), 0.0000005,
+		"client buffer tracks the real dedicated server snapshot rate")
 	live.free()
