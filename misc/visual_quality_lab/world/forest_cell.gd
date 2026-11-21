@@ -8,6 +8,7 @@ const NavigationTile = preload("res://addons/visual_quality/navigation_tile.gd")
 const NPC = preload("res://addons/visual_quality/streamed_patrol_npc.gd")
 
 signal stream_state_changed()
+signal resource_awarded(item_id: String, source_uid: String)
 
 @export var world_seed: int = 20261120
 @export var local_chunk_size: float = 14.0
@@ -138,6 +139,7 @@ func try_activate_beacon(player_world_position: Vector3, radius: float = 2.8) ->
 		return false
 	beacon_activated = true
 	_update_beacon_visual()
+	resource_awarded.emit("forest_essence", "beacon:%d:%d" % [cell_coord.x, cell_coord.y])
 	stream_state_changed.emit()
 	return true
 
