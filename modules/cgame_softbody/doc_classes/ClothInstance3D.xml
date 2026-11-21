@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="ClothInstance3D" inherits="MeshInstance3D" api_type="core" keywords="cloth,softbody,skeleton,simulation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Mesh node that simulates and renders a [CgameXPBDCloth].
+	</brief_description>
+	<description>
+		[ClothInstance3D] owns a [CgameXPBDCloth], steps it every physics frame (outside the editor) and keeps its [ArrayMesh] in sync. While the cloth topology is unchanged, vertex positions and normals are streamed to the GPU in place with [method RenderingServer.mesh_surface_update_vertex_region], so no mesh arrays are rebuilt. When tearing changes the triangle list, or the surface layout does not allow in-place updates, the mesh is rebuilt.
+		The cloth runs in world space; the node converts positions to its local space for rendering, so the node can be moved without teleporting the cloth. Particles can be pinned to bones of a [Skeleton3D] with [method attach_particle_to_bone]. Pinned particles glide toward the current bone transform during each step.
+		[codeblock]
+		var cloth := CgameXPBDCloth.new()
+		cloth.setup_grid(16, 24, 0.04, Transform3D(Basis(), Vector3(0, 1.6, 0)))
+		var node := ClothInstance3D.new()
+		add_child(node)
+		node.set_cloth(cloth)
+		node.skeleton_path = ^"../Skeleton3D"
+		for i in range(cloth.columns()):
+		    node.attach_particle_to_bone(cloth.index_of(i, 0), "Spine2")
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="attach_particle_to_bone">
+			<return type="void" />
+			<param index="0" name="particle" type="int" />
+			<param index="1" name="bone" type="StringName" />
+			<param index="2" name="offset" type="Vector3" default="Vector3(0, 0, 0)" />
+			<description>
+				Pins cloth particle [param particle] to the bone named [param bone] of the skeleton at [member skeleton_path], at [param offset] in bone-local space. Does nothing and prints an error if no cloth is set or the index is out of range. Bones that cannot be found are skipped at runtime.
+			</description>
+		</method>
+		<method name="clear_bone_attachments">
+			<return type="void" />
+			<description>
+				Removes all bone attachments and releases the attached particles.
+			</description>
+		</method>
+		<method name="detach_particle_from_bone">
+			<return type="void" />
+			<param index="0" name="particle" type="int" />
+			<description>
+				Removes the bone attachment of [param particle] and releases the particle.
+			</description>
+		</method>
+		<method name="get_bone_attachments" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the bone attachment map. Keys are particle indices; values are arrays [code][bone_name, offset][/code].
+			</description>
+		</method>
+		<method name="get_cloth" qualifiers="const">
+			<return type="CgameXPBDCloth" />
+			<description>
+				Returns the simulated cloth, or [code]null[/code].
+			</description>
+		</method>
+		<method name="is_using_fast_update" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the mesh is currently refreshed in place through the rendering server instead of being rebuilt.
+			</description>
+		</method>
+		<method name="rebuild_mesh">
+			<return type="void" />
+			<description>
+				Rebuilds the [ArrayMesh] from the current cloth state. This happens automatically when the cloth is assigned and when tearing changes the triangles.
+			</description>
+		</method>
+		<method name="set_bone_attachments">
+			<return type="void" />
+			<param index="0" name="map" type="Dictionary" />
+			<description>
+				Replaces all bone attachments. Keys are particle indices; values are either a bone name or an array [code][bone_name, offset][/code].
+			</description>
+		</method>
+		<method name="set_cloth">
+			<return type="void" />
+			<param index="0" name="cloth" type="CgameXPBDCloth" />
+			<description>
+				Sets the cloth to simulate and render. The mesh is created immediately when the node is inside the scene tree, otherwise when it enters it.
+			</description>
+		</method>
+		<method name="simulate">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>
+				Updates bone attachments, steps the cloth by [param delta] seconds using [member substeps] and refreshes the mesh. This is what the physics notification calls; it can also be used for manual stepping, for example in the editor or in tests.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="simulating" type="bool" setter="set_simulating" getter="is_simulating" default="true">
+			If [code]true[/code], the cloth is stepped every physics frame. The simulation never runs automatically in the editor.
+		</member>
+		<member name="skeleton_path" type="NodePath" setter="set_skeleton_path" getter="get_skeleton_path" default="NodePath(&quot;&quot;)">
+			Path to the [Skeleton3D] that provides the bone transforms for bone attachments.
+		</member>
+		<member name="substeps" type="int" setter="set_substeps" getter="get_substeps" default="8">
+			Number of solver sub-steps per physics frame, from [code]1[/code] to [code]64[/code].
+		</member>
+	</members>
+</class>

@@ -1,0 +1,273 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameXPBDCloth" inherits="RefCounted" api_type="core" keywords="cloth,softbody,xpbd,simulation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Native XPBD cloth simulation on a rectangular particle grid.
+	</brief_description>
+	<description>
+		[CgameXPBDCloth] simulates a rectangular piece of cloth with extended position-based dynamics (XPBD). Stretch, shear and bending behaviour are modelled as distance constraints with a configurable compliance (inverse stiffness). The solver uses small sub-steps with one iteration each, optional sphere, capsule and plane colliders, a spatial-hash self-collision pass and constraint tearing.
+		The cloth grid is created with [method setup_grid]. Particle [code](i, j)[/code] is placed at [code]origin * Vector3(i * spacing, -j * spacing, 0)[/code], so row 0 is the top edge, local [code]-Y[/code] runs down the cloth and local [code]+Z[/code] is the front-face normal. All positions handled by this class are in world space.
+		Particles can be fixed in place with [method pin], follow a script callback with [method attach], or follow a position that is updated every frame with [method drive]. [ClothInstance3D] uses [method drive] to follow skeleton bones.
+		[codeblock]
+		var cloth := CgameXPBDCloth.new()
+		cloth.setup_grid(20, 20, 0.05, Transform3D(Basis(), Vector3(0, 2, 0)))
+		for i in range(cloth.columns()):
+		    cloth.pin(cloth.index_of(i, 0), cloth.positions()[cloth.index_of(i, 0)])
+		cloth.add_sphere(Vector3(0.5, 1.0, 0.2), 0.3)
+		cloth.step(1.0 / 60.0, 8)
+		[/codeblock]
+		[b]Credits:[/b] Algorithm from Macklin, Müller and Chentanez, "XPBD: Position-Based Simulation of Compliant Constrained Dynamics" (2016). Structure follows Matthias Müller's "Ten Minute Physics" cloth demo (MIT License). This is a clean re-implementation from the published algorithm.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_capsule">
+			<return type="int" />
+			<param index="0" name="a" type="Vector3" />
+			<param index="1" name="b" type="Vector3" />
+			<param index="2" name="radius" type="float" />
+			<description>
+				Adds a capsule collider between world-space points [param a] and [param b] and returns its index. Particles are kept outside [param radius] plus [member collision_margin].
+			</description>
+		</method>
+		<method name="add_plane">
+			<return type="int" />
+			<param index="0" name="normal" type="Vector3" />
+			<param index="1" name="offset" type="float" />
+			<description>
+				Adds a plane collider and returns its index. The half-space where [code]normal.dot(x) &gt;= offset[/code] is free; particles are pushed out of the other side. [param normal] is normalized.
+			</description>
+		</method>
+		<method name="add_sphere">
+			<return type="int" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="radius" type="float" />
+			<description>
+				Adds a sphere collider in world space and returns its index. Particles are kept outside [param radius] plus [member collision_margin].
+			</description>
+		</method>
+		<method name="attach">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<param index="1" name="target_fn" type="Callable" />
+			<description>
+				Makes particle [param index] follow the [Vector3] returned by [param target_fn], which is called once per sub-step. The particle becomes immovable for the solver. Use [method unpin] to release it.
+			</description>
+		</method>
+		<method name="build_mesh" qualifiers="const">
+			<return type="ArrayMesh" />
+			<param index="0" name="flags" type="int" default="0" />
+			<description>
+				Builds an [ArrayMesh] with one triangle surface from the current world-space particle positions, normals, UVs and triangles. [param flags] are [enum Mesh.ArrayFormat] flags passed to [method ArrayMesh.add_surface_from_arrays]. Returns an empty mesh when no triangles remain.
+			</description>
+		</method>
+		<method name="clear_colliders">
+			<return type="void" />
+			<description>
+				Removes all sphere, capsule and plane colliders.
+			</description>
+		</method>
+		<method name="columns" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of particle columns ([code]width_cells + 1[/code]).
+			</description>
+		</method>
+		<method name="constraint_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of remaining constraints of all kinds. Tearing reduces this number.
+			</description>
+		</method>
+		<method name="drive">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<param index="1" name="world_pos" type="Vector3" />
+			<description>
+				Sets the target position of an externally driven particle. The first call snaps the particle to [param world_pos]; later calls make it glide linearly toward the new target across the sub-steps of the next [method step]. This is cheaper than [method attach] because no callback is involved.
+			</description>
+		</method>
+		<method name="get_torn_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the total number of constraints removed by tearing since the last [method setup_grid].
+			</description>
+		</method>
+		<method name="index_of" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="i" type="int" />
+			<param index="1" name="j" type="int" />
+			<description>
+				Returns the particle index of column [param i] and row [param j].
+			</description>
+		</method>
+		<method name="is_pinned" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Returns [code]true[/code] if particle [param index] is pinned, attached or driven.
+			</description>
+		</method>
+		<method name="max_stretch_error" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the largest [code]|length / rest - 1|[/code] over all stretch constraints, or [code]0[/code] when none remain.
+			</description>
+		</method>
+		<method name="normals" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns smooth per-particle normals computed from the current triangles.
+			</description>
+		</method>
+		<method name="particle_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of particles.
+			</description>
+		</method>
+		<method name="pin">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<param index="1" name="world_pos" type="Vector3" />
+			<description>
+				Fixes particle [param index] at [param world_pos]. Its inverse mass becomes zero and its position and velocity are reset.
+			</description>
+		</method>
+		<method name="positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns the current world-space particle positions.
+			</description>
+		</method>
+		<method name="rows" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of particle rows ([code]height_cells + 1[/code]).
+			</description>
+		</method>
+		<method name="set_capsule">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<param index="1" name="a" type="Vector3" />
+			<param index="2" name="b" type="Vector3" />
+			<description>
+				Moves the capsule collider [param index] to the segment from [param a] to [param b].
+			</description>
+		</method>
+		<method name="set_particle">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<param index="1" name="world_pos" type="Vector3" />
+			<description>
+				Teleports particle [param index] to [param world_pos] and clears its velocity, for example to pre-fold the cloth.
+			</description>
+		</method>
+		<method name="set_sphere_center">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<param index="1" name="center" type="Vector3" />
+			<description>
+				Moves the sphere collider [param index] to [param center].
+			</description>
+		</method>
+		<method name="setup_grid">
+			<return type="void" />
+			<param index="0" name="width_cells" type="int" />
+			<param index="1" name="height_cells" type="int" />
+			<param index="2" name="spacing" type="float" />
+			<param index="3" name="origin" type="Transform3D" />
+			<param index="4" name="particle_mass" type="float" default="1.0" />
+			<description>
+				Builds a grid of [code]width_cells + 1[/code] by [code]height_cells + 1[/code] particles with [param spacing] meters between neighbours, placed relative to [param origin]. Stretch, shear and bending constraints and the render triangles are generated, and all previous state is discarded.
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<param index="0" name="dt" type="float" />
+			<param index="1" name="substeps" type="int" default="8" />
+			<description>
+				Advances the simulation by [param dt] seconds using [param substeps] sub-steps. Does nothing when [param dt] is not positive or the cloth has not been set up. Tearing is evaluated once after all sub-steps.
+			</description>
+		</method>
+		<method name="stretch_constraint_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of remaining stretch constraints.
+			</description>
+		</method>
+		<method name="triangles" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>
+				Returns the triangle index list, three indices per triangle, counter-clockwise when seen from local [code]+Z[/code]. Triangles touching a torn edge are removed.
+			</description>
+		</method>
+		<method name="unpin">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Releases particle [param index] and restores its original mass.
+			</description>
+		</method>
+		<method name="uvs" qualifiers="const">
+			<return type="PackedVector2Array" />
+			<description>
+				Returns per-particle UV coordinates covering the grid from [code](0, 0)[/code] to [code](1, 1)[/code].
+			</description>
+		</method>
+		<method name="velocities" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns the current particle velocities.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="collision_margin" type="float" setter="set_collision_margin" getter="get_collision_margin" default="0.01">
+			Particle radius used for collider contact, in meters.
+		</member>
+		<member name="compliance_bend" type="float" setter="set_compliance_bend" getter="get_compliance_bend" default="0.02">
+			Compliance (inverse stiffness, m/N) of the bending constraints. Larger values give softer cloth.
+		</member>
+		<member name="compliance_shear" type="float" setter="set_compliance_shear" getter="get_compliance_shear" default="0.0001">
+			Compliance of the shear (diagonal) constraints.
+		</member>
+		<member name="compliance_stretch" type="float" setter="set_compliance_stretch" getter="get_compliance_stretch" default="0.0">
+			Compliance of the stretch constraints. [code]0[/code] makes them fully rigid.
+		</member>
+		<member name="drag" type="float" setter="set_drag" getter="get_drag" default="0.1">
+			Air drag rate in 1/s toward the [member wind] velocity. With zero wind this is plain damping.
+		</member>
+		<member name="friction" type="float" setter="set_friction" getter="get_friction" default="0.2">
+			Tangential damping applied on collider contact, from [code]0[/code] to [code]1[/code].
+		</member>
+		<member name="gravity" type="Vector3" setter="set_gravity" getter="get_gravity" default="Vector3(0, -9.81, 0)">
+			Gravity acceleration in world space.
+		</member>
+		<member name="iterations" type="int" setter="set_iterations" getter="get_iterations" default="1">
+			Solver iterations per sub-step. Values below [code]1[/code] are clamped to [code]1[/code].
+		</member>
+		<member name="self_collision_enabled" type="bool" setter="set_self_collision_enabled" getter="is_self_collision_enabled" default="false">
+			If [code]true[/code], particles that were not neighbours at rest are kept at least [member thickness] apart using a spatial hash.
+		</member>
+		<member name="tear_threshold" type="float" setter="set_tear_threshold" getter="get_tear_threshold" default="0.0">
+			Stretch constraints longer than [code]rest * tear_threshold[/code] are removed together with the dependent shear, bending and triangle data. [code]0[/code] disables tearing.
+		</member>
+		<member name="thickness" type="float" setter="set_thickness" getter="get_thickness" default="0.04">
+			Minimum distance kept between non-neighbouring particles when [member self_collision_enabled] is [code]true[/code]. Also the spatial hash cell size.
+		</member>
+		<member name="wind" type="Vector3" setter="set_wind" getter="get_wind" default="Vector3(0, 0, 0)">
+			Wind velocity the air drags particles toward.
+		</member>
+	</members>
+	<constants>
+		<constant name="KIND_STRETCH" value="0" enum="ConstraintKind">
+			Constraint family keeping grid neighbours at their rest distance.
+		</constant>
+		<constant name="KIND_SHEAR" value="1" enum="ConstraintKind">
+			Constraint family keeping the cell diagonals at their rest distance.
+		</constant>
+		<constant name="KIND_BEND" value="2" enum="ConstraintKind">
+			Constraint family connecting every second particle to resist folding.
+		</constant>
+	</constants>
+</class>

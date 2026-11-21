@@ -1,0 +1,224 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameXPBDRope" inherits="RefCounted" api_type="core" keywords="rope,chain,softbody,xpbd,simulation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Native XPBD rope simulation.
+	</brief_description>
+	<description>
+		[CgameXPBDRope] simulates a chain of particles joined by distance constraints using extended position-based dynamics. It supports an optional skip-one bending constraint, sphere and plane colliders, segment-versus-segment self-collision through a spatial hash and a crossing-number knot heuristic. All positions are in world space.
+		[codeblock]
+		var rope := CgameXPBDRope.new()
+		rope.setup(Vector3(0, 3, 0), Vector3(2, 3, 0), 20)
+		rope.pin(0, Vector3(0, 3, 0))
+		rope.step(1.0 / 60.0, 8)
+		print(rope.length())
+		[/codeblock]
+		[b]Credits:[/b] Algorithm from Macklin, Müller and Chentanez, "XPBD: Position-Based Simulation of Compliant Constrained Dynamics" (2016), with a small-steps layout after Matthias Müller's "Ten Minute Physics" demos (MIT License). The closest-point-between-segments routine is the textbook formulation from Ericson, "Real-Time Collision Detection".
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_plane">
+			<return type="int" />
+			<param index="0" name="normal" type="Vector3" />
+			<param index="1" name="offset" type="float" />
+			<description>
+				Adds a plane collider and returns its index. The half-space where [code]normal.dot(x) &gt;= offset[/code] is free.
+			</description>
+		</method>
+		<method name="add_sphere">
+			<return type="int" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="radius" type="float" />
+			<description>
+				Adds a sphere collider and returns its index. Particles are kept outside the sphere radius plus [member radius].
+			</description>
+		</method>
+		<method name="attach">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<param index="1" name="target_fn" type="Callable" />
+			<description>
+				Makes particle [param index] follow the [Vector3] returned by [param target_fn], which is called once per sub-step.
+			</description>
+		</method>
+		<method name="attach_end">
+			<return type="void" />
+			<param index="0" name="target_fn" type="Callable" />
+			<description>
+				Equivalent to [method attach] on the last particle.
+			</description>
+		</method>
+		<method name="attach_start">
+			<return type="void" />
+			<param index="0" name="target_fn" type="Callable" />
+			<description>
+				Equivalent to [method attach] on the first particle.
+			</description>
+		</method>
+		<method name="clear_colliders">
+			<return type="void" />
+			<description>
+				Removes all sphere and plane colliders.
+			</description>
+		</method>
+		<method name="closest_params" qualifiers="static">
+			<return type="Vector2" />
+			<param index="0" name="p1" type="Vector3" />
+			<param index="1" name="q1" type="Vector3" />
+			<param index="2" name="p2" type="Vector3" />
+			<param index="3" name="q2" type="Vector3" />
+			<description>
+				Returns the parameters [code](s, t)[/code], each in [code][0, 1][/code], of the closest points between segment [code]p1-q1[/code] and segment [code]p2-q2[/code].
+			</description>
+		</method>
+		<method name="crossing_number" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of self-crossings of the rope projected along its thinnest axis.
+			</description>
+		</method>
+		<method name="drive">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<param index="1" name="world_pos" type="Vector3" />
+			<description>
+				Sets the target of an externally driven particle. The first call snaps it to [param world_pos]; later calls make it glide toward the new target across the sub-steps of the next [method step].
+			</description>
+		</method>
+		<method name="is_pinned" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Returns [code]true[/code] if particle [param index] is pinned, attached or driven.
+			</description>
+		</method>
+		<method name="knot_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns a heuristic knot count: every three projected crossings count as one knot, so a single loop or a clasp of two crossings is not a knot.
+			</description>
+		</method>
+		<method name="length" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the current arc length of the rope.
+			</description>
+		</method>
+		<method name="min_self_distance" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the smallest distance between any two non-adjacent segments, or infinity for very short ropes.
+			</description>
+		</method>
+		<method name="particle_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of particles.
+			</description>
+		</method>
+		<method name="pin">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<param index="1" name="world_pos" type="Vector3" />
+			<description>
+				Fixes particle [param index] at [param world_pos].
+			</description>
+		</method>
+		<method name="positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns the current world-space particle positions.
+			</description>
+		</method>
+		<method name="rest_length" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the total rest length of the rope.
+			</description>
+		</method>
+		<method name="segment_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of segments, one less than the particle count.
+			</description>
+		</method>
+		<method name="segment_distance" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="i" type="int" />
+			<param index="1" name="j" type="int" />
+			<description>
+				Returns the smallest distance between segments [param i] and [param j].
+			</description>
+		</method>
+		<method name="set_sphere_center">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<param index="1" name="center" type="Vector3" />
+			<description>
+				Moves the sphere collider [param index] to [param center].
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="start" type="Vector3" />
+			<param index="1" name="end" type="Vector3" />
+			<param index="2" name="segments" type="int" />
+			<param index="3" name="particle_mass" type="float" default="0.1" />
+			<description>
+				Creates a straight rope from [param start] to [param end] with [param segments] segments, that is [code]segments + 1[/code] particles.
+			</description>
+		</method>
+		<method name="setup_points">
+			<return type="void" />
+			<param index="0" name="points" type="PackedVector3Array" />
+			<param index="1" name="particle_mass" type="float" default="0.1" />
+			<description>
+				Creates a rope through an explicit polyline. The rest lengths are the lengths of the polyline segments.
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<param index="0" name="dt" type="float" />
+			<param index="1" name="substeps" type="int" default="8" />
+			<description>
+				Advances the simulation by [param dt] seconds using [param substeps] sub-steps. Does nothing when [param dt] is not positive or the rope has fewer than two particles.
+			</description>
+		</method>
+		<method name="unpin">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Releases particle [param index] and restores its original mass.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="bend_compliance" type="float" setter="set_bend_compliance" getter="get_bend_compliance" default="-1.0">
+			Compliance of the skip-one bending constraint. A negative value disables bending resistance.
+		</member>
+		<member name="compliance" type="float" setter="set_compliance" getter="get_compliance" default="0.0">
+			Compliance of the segment distance constraints. [code]0[/code] makes the rope inextensible.
+		</member>
+		<member name="drag" type="float" setter="set_drag" getter="get_drag" default="0.05">
+			Air drag rate in 1/s toward the [member wind] velocity.
+		</member>
+		<member name="friction" type="float" setter="set_friction" getter="get_friction" default="0.3">
+			Tangential damping applied on collider contact.
+		</member>
+		<member name="gravity" type="Vector3" setter="set_gravity" getter="get_gravity" default="Vector3(0, -9.81, 0)">
+			Gravity acceleration in world space.
+		</member>
+		<member name="iterations" type="int" setter="set_iterations" getter="get_iterations" default="1">
+			Solver iterations per sub-step.
+		</member>
+		<member name="radius" type="float" setter="set_radius" getter="get_radius" default="0.02">
+			Rope radius, used for collider contact and self-collision (contact distance is twice the radius).
+		</member>
+		<member name="self_collision_enabled" type="bool" setter="set_self_collision_enabled" getter="is_self_collision_enabled" default="false">
+			If [code]true[/code], non-adjacent segments are kept at least [code]2 * radius[/code] apart.
+		</member>
+		<member name="wind" type="Vector3" setter="set_wind" getter="get_wind" default="Vector3(0, 0, 0)">
+			Wind velocity the air drags particles toward.
+		</member>
+	</members>
+</class>

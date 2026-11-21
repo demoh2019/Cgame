@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameHairStrands" inherits="RefCounted" api_type="core" keywords="hair,strands,fur,ribbon,simulation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Native strand-based hair: guide-strand physics, interpolated render strands, culling and ribbon mesh generation.
+	</brief_description>
+	<description>
+		[CgameHairStrands] simulates a small number of guide strands with Verlet integration, global shape matching toward the rest pose, Dynamic Follow-The-Leader length constraints and capsule collision. Dense render strands are interpolated from each guide and its two nearest neighbours, and can be turned into a camera-facing ribbon mesh whose vertices are expanded by a vertex shader.
+		Guide [code]g[/code] owns the points [code][g * points_per_guide, (g + 1) * points_per_guide)[/code]; point [code]0[/code] is the pinned root. Rest positions are stored in head space, simulated positions in world space, so [method step] takes the current head transform. Capsule colliders are specified in head space.
+		Ribbon mesh vertices use these attributes: [code]NORMAL[/code] is the strand tangent, [code]UV[/code] is [code](side 0/1, t root to tip)[/code] and [code]COLOR[/code] is [code](half width, per-strand random, t, 1)[/code]. Every strand point produces two vertices at the same position.
+		[codeblock]
+		var hair := CgameHairStrands.new()
+		hair.grow_guides(root_points, root_normals, 8, 0.3)
+		hair.add_capsule(Vector3(0, 0, 0), Vector3(0, 0.1, 0), 0.12)
+		hair.reset(head.global_transform)
+		# Every physics frame:
+		hair.step(delta, head.global_transform)
+		$HairMesh.mesh = hair.build_ribbon_mesh(4, 1234, 0.002)
+		[/codeblock]
+		[b]Credits:[/b] Dynamic Follow-The-Leader after Müller, Kim and Chentanez, "Fast Simulation of Inextensible Hair and Fur" (VRIPHYS 2012); only the published idea is used. Shape matching, guide-to-render-strand interpolation and capsule collision follow the concepts of AMD TressFX (MIT License). The small-step XPBD family and Ten Minute Physics (Matthias Müller, MIT License) inspired the sibling [CgameXPBDCloth] and [CgameXPBDRope] classes.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_capsule">
+			<return type="void" />
+			<param index="0" name="a" type="Vector3" />
+			<param index="1" name="b" type="Vector3" />
+			<param index="2" name="radius" type="float" />
+			<description>
+				Adds a capsule collider between points [param a] and [param b] given in head space. Strand points are kept outside [param radius] plus [member collision_margin].
+			</description>
+		</method>
+		<method name="build_mesh" qualifiers="const">
+			<return type="ArrayMesh" />
+			<param index="0" name="strands" type="Array[PackedVector3Array]" />
+			<param index="1" name="width" type="float" />
+			<description>
+				Builds a ribbon mesh from the given strands, for example the result of [method render_strands]. Strands with fewer than two points are skipped. Returns an empty mesh when no strand is usable.
+			</description>
+		</method>
+		<method name="build_ribbon_mesh" qualifiers="const">
+			<return type="ArrayMesh" />
+			<param index="0" name="per_guide" type="int" />
+			<param index="1" name="seed" type="int" />
+			<param index="2" name="width" type="float" />
+			<description>
+				Interpolates [param per_guide] render strands per guide using [param seed] and builds the ribbon mesh in one native pass, without creating the intermediate strand arrays. The result is identical to calling [method render_strands] followed by [method build_mesh].
+			</description>
+		</method>
+		<method name="clear_capsules">
+			<return type="void" />
+			<description>
+				Removes all capsule colliders.
+			</description>
+		</method>
+		<method name="cull" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="view_frustum_planes" type="Array[Plane]" />
+			<param index="1" name="view_pos" type="Vector3" />
+			<description>
+				Returns the indices of guides that are visible. [param view_frustum_planes] use the [method Camera3D.get_frustum] convention: normals point outward and a point is inside when its distance to every plane is not positive. Guides farther than [member max_distance] from [param view_pos] are culled.
+			</description>
+		</method>
+		<method name="get_guide_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of guide strands.
+			</description>
+		</method>
+		<method name="get_neighbors" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>
+				Returns the two nearest guides of every guide, two entries per guide, used for render strand interpolation.
+			</description>
+		</method>
+		<method name="get_points_per_guide" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of points per guide ([code]segments + 1[/code]).
+			</description>
+		</method>
+		<method name="get_pos" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns the current world-space positions of all guide points.
+			</description>
+		</method>
+		<method name="get_prev" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns the previous-frame world-space positions used by the Verlet integrator.
+			</description>
+		</method>
+		<method name="get_rest" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns the rest positions of all guide points in head space.
+			</description>
+		</method>
+		<method name="get_seg_len" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the constant length of one guide segment.
+			</description>
+		</method>
+		<method name="get_segments" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of segments per guide.
+			</description>
+		</method>
+		<method name="grow_guides">
+			<return type="void" />
+			<param index="0" name="root_points" type="PackedVector3Array" />
+			<param index="1" name="root_normals" type="PackedVector3Array" />
+			<param index="2" name="segments" type="int" />
+			<param index="3" name="length" type="float" />
+			<description>
+				Builds one straight guide per root along its normal, all in head space, with [param segments] segments and total [param length]. The number of guides is the smaller of the two array sizes. Neighbour links are rebuilt and the simulation must be re-initialized with [method reset] or the next [method step].
+			</description>
+		</method>
+		<method name="guide_points" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<param index="0" name="guide" type="int" />
+			<description>
+				Returns the current world-space points of the guide with the given index.
+			</description>
+		</method>
+		<method name="lod_strand_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="screen_coverage" type="float" />
+			<description>
+				Returns how many render strands per guide to draw for a screen coverage from [code]0[/code] to [code]1[/code]. Returns [code]0[/code] when the hair is too small to draw. The result never decreases with coverage and never exceeds [member max_per_guide].
+			</description>
+		</method>
+		<method name="render_strands" qualifiers="const">
+			<return type="Array[PackedVector3Array]" />
+			<param index="0" name="per_guide" type="int" />
+			<param index="1" name="seed" type="int" />
+			<description>
+				Returns [param per_guide] interpolated strands for every guide, blended from the guide and its two nearest neighbours with seeded random weights and a lateral offset of up to [member strand_spread]. Strand [code]0[/code] of each guide is the guide itself. The same [param seed] always gives the same strands.
+			</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<param index="0" name="head_transform" type="Transform3D" />
+			<description>
+				Snaps all guides to the rest pose under [param head_transform] and clears their velocity.
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<param index="0" name="dt" type="float" />
+			<param index="1" name="head_transform" type="Transform3D" />
+			<description>
+				Advances the simulation by [param dt] seconds with the head at [param head_transform]. Initializes the hair first if it was not reset yet. Does nothing without guides or when [param dt] is not positive.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="collision_margin" type="float" setter="set_collision_margin" getter="get_collision_margin" default="0.002">
+			Extra distance, in meters, kept between strand points and capsule surfaces.
+		</member>
+		<member name="damping" type="float" setter="set_damping" getter="get_damping" default="0.98">
+			Fraction of velocity retained per frame at 60 Hz.
+		</member>
+		<member name="ftl_damping" type="float" setter="set_ftl_damping" getter="get_ftl_damping" default="0.9">
+			Fraction of the length-constraint correction that is removed from the velocity, which stops chains from whipping.
+		</member>
+		<member name="gravity" type="Vector3" setter="set_gravity" getter="get_gravity" default="Vector3(0, -9.8, 0)">
+			Gravity acceleration in world space.
+		</member>
+		<member name="iterations" type="int" setter="set_iterations" getter="get_iterations" default="2">
+			Number of Follow-The-Leader and collision iterations per step.
+		</member>
+		<member name="max_distance" type="float" setter="set_max_distance" getter="get_max_distance" default="60.0">
+			Guides farther than this distance from the viewer are removed by [method cull].
+		</member>
+		<member name="max_per_guide" type="int" setter="set_max_per_guide" getter="get_max_per_guide" default="8">
+			Upper bound returned by [method lod_strand_count].
+		</member>
+		<member name="stiffness" type="float" setter="set_stiffness" getter="get_stiffness" default="0.08">
+			Global shape matching strength per frame at 60 Hz, pulling points toward the moving rest pose.
+		</member>
+		<member name="stiffness_root_bias" type="float" setter="set_stiffness_root_bias" getter="get_stiffness_root_bias" default="0.5">
+			How much softer the tip is than the root: tip stiffness is [code]stiffness * (1 - bias)[/code].
+		</member>
+		<member name="strand_spread" type="float" setter="set_strand_spread" getter="get_strand_spread" default="0.012">
+			Lateral jitter of interpolated render strands, in meters.
+		</member>
+		<member name="wind" type="Vector3" setter="set_wind" getter="get_wind" default="Vector3(0, 0, 0)">
+			Wind acceleration added to [member gravity].
+		</member>
+	</members>
+</class>
