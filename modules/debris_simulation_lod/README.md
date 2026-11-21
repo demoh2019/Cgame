@@ -39,7 +39,10 @@ The actual networked client already invokes
    9s lifetime/sleep-retirement shrink and server-invisible collision.
 5. Suppresses out-of-range chunk/casing spawns and blast queries before
    allocating mesh/shape objects or doing physics-ray overlap work.
-6. Iterates active bodies backwards, removing the per-physics-frame
+6. Wakes frozen fragments for 400 ms if a nearby explosion can affect
+   them, so blast impulses still animate visible pieces. Frozen bodies
+   also immediately unfreeze if the viewer position becomes invalid.
+7. Iterates active bodies backwards, removing the per-physics-frame
    `_bodies.duplicate()` temporary array even during mass recycling.
 
 Invalid or missing viewer positions disable the distance policy and
@@ -52,7 +55,7 @@ damage, hitboxes, zombies, navigation, combat, saves or network state.
   inputs, 600-frame hysteresis simulation and safe radius constraints.
 - Focused and full headless game regression: parity, state transitions
   on actual pooled `RigidBody3D` nodes, no-camera fallback, early
-  spawn culling and the live `physics_fx` update chain.
+  spawn culling, short blast-wake grace and the live `physics_fx` update chain.
 - GitHub Actions workflow: source contracts, native editor build,
   doctests, import, focused and full Albion After tests.
 
