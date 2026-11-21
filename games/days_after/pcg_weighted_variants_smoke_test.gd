@@ -76,6 +76,55 @@ func _initialize() -> void:
     _check(Weighted.choose_variants(PackedInt64Array(), weights).is_empty(),
         "valid empty input should yield empty output", failures)
 
+    var authored := PackedInt32Array([2, 0, 1, 2, 0, 2, 1, 2])
+    var native_groups: Array = Weighted.partition_indices(authored, 4)
+    var fallback_groups: Array = Weighted.partition_indices(authored, 4, false)
+    _check(native_groups == fallback_groups and native_groups.size() == 4,
+        "native/fallback PCG mesh batches disagree", failures)
+    if native_groups.size() == 4:
+        _check(native_groups[0] == PackedInt32Array([1, 4]) and
+            native_groups[1] == PackedInt32Array([2, 6]) and
+            native_groups[2] == PackedInt32Array([0, 3, 5, 7]) and
+            (native_groups[3] as PackedInt32Array).is_empty(),
+            "PCG mesh buckets are not stable and ordered", failures)
+
+    var chosen_groups: Array = Weighted.partition_indices(output, 3)
+    var chosen_script_groups: Array = Weighted.partition_indices(output, 3, false)
+    _check(chosen_groups.size() == 3 and chosen_groups == chosen_script_groups,
+        "large 4096 point PCG mesh partition parity failed", failures)
+    if chosen_groups.size() == 3:
+        var visit_counts := PackedInt32Array()
+        visit_counts.resize(output.size())
+        for variant in 3:
+            var indices: PackedInt32Array = chosen_groups[variant]
+            for source_index in indices:
+                _check(source_index >= 0 and source_index < output.size(),
+                    "PCG mesh bucket index is out of bounds", failures)
+                if source_index >= 0 and source_index < output.size():
+                    visit_counts[source_index] += 1
+                    _check(output[source_index] == variant,
+                        "PCG mesh bucketing changed selected variant", failures)
+        for visits in visit_counts:
+            if visits != 1:
+                failures.append("PCG mesh partition duplicated or dropped source points")
+                break
+    _check(Weighted.partition_indices(PackedInt32Array(), 3).size() == 3,
+        "valid empty input must create all empty mesh buckets", failures)
+    _check(Weighted.partition_indices(PackedInt32Array([0, 2]), 3).size() == 3,
+        "missing middle variant is valid", failures)
+    _check(Weighted.partition_indices(PackedInt32Array([0, 3]), 3).is_empty(),
+        "invalid tail variant must atomically reject mesh batches", failures)
+    _check(Weighted.partition_indices(PackedInt32Array([0, -1]), 3).is_empty(),
+        "negative mesh variant must reject all input", failures)
+    _check(Weighted.partition_indices(PackedInt32Array([0, 1]), 0).is_empty(),
+        "zero mesh variant count must reject", failures)
+    _check(Weighted.partition_indices(PackedInt32Array([0, 1]), 33).is_empty(),
+        "too many mesh variants must reject", failures)
+    var oversized := PackedInt32Array()
+    oversized.resize(16385)
+    _check(Weighted.partition_indices(oversized, 3).is_empty(),
+        "mesh partition must enforce the native 16K limit", failures)
+
     for failure in failures:
         printerr("FAIL " + failure)
     print("PCG WEIGHTED VARIANTS TOTAL: %d failures" % failures.size())
