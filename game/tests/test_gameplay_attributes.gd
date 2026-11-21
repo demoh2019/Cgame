@@ -37,6 +37,26 @@ func run(t) -> void:
 			1.30, 0.0001, "elite + sunder - resolve yields 1.3 visual multiplier")
 		t.near(Features.runtime_attribute_value(actor, "Vital.Health", -1.0),
 			75.0, 0.0001, "native current health follows snapshot")
+		var attrs: Object = actor.get_meta("attributes", null) as Object
+		if attrs != null and attrs.has_method("replace_snapshot_branch"):
+			t.current = "server snapshots preserve independent local visual modifiers"
+			t.check(bool(attrs.call("set_modifier", StringName("Local.Visual.Crit"),
+				StringName("Visual.HitResponse"), 0.10, 0.0)),
+				"local presentation source applied independently")
+			t.near(Features.runtime_attribute_value(actor, "Visual.HitResponse", 1.0),
+				1.40, 0.0001, "local modifier combines with server status modifiers")
+			snapshot["hp"] = 60.0
+			Features.sync_runtime_tags(actor, "zombie", snapshot)
+			t.near(Features.runtime_attribute_value(actor, "Vital.Health", -1.0),
+				60.0, 0.0001, "authoritative base health still refreshes")
+			t.near(Features.runtime_attribute_value(actor, "Visual.HitResponse", 1.0),
+				1.40, 0.0001, "local source survives updated authoritative snapshot")
+			t.eq(int(attrs.call("get_modifier_count")), 4,
+				"server and local modifiers remain separate")
+			t.check(bool(attrs.call("remove_modifier", StringName("Local.Visual.Crit"),
+				StringName("Visual.HitResponse"))), "local source expires independently")
+			t.near(Features.runtime_attribute_value(actor, "Visual.HitResponse", 1.0),
+				1.30, 0.0001, "removing local source leaves server effects")
 		snapshot["sunder_seconds"] = 0.0
 		Features.sync_runtime_tags(actor, "zombie", snapshot)
 		t.near(Features.runtime_attribute_value(actor, "Visual.HitResponse", 1.0),

@@ -132,7 +132,13 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 	# Attribute snapshots are read-only presentation mirrors, never combat authority.
 	var attrs: Object = node.get_meta("attributes", null) as Object
 	if attrs != null and attrs.has_method("replace_snapshot"):
-		attrs.call("replace_snapshot", runtime_attribute_snapshot(kind, snapshot))
+		var attribute_data: Dictionary = runtime_attribute_snapshot(kind, snapshot)
+		# Server-owned Runtime modifiers should not erase Local / FX visual sources.
+		# Older Cgame binaries retain the legacy complete replacement path.
+		if attrs.has_method("replace_snapshot_branch"):
+			attrs.call("replace_snapshot_branch", StringName("Runtime"), attribute_data)
+		else:
+			attrs.call("replace_snapshot", attribute_data)
 	# Render-only native timers are independent from counted tag branches.
 	var timeline: Object = node.get_meta("effect_timeline", null) as Object
 	if timeline != null:
@@ -231,7 +237,7 @@ static func runtime_attribute_snapshot(kind: String, state: Dictionary) -> Dicti
 			var additive: float = float(visual_bonuses[source])
 			if additive != 0.0:
 				modifiers.append({
-					"source": StringName(source),
+					"source": StringName("Runtime." + str(source)),
 					"attribute": StringName("Visual.HitResponse"),
 					"additive": additive, "percent": 0.0
 				})

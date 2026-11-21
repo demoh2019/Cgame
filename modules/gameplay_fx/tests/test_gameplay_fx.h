@@ -411,6 +411,59 @@ TEST_CASE("[GameplayFX] GameplayAttributeSet transaction validation and snapshot
 	CHECK(a->get_value("Visual.HitResponse") == doctest::Approx(1.25));
 }
 
+TEST_CASE("[GameplayFX] GameplayAttributeSet scoped snapshots preserve other sources") {
+	Ref<GameplayAttributeSet> a;
+	a.instantiate();
+	CHECK(a->set_base_value("Visual.HitResponse", 1.0));
+	CHECK(a->set_bounds("Visual.HitResponse", 0.0, 10.0));
+	CHECK(a->set_modifier("Runtime.Status.Sunder", "Visual.HitResponse", 0.25));
+	CHECK(a->set_modifier("Local.Visual.Boost", "Visual.HitResponse", 0.15));
+	CHECK(a->set_modifier("RuntimeExtra.Keep", "Visual.HitResponse", 0.1));
+	CHECK(a->get_value("Visual.HitResponse") == doctest::Approx(1.5));
+
+	Dictionary incoming = a->get_snapshot();
+	Array mods;
+	Dictionary elite;
+	elite["source"] = StringName("Runtime.Rank.Elite");
+	elite["attribute"] = StringName("Visual.HitResponse");
+	elite["additive"] = 0.2;
+	elite["percent"] = 0.0;
+	mods.push_back(elite);
+	incoming["modifiers"] = mods;
+	CHECK(a->replace_snapshot_branch("Runtime", incoming));
+	CHECK(a->get_value("Visual.HitResponse") == doctest::Approx(1.45));
+	CHECK(a->get_modifier_count() == 3); // Rank + Local + RuntimeExtra.
+	CHECK(a->clear_source("Runtime.Status.Sunder") == 0); // Expired.
+	Dictionary saved = a->get_snapshot();
+	CHECK(a->replace_snapshot_branch("Runtime", incoming)); // Idempotent.
+	CHECK(a->get_modifier_count() == 3);
+	CHECK(a->get_value("Visual.HitResponse") == doctest::Approx(1.45));
+
+	Dictionary invalid = incoming.duplicate(true);
+	Array wrong_mods = invalid["modifiers"];
+	Dictionary rogue = elite.duplicate();
+	rogue["source"] = StringName("Local.Visual.Escaped");
+	wrong_mods.push_back(rogue);
+	invalid["modifiers"] = wrong_mods;
+	CHECK_FALSE(a->replace_snapshot_branch("Runtime", invalid));
+	CHECK_FALSE(a->replace_snapshot_branch("Runtime..Invalid", incoming));
+	CHECK_FALSE(a->replace_snapshot_branch("Other", incoming));
+	invalid = incoming.duplicate(true);
+	Dictionary attrs = invalid["attributes"];
+	attrs.erase(StringName("Visual.HitResponse"));
+	CHECK_FALSE(a->replace_snapshot_branch("Runtime", invalid));
+	CHECK(a->get_value("Visual.HitResponse") == doctest::Approx(1.45));
+	CHECK(a->get_snapshot() == saved); // Rollback after all rejected updates.
+
+	// An empty incoming modifier list clears only Runtime sources, not Local.
+	incoming["modifiers"] = Array();
+	CHECK(a->replace_snapshot_branch("Runtime", incoming));
+	CHECK(a->get_modifier_count() == 2);
+	CHECK(a->get_value("Visual.HitResponse") == doctest::Approx(1.25));
+	CHECK(a->clear_source("RuntimeExtra.Keep") == 1);
+	CHECK(a->get_value("Visual.HitResponse") == doctest::Approx(1.15));
+}
+
 TEST_CASE("[GameplayFX] AudioDuckMix overlapping source holds and bounded envelope") {
 	Ref<AudioDuckMix> mix;
 	mix.instantiate();
