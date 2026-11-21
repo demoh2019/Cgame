@@ -7,7 +7,7 @@ const GRID_SIZE: int = 25
 const MAX_INSTANCES: int = 160
 const MIN_SPACING: float = 2.1
 const WeightedVariants = preload("res://pcg_weighted_variants.gd")
-const VARIANT_WEIGHTS := PackedFloat32Array([6.0, 3.0, 1.0])
+const VARIANT_WEIGHTS = [6.0, 3.0, 1.0]
 const VARIANT_SEED := 81419
 const VARIANT_COLORS := [
     Color(0.27, 0.41, 0.21), # Damp green vegetation (60%)
@@ -73,7 +73,7 @@ func get_selected_stable_ids() -> PackedInt64Array:
 
 func verify_variant_native_fallback_parity() -> bool:
     return (WeightedVariants.choose_variants(_selected_stable_ids,
-        VARIANT_WEIGHTS, VARIANT_SEED, false) == _selected_variants)
+        PackedFloat32Array(VARIANT_WEIGHTS), VARIANT_SEED, false) == _selected_variants)
 
 
 func get_variant_counts() -> PackedInt32Array:
