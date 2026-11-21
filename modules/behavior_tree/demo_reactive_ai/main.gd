@@ -32,6 +32,7 @@ var stimulus_history := AIStimulusHistory2D.new()
 var navigation := AStarGrid2D.new()
 var update_scheduler := AIUpdateScheduler.new()
 var navigation_profiler := AIExecutionProfiler.new()
+var player_action_cooldowns := AIActionCooldowns.new()
 var last_navigation_profile: Dictionary = {}
 var ai_tick_index := 0
 var navigation_path := PackedVector2Array()
@@ -77,7 +78,7 @@ func _ready() -> void:
     priorities.add_task(_make_guarded_behavior(_make_health_guard(), "retreat"))
     priorities.add_task(_make_behavior("target_visible", "chase"))
     priorities.add_task(_make_behavior("target_remembered", "investigate"))
-    priorities.add_task(_make_behavior("sound_remembered", "investigate_sound"))
+    priorities.add_task(_make_timed_sound_investigation())
     priorities.add_task(_make_action("patrol"))
     brain.root_task = priorities
     brain.auto_tick = false
@@ -119,6 +120,20 @@ func _make_behavior(flag: StringName, action_name: String) -> BehaviorTreeReacti
     return _make_guarded_behavior(_make_condition(flag), action_name)
 
 
+func _make_timed_sound_investigation() -> BehaviorTreeReactiveSequence:
+    # A sound investigation has a deterministic hard task deadline, so a
+    # stuck running child cannot retain the NPC indefinitely.
+    var branch := _make_behavior(&"sound_remembered", "investigate_sound")
+    var timeout := BehaviorTreeTimeout.new()
+    timeout.duration = 0.8
+    var search := BehaviorTreeWait.new()
+    search.duration = 2.0
+    timeout.task = search
+    branch.remove_task(branch.get_task_count() - 1)
+    branch.add_task(timeout)
+    return branch
+
+
 func _make_guarded_behavior(guard: BehaviorTreeTask, action_name: String) -> BehaviorTreeReactiveSequence:
     var sequence := BehaviorTreeReactiveSequence.new()
     sequence.add_task(guard)
@@ -130,6 +145,7 @@ func _make_guarded_behavior(guard: BehaviorTreeTask, action_name: String) -> Beh
 
 
 func _physics_process(delta: float) -> void:
+    player_action_cooldowns.advance_time(delta)
     var movement := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
     var motion := movement * PLAYER_SPEED * delta
     player_position = _move_around_wall(player_position, motion, PLAYER_RADIUS)
@@ -144,7 +160,8 @@ func _physics_process(delta: float) -> void:
         footstep_timer = 0.0
     if pending_shout:
         pending_shout = false
-        _report_player_noise(1.0)
+        if player_action_cooldowns.try_trigger(&"shout", 0.8):
+            _report_player_noise(1.0)
 
     ai_timer += delta
     if ai_timer >= AI_TICK_SECONDS:
@@ -352,6 +369,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
         hearing.reset()
         stimulus_history.reset()
         brain.reset()
+        player_action_cooldowns.reset()
         brain.set_blackboard({})
         navigation_path = PackedVector2Array()
         navigation_goal_cell = Vector2i(-1, -1)
@@ -379,6 +397,7 @@ func _update_hud() -> void:
         float(decision.get("mean_usec", 0.0)),
         int(decision.get("max_usec", 0))
     ]
+    hud.text += "\nNative shout gate: %.1fs | Sound investigation time limit: 0.8s" % player_action_cooldowns.get_remaining(&"shout")
     var path_rows: Dictionary = last_navigation_profile.get("categories", {})
     var path_cost: Dictionary = path_rows.get("navigation_repath", {})
     hud.text += "\nRemembered sights/sounds: %d | Multi-source history bounded to %d" % [stimulus_history.get_event_count(), stimulus_history.capacity]
