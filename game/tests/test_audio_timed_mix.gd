@@ -90,6 +90,17 @@ func run(t) -> void:
 	if ClassDB.class_exists("AudioMixSnapshotController"):
 		var native: Object = ClassDB.instantiate("AudioMixSnapshotController")
 		if native != null and native.has_method("activate_timed_mix"):
+			# Exercise the actual game's C++ path, not only the C++ API in isolation.
+			var native_scene = AudioScene.new()
+			native_scene._native_mix_snapshots = native
+			native_scene.mark_combat()
+			native_scene._update_environment_mix_snapshots(false, "plains", 0.0, 0.15)
+			t.near(native_scene._snapshot_bus_db("Ambience"), -3.0, 0.00001,
+				"real Albion sound node consumes native timed combat snapshots")
+			t.eq(int(native.call("get_mix_count")), 1,
+				"the actual combat event registers just one native mix")
+			native.call("clear")
+			native_scene.free()
 			var portable: Dictionary = {}
 			t.check(Snapshots.activate_timed_mix(portable, "Combat.Focus", focus,
 				0.25, 1.0, 2.0), "portable profile is accepted")
