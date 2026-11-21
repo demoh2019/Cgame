@@ -21,7 +21,7 @@ const IK_RETENTION_HYSTERESIS_METRES := 1.5 # Keeps a prior on-screen IK owner d
 const FULL_POSE_CPU_BUDGET_US := [0, 750, 1500, 2750]
 # 0: players, 1: standard infected, 2: elite / raid boss, 3: reserved
 # for future scripted characters. Only active groups receive CPU shares.
-const FULL_POSE_GROUP_WEIGHTS := PackedFloat64Array([3.0, 1.0, 2.0, 2.0])
+static var FULL_POSE_GROUP_WEIGHTS := PackedFloat64Array([3.0, 1.0, 2.0, 2.0])
 const POSE_PROCESS_TARGET_US := 12500 # Main-thread process time, not FPS or GPU frame duration.
 
 ## Clears CPU pressure history when the world/session or rendering policy
