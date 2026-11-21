@@ -45,6 +45,35 @@ func run(t) -> void:
     else:
         t.check(not senses.remembers_sound(), "stock Godot has a safe no-op fallback")
 
+
+    t.current = "Ranked audible stimuli prefer stronger sources and stable order"
+    var left_first := NativeSenses.new()
+    var right_first := NativeSenses.new()
+    if left_first.has_ranked_hearing() and right_first.has_ranked_hearing():
+        t.check(left_first.record_confirmed_sound(Vector2.ZERO, Vector2(12, 0), 20.0),
+            "weak accepted sound starts native memory")
+        t.check(left_first.record_confirmed_sound(Vector2.ZERO, Vector2(4, 0), 20.0),
+            "stronger confirmed sound replaces weaker one")
+        t.check(left_first.record_confirmed_sound(Vector2.ZERO, Vector2(16, 0), 20.0),
+            "a subsequent weaker sound remains audible")
+        t.eq(left_first.last_heard_position(), Vector2(4, 0),
+            "weak accepted sounds cannot overwrite stronger sound memory")
+        t.check(right_first.record_confirmed_sound(Vector2.ZERO, Vector2(4, 0), 20.0),
+            "second listener receives the same events in reverse order")
+        t.check(right_first.record_confirmed_sound(Vector2.ZERO, Vector2(12, 0), 20.0),
+            "second listener also hears the weaker event")
+        t.eq(right_first.last_heard_position(), left_first.last_heard_position(),
+            "confirmed sound ranking is independent of input order")
+        t.near(float(left_first.get_debug_snapshot()["sound_strength"]), 0.8, 0.0001,
+            "debug strength comes from native accepted-event clarity")
+        left_first.advance_time(4.0)
+        t.check(not left_first.remembers_sound(), "priority does not prevent sound expiry")
+        t.eq(float(left_first.get_debug_snapshot()["sound_strength"]), 0.0,
+            "expired sound memory clears stored strength")
+    else:
+        t.check(not left_first.has_ranked_hearing(),
+            "stock Godot and older Cgame retain legacy hearing safely")
+
     t.current = "Existing authoritative zombie hearing populates native memory"
     var height: float = WorldGen.HUB_HEIGHT
     var world := WorldGen.new(42)

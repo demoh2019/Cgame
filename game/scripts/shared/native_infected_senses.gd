@@ -9,6 +9,7 @@ const DEFAULT_SOUND_MEMORY := 3.5
 
 var _vision: Variant = null
 var _hearing: Variant = null
+var _ranked_hearing_available: bool = false
 
 
 func _init() -> void:
@@ -21,6 +22,7 @@ func _init() -> void:
         _hearing = ClassDB.instantiate("AIHearingSensor2D")
         if _hearing != null:
             _hearing.set_memory_duration(DEFAULT_SOUND_MEMORY)
+            _ranked_hearing_available = _hearing.has_method("report_noise_ranked")
 
 
 func has_native_vision() -> bool:
@@ -29,6 +31,10 @@ func has_native_vision() -> bool:
 
 func has_native_hearing() -> bool:
     return _hearing != null
+
+
+func has_ranked_hearing() -> bool:
+    return _ranked_hearing_available
 
 
 func record_confirmed_sight(observer: Vector2, position: Vector2, radius: float,
@@ -50,6 +56,10 @@ func record_confirmed_sound(listener: Vector2, source: Vector2, radius: float) -
         return false
     _hearing.set_hearing_radius(radius)
     # InfectedHearing.audible() has already checked occlusion, wind, and noise.
+    # A weaker but valid sound must not erase a louder/closer remembered
+    # source merely because another player's dictionary entry was visited.
+    if _ranked_hearing_available:
+        return bool(_hearing.report_noise_ranked(listener, source, 1.0))
     return bool(_hearing.report_noise(listener, source, 1.0))
 
 
@@ -86,12 +96,14 @@ func get_debug_snapshot() -> Dictionary:
     return {
         "native_vision": has_native_vision(),
         "native_hearing": has_native_hearing(),
+        "ranked_hearing": has_ranked_hearing(),
         "remembers_sight": remembers_sight(),
         "remembers_sound": remembers_sound(),
         "last_seen_position": last_seen_position(),
         "last_heard_position": last_heard_position(),
         "sight_memory_seconds": float(_vision.get_memory_remaining()) if _vision != null else 0.0,
         "sound_memory_seconds": float(_hearing.get_memory_remaining()) if _hearing != null else 0.0,
+        "sound_strength": float(_hearing.get_last_heard_strength()) if _ranked_hearing_available else 0.0,
     }
 
 

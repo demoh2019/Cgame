@@ -96,3 +96,28 @@ The runtime provides a foundation for a **graph editor** (the requested
 editor experience), more leaf tasks, AI perception, asynchronous actions,
 debug visualization, and StateTree-style hierarchy. Those are not
 implemented by this first PR.
+
+## Opt-in ranked hearing memory
+
+`AIHearingSensor2D.report_noise_ranked(listener, source, loudness, occlusion=1.0)`
+preserves the clearest of several already-audible events during its memory
+window, instead of overwriting the last-heard position on each report.
+
+- Clarity is normalized `max(0, 1 - distance / effective_radius)`;
+  `effective_radius = hearing_radius * loudness * occlusion`.
+- The strongest audible source wins. Equal scores use world position
+  lexicographic order (X then Y), independent of event iteration order.
+  Reports from the current winning source refresh memory when their
+  score is unchanged. Weaker reports return `true` (heard), but do not
+  overwrite or refresh memory.
+- Strength is exposed through `get_last_heard_strength()`. It is
+  cleared when memory expires or is reset. Invalid coordinates and
+  multipliers are rejected.
+- Existing `report_noise()` retains its original last-event-wins
+  behavior for compatibility, while clearing optional ranked strength.
+- Nothing is heard unless the game explicitly reports a sound. The
+  engine never performs automatic LOS, wall attenuation, PvP checks,
+  team checking or client-owned sensory updates.
+
+Albion After calls the ranked method **only** when available; stock
+Godot and older Cgame continue their previous behavior.

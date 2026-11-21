@@ -130,6 +130,71 @@ TEST_CASE("[AIHearingSensor2D] Reset clears sound memory") {
 	CHECK(sensor->get_memory_remaining() == real_t(0.0));
 }
 
+
+TEST_CASE("[AIHearingSensor2D] Ranked noise retains the clearest perceived event") {
+	Ref<AIHearingSensor2D> sensor;
+	sensor.instantiate();
+	sensor->set_hearing_radius(20.0);
+	REQUIRE(sensor->report_noise_ranked(Vector2(), Vector2(12, 0), 1.0));
+	CHECK(Math::is_equal_approx(sensor->get_last_heard_strength(), real_t(0.4)));
+	CHECK(sensor->report_noise_ranked(Vector2(), Vector2(18, 0), 1.0));
+	CHECK(sensor->get_last_heard_position() == Vector2(12, 0));
+	CHECK(sensor->report_noise_ranked(Vector2(), Vector2(4, 0), 1.0));
+	CHECK(sensor->get_last_heard_position() == Vector2(4, 0));
+	CHECK(Math::is_equal_approx(sensor->get_last_heard_strength(), real_t(0.8)));
+	CHECK_FALSE(sensor->report_noise_ranked(Vector2(), Vector2(30, 0), 1.0));
+}
+
+TEST_CASE("[AIHearingSensor2D] Equal-strength ranked sounds do not depend on report order") {
+	Ref<AIHearingSensor2D> first;
+	first.instantiate();
+	Ref<AIHearingSensor2D> second;
+	second.instantiate();
+	first->set_hearing_radius(10.0);
+	second->set_hearing_radius(10.0);
+	CHECK(first->report_noise_ranked(Vector2(), Vector2(4, 0), 1.0));
+	CHECK(first->report_noise_ranked(Vector2(), Vector2(0, 4), 1.0));
+	CHECK(second->report_noise_ranked(Vector2(), Vector2(0, 4), 1.0));
+	CHECK(second->report_noise_ranked(Vector2(), Vector2(4, 0), 1.0));
+	CHECK(first->get_last_heard_position() == Vector2(0, 4));
+	CHECK(second->get_last_heard_position() == first->get_last_heard_position());
+}
+
+TEST_CASE("[AIHearingSensor2D] Ranked memory expires and legacy report still overwrites") {
+	Ref<AIHearingSensor2D> sensor;
+	sensor.instantiate();
+	sensor->set_hearing_radius(20.0);
+	sensor->set_memory_duration(2.0);
+	REQUIRE(sensor->report_noise_ranked(Vector2(), Vector2(2, 0), 1.0));
+	sensor->advance_time(1.0);
+	REQUIRE(sensor->report_noise_ranked(Vector2(), Vector2(18, 0), 1.0));
+	CHECK(sensor->get_last_heard_position() == Vector2(2, 0));
+	CHECK(sensor->get_memory_remaining() == real_t(1.0)); // weaker noise must not refresh memory
+	sensor->advance_time(1.0);
+	CHECK_FALSE(sensor->has_sound_memory());
+	CHECK(sensor->get_last_heard_strength() == real_t(0.0));
+	REQUIRE(sensor->report_noise_ranked(Vector2(), Vector2(18, 0), 1.0));
+	CHECK(sensor->get_last_heard_position() == Vector2(18, 0));
+	REQUIRE(sensor->report_noise(Vector2(), Vector2(19, 0), 1.0));
+	CHECK(sensor->get_last_heard_position() == Vector2(19, 0)); // legacy latest-event behavior
+	CHECK(sensor->get_last_heard_strength() == real_t(0.0));
+	sensor->reset();
+	CHECK(sensor->get_last_heard_strength() == real_t(0.0));
+}
+
+TEST_CASE("[AIHearingSensor2D] Ranked reports reject nonfinite coordinates and multipliers") {
+	Ref<AIHearingSensor2D> sensor;
+	sensor.instantiate();
+	ERR_PRINT_OFF
+	CHECK_FALSE(sensor->report_noise_ranked(Vector2(Math::NaN, 0), Vector2(), 1.0));
+	CHECK_FALSE(sensor->report_noise_ranked(Vector2(), Vector2(Math::INF, 0), 1.0));
+	CHECK_FALSE(sensor->report_noise_ranked(Vector2(), Vector2(), Math::NaN));
+	CHECK_FALSE(sensor->report_noise_ranked(Vector2(), Vector2(), 1.0, Math::INF));
+	CHECK_FALSE(sensor->report_noise_ranked(Vector2(), Vector2(), 1.0, -1.0));
+	ERR_PRINT_ON
+	CHECK_FALSE(sensor->has_sound_memory());
+}
+
 TEST_CASE("[AIHearingSensor2D] Zero memory duration does not latch noise") {
 	Ref<AIHearingSensor2D> sensor;
 	sensor.instantiate();
