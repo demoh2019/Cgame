@@ -114,6 +114,8 @@ TEST_CASE("[SceneTree][WorldPartition3D] Persisted rigid-body transforms and vel
 		REQUIRE(snapshot.has(cell));
 		const Dictionary box_states = snapshot[cell];
 		REQUIRE(box_states.has("PersistentBox"));
+		CHECK_FALSE(box_states.has("UnmarkedBox"));
+		CHECK(box_states.size() == 1);
 		const Dictionary record = box_states["PersistentBox"];
 		CHECK(record["linear_velocity"] == Vector3(1, 2, 3));
 		CHECK(record["angular_velocity"] == Vector3(0, 1, 0));
@@ -784,6 +786,12 @@ static String make_physics_cell_scene(const String &p_id) {
 	body->set_position(Vector3(9, 4, 7));
 	root->add_child(body);
 	body->set_owner(root);
+	// An ordinary unmarked physics body must never bloat the saved state.
+	RigidBody3D *unmarked = memnew(RigidBody3D);
+	unmarked->set_name("UnmarkedBox");
+	unmarked->set_gravity_scale(0);
+	root->add_child(unmarked);
+	unmarked->set_owner(root);
 	Ref<PackedScene> packed;
 	packed.instantiate();
 	CHECK(packed->pack(root) == OK);
