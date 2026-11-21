@@ -89,4 +89,90 @@ TEST_CASE("[AudioMixSnapshot] atomic validation, saturation and bounded capacity
 	CHECK(mixes->get_mix_count() == 16);
 }
 
+TEST_CASE("[AudioMixSnapshot] timed bus mix respects attack hold release and exact frame boundary") {
+	Ref<AudioMixSnapshotController> mixes;
+	mixes.instantiate();
+	Dictionary combat;
+	combat[StringName("Ambience")] = -3.0;
+	combat[StringName("Music")] = -1.0;
+	CHECK(mixes->activate_timed_mix("Combat.Focus", combat, 1.0, 2.0, 1.0));
+	CHECK(mixes->get_mix_weight("Combat.Focus") == doctest::Approx(0.0));
+	CHECK(mixes->get_mix_remaining_seconds("Combat.Focus") == doctest::Approx(2.0));
+	mixes->tick(0.5);
+	CHECK(mixes->get_mix_weight("Combat.Focus") == doctest::Approx(0.5));
+	CHECK(mixes->get_bus_offset_db("Ambience") == doctest::Approx(-1.5));
+	CHECK(mixes->get_mix_remaining_seconds("Combat.Focus") == doctest::Approx(1.5));
+	mixes->tick(1.0);
+	CHECK(mixes->get_mix_weight("Combat.Focus") == doctest::Approx(1.0));
+	CHECK(mixes->get_mix_remaining_seconds("Combat.Focus") == doctest::Approx(0.5));
+	// This frame crosses the timer boundary: first half holds full, the
+	// second half advances release for 0.5s instead of a full second.
+	mixes->tick(1.0);
+	CHECK(mixes->get_mix_weight("Combat.Focus") == doctest::Approx(0.5));
+	CHECK(mixes->get_bus_offset_db("Music") == doctest::Approx(-0.5));
+	CHECK(mixes->get_mix_remaining_seconds("Combat.Focus") == doctest::Approx(-1.0));
+	mixes->tick(0.5);
+	CHECK_FALSE(mixes->has_mix("Combat.Focus"));
+	CHECK(mixes->get_mix_count() == 0);
+	CHECK(mixes->get_bus_offset_db("Ambience") == doctest::Approx(0.0));
+}
+
+TEST_CASE("[AudioMixSnapshot] timed retrigger preserves active level and independent mixes") {
+	Ref<AudioMixSnapshotController> mixes;
+	mixes.instantiate();
+	Dictionary storm;
+	storm[StringName("Ambience")] = -1.0;
+	CHECK(mixes->activate_mix("Weather.Storm", storm, 0.0));
+	Dictionary focus;
+	focus[StringName("Ambience")] = -3.0;
+	CHECK(mixes->activate_timed_mix("Combat.Focus", focus, 0.25, 1.0, 2.0));
+	mixes->tick(1.5); // Reach full, then half a second into fade-out.
+	CHECK(mixes->get_mix_weight("Combat.Focus") == doctest::Approx(0.75));
+	CHECK(mixes->activate_timed_mix("Combat.Focus", focus, 0.25, 1.0, 2.0));
+	CHECK(mixes->get_mix_count() == 2);
+	CHECK(mixes->get_mix_weight("Combat.Focus") == doctest::Approx(0.75));
+	CHECK(mixes->get_mix_remaining_seconds("Combat.Focus") == doctest::Approx(1.0));
+	mixes->tick(0.125);
+	CHECK(mixes->get_mix_weight("Combat.Focus") == doctest::Approx(1.0));
+	CHECK(mixes->get_bus_offset_db("Ambience") == doctest::Approx(-4.0));
+	// An ordinary manual activation takes ownership of this source and
+	// cancels its timer, preserving the original user-driven API.
+	CHECK(mixes->activate_mix("Combat.Focus", focus, 0.0));
+	CHECK(mixes->get_mix_remaining_seconds("Combat.Focus") == -1.0);
+	mixes->tick(120.0);
+	CHECK(mixes->has_mix("Combat.Focus"));
+	CHECK(mixes->deactivate_mix("Combat.Focus", 0.0));
+	CHECK(mixes->has_mix("Weather.Storm"));
+	CHECK(mixes->get_bus_offset_db("Ambience") == -1.0);
+	// A zero duration and zero release never leave a stale profile behind.
+	CHECK(mixes->activate_timed_mix("OneShot", focus, 0.0, 0.0, 0.0));
+	mixes->tick(0.01);
+	CHECK_FALSE(mixes->has_mix("OneShot"));
+}
+
+TEST_CASE("[AudioMixSnapshot] timed invalid durations leave live profiles untouched") {
+	Ref<AudioMixSnapshotController> mixes;
+	mixes.instantiate();
+	Dictionary focus;
+	focus[StringName("Ambience")] = -3.0;
+	CHECK(mixes->activate_timed_mix("Combat.Focus", focus, 0.0, 5.0, 1.5));
+	CHECK_FALSE(mixes->activate_timed_mix("Combat.Focus", focus, 0.0, -0.1, 1.5));
+	CHECK_FALSE(mixes->activate_timed_mix("Combat.Focus", focus, 0.0, 121.0, 1.5));
+	CHECK_FALSE(mixes->activate_timed_mix("Combat.Focus", focus, 0.0, Math::NaN, 1.5));
+	CHECK_FALSE(mixes->activate_timed_mix("Combat.Focus", focus, 0.0, Math::INF, 1.5));
+	CHECK_FALSE(mixes->activate_timed_mix("Combat.Focus", focus, 0.0, 5.0, -0.1));
+	CHECK_FALSE(mixes->activate_timed_mix("Combat.Focus", focus, 0.0, 5.0, 16.0));
+	CHECK_FALSE(mixes->activate_timed_mix("Combat.Focus", focus, 0.0, 5.0, Math::INF));
+	CHECK_FALSE(mixes->activate_timed_mix("Combat.Focus", focus, Math::NaN, 5.0, 1.5));
+	CHECK_FALSE(mixes->activate_timed_mix("Combat.Focus", Dictionary(), 0.0, 5.0, 1.5));
+	CHECK(mixes->get_mix_remaining_seconds("Combat.Focus") == doctest::Approx(5.0));
+	CHECK(mixes->get_mix_weight("Combat.Focus") == doctest::Approx(1.0));
+	CHECK(mixes->get_mix_count() == 1);
+	CHECK(mixes->deactivate_mix("Combat.Focus", 1.0));
+	CHECK(mixes->get_mix_remaining_seconds("Combat.Focus") == -1.0);
+	mixes->tick(1.0);
+	CHECK(mixes->get_mix_count() == 0);
+	CHECK(mixes->get_mix_remaining_seconds("Combat.Focus") == -1.0);
+}
+
 } // namespace TestAudioMixSnapshotController
