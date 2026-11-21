@@ -74,5 +74,11 @@ func get_owner(slot_id: int) -> int:
 	return int(_claims[slot_id]["actor"]) if _claims.has(slot_id) else 0
 
 
+## O(1) owned-slot lookup, matching native SmartObjectSlotReservations.
+## The zombie uses this to reject a cached flank goal after its lease expires.
+func get_actor_slot(actor_id: int) -> int:
+	return int(_actor_slots.get(actor_id, 0)) if actor_id > 0 else 0
+
+
 func get_claim_count() -> int:
 	return _claims.size()
