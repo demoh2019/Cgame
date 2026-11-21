@@ -7,6 +7,11 @@ const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
 const FinishingStrike = preload("res://scripts/shared/finishing_strike.gd")
 const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
 
+# Server-side loot distribution, shared by all crate rolls. Native optional:
+# stock Godot still uses the same immutable ordered thresholds.
+static var _crate_choice_table: Object = null
+static var _crate_choice_checked: bool = false
+
 
 ## Damage after the target's armour. `armor_id` may be empty.
 static func apply_armor(damage: float, armor_id: String) -> float:
@@ -173,24 +178,57 @@ static func active_skill(weapon_id: String) -> Dictionary:
 	return {}
 
 
+## Deterministic weighted category for ordinary ruin-crate drops.
+## Weights reproduce the prior thresholds exactly (24/20/16/16/10/9/5).
+## A precomputed native Resource avoids one threshold chain per loot roll.
+## IMPORTANT: the caller always draws exactly one rng.randf(), regardless
+## of whether the custom engine is available; RNG/quantity order is stable.
+static func crate_loot_bucket(unit_roll: float) -> int:
+	if not _crate_choice_checked:
+		_crate_choice_checked = true
+		if ClassDB.class_exists("WeightedChoiceTable"):
+			var table: Object = ClassDB.instantiate("WeightedChoiceTable")
+			if table != null and table.has_method("configure") and bool(table.call(
+					"configure", PackedFloat64Array([24.0, 20.0, 16.0, 16.0, 10.0, 9.0, 5.0]))):
+				_crate_choice_table = table
+	if _crate_choice_table != null:
+		var category: int = int(_crate_choice_table.call("sample_unit", unit_roll))
+		if category >= 0:
+			return category
+	# Exact original thresholds are the fallback on stock Godot/older Cgame.
+	if unit_roll < 0.24:
+		return 0
+	if unit_roll < 0.44:
+		return 1
+	if unit_roll < 0.60:
+		return 2
+	if unit_roll < 0.76:
+		return 3
+	if unit_roll < 0.86:
+		return 4
+	if unit_roll < 0.95:
+		return 5
+	return 6
+
+
 ## Loot from a ruin crate or a dead zombie: {item_id: count}. Deterministic for a given rng.
 static func crate_loot(zone: int, rng: RandomNumberGenerator) -> Dictionary:
 	var loot: Dictionary = {}
 	var tier := WorldGen.tier_for_zone(zone)
 	var rolls := rng.randi_range(2, 4)
 	for i in rolls:
-		var roll := rng.randf()
-		if roll < 0.24:
+		var category: int = crate_loot_bucket(rng.randf())
+		if category == 0:
 			loot["canned_food"] = int(loot.get("canned_food", 0)) + 1
-		elif roll < 0.44:
+		elif category == 1:
 			loot["water_bottle"] = int(loot.get("water_bottle", 0)) + 1
-		elif roll < 0.60:
+		elif category == 2:
 			loot["bandage"] = int(loot.get("bandage", 0)) + rng.randi_range(1, 2)
-		elif roll < 0.76:
+		elif category == 3:
 			loot["scrap"] = int(loot.get("scrap", 0)) + rng.randi_range(2, 6)
-		elif roll < 0.86:
+		elif category == 4:
 			loot["cloth_%d" % tier] = int(loot.get("cloth_%d" % tier, 0)) + rng.randi_range(1, 3)
-		elif roll < 0.95:
+		elif category == 5:
 			loot["ammo_9mm"] = int(loot.get("ammo_9mm", 0)) + rng.randi_range(6, 18)
 		else:
 			loot["pistol"] = 1
