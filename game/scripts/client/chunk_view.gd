@@ -22,6 +22,7 @@ const TerrainAnisotropy = preload("res://scripts/client/terrain_anisotropy.gd")
 const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
 const ResourceMultiMeshUpdates = preload("res://scripts/client/multimesh_resource_updates.gd")
+const ResourceInstanceInitializer = preload("res://scripts/client/resource_instance_initializer.gd")
 const DecorStreamingPolicy = preload("res://scripts/client/decor_streaming_policy.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
@@ -1182,6 +1183,7 @@ func _build_objects(data: Dictionary) -> void:
 		multimesh.instance_count = list.size()
 		var index: Dictionary = {}
 		var transforms: Array = []
+		var tints := PackedColorArray()
 		var is_building: bool = kind.begins_with("wall") or kind.begins_with("building:") or kind.begins_with("tower") or kind == "workbench" or kind.begins_with("ruin:") or kind.begins_with("monument:")
 		for i in list.size():
 			var node: Dictionary = list[i]
@@ -1190,16 +1192,21 @@ func _build_objects(data: Dictionary) -> void:
 			var basis := Basis(Vector3.UP, yaw).scaled(Vector3.ONE * size)
 			var sink: float = 0.05 if (is_building or kind == "crate") else 0.0
 			var transform := Transform3D(basis, Vector3(node["x"] - origin.x, node["y"] - sink, node["z"] - origin.y))
-			multimesh.set_instance_transform(i, transform)
-			# The tier shows as a tint on the Kenney meshes (which use vertex colors).
+			# Keep the original tier tint exactly as before; submit the
+			# complete group only after every resource slot is prepared.
 			var tier: int = node.get("tier", 1)
 			if kind.begins_with("rock") or kind.begins_with("ore"):
-				multimesh.set_instance_color(i, Color.WHITE.lerp(Color(0.8, 0.85, 1.0), (tier - 1) * 0.2))
+				tints.append(Color.WHITE.lerp(Color(0.8, 0.85, 1.0), (tier - 1) * 0.2))
 			else:
-				multimesh.set_instance_color(i, Color.WHITE.darkened((tier - 1) * 0.07) if kind.begins_with("tree:") else Color.WHITE)
+				tints.append(Color.WHITE.darkened((tier - 1) * 0.07) if kind.begins_with("tree:") else Color.WHITE)
 			if node.has("id"):
 				index[node["id"]] = i
 			transforms.append(transform)
+		# Native CGame uses two calls for a populated batch instead of two
+		# per resource. The legacy Godot path preserves identical rendering.
+		if not ResourceInstanceInitializer.initialize(multimesh, transforms, tints):
+			push_error("Invalid resource MultiMesh initialization: %s" % str(batch_id))
+			continue
 		var instance := MultiMeshInstance3D.new()
 		instance.multimesh = multimesh
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if (kind.begins_with("tree:") or kind.begins_with("building:") or kind.begins_with("wall") or kind.begins_with("tower") or kind.begins_with("ruin:") or kind.begins_with("monument:")) else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
