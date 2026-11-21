@@ -769,4 +769,116 @@ TEST_CASE("[SignificanceBudget] view-cone validation fails atomically") {
 			facing, many_priorities, many_ids, {}, 2).is_empty());
 }
 
+TEST_CASE("[SignificanceBudget] cost-aware VFX respects both scene slots and particle work") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distances = { 2.0, 2.0, 4.0, 1.0, 6.0 };
+	const PackedByteArray priorities = { 3, 2, 2, 1, 1 };
+	const PackedByteArray categories = { 3, 1, 1, 0, 0 };
+	const PackedByteArray visible = { 0, 1, 1, 1, 1 };
+	const PackedInt32Array costs = { 36, 80, 30, 10, 10 };
+	const PackedInt32Array caps = { 1, 4, 4, 4 };
+	const PackedInt32Array expected = { 0, 2, 3 };
+	const PackedInt32Array first_two = { 0, 2 };
+	const PackedInt32Array cheap_only = { 2 };
+	const PackedInt32Array preferred_visible = { 1, 0 };
+	const PackedInt32Array within_range = { 0 };
+	CHECK(planner->select_effects_visible_costed(distances, priorities, categories, visible,
+			costs, caps, 8, 140.0, 96) == expected);
+	CHECK(planner->select_effects_visible_costed(distances, priorities, categories, visible,
+			costs, caps, 2, 140.0, 96) == first_two);
+	CHECK(planner->select_effects_visible_costed(distances, priorities, categories, visible,
+			costs, caps, 8, 140.0, 35) == cheap_only);
+	CHECK(planner->select_effects_visible_costed(distances, priorities, categories, visible,
+			costs, caps, 8, 140.0, 0).is_empty());
+	CHECK(planner->select_effects_visible_costed(distances, priorities, categories, visible,
+			costs, caps, 0, 140.0, 96).is_empty());
+	CHECK(costs[0] == 36); // Does not edit particle recipe data.
+
+	// Visibility is only a tie-breaker within the same urgency tier.
+	CHECK(planner->select_effects_visible_costed({ 1.0, 3.0 }, { 1, 1 }, { 0, 0 },
+			{ 0, 1 }, { 10, 10 }, caps, 2, 10.0, 20) == preferred_visible);
+	CHECK(planner->select_effects_visible_costed({ 1.0, 141.0 }, { 0, 3 }, { 0, 3 },
+			{ 1, 1 }, { 10, 10 }, caps, 2, 140.0, 96) == within_range);
+}
+
+TEST_CASE("[SignificanceBudget] cost-aware VFX rejects malformed arrays atomically") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array d = { 1.0, 2.0 };
+	const PackedByteArray p = { 3, 1 };
+	const PackedByteArray g = { 3, 0 };
+	const PackedByteArray v = { 1, 0 };
+	const PackedInt32Array c = { 10, 10 };
+	const PackedInt32Array caps = { 1, 1, 1, 1 };
+	CHECK(planner->select_effects_visible_costed(d, p, g, v, c, caps, 2, 140.0, 100).size() == 2);
+	CHECK(planner->select_effects_visible_costed(d, p, g, v, { 10 }, caps, 2, 140.0, 100).is_empty());
+	CHECK(planner->select_effects_visible_costed(d, p, g, { 1, 2 }, c, caps, 2, 140.0, 100).is_empty());
+	CHECK(planner->select_effects_visible_costed(d, p, { 4, 0 }, v, c, caps, 2, 140.0, 100).is_empty());
+	CHECK(planner->select_effects_visible_costed(d, { 4, 0 }, g, v, c, caps, 2, 140.0, 100).is_empty());
+	CHECK(planner->select_effects_visible_costed({ Math::NaN, 2.0 }, p, g, v, c, caps, 2, 140.0, 100).is_empty());
+	CHECK(planner->select_effects_visible_costed(d, p, g, v, { 0, 10 }, caps, 2, 140.0, 100).is_empty());
+	CHECK(planner->select_effects_visible_costed(d, p, g, v, { 4097, 10 }, caps, 2, 140.0, 100).is_empty());
+	CHECK(planner->select_effects_visible_costed(d, p, g, v, c, { -1, 1, 1, 1 }, 2, 140.0, 100).is_empty());
+	CHECK(planner->select_effects_visible_costed(d, p, g, v, c, caps, 129, 140.0, 100).is_empty());
+	CHECK(planner->select_effects_visible_costed(d, p, g, v, c, caps, 2, -1.0, 100).is_empty());
+	CHECK(planner->select_effects_visible_costed(d, p, g, v, c, caps, 2, 140.0, -1).is_empty());
+	CHECK(planner->select_effects_visible_costed(d, p, g, v, c, caps, 2, 140.0, 65537).is_empty());
+}
+
+TEST_CASE("[SignificanceBudget] fair cost-aware VFX applies particle work inside quota stages") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	// Dust, hit, combat and milestone categories; index 4 is beyond dust range.
+	const PackedFloat64Array distances = { 5.0, 5.0, 6.0, 7.0, 200.0, 3.0 };
+	const PackedByteArray priorities = { 3, 2, 1, 2, 3, 0 };
+	const PackedByteArray categories = { 3, 2, 1, 2, 0, 0 };
+	const PackedByteArray visible = { 1, 1, 1, 1, 1, 1 };
+	const PackedInt32Array costs = { 60, 50, 30, 20, 5, 5 };
+	const PackedInt32Array caps = { 1, 4, 5, 4 };
+	const PackedFloat64Array ranges = { 18.0, 40.0, 75.0, 140.0 };
+	const PackedInt32Array minimums = { 0, 1, 1, 0 };
+	const PackedInt32Array unconstrained = { 0, 1, 2, 3, 5 };
+	const PackedInt32Array constrained = { 0, 2, 5 };
+	const PackedInt32Array critical_only = { 0 };
+	// A generous particle budget reproduces the plain fair plan.
+	CHECK(planner->select_effects_visible_fair_costed(distances, priorities, categories, visible,
+			costs, caps, ranges, minimums, 8, 1000) == unconstrained);
+	CHECK(planner->select_effects_visible_fair(distances, priorities, categories, visible,
+			caps, ranges, minimums, 8) == unconstrained);
+	// Under a tight particle budget the priority-3 event still wins, the hit
+	// minimum is met, and unaffordable combat effects leave room for cheap dust.
+	CHECK(planner->select_effects_visible_fair_costed(distances, priorities, categories, visible,
+			costs, caps, ranges, minimums, 8, 100) == constrained);
+	CHECK(planner->select_effects_visible_fair_costed(distances, priorities, categories, visible,
+			costs, caps, ranges, minimums, 8, 60) == critical_only);
+	CHECK(planner->select_effects_visible_fair_costed(distances, priorities, categories, visible,
+			costs, caps, ranges, minimums, 8, 0).is_empty());
+	CHECK(planner->select_effects_visible_fair_costed(distances, priorities, categories, visible,
+			costs, caps, ranges, minimums, 0, 100).is_empty());
+	CHECK(costs[0] == 60); // Does not edit particle recipe data.
+}
+
+TEST_CASE("[SignificanceBudget] fair cost-aware VFX rejects malformed input atomically") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array d = { 1.0, 2.0 };
+	const PackedByteArray p = { 3, 1 };
+	const PackedByteArray g = { 3, 1 };
+	const PackedByteArray v = { 1, 0 };
+	const PackedInt32Array c = { 10, 10 };
+	const PackedInt32Array caps = { 1, 1, 1, 1 };
+	const PackedFloat64Array ranges = { 10.0, 10.0, 10.0, 10.0 };
+	const PackedInt32Array minimums = { 0, 1, 0, 0 };
+	CHECK(planner->select_effects_visible_fair_costed(d, p, g, v, c, caps, ranges, minimums, 2, 100).size() == 2);
+	CHECK(planner->select_effects_visible_fair_costed(d, p, g, v, { 10 }, caps, ranges, minimums, 2, 100).is_empty());
+	CHECK(planner->select_effects_visible_fair_costed(d, p, g, v, { 0, 10 }, caps, ranges, minimums, 2, 100).is_empty());
+	CHECK(planner->select_effects_visible_fair_costed(d, p, g, v, { 4097, 10 }, caps, ranges, minimums, 2, 100).is_empty());
+	CHECK(planner->select_effects_visible_fair_costed(d, p, g, v, c, caps, ranges, { 2, 0, 0, 0 }, 2, 100).is_empty()); // Minimum above cap.
+	CHECK(planner->select_effects_visible_fair_costed(d, p, g, v, c, caps, ranges, { 1, 1, 1, 1 }, 2, 100).is_empty()); // Minimums exceed budget.
+	CHECK(planner->select_effects_visible_fair_costed(d, p, g, v, c, caps, { 10.0, Math::NaN, 10.0, 10.0 }, minimums, 2, 100).is_empty());
+	CHECK(planner->select_effects_visible_fair_costed(d, p, g, v, c, caps, ranges, minimums, 2, 65537).is_empty());
+	CHECK(planner->select_effects_visible_fair_costed(d, p, g, v, c, caps, ranges, minimums, 129, 100).is_empty());
+}
+
 } // namespace TestSignificanceBudgetPlanner

@@ -267,3 +267,136 @@ static func select_visible_fair_indices(distances: PackedFloat64Array,
 			claimed[index] = 1
 			result.append(index)
 	return result
+
+
+## Hard upper bound on particles requested from the pooled cosmetic VFX queue.
+const PARTICLE_BUDGET := [96, 160, 256, 384]
+
+
+static func particle_budget_for(quality: int) -> int:
+	return PARTICLE_BUDGET[clampi(quality, 0, 3)]
+
+
+## Dual-budget effect admission. This is not an allocation/CPU timing estimate:
+## one requested CPUParticles3D particle counts as one unit of visual work.
+## Critical effects retain their strict priority; effects that do not fit
+## leave space for cheaper lower-priority feedback in the same frame.
+static func select_visible_costed_indices(distances: PackedFloat64Array,
+		priorities: PackedByteArray, categories: PackedByteArray,
+		visible: PackedByteArray, particle_costs: PackedInt32Array,
+		quality: int, native: Object = null) -> PackedInt32Array:
+	var empty := PackedInt32Array()
+	var n: int = distances.size()
+	if n != priorities.size() or n != categories.size() \
+			or n != visible.size() or n != particle_costs.size() or n > 16384:
+		return empty
+	for i in n:
+		if not is_finite(distances[i]) or distances[i] < 0.0 \
+				or priorities[i] > 3 or categories[i] > 3 or visible[i] > 1 \
+				or particle_costs[i] < 1 or particle_costs[i] > 4096:
+			return empty
+	var caps: PackedInt32Array = caps_for(quality)
+	var budget: int = budget_for(quality)
+	var particle_budget: int = particle_budget_for(quality)
+	if native != null and native.has_method("select_effects_visible_costed"):
+		return native.call("select_effects_visible_costed", distances, priorities,
+			categories, visible, particle_costs, caps, budget, MAX_DISTANCE,
+			particle_budget)
+	var eligible: Array[int] = []
+	for i in n:
+		if distances[i] <= MAX_DISTANCE and caps[categories[i]] > 0:
+			eligible.append(i)
+	eligible.sort_custom(func(a: int, b: int) -> bool:
+		if priorities[a] != priorities[b]:
+			return priorities[a] > priorities[b]
+		if visible[a] != visible[b]:
+			return visible[a] > visible[b]
+		if distances[a] != distances[b]:
+			return distances[a] < distances[b]
+		return a < b)
+	var used := PackedInt32Array([0, 0, 0, 0])
+	var remaining: int = particle_budget
+	var output := PackedInt32Array()
+	for index in eligible:
+		if output.size() >= budget or remaining == 0:
+			break
+		var group: int = int(categories[index])
+		if used[group] >= caps[group] or particle_costs[index] > remaining:
+			continue
+		remaining -= particle_costs[index]
+		used[group] += 1
+		output.append(index)
+	return output
+
+
+## The real burst-queue planner: the fair three-stage selection (priority-3
+## events, soft per-category minimums, then top significance) with per-category
+## ranges and caps, plus the particle-work budget applied inside every stage.
+## An effect that does not fit the remaining particle work is skipped and never
+## blocks a cheaper candidate. Stock Godot and older Cgame engines use the
+## exact same deterministic fallback.
+static func select_visible_fair_costed_indices(distances: PackedFloat64Array,
+		priorities: PackedByteArray, categories: PackedByteArray,
+		visible: PackedByteArray, particle_costs: PackedInt32Array,
+		quality: int, native: Object = null) -> PackedInt32Array:
+	var empty := PackedInt32Array()
+	var count: int = distances.size()
+	if count != priorities.size() or count != categories.size() or \
+			count != visible.size() or count != particle_costs.size() or count > 16384:
+		return empty
+	var caps: PackedInt32Array = caps_for(quality)
+	var ranges: PackedFloat64Array = ranges_for(quality)
+	var minimums: PackedInt32Array = minimums_for(quality)
+	var budget: int = budget_for(quality)
+	var particle_budget: int = particle_budget_for(quality)
+	var total_minimums: int = 0
+	for group in 4:
+		if minimums[group] < 0 or minimums[group] > caps[group]:
+			return empty
+		total_minimums += minimums[group]
+	if total_minimums > budget:
+		return empty
+	for i in count:
+		if not is_finite(distances[i]) or distances[i] < 0.0 or \
+				priorities[i] > 3 or categories[i] > 3 or visible[i] > 1 or \
+				particle_costs[i] < 1 or particle_costs[i] > 4096:
+			return empty
+	if native != null and native.has_method("select_effects_visible_fair_costed"):
+		return native.call("select_effects_visible_fair_costed", distances,
+			priorities, categories, visible, particle_costs, caps, ranges,
+			minimums, budget, particle_budget)
+	var eligible: Array[int] = []
+	for i in count:
+		if distances[i] <= ranges[categories[i]] and caps[categories[i]] > 0:
+			eligible.append(i)
+	eligible.sort_custom(func(a: int, b: int) -> bool:
+		if priorities[a] != priorities[b]:
+			return priorities[a] > priorities[b]
+		if visible[a] != visible[b]:
+			return visible[a] > visible[b]
+		if distances[a] != distances[b]:
+			return distances[a] < distances[b]
+		return a < b)
+	var used := PackedInt32Array([0, 0, 0, 0])
+	var claimed := PackedByteArray()
+	claimed.resize(count)
+	var remaining: int = particle_budget
+	var result := PackedInt32Array()
+	for stage in 3:
+		for index in eligible:
+			if result.size() >= budget or remaining == 0:
+				break
+			if claimed[index] != 0:
+				continue
+			var group: int = categories[index]
+			if used[group] >= caps[group] or particle_costs[index] > remaining:
+				continue
+			if stage == 0 and priorities[index] != 3:
+				continue
+			if stage == 1 and used[group] >= minimums[group]:
+				continue
+			remaining -= particle_costs[index]
+			used[group] += 1
+			claimed[index] = 1
+			result.append(index)
+	return result

@@ -310,17 +310,25 @@ func flush_bursts() -> void:
 	var priorities := PackedByteArray()
 	var categories := PackedByteArray()
 	var visible := PackedByteArray()
+	var particle_costs := PackedInt32Array()
 	for effect in _pending_bursts:
 		distances.append(viewer.distance_to(effect["position"]) if camera != null else 0.0)
 		priorities.append(int(effect["priority"]))
 		categories.append(int(effect["group"]))
+		particle_costs.append(clampi(int(effect["count"]), 1, 4096))
 		# No camera during headless tests means all candidates are equivalent
 		# on visibility. Do not cull a critical event merely for being behind us.
 		visible.append(1 if camera == null or camera.is_position_in_frustum(effect["position"]) else 0)
 	# Niagara-style soft type minimums protect hit and combat feedback from
 	# dense ambient particle storms without exceeding the global VFX budget.
-	var chosen: PackedInt32Array = FxPolicy.select_visible_fair_indices(
-		distances, priorities, categories, visible, GraphicsQuality.level(), _native_fx_budget)
+	# A second budget caps the total requested particle work per frame inside
+	# the same fair selection (an effect that does not fit is skipped).
+	var chosen: PackedInt32Array = FxPolicy.select_visible_fair_costed_indices(
+		distances, priorities, categories, visible, particle_costs,
+		GraphicsQuality.level(), _native_fx_budget)
+	var planned_particles: int = 0
+	for index in chosen:
+		planned_particles += particle_costs[index]
 	var actual: int = 0
 	for index in chosen:
 		if _emit_burst(_pending_bursts[index]):
@@ -329,6 +337,8 @@ func flush_bursts() -> void:
 		"requested": _pending_bursts.size(),
 		"rendered": actual,
 		"dropped": _pending_bursts.size() - actual,
+		"planned_particles": planned_particles,
+		"particle_budget": FxPolicy.particle_budget_for(GraphicsQuality.level()),
 		"native": _native_fx_budget != null,
 	}
 	_pending_bursts.clear()
@@ -352,7 +362,7 @@ func burst(position: Vector3, color: Color, count: int = 14, speed: float = 3.0,
 	if not position.is_finite():
 		return
 	var effect: Dictionary = {
-		"position": position, "color": color, "count": count,
+		"position": position, "color": color, "count": clampi(count, 1, 4096),
 		"speed": speed, "lifetime": lifetime, "size": size,
 		"gravity": gravity, "up": up,
 		"priority": clampi(priority, 0, 3), "group": clampi(group, 0, 3),

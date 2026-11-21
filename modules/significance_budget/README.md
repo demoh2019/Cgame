@@ -189,3 +189,47 @@ full-distance cutoff, view-cone eligibility and restoration.
 
 Reference: [Unreal Engine visibility and occlusion culling](https://dev.epicgames.com/documentation/en-us/unreal-engine/visibility-and-occlusion-culling-in-unreal-engine).
 
+## Dual-budget Niagara-style admission (particle work)
+
+`select_effects_visible_costed(distances, priorities, categories, visible,
+particle_costs, category_caps, budget, max_distance, particle_budget)` applies
+the existing global effect-slot and per-type caps **plus a hard sum of the
+requested particles**. The method retains priority > on-screen > distance >
+input index ordering. When the next effect is too expensive, it skips that
+candidate and may fill spare capacity with cheaper effects. A hard radius is
+always enforced; all inputs are checked before any selection is returned.
+
+- At most 16,384 candidates, 128 effect slots, four effect categories and
+  65,536 particle work units. Each effect must cost 1 to 4,096 units.
+- Native C++ keeps work bounded to O(N × selected slots) and O(N) bytes of
+  temporary selection flags. No global RNG, GPU query or scene-tree mutation.
+- Albion After uses the fair variant in the **real** pooled
+  `Effects.flush_bursts()` path. Quality-tier particle budgets are
+  96 / 160 / 256 / 384 (Performance to Ultra) in addition to existing
+  scene-slot caps. The script fallback works in official Godot and older
+  Cgame engines.
+- `last_fx_budget_stats` reports `planned_particles` and `particle_budget`.
+  These numbers measure admitted recipe particle counts, **not measured CPU
+  time, actual pool allocation, GPU overdraw or frame rate**.
+
+A particle budget prevents an overload of many individually affordable bursts
+from producing an unbounded amount of cosmetic particle work in one frame.
+It never modifies health, loot, damage, audio or multiplayer authority.
+Validated by C++ doctests and `game/tests/test_fx_scalability_budget.gd`;
+runtime FPS benefits should be benchmarked on representative hardware.
+
+Unreal reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/performance-budgeting-using-effect-types-in-niagara-for-unreal-engine
+
+`select_effects_visible_fair_costed(distances, priorities, categories, visible,
+particle_costs, category_caps, category_ranges, category_minimums, budget,
+particle_budget)` applies the particle budget **inside** the fair quota
+selection (`select_effects_visible_fair`): priority-3 events first, then the
+soft per-category minimums, then the remaining most significant effects, with
+per-category ranges and caps unchanged. An effect that no longer fits the
+residual particle work is skipped, so an expensive effect can neither exceed
+the budget nor block cheaper feedback; as a consequence a category minimum is
+only guaranteed while its effects are affordable. With a large enough particle
+budget it returns exactly the plan of `select_effects_visible_fair`.
+`Effects.flush_bursts()` uses it (native when present, otherwise the identical
+`FxPolicy.select_visible_fair_costed_indices()` GDScript fallback); the older
+`select_effects_visible_costed` keeps its flat-range semantics.
