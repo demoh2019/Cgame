@@ -52,6 +52,33 @@ func run(t) -> void:
 			"consecutive zombie IDs stagger their first distant scan")
 		t.near(remote_a.think_timer, remote_same.think_timer, 0.0001,
 			"the same zombie ID has deterministic phase regardless of RNG")
+		var combined_lod: Variant = Zombie._get_ai_lod_scheduler()
+		if combined_lod != null and combined_lod.has_method("plan_passive_scan"):
+			var passive_near: float = float(Defs.ZOMBIES["walker"]["lose"])
+			var first_plan: Vector2 = combined_lod.plan_passive_scan(
+				remote_a.id, 100.0, passive_near, passive_near + 24.0,
+				0.0, 4.0, false)
+			t.near(remote_a.think_timer, first_plan.y, 0.0001,
+				"real infected uses one-call scheduled startup scan delay")
+			t.near(remote_a._ai_lod_previous_interval, first_plan.x, 0.0001,
+				"real infected remembers nominal tier, not staggered delay")
+			t.check(remote_a._ai_lod_staggered,
+				"server flags one-shot stagger after first remote scan")
+			var next_plan: Vector2 = combined_lod.plan_passive_scan(
+				remote_a.id, 100.0, passive_near, passive_near + 24.0,
+				remote_a._ai_lod_previous_interval, 4.0, true)
+			t.near(next_plan.x, next_plan.y, 0.0001,
+				"subsequent remote scans use full LOD period, not startup phase")
+			var close_plan: Vector2 = combined_lod.plan_passive_scan(
+				remote_a.id, passive_near, passive_near, passive_near + 24.0,
+				next_plan.x, 4.0, true)
+			t.near(close_plan.y, 0.25, 0.0001,
+				"survivor reaching pursuit range immediately restores fast scanning")
+			var urgent_plan: Vector2 = combined_lod.plan_passive_scan(
+				remote_a.id, 100.0, passive_near, passive_near + 24.0,
+				next_plan.x, 4.0, false, true)
+			t.near(urgent_plan.y, 0.25, 0.0001,
+				"urgent work bypasses even the one-time startup stagger")
 		var nearby_idle := Zombie.new(162, "walker", Vector3(0, ground, 0))
 		nearby_idle.think(world, _players(Vector3(20, ground, 0)), 0.05, rng)
 		t.near(nearby_idle.think_timer, 0.25, 0.0001,

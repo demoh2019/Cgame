@@ -132,4 +132,64 @@ TEST_CASE("[AISimulationLOD2D] Hysteresis fails safe on invalid input and after 
 	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.5, 4.0) == real_t(0.8));
 }
 
+
+TEST_CASE("[AISimulationLOD2D] combined passive scan plan matches scalar LOD at all tiers") {
+	Ref<AISimulationLOD2D> lod;
+	lod.instantiate();
+	const real_t near_distance = 30.0;
+	const real_t far_distance = 54.0;
+	const real_t hysteresis = 4.0;
+	const real_t distances[] = { 0.0, 20.0, 30.0, 30.1, 33.0, 35.0,
+		50.0, 54.0, 55.0, 57.0, 60.0, 100.0, real_t(Math::INF),
+		-real_t(Math::INF), real_t(Math::NaN), -1.0 };
+	const real_t previous[] = { 0.0, 0.25, 0.5, 1.0 };
+	for (const real_t distance : distances) {
+		for (const real_t last : previous) {
+			for (int64_t id : { int64_t(0), int64_t(1), int64_t(15), int64_t(16), int64_t(-1) }) {
+				for (bool staggered : { false, true }) {
+					for (bool urgent : { false, true }) {
+						const Vector2 plan = lod->plan_passive_scan(id, distance,
+								near_distance, far_distance, last, hysteresis,
+								staggered, urgent);
+						const bool first_distant = !staggered && distance > near_distance && !urgent;
+						const real_t expected_nominal = first_distant ?
+								lod->get_interval(distance, near_distance, far_distance, urgent) :
+								lod->get_hysteretic_interval(distance, near_distance,
+										far_distance, last, hysteresis, urgent);
+						const real_t expected_delay = first_distant ?
+								lod->get_staggered_interval(id, distance,
+										near_distance, far_distance, false) : expected_nominal;
+						CHECK(plan.x == expected_nominal);
+						CHECK(plan.y == expected_delay);
+						CHECK(plan.x > 0.0);
+						CHECK(plan.y > 0.0);
+					}
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[AISimulationLOD2D] combined planning honors urgent scans and configured intervals") {
+	Ref<AISimulationLOD2D> lod;
+	lod.instantiate();
+	CHECK(lod->configure_intervals(0.1, 0.3, 0.8));
+	const Vector2 first = lod->plan_passive_scan(160, 100.0, 30.0, 54.0,
+			0.0, 4.0, false);
+	CHECK(first.x == real_t(0.8));
+	CHECK(first.y == real_t(0.8 / 16.0));
+	const Vector2 repeated = lod->plan_passive_scan(160, 100.0, 30.0, 54.0,
+			first.x, 4.0, true);
+	CHECK(repeated.x == real_t(0.8));
+	CHECK(repeated.y == real_t(0.8));
+	const Vector2 near = lod->plan_passive_scan(160, 30.0, 30.0, 54.0,
+			first.x, 4.0, true);
+	CHECK(near.x == real_t(0.1));
+	CHECK(near.y == real_t(0.1));
+	const Vector2 urgent = lod->plan_passive_scan(160, 100.0, 30.0, 54.0,
+			first.x, 4.0, false, true);
+	CHECK(urgent.x == real_t(0.1));
+	CHECK(urgent.y == real_t(0.1));
+}
+
 } // namespace TestAISimulationLOD2D

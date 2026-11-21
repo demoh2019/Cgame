@@ -10,6 +10,8 @@ on:
       - 'modules/behavior_tree/config.py'
       - 'game/scripts/shared/zombie.gd'
       - 'game/tests/test_zombie_ai.gd'
+      - 'tests/scene/test_ai_passive_scan_plan_contract.py'
+      - 'modules/behavior_tree/doc_classes/AISimulationLOD2D.xml'
       - '.github/workflows/native-ai-simulation-lod.yml'
   push:
     branches: [develop]
@@ -19,6 +21,8 @@ on:
       - 'modules/behavior_tree/register_types.cpp'
       - 'game/scripts/shared/zombie.gd'
       - 'game/tests/test_zombie_ai.gd'
+      - 'tests/scene/test_ai_passive_scan_plan_contract.py'
+      - 'modules/behavior_tree/doc_classes/AISimulationLOD2D.xml'
       - '.github/workflows/native-ai-simulation-lod.yml'
   workflow_dispatch:
 
@@ -37,6 +41,8 @@ jobs:
         with:
           cache-name: linux-ai-simulation-lod
         continue-on-error: true
+      - name: Verify combined AI scan engine/game source contracts
+        run: python3 -m unittest tests/scene/test_ai_passive_scan_plan_contract.py -v
       - uses: ./.github/actions/godot-deps
       - uses: ./.github/actions/godot-build
         with:

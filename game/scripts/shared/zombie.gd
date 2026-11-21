@@ -331,23 +331,34 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 				# exact legacy 0.25s scan, including audible gunshots.
 				var near_range: float = float(data["lose"])
 				var far_range: float = near_range + 24.0
-				# Keep the existing one-time deterministic startup phase; store
-				# the nominal interval, not that initial stagger delay.
-				var nominal: float = float(lod.get_interval(
-					nearest_viewer, near_range, far_range))
-				if not _ai_lod_staggered and nearest_viewer > near_range:
-					think_timer = float(lod.get_staggered_interval(
-						id, nearest_viewer, near_range, far_range))
-					_ai_lod_staggered = true
+				# Mass Simulation LOD: one native query now composes nominal
+				# distance tier, one-time stable ID phase and temporal hysteresis.
+				# The authoritative server still owns the per-zombie phase flag
+				# and previous interval; no combat or movement cadence changes.
+				if lod.has_method("plan_passive_scan"):
+					var plan: Vector2 = lod.plan_passive_scan(
+						id, nearest_viewer, near_range, far_range,
+						_ai_lod_previous_interval, 4.0, _ai_lod_staggered)
+					_ai_lod_previous_interval = plan.x
+					think_timer = plan.y
+					if not _ai_lod_staggered and nearest_viewer > near_range:
+						_ai_lod_staggered = true
 				else:
-					# Passive NPC LOD stabilizes across jittery player distance.
-					# Older Cgame binaries retain the existing distance-only policy.
-					if lod.has_method("get_hysteretic_interval"):
-						nominal = float(lod.get_hysteretic_interval(
-							nearest_viewer, near_range, far_range,
-							_ai_lod_previous_interval, 4.0))
-					think_timer = nominal
-				_ai_lod_previous_interval = nominal
+					# Stock Godot and older Cgame binaries retain the exact
+					# original scalar scheduler and first-scan semantics.
+					var nominal: float = float(lod.get_interval(
+						nearest_viewer, near_range, far_range))
+					if not _ai_lod_staggered and nearest_viewer > near_range:
+						think_timer = float(lod.get_staggered_interval(
+							id, nearest_viewer, near_range, far_range))
+						_ai_lod_staggered = true
+					else:
+						if lod.has_method("get_hysteretic_interval"):
+							nominal = float(lod.get_hysteretic_interval(
+								nearest_viewer, near_range, far_range,
+								_ai_lod_previous_interval, 4.0))
+						think_timer = nominal
+					_ai_lod_previous_interval = nominal
 		elif target_id != -1:
 			# A later passive scan cannot inherit stale LOD during combat.
 			_ai_lod_previous_interval = 0.0

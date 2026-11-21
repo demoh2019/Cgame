@@ -1,5 +1,34 @@
 # Behavior Tree module (runtime MVP)
 
+## One-call Mass Simulation LOD planning for server-owned infected
+
+`AISimulationLOD2D.plan_passive_scan(agent_id, distance, near_distance, far_distance,
+previous_interval, hysteresis, already_staggered, urgent=false)` returns a
+`Vector2(nominal_interval, next_scan_delay)`. The caller records the nominal
+interval, flags the first distant stagger exactly once, and uses the delay
+only for **unengaged passive target acquisition**.
+
+This combines the existing scalar distance-tier, deterministic ID-phase, and
+hysteretic interval methods inside one native call. It is inspired by Unreal
+Engine Mass Simulation LOD (variable-frequency updates grouped by significance),
+but is a small pure-data API, **not** a full MassEntity framework:
+https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-mass-gameplay-in-unreal-engine
+
+Albion After's authoritative `game/scripts/shared/zombie.gd` invokes the
+combined method only when no player target is selected and the infected is
+idle/wandering. All attack ticks, projectiles, movement, threats, health,
+server validation, and RNG sequences remain untouched. The legacy scalar
+branch stays available for older native Cgame builds; stock Godot still runs
+the original 0.25s passive scan.
+
+Native C++ tests compare the combined result against the scalar composition
+across boundary distances, one-time phases, hysteresis states, urgent
+interruptions and invalid inputs. The real zombie game regression verifies
+startup scan timing, saved nominal tier, urgent bypass and near-range recovery.
+This reduces multiple script/native method calls to one per eligible scan;
+it is **not** a measured TPS or FPS claim.
+
+
 This optional, built-in Godot module provides the **runtime foundation** of a
 behavior tree system for gameplay AI. It is not a visual graph editor yet.
 When enabled, all resources are available in the scene inspector and in
