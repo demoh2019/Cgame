@@ -5,6 +5,37 @@ and exclusion operations for biome decoration, dungeon dressing, resource-site
 visuals and level generation. It is inspired by the PCG point-filtering and
 exclusion-volume concepts in Unreal Engine, without using Unreal code.
 
+## Runtime foliage density scalability (Unreal-inspired)
+
+`PCGFoliageScalability3D` exposes two deterministic, data-only methods for
+scalable instanced cosmetic vegetation:
+
+- `spread_indices(count)` returns a bit-reversed index permutation, enabling
+  the first visible subset of a MultiMesh to sample its **whole authored
+  instance sequence** rather than showing only its earliest objects.
+- `plan_visible_counts(counts, distances, quality, near_distance=18,
+  far_distance=125)` processes up to 4096 instance clusters per native call.
+  It returns a stable count for each cluster with smooth distance-based
+  scaling and four quality levels. Performance uses near/far density 42%/20%,
+  Balanced 68%/42%, High 88%/70%, and Ultra 100%/100%. Every nonempty
+  visual group retains at least one instance; empty groups remain empty.
+- All inputs are atomically validated: 0–65536 instances per cluster,
+  0–4096 clusters, nonnegative finite distances ≤10,000,000 and valid
+  distance windows. Invalid inputs return an empty packed result.
+- This **does not implement Nanite or proxy-mesh HLOD**; it is an opt-in
+  foliage-scalability API analogous to Unreal Engine's `foliage.DensityScale`.
+
+In Albion After, `SceneryBatches.add(..., density_scalable=true)` creates a
+permuted, immutable GPU MultiMesh **once**, then `SceneryDensityLod` updates
+only `MultiMesh.visible_instance_count` every 0.6 s as needed. Flower,
+grass, fern and petal decorations opt in; interactive loot, rocks, bushes,
+terrain collisions and authoritative objects never do. Older/stock Godot
+takes identical GDScript planning paths, with native-vs-fallback parity
+tests and reversible Ultra recovery tests. No repeated mesh reuploads,
+per-frame instance sorting, scene-node deletion or RNG draws.
+
+Official inspiration: [Unreal foliage density scalability](https://dev.epicgames.com/documentation/en-us/unreal-engine/foliage-mode-in-unreal-engine).
+
 ## 3D exclusion zones
 
 ```gdscript
