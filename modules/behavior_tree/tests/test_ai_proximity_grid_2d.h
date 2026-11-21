@@ -586,8 +586,10 @@ TEST_CASE("[AIProximityGrid2D] Variable-radius batch permits empty player cohort
 	radii.push_back(256.0f);
 	const Array no_targets = grid->query_cross_variable_radius_batch(sources, radii, PackedVector2Array());
 	REQUIRE(no_targets.size() == 2);
-	CHECK(PackedInt32Array(no_targets[0]).is_empty());
-	CHECK(PackedInt32Array(no_targets[1]).is_empty());
+	const PackedInt32Array first = no_targets[0];
+	const PackedInt32Array second = no_targets[1];
+	CHECK(first.is_empty());
+	CHECK(second.is_empty());
 }
 
 TEST_CASE("[AIProximityGrid2D] Variable-radius rejects invalid inputs atomically") {
