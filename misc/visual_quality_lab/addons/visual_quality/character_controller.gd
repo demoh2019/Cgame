@@ -20,6 +20,7 @@ signal movement_mode_changed(is_flying: bool)
 
 var is_flying: bool = false
 var view_camera: Camera3D
+var attributes: WorldAttributes3D
 var _jump_buffer_left: float = 0.0
 var _coyote_left: float = 0.0
 var _jump_was_held: bool = false
@@ -42,6 +43,9 @@ func _physics_process(delta: float) -> void:
 	var axes: Vector2 = read_movement_axes()
 	var direction: Vector3 = global_basis * Vector3(axes.x, 0.0, axes.y)
 	var sprinting: bool = Input.is_key_pressed(KEY_SHIFT)
+	if is_instance_valid(attributes) and not is_flying:
+		sprinting = sprinting and axes.length_squared() > 0.0 \
+			and attributes.try_spend_stamina(18.0 * delta)
 	var jump_held: bool = Input.is_key_pressed(KEY_SPACE)
 	if is_flying:
 		_jump_buffer_left = 0.0
@@ -53,7 +57,8 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		return
 
-	var speed: float = walk_speed * (sprint_multiplier if sprinting else 1.0)
+	var speed_modifier: float = attributes.get_stat("move_speed") if is_instance_valid(attributes) else 1.0
+	var speed: float = walk_speed * speed_modifier * (sprint_multiplier if sprinting else 1.0)
 	var desired: Vector3 = direction.normalized() * speed
 	var grounded: bool = is_on_floor()
 	var acceleration: float = (ground_acceleration if axes.length_squared() > 0.0 else ground_braking)
