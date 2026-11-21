@@ -32,7 +32,7 @@ func run(t) -> void:
 	idle.observe_tick(-1, 1)
 	idle.observe_tick(61000000, 1)
 	t.eq(idle.snapshot()["total_ticks"], 0, "invalid clock samples are ignored")
-	for i in Governor.WINDOW_TICKS * Governor.HIGH_WINDOWS * 3:
+	for i in Governor.HISTORY_CAP + 15:
 		idle.observe_tick(60000, 0)
 	t.eq(idle.spawn_cap, Governor.MAX_SPAWN_CAP, "empty server never throttles")
 	t.eq(idle.snapshot()["sample_count"], Governor.HISTORY_CAP,
