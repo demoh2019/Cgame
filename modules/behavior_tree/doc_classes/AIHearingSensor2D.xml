@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AIHearingSensor2D" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Event-driven 2D AI hearing with loudness, attenuation and temporary sound memory.</brief_description>
+	<description>
+		AIHearingSensor2D receives explicit gameplay noise events using [method report_noise]. It checks distance against hearing radius multiplied by sound loudness and a caller-provided attenuation factor, and stores the most recent perceived source position. The timer advances only when [method advance_time] is called.
+		This class does not play audio, trace physics, identify teams or broadcast noise to other NPCs. To handle multiple listeners, create one instance per listener and deliver emitted sound events to interested sensors. The listener does not require visual line of sight.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="report_noise">
+			<return type="bool" />
+			<param index="0" name="listener_position" type="Vector2" />
+			<param index="1" name="source_position" type="Vector2" />
+			<param index="2" name="loudness" type="float" />
+			<param index="3" name="occlusion" type="float" default="1.0" />
+			<description>Reports a noise source. Loudness multiplies the base hearing radius. Occlusion is a caller-provided factor in [code][0, 1][/code] to attenuate sound across walls and other geometry. Returns [code]true[/code] if this listener heard the event, and records the position and loudness.</description>
+		</method>
+		<method name="advance_time">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>Expires auditory memory using elapsed seconds (non-negative). Call every physics or fixed AI tick, even when no noise occurs.</description>
+		</method>
+		<method name="has_sound_memory" qualifiers="const">
+			<return type="bool" />
+			<description>Returns whether an accepted sound event remains in memory.</description>
+		</method>
+		<method name="get_last_heard_position" qualifiers="const">
+			<return type="Vector2" />
+			<description>Most recent audible event position; use [method has_sound_memory] to check validity.</description>
+		</method>
+		<method name="get_last_heard_loudness" qualifiers="const">
+			<return type="float" />
+			<description>Loudness of the most recent accepted event.</description>
+		</method>
+		<method name="get_memory_remaining" qualifiers="const">
+			<return type="float" />
+			<description>Seconds remaining until sound memory expires.</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>Clears sound memory and the last remembered event.</description>
+		</method>
+		<method name="set_hearing_radius">
+			<return type="void" />
+			<param index="0" name="radius" type="float" />
+			<description>Sets the positive base listening radius.</description>
+		</method>
+		<method name="get_hearing_radius" qualifiers="const">
+			<return type="float" />
+		</method>
+		<method name="set_memory_duration">
+			<return type="void" />
+			<param index="0" name="seconds" type="float" />
+			<description>Sets how long an accepted noise remains remembered; zero disables persistent memory.</description>
+		</method>
+		<method name="get_memory_duration" qualifiers="const">
+			<return type="float" />
+		</method>
+	</methods>
+	<members>
+		<member name="hearing_radius" type="float" setter="set_hearing_radius" getter="get_hearing_radius" default="550.0">Base hearing range, scaled by loudness and occlusion.</member>
+		<member name="memory_duration" type="float" setter="set_memory_duration" getter="get_memory_duration" default="3.0">Seconds the most recent accepted noise remains remembered.</member>
+	</members>
+</class>
