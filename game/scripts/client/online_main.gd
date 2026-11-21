@@ -1396,6 +1396,16 @@ func _on_welcomed() -> void:
 			Performance.add_custom_monitor(simulation_monitor,
 				Callable(streamer, "get_simulation_active_count"))
 			_ambient_monitors.append(simulation_monitor)
+	if streamer.has_method("get_chunk_cache_hit_count"):
+		for monitor in [
+			[&"Albion/StreamCacheRetained", Callable(streamer, "get_cached_chunk_count")],
+			[&"Albion/StreamCacheHits", Callable(streamer, "get_chunk_cache_hit_count")],
+			[&"Albion/StreamCacheEvictions", Callable(streamer, "get_chunk_cache_eviction_count")],
+		]:
+			var monitor_name: StringName = monitor[0]
+			if not Performance.has_custom_monitor(monitor_name):
+				Performance.add_custom_monitor(monitor_name, monitor[1])
+				_ambient_monitors.append(monitor_name)
 	_access.set_world_streamer(streamer)
 	# Streamer is created after the initial renderer setup; apply its draw-distance budget now.
 	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
