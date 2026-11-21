@@ -23,6 +23,7 @@ var patrol_direction := -1.0
 var ai_timer := 0.0
 var current_action := "patrol"
 var last_status := BehaviorTreeTask.RUNNING
+var last_debug_snapshot: Dictionary = {}
 var brain := BehaviorTreeRunner.new()
 var sensor := AIVisualSensor2D.new()
 var hearing := AIHearingSensor2D.new()
@@ -158,6 +159,7 @@ func _physics_process(delta: float) -> void:
             "action": current_action
         })
         last_status = brain.tick(AI_TICK_SECONDS)
+        last_debug_snapshot = brain.get_debug_snapshot()
         current_action = str(brain.get_blackboard().get("action", "patrol"))
 
     var enemy_motion := Vector2.ZERO
@@ -305,6 +307,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
         patrol_direction = -1.0
         current_action = "patrol"
         last_status = BehaviorTreeTask.RUNNING
+        last_debug_snapshot = {}
         ai_timer = 0.0
         sensor.reset()
         hearing.reset()
@@ -325,9 +328,8 @@ func _update_hud() -> void:
     hud.text = "SIGHT + HEARING + A* NAVIGATION | Arrows: move | F: shout | Space: hit | R: reset\n"
     hud.text += "Enemy HP: %d | AI: %s | Tree: %s | Visible: %s\n" % [enemy_health, current_action, status_text, str(sensor.is_target_visible())]
     hud.text += "Sight: %.1fs | Sound: %.1fs | Gray wall blocks LOS | Yellow X = last seen position" % [sensor.get_memory_remaining(), hearing.get_memory_remaining()]
-    # Runner debug inspection makes a detached snapshot only when requested.
-    var debug_state: Dictionary = brain.get_debug_snapshot()
-    var cursors: Dictionary = debug_state.get("execution_memory", {})
+    # Update diagnostic snapshots only at logical AI ticks, not render frames.
+    var cursors: Dictionary = last_debug_snapshot.get("execution_memory", {})
     hud.text += "\nNative Blackboard guard: HP <= %d | Running node memories: %d" % [30, cursors.size()]
 
 
