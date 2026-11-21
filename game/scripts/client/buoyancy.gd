@@ -4,6 +4,7 @@ extends Node
 ## damped in the water, and drifts with river current and the wind - so debris, severed limbs and
 ## dropped wreckage float, bob and drift instead of sinking through the surface.
 
+const VegetationWind = preload("res://scripts/client/vegetation_wind.gd")
 const GROUP := "buoyant"
 const DENSITY_LIFT := 1.7 # Upward force at full submersion, in units of the body's weight.
 const DEPTH_FOR_FULL := 0.35
@@ -15,7 +16,8 @@ var world
 func _physics_process(_delta: float) -> void:
 	if world == null:
 		return
-	var wind: Vector3 = RenderingServer.global_shader_parameter_get("aa_vegetation_wind") if RenderingServer.has_method("global_shader_parameter_get") else Vector3.ZERO
+	# Published by atmosphere.gd at 10 Hz; global_shader_parameter_get is editor-only and returns null in game.
+	var wind: Vector3 = VegetationWind.current
 	for node in get_tree().get_nodes_in_group(GROUP):
 		var body := node as RigidBody3D
 		if body == null or not body.is_inside_tree() or body.freeze:
