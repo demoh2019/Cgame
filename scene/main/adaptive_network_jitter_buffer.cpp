@@ -132,6 +132,7 @@ double AdaptiveNetworkJitterBuffer::observe(double p_server_time, double p_local
 		// A reconnect or large packet gap should not keep stale pressure.
 		peak_jitter = 0.0;
 		delay = base_delay;
+		recovery_hold_remaining = 0; // Large reconnect gap ends any old loss burst.
 		network_gap_count++;
 		return delay;
 	}

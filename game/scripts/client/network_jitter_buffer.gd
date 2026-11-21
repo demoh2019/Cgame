@@ -141,6 +141,7 @@ func observe(server_time: float, local_arrival_time: float) -> float:
 		# Reconnect or background pause: do not drag huge stale jitter tails.
 		_peak_jitter = 0.0
 		delay = _base_delay
+		_recovery_hold_remaining = 0 # Discard old burst state on reconnect gap.
 		_network_gaps += 1
 		return delay
 	# Late network arrival and missing server ticks both need more historical

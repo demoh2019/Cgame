@@ -53,6 +53,57 @@ func run(t) -> void:
 	t.near(buffer.delay, Jitter.BASE_DELAY, 0.0001,
 		"invalid incoming timestamps cannot poison buffer state")
 
+	t.current = "packet-loss recovery hold does not mistake duplicates for arrivals"
+	buffer.reset()
+	t.eq(buffer.get_recovery_guard_packets(), 0,
+		"legacy jitter adaptation starts without a hold")
+	t.check(not buffer.set_recovery_guard_packets(-1),
+		"negative recovery guard count rejected")
+	t.check(not buffer.set_recovery_guard_packets(33),
+		"excessive recovery guard count rejected")
+	t.check(buffer.set_recovery_guard_packets(3),
+		"game can require three genuine recovery snapshots")
+	buffer.observe(1.0, 10.0)
+	var loss_delay: float = buffer.observe(1.2, 10.2)
+	t.check(loss_delay > Jitter.BASE_DELAY + 0.05,
+		"missing a server tick expands interpolation reserve")
+	t.eq(buffer.get_estimated_missing_snapshots(), 1,
+		"missing snapshot estimate counts inferred 10Hz loss")
+	t.eq(buffer.get_burst_loss_events(), 1,
+		"one loss burst counted once")
+	t.eq(buffer.get_recovery_hold_remaining(), 3,
+		"loss arms three stable-arrival recovery credits")
+	buffer.observe(1.2, 10.4)
+	buffer.observe(1.1, 10.41)
+	t.eq(buffer.get_recovery_hold_remaining(), 3,
+		"duplicate and out-of-order packets cannot drain the hold")
+	for i in 3:
+		t.near(buffer.observe(1.3 + float(i) * 0.1, 10.3 + float(i) * 0.1),
+			loss_delay, 0.000001,
+			"good packet %d retains delay while recovery is guarded" % i)
+	t.eq(buffer.get_recovery_hold_remaining(), 0,
+		"three genuine arrivals exhaust the loss recovery guard")
+	t.check(buffer.observe(1.6, 10.6) < loss_delay,
+		"normal delay recovery resumes as soon as protection expires")
+	buffer.reset()
+	t.eq(buffer.get_recovery_guard_packets(), 3,
+		"reset clears burst history but preserves opt-in policy")
+	t.eq(buffer.get_estimated_missing_snapshots(), 0,
+		"reset clears cumulative estimated missing snapshots")
+	buffer.observe(1.0, 10.0)
+	buffer.observe(1.1, 10.27)
+	t.eq(buffer.get_estimated_missing_snapshots(), 0,
+		"late but continuous server timestamps are not packet loss")
+	buffer.observe(1.3, 10.47)
+	t.eq(buffer.get_recovery_hold_remaining(), 3,
+		"new missing tick arms another recovery guard")
+	buffer.observe(2.0, 11.17)
+	t.eq(buffer.get_recovery_hold_remaining(), 0,
+		"reconnect gap clears old recovery state")
+	t.check(buffer.set_recovery_guard_packets(0),
+		"disable restores pre-existing release behavior")
+	buffer.reset()
+
 	t.current = "render time moves monotonically without future-packet prediction"
 	var clock: float = Jitter.advance_clock(-1.0, 1.0, 0.12, 0.016)
 	t.near(clock, 0.88, 0.00001, "first sample starts just behind server")
@@ -110,6 +161,10 @@ func run(t) -> void:
 				"Cgame network smoothing accepts the 10 Hz gameplay profile")
 			t.check(local_policy.configure(0.12, 0.35, 0.10),
 				"script and native use same policy parameters")
+			t.check(native_buffer.set_recovery_guard_packets(3),
+				"native network buffer enables loss-burst protection")
+			t.check(local_policy.set_recovery_guard_packets(3),
+				"script policy enables identical loss-burst protection")
 			var rng := RandomNumberGenerator.new()
 			rng.seed = 440321
 			var server_ts := 1.0
@@ -139,7 +194,9 @@ func run(t) -> void:
 			var engine_stats: Dictionary = native_buffer.get_stats()
 			for key in ["delay", "peak_jitter", "accepted_packets",
 					"ignored_packets", "resets", "network_gaps",
-					"expected_snapshot_step"]:
+					"expected_snapshot_step", "recovery_guard_packets",
+					"recovery_hold_remaining", "estimated_missing_snapshots",
+					"burst_loss_events"]:
 				t.near(float(engine_stats[key]), float(script_stats[key]), 0.0000005,
 					"native telemetry parity %s" % key)
 			t.check(engine_stats["native_backend"], "native telemetry identifies backend")
@@ -162,6 +219,17 @@ func run(t) -> void:
 		"player and infected render paths use the correct smoothing backend")
 	t.check(live.network_jitter_stats().has("accepted_packets"),
 		"game exposes local network diagnostics without server changes")
+	t.eq(int(live.network_jitter_stats().get("recovery_guard_packets", 0)), 3,
+		"Albion simulated proxies opt into 3-packet loss recovery")
+	t.eq(live.network_missing_snapshot_estimate(), 0,
+		"new presentation buffer has no inferred packet losses")
+	t.eq(live.network_recovery_hold_remaining(), 0,
+		"new presentation buffer has no unresolved loss hold")
+	var online_source: String = FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
+	t.check(online_source.contains("Albion/NetworkEstimatedMissingSnapshots"),
+		"game profiler exposes estimated missing snapshots")
+	t.check(online_source.contains("Albion/NetworkRecoveryHoldRemaining"),
+		"game profiler exposes current loss recovery pressure")
 	t.near(float(live.network_jitter_stats()["expected_snapshot_step"]),
 		1.0 / float(Defs.SNAPSHOT_RATE), 0.0000005,
 		"client buffer tracks the real dedicated server snapshot rate")

@@ -101,4 +101,54 @@ TEST_CASE("[AdaptiveNetworkJitterBuffer] Configurable rates and invalid profiles
 	CHECK(double(buffer->get_stats()["expected_snapshot_step"]) == doctest::Approx(0.05));
 	CHECK(bool(buffer->get_stats()["native_backend"]));
 }
+TEST_CASE("[AdaptiveNetworkJitterBuffer] Optional loss recovery retains reserve for stable packets") {
+	Ref<AdaptiveNetworkJitterBuffer> b;
+	b.instantiate();
+	CHECK(b->get_recovery_guard_packets() == 0);
+	CHECK_FALSE(b->set_recovery_guard_packets(-1));
+	CHECK_FALSE(b->set_recovery_guard_packets(33));
+	CHECK(b->set_recovery_guard_packets(3));
+	CHECK(b->get_recovery_guard_packets() == 3);
+	CHECK(b->observe(1.0, 10.0) == doctest::Approx(0.12));
+	const double burst_delay = b->observe(1.2, 10.2); // One skipped 10Hz snapshot.
+	CHECK(burst_delay > 0.20);
+	CHECK(int64_t(b->get_estimated_missing_snapshots()) == 1);
+	CHECK(int64_t(b->get_burst_loss_events()) == 1);
+	CHECK(b->get_recovery_hold_remaining() == 3);
+	CHECK(b->observe(1.2, 10.4) == doctest::Approx(burst_delay));
+	CHECK(b->observe(1.1, 10.41) == doctest::Approx(burst_delay));
+	CHECK(b->get_recovery_hold_remaining() == 3); // Render duplicates don't spend credits.
+	for (int i = 1; i <= 3; ++i) {
+		CHECK(b->observe(1.2 + i * 0.1, 10.2 + i * 0.1) == doctest::Approx(burst_delay));
+		CHECK(b->get_recovery_hold_remaining() == 3 - i);
+	}
+	CHECK(b->observe(1.6, 10.6) < burst_delay); // Regular decay resumes after 3 arrivals.
+	CHECK(int64_t(b->get_estimated_missing_snapshots()) == 1);
+	CHECK(int64_t(b->get_burst_loss_events()) == 1);
+	CHECK(int64_t(b->get_stats()["recovery_guard_packets"]) == 3);
+	CHECK(int64_t(b->get_stats()["recovery_hold_remaining"]) == 0);
+
+	b->reset();
+	CHECK(b->get_recovery_guard_packets() == 3); // Reset leaves policy enabled.
+	CHECK(b->get_estimated_missing_snapshots() == 0);
+	CHECK(b->get_burst_loss_events() == 0);
+	b->observe(1.0, 10.0);
+	b->observe(1.1, 10.27); // Late arrival, but no server timestamps missing.
+	CHECK(b->get_recovery_hold_remaining() == 0);
+	CHECK(b->get_estimated_missing_snapshots() == 0);
+	b->observe(1.3, 10.47); // Missing one server tick.
+	CHECK(b->get_recovery_hold_remaining() == 3);
+	b->observe(2.0, 11.17); // Disconnected for > 0.65 server seconds.
+	CHECK(b->get_recovery_hold_remaining() == 0);
+	CHECK(b->get_delay() == doctest::Approx(0.12));
+	CHECK(int64_t(b->get_stats()["network_gaps"]) == 1);
+	CHECK(b->set_recovery_guard_packets(0)); // Explicitly disable.
+	CHECK(b->get_recovery_guard_packets() == 0);
+	b->reset();
+	b->observe(1.0, 10.0);
+	b->observe(1.2, 10.2);
+	CHECK(b->get_recovery_hold_remaining() == 0);
+	CHECK(b->observe(1.3, 10.3) < b->get_stats().get("peak_jitter", 0.0));
+}
+
 } // namespace TestAdaptiveNetworkJitterBuffer
