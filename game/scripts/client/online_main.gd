@@ -1362,6 +1362,11 @@ func _on_welcomed() -> void:
 	# The engine ensures that both streaming update paths share one drain.
 	streamer.max_instantiations_per_frame = 3
 	streamer.max_chunk_work_usec = 2500
+	# Retain only 1-2 immutable *client visual* chunks after unload; reattaching
+	# them when the player backtracks avoids regenerating their terrain/props.
+	# Hard native cap + per-node opt-in; no server entities or physics cached.
+	if "max_cached_chunks" in streamer:
+		streamer.max_cached_chunks = 2 if GraphicsQuality.level() >= 2 else 1
 	# Slow-frame backpressure is an opt-in extension. Older Godot forks
 	# retain their unchanged fixed streaming budgets.
 	if "adaptive_chunk_budget_enabled" in streamer:
