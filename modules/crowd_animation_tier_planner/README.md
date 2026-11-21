@@ -60,3 +60,29 @@ scons platform=linuxbsd target=editor tests=yes module_crowd_animation_tier_plan
 bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[CrowdAnimationTierPlanner]*"
 bin/godot.linuxbsd.editor.x86_64 --headless --path game --script res://tests/run_all.gd
 ```
+
+## Stateful-in-input LOD hysteresis (Unreal / Unity-inspired)
+
+`plan_tiers_stable(distances, priority_flags, previous_tiers, full_budget,
+priority_budget, hysteresis_meters)` is a data-only companion to
+`plan_tiers`. It uses the **previous output for the same actors** to introduce
+a symmetric 0–4 m dead band around each 22/38/60/90 m distance boundary.
+A camera moving a few centimetres back and forth around a threshold will
+not toggle a crowd's animation rate every frame.
+
+The native planner retains its absolute hard full-pose and combat-slot
+budgets. Previously chosen tier-0 and tier-1 combat characters get a small
+bounded distance preference to reduce churn, but never reserve a slot when
+their corresponding flags are absent. Multi-tier teleports are immediate.
+`hysteresis_meters=0` yields the old algorithm's result. Invalid size,
+distance, previous-tier, budget and hysteresis inputs fail atomically.
+
+Albion After reads `CharacterModel._lod_tier` once for each existing model
+and sends those aligned tiers to the native planner, or runs the equivalent
+GDScript fallback on official Godot. The engine holds no actor IDs, Nodes,
+world coordinates or gameplay state, and neither path affects authoritative
+combat or networking. All expensive procedural animation remains budgeted.
+
+Design inspiration: Unreal Animation Budget Allocator (significance-based
+skeleton work) and Unity LOD Group transition zones. This **does not**
+implement crossfading, GPU optimization or Unreal's complete allocator.
