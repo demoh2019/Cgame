@@ -99,6 +99,7 @@
 #include "scene/gui/video_stream_player.h"
 #include "scene/gui/virtual_joystick.h"
 #include "scene/main/adaptive_network_jitter_buffer.h"
+#include "scene/main/audio_voice_admission_planner.h"
 #include "scene/main/adaptive_tick_governor.h"
 #include "scene/main/canvas_item.h"
 #include "scene/main/canvas_layer.h"
@@ -493,6 +494,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(ResourcePreloader);
 	GDREGISTER_CLASS(AdaptiveTickGovernor);
 	GDREGISTER_CLASS(AdaptiveNetworkJitterBuffer);
+	GDREGISTER_CLASS(AudioVoiceAdmissionPlanner);
 	GDREGISTER_CLASS(SceneNodePool);
 	GDREGISTER_CLASS(SpatialPointGrid2D);
 	GDREGISTER_CLASS(SpatialRelevancyGrid2D);
