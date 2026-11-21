@@ -62,7 +62,6 @@ static func plan_crowd_tiers(distances: PackedFloat64Array, priority_flags: Pack
 	if count != priority_flags.size() or count > 16384 or full_slots < 0 or full_slots > 256 \
 			or priority_slots < 0 or priority_slots > 256 or \
 			(not visible_flags.is_empty() and visible_flags.size() != count):
-
 		return PackedInt32Array()
 	for distance in distances:
 		if not is_finite(distance) or distance < 0.0:
