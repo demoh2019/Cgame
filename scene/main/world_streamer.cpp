@@ -769,6 +769,27 @@ int WorldStreamer::calculate_adaptive_instantiation_slots(int p_configured, doub
 	return MAX(1, configured - reduction);
 }
 
+int WorldStreamer::calculate_adaptive_unload_slots(int p_configured, double p_pressure) {
+	const int configured = CLAMP(p_configured, 0, 64);
+	if (configured == 0) {
+		return 0; // Unlimited legacy cleanup, even under pressure.
+	}
+	const double pressure = Math::is_finite(p_pressure) ? CLAMP(p_pressure, 0.0, 1.0) : 0.0;
+	if (pressure >= 0.8) {
+		return MAX(1, (configured + 1) / 2);
+	}
+	if (pressure >= 0.4) {
+		return MAX(1, (configured * 3 + 3) / 4);
+	}
+	return configured;
+}
+
+int WorldStreamer::get_effective_unloads_per_update() const {
+	return adaptive_chunk_budget_enabled ?
+			calculate_adaptive_unload_slots(max_unloads_per_update, streaming_frame_pressure) :
+			max_unloads_per_update;
+}
+
 int WorldStreamer::calculate_adaptive_chunk_work_usec(int p_configured, double p_pressure) {
 	const int configured = CLAMP(p_configured, 0, 1000000);
 	if (configured == 0) {
@@ -952,7 +973,7 @@ void WorldStreamer::_update_streaming() {
 			expired.push_back(cell);
 		}
 		const int count = int(expired.size());
-		const int grant = MIN(count, max_unloads_per_update);
+		const int grant = MIN(count, get_effective_unloads_per_update());
 		last_unload_count = grant;
 		last_deferred_unload_count = count - grant;
 		if (grant == count) {
@@ -1658,6 +1679,8 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_static_method("WorldStreamer", D_METHOD("advance_chunk_pressure", "pressure", "frame_delta"), &WorldStreamer::advance_chunk_pressure);
 	ClassDB::bind_static_method("WorldStreamer", D_METHOD("calculate_adaptive_instantiation_slots", "configured", "pressure"), &WorldStreamer::calculate_adaptive_instantiation_slots);
 	ClassDB::bind_static_method("WorldStreamer", D_METHOD("calculate_adaptive_chunk_work_usec", "configured", "pressure"), &WorldStreamer::calculate_adaptive_chunk_work_usec);
+	ClassDB::bind_static_method("WorldStreamer", D_METHOD("calculate_adaptive_unload_slots", "configured", "pressure"), &WorldStreamer::calculate_adaptive_unload_slots);
+	ClassDB::bind_method(D_METHOD("get_effective_unloads_per_update"), &WorldStreamer::get_effective_unloads_per_update);
 	ClassDB::bind_method(D_METHOD("get_effective_chunk_work_usec"), &WorldStreamer::get_effective_chunk_work_usec);
 	ClassDB::bind_method(D_METHOD("get_effective_instantiations_per_frame"), &WorldStreamer::get_effective_instantiations_per_frame);
 	ClassDB::bind_method(D_METHOD("get_streaming_frame_pressure_percent"), &WorldStreamer::get_streaming_frame_pressure_percent);

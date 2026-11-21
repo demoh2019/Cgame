@@ -15,6 +15,14 @@ func run(t) -> void:
 	var streamer := WorldStreamer.new()
 	streamer.max_instantiations_per_frame = 3
 	streamer.max_chunk_work_usec = 2500
+	streamer.max_unloads_per_update = 12
+	if streamer.has_method("get_effective_unloads_per_update"):
+		t.eq(streamer.get_effective_unloads_per_update(), 12,
+			"without frame pressure configured unload throughput is unchanged")
+		streamer.max_unloads_per_update = 0
+		t.eq(streamer.get_effective_unloads_per_update(), 0,
+			"unlimited legacy cleanup remains opt-out")
+		streamer.max_unloads_per_update = 12
 	if streamer.has_method("set_adaptive_chunk_budget_enabled"):
 		t.check(not streamer.is_adaptive_chunk_budget_enabled(),
 			"native streamer defaults to legacy fixed budgets")
@@ -66,7 +74,7 @@ func run(t) -> void:
 	for monitor_name in [
 		"Albion/StreamChunkCPUus", "Albion/StreamChunkAttempts",
 		"Albion/StreamPressurePct", "Albion/StreamEffectiveSlots",
-		"Albion/StreamEffectiveCPUus",
+		"Albion/StreamEffectiveCPUus", "Albion/StreamEffectiveUnloads",
 	]:
 		t.check(source.contains(monitor_name), "%s is exported to profiler" % monitor_name)
 	t.check(source.contains('_ambient_monitors.append(monitor_name)'),

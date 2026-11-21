@@ -46,6 +46,20 @@ TEST_CASE("[WorldStreamer] Effective slots and time budgets never exceed configu
 	CHECK(WorldStreamer::calculate_adaptive_instantiation_slots(3, std::numeric_limits<double>::quiet_NaN()) == 3);
 }
 
+TEST_CASE("[WorldStreamer] Frame pressure scales unload cleanup without starvation") {
+	CHECK(WorldStreamer::calculate_adaptive_unload_slots(0, 1.0) == 0);
+	CHECK(WorldStreamer::calculate_adaptive_unload_slots(-10, 1.0) == 0);
+	CHECK(WorldStreamer::calculate_adaptive_unload_slots(12, 0.39) == 12);
+	CHECK(WorldStreamer::calculate_adaptive_unload_slots(12, 0.4) == 9);
+	CHECK(WorldStreamer::calculate_adaptive_unload_slots(12, 0.8) == 6);
+	CHECK(WorldStreamer::calculate_adaptive_unload_slots(48, 0.8) == 24);
+	CHECK(WorldStreamer::calculate_adaptive_unload_slots(1, 1.0) == 1);
+	CHECK(WorldStreamer::calculate_adaptive_unload_slots(2, 0.8) == 1);
+	CHECK(WorldStreamer::calculate_adaptive_unload_slots(200, 0.8) == 32);
+	CHECK(WorldStreamer::calculate_adaptive_unload_slots(12, std::numeric_limits<double>::quiet_NaN()) == 12);
+	CHECK(WorldStreamer::calculate_adaptive_unload_slots(12, std::numeric_limits<double>::infinity()) == 12);
+}
+
 TEST_CASE("[WorldStreamer] Adaptive backpressure is opt-in and reversible") {
 	WorldStreamer *streamer = memnew(WorldStreamer);
 	streamer->set_max_instantiations_per_frame(3);
