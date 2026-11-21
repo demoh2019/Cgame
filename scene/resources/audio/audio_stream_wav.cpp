@@ -518,11 +518,16 @@ bool AudioStreamWAV::is_monophonic() const {
 }
 
 void AudioStreamWAV::set_data(const Vector<uint8_t> &p_data) {
-	AudioServer::get_singleton()->lock();
+	const bool has_audio_server = AudioServer::get_singleton() != nullptr; // Absent in headless unit tests.
+	if (has_audio_server) {
+		AudioServer::get_singleton()->lock();
+	}
 
 	data = p_data;
 
-	AudioServer::get_singleton()->unlock();
+	if (has_audio_server) {
+		AudioServer::get_singleton()->unlock();
+	}
 }
 
 Vector<uint8_t> AudioStreamWAV::get_data() const {

@@ -47,9 +47,9 @@ AudioEffectConvolutionReverbInstance::~AudioEffectConvolutionReverbInstance() {
 		MutexLock lock(base->registry_mutex);
 		base->instances.erase(this);
 	}
-	delete pending.exchange(nullptr, std::memory_order_acq_rel);
+	memdelete(pending.exchange(nullptr, std::memory_order_acq_rel));
 	collect_retired();
-	delete active;
+	memdelete(active);
 	active = nullptr;
 }
 
@@ -57,7 +57,7 @@ void AudioEffectConvolutionReverbInstance::publish(CgameConvolutionEngine *p_eng
 	collect_retired();
 	CgameConvolutionEngine *old = pending.exchange(p_engine, std::memory_order_acq_rel);
 	// Anything handed back by the exchange was never seen by the audio thread.
-	delete old;
+	memdelete(old);
 }
 
 void AudioEffectConvolutionReverbInstance::collect_retired() {
@@ -68,7 +68,7 @@ void AudioEffectConvolutionReverbInstance::collect_retired() {
 		}
 		CgameConvolutionEngine *e = retired[tail % RETIRED_RING_SIZE].load(std::memory_order_relaxed);
 		retired_tail.store(tail + 1, std::memory_order_release);
-		delete e;
+		memdelete(e);
 	}
 }
 

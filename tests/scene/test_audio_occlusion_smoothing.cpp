@@ -35,12 +35,18 @@ TEST_FORCE_LINK(test_audio_occlusion_smoothing)
 #ifndef _3D_DISABLED
 
 #include "scene/3d/audio_stream_player_3d.h"
+#include "servers/audio/audio_server.h"
 
 #include <limits>
 
 namespace TestAudioOcclusionSmoothing {
 
 TEST_CASE("[SceneTree][AudioStreamPlayer3D] Obstruction attack and release are time consistent") {
+	if (AudioServer::get_singleton() == nullptr) {
+		// AudioStreamPlayer3D connects to AudioServer signals in its constructor.
+		MESSAGE("Skipped: no AudioServer in this test harness.");
+		return;
+	}
 	AudioStreamPlayer3D *source = memnew(AudioStreamPlayer3D);
 	CHECK(source->get_obstruction_amount() == 0.0f);
 

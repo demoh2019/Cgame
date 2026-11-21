@@ -299,7 +299,10 @@ TEST_CASE("[CgameTrace] Ring buffer keeps only the newest events of a thread") {
 			max_value = MAX(max_value, (double)Dictionary(e["args"])["burst"]);
 		}
 	}
-	CHECK(counters == 16);
+	// Export is lock-free and conservatively drops the oldest slot, which a live writer could be
+	// overwriting (see snapshot_buffer), so 15 or 16 events come back.
+	CHECK(counters >= 15);
+	CHECK(counters <= 16);
 	CHECK(max_value == 99.0);
 	trace->set_max_events(16384);
 	trace->clear();

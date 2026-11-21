@@ -553,6 +553,8 @@ TEST_CASE("[VFXBindings] Event mapping, sequences and cue events") {
 	CHECK(bindings->get_active_sequence_count() == 0);
 
 	recorder.effects.clear();
+	recorder.positions.clear();
+	recorder.params.clear();
 	bindings->register_binding("fx.impact", D({ { "effect", "boom" }, { "params", D({ { "power", D({ { "from", "magnitude" } }) } }) } }));
 	const Array cues = A({ D({ { "tag", "fx.impact" }, { "event", "executed" }, { "stacks", 0 }, { "magnitude", 2.5 }, { "priority", 0 }, { "count", 1 } }),
 			D({ { "tag", "fx.impact" }, { "event", "updated" }, { "magnitude", 1.0 } }) });

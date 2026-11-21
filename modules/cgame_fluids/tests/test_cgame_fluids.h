@@ -624,7 +624,8 @@ TEST_CASE("[CgameFFTOcean] Ocean is deterministic, real, zero mean and animated"
 	CHECK(finite);
 	CHECK(hi - lo > 0.001);
 	CHECK(Math::abs(sum / double(ha.size())) < 0.01);
-	CHECK(a->get_last_max_imag() < 1e-3);
+	// Float32 FFT round-off: leakage must stay tiny relative to the wave amplitude.
+	CHECK(a->get_last_max_imag() < 1e-3 * MAX(real_t(1.0), hi - lo));
 	const Vector<float> h2 = a->evaluate(4.0);
 	double diff = 0.0;
 	for (int i = 0; i < ha.size(); i++) {

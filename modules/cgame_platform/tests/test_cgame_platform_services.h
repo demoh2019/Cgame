@@ -110,7 +110,8 @@ TEST_CASE("[CgamePlatformServices] Desktop save atomicity and backup recovery") 
 
 TEST_CASE("[CgamePlatformServices] Save envelope detects damage") {
 	const PackedByteArray good = CgamePlatformServices::encode_save(save_dict(7));
-	CHECK(CgamePlatformServices::decode_save(good).get("v", 0) == Variant(7));
+	// JSON numbers decode as floats (same as the GDScript reference).
+	CHECK(int(CgamePlatformServices::decode_save(good).get("v", 0)) == 7);
 
 	// Flip one payload byte: the hash no longer matches.
 	PackedByteArray damaged = good;

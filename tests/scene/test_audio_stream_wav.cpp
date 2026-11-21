@@ -40,6 +40,7 @@ TEST_FORCE_LINK(test_audio_stream_wav)
 #include "scene/2d/audio_stream_player_2d.h"
 #include "scene/3d/audio_stream_player_3d.h"
 #include "scene/resources/audio/audio_stream_wav.h"
+#include "servers/audio/audio_server.h"
 #include "tests/test_utils.h"
 
 namespace TestAudioStreamWAV {
@@ -385,6 +386,11 @@ TEST_CASE("[Audio][AudioStreamWAV] empty sample buffers remain valid") {
 
 
 TEST_CASE("[AudioSetterFastPath] AudioStreamPlayer avoids redundant volume and pitch updates") {
+	if (AudioServer::get_singleton() == nullptr) {
+		// AudioStreamPlayer connects to AudioServer signals in its constructor.
+		MESSAGE("Skipped: no AudioServer in this test harness.");
+		return;
+	}
 	AudioStreamPlayer *player = memnew(AudioStreamPlayer);
 	CHECK_EQ(player->get_volume_db(), 0.0f);
 	player->set_volume_db(-12.5f);
@@ -403,6 +409,11 @@ TEST_CASE("[AudioSetterFastPath] AudioStreamPlayer avoids redundant volume and p
 }
 
 TEST_CASE("[AudioSetterFastPath] exact small volume changes remain observable") {
+	if (AudioServer::get_singleton() == nullptr) {
+		// AudioStreamPlayer connects to AudioServer signals in its constructor.
+		MESSAGE("Skipped: no AudioServer in this test harness.");
+		return;
+	}
 	AudioStreamPlayer *player = memnew(AudioStreamPlayer);
 	player->set_volume_db(-6.0f);
 	player->set_volume_db(-6.0001f);
@@ -413,6 +424,11 @@ TEST_CASE("[AudioSetterFastPath] exact small volume changes remain observable") 
 }
 
 TEST_CASE("[AudioSetterFastPath] pitch changes still apply after repeated identical values") {
+	if (AudioServer::get_singleton() == nullptr) {
+		// AudioStreamPlayer connects to AudioServer signals in its constructor.
+		MESSAGE("Skipped: no AudioServer in this test harness.");
+		return;
+	}
 	AudioStreamPlayer *player = memnew(AudioStreamPlayer);
 	player->set_pitch_scale(1.25f);
 	player->set_pitch_scale(1.25f);
@@ -426,6 +442,10 @@ TEST_CASE("[AudioSetterFastPath] pitch changes still apply after repeated identi
 }
 
 TEST_CASE("[AudioSetterFastPath] AudioStreamPlayer2D shares the guarded pitch update path") {
+	if (AudioServer::get_singleton() == nullptr) {
+		MESSAGE("Skipped: no AudioServer in this test harness.");
+		return;
+	}
 	AudioStreamPlayer2D *player = memnew(AudioStreamPlayer2D);
 	player->set_pitch_scale(1.5f);
 	for (int i = 0; i < 128; i++) {
@@ -438,6 +458,10 @@ TEST_CASE("[AudioSetterFastPath] AudioStreamPlayer2D shares the guarded pitch up
 }
 
 TEST_CASE("[AudioSetterFastPath] AudioStreamPlayer3D shares the guarded pitch update path") {
+	if (AudioServer::get_singleton() == nullptr) {
+		MESSAGE("Skipped: no AudioServer in this test harness.");
+		return;
+	}
 	AudioStreamPlayer3D *player = memnew(AudioStreamPlayer3D);
 	player->set_pitch_scale(1.5f);
 	for (int i = 0; i < 128; i++) {

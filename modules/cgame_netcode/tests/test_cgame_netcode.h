@@ -244,9 +244,9 @@ TEST_CASE("[CgameNetcode] Schema delta against baseline sends only changed field
 	CHECK(int(applied["hp"]) == 70);
 	CHECK(Vector3(applied["pos"]) == Vector3(baseline["pos"]));
 
-	// No change: mask + the always-sent bool only.
+	// No change: 7 mask bits + the always-sent bool = 8 bits = 1 byte.
 	PackedByteArray none = schema->serialize(baseline, baseline, true);
-	CHECK(none.size() == 2);
+	CHECK(none.size() == 1);
 }
 
 TEST_CASE("[CgameNetcode] Replication graph relevance") {

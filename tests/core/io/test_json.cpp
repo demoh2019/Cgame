@@ -740,9 +740,10 @@ TEST_CASE("[JSON] Packed arrays stream with the same formatting as an Array") {
 
 	const Array parsed = JSON::parse_string(JSON::stringify(Variant(int32_values)));
 	REQUIRE_EQ(parsed.size(), int32_values.size());
-	CHECK_EQ(parsed[0], Variant(0));
-	CHECK_EQ(parsed[1], Variant(-1));
-	CHECK_EQ(parsed[1023], Variant(-1023));
+	// JSON numbers parse as floats.
+	CHECK_EQ(parsed[0], Variant(0.0));
+	CHECK_EQ(parsed[1], Variant(-1.0));
+	CHECK_EQ(parsed[1023], Variant(-1023.0));
 }
 
 TEST_CASE("[JSON] Large packed primitive arrays do not lose elements or ordering") {
