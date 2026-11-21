@@ -63,13 +63,14 @@ bool FrameUpdateBudget::configure(const PackedFloat64Array &p_rates, const Packe
 		rates[i] = p_rates[i];
 		slots[i] = p_slots[i];
 	}
-	quality_changed = true;
+	profile_dirty = true;
 	return true;
 }
 
 void FrameUpdateBudget::begin_frame(double p_delta, int p_quality) {
 	const int next_quality = CLAMP(p_quality, 0, 3);
-	quality_changed = quality_changed || next_quality != quality;
+	quality_changed = profile_dirty || next_quality != quality;
+	profile_dirty = false;
 	quality = next_quality;
 	spent = 0;
 	last_updated = 0;
