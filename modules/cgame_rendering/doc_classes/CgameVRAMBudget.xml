@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameVRAMBudget" inherits="RefCounted" api_type="core" keywords="vram,memory,budget,pressure" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Watches video memory and reports sustained pressure against a per-quality budget.
+	</brief_description>
+	<description>
+		[CgameVRAMBudget] helps an automatic quality system step down before the driver starts paging or evicting memory, which causes multi-second hitches on 8 GB machines. Each quality level [code]0..3[/code] has a budget of 1536, 2560, 4096 and 6144 MiB.
+		Feed [method sample] once per frame with [method used_bytes]. It returns [code]true[/code] once usage has stayed above 92% of the current level's budget for 2 seconds and the level can still be lowered. Use [method upgrade_allowed] to block quality upgrades unless usage is below 75% of the next level's budget.
+	</description>
+	<methods>
+		<method name="budget_bytes" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="level" type="int" />
+			<description>
+				Returns the memory budget of [param level] (clamped to [code]0..3[/code]) in bytes.
+			</description>
+		</method>
+		<method name="get_pressure_seconds" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the number of seconds the memory has currently stayed above the pressure line.
+			</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>
+				Clears the accumulated pressure time.
+			</description>
+		</method>
+		<method name="sample">
+			<return type="bool" />
+			<param index="0" name="used" type="float" />
+			<param index="1" name="level" type="int" />
+			<param index="2" name="delta" type="float" />
+			<description>
+				Adds [param delta] seconds to the pressure timer when [param used] bytes exceed 92% of the budget of [param level], and resets it otherwise. Returns [code]true[/code] (and resets the timer) once pressure has lasted 2 seconds and [param level] is above [code]0[/code]. Non-finite or non-positive [param delta] values are ignored.
+			</description>
+		</method>
+		<method name="upgrade_allowed" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="used" type="float" />
+			<param index="1" name="level" type="int" />
+			<description>
+				Returns [code]true[/code] when [param used] bytes are at most 75% of the budget of [code]level + 1[/code].
+			</description>
+		</method>
+		<method name="used_bytes" qualifiers="static">
+			<return type="float" />
+			<description>
+				Returns the video memory currently used according to [method RenderingServer.get_rendering_info], in bytes.
+			</description>
+		</method>
+	</methods>
+</class>

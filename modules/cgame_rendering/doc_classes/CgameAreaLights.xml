@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameAreaLights" inherits="RefCounted" api_type="core" keywords="area light,pcss,soft shadow,light size" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Gives local lights a physical emitter size so their shadows soften with distance.
+	</brief_description>
+	<description>
+		[CgameAreaLights] manages the PCSS-style softness of torches, lanterns and campfires. Register an [OmniLight3D] or [SpotLight3D] with its emitter radius using [method register_light]; the radius is applied to [member Light3D.light_size] only on quality level [code]2[/code] and above because the blocker search costs extra texture taps. [method configure] sets the tier, switches the positional shadow filter quality and re-applies all registered lights.
+		Registered lights join the [code]aa_area_light[/code] group and keep their emitter radius in the [code]aa_area_radius[/code] meta entry.
+	</description>
+	<methods>
+		<method name="configure" qualifiers="static">
+			<return type="void" />
+			<param index="0" name="level" type="int" />
+			<param index="1" name="tree" type="SceneTree" />
+			<description>
+				Stores [param level] (clamped to [code]0..3[/code]), sets the positional soft shadow filter quality to [method filter_quality] and re-applies the size of every registered light in [param tree]. [param tree] may be [code]null[/code].
+			</description>
+		</method>
+		<method name="filter_quality" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="level" type="int" />
+			<description>
+				Returns the [enum RenderingServer.ShadowQuality] used for [param level]: hard, soft low, soft medium and soft high for levels [code]0[/code] to [code]3[/code].
+			</description>
+		</method>
+		<method name="get_group" qualifiers="static">
+			<return type="StringName" />
+			<description>
+				Returns the name of the node group that registered lights belong to.
+			</description>
+		</method>
+		<method name="get_level" qualifiers="static">
+			<return type="int" />
+			<description>
+				Returns the level stored by the last [method configure] call.
+			</description>
+		</method>
+		<method name="get_meta_radius" qualifiers="static">
+			<return type="StringName" />
+			<description>
+				Returns the meta key under which a registered light stores its emitter radius.
+			</description>
+		</method>
+		<method name="register_light" qualifiers="static">
+			<return type="void" />
+			<param index="0" name="light" type="Light3D" />
+			<param index="1" name="emitter_radius" type="float" />
+			<description>
+				Registers [param light] with an emitter radius in meters, adds it to the area-light group and applies the size for the current level. Only [OmniLight3D] and [SpotLight3D] receive a size.
+			</description>
+		</method>
+		<method name="size_for" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="level" type="int" />
+			<param index="1" name="emitter_radius" type="float" />
+			<description>
+				Returns the light size actually used: [param emitter_radius] (never negative) for levels [code]2[/code] and above, [code]0.0[/code] below.
+			</description>
+		</method>
+	</methods>
+</class>

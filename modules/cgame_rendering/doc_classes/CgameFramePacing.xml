@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameFramePacing" inherits="RefCounted" api_type="core" keywords="vsync,fps,frame pacing,refresh rate" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Chooses V-Sync mode and frame rate cap per quality level.
+	</brief_description>
+	<description>
+		[CgameFramePacing] favors steady frame delivery over a higher but jittery average. Quality levels map to V-Sync and [member Engine.max_fps] settings derived from the display refresh rate:
+		[b]0 (Performance):[/b] V-Sync on; capped to half the refresh rate on panels above 90 Hz, otherwise to the refresh rate.
+		[b]1 (Balanced):[/b] V-Sync on; capped to the refresh rate.
+		[b]2 (High):[/b] adaptive V-Sync; capped to the refresh rate.
+		[b]3 (Ultra):[/b] mailbox V-Sync (newest frame wins, no tearing, lowest latency) and no cap.
+		Refresh rates below 30 Hz are treated as unknown and replaced by 60 Hz. Levels are clamped to [code]0..3[/code].
+	</description>
+	<methods>
+		<method name="apply" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="level" type="int" />
+			<description>
+				Applies the settings for [param level] using the current display refresh rate: sets the V-Sync mode of the main window (skipped on the headless display server) and [member Engine.max_fps]. Returns the applied settings as in [method settings].
+			</description>
+		</method>
+		<method name="display_refresh" qualifiers="static">
+			<return type="float" />
+			<description>
+				Returns the refresh rate of the main window's screen in Hz, or [code]60.0[/code] when it is unknown.
+			</description>
+		</method>
+		<method name="settings" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="level" type="int" />
+			<param index="1" name="refresh_hz" type="float" />
+			<description>
+				Returns the settings for [param level] on a display refreshing at [param refresh_hz] as a dictionary with [code]vsync[/code] (a [enum DisplayServer.VSyncMode] value) and [code]max_fps[/code] (an integer, [code]0[/code] meaning unlimited).
+			</description>
+		</method>
+	</methods>
+</class>

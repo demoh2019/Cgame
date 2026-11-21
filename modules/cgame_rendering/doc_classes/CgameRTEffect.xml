@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameRTEffect" inherits="CompositorEffect" api_type="core" keywords="ray tracing,ray query,shadows,ambient occlusion,compositor" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Hardware ray-traced shadows and ambient occlusion as a native compositor effect.
+	</brief_description>
+	<description>
+		[CgameRTEffect] is the render-thread half of a hardware ray-traced shadow and ambient occlusion pipeline. It owns all GPU state: one bottom-level acceleration structure (BLAS) per mesh surface with budgeted builds and least-recently-used eviction, one top-level acceleration structure (TLAS) rebuilt whenever a new instance snapshot arrives, and three compute passes. The shadow pass shoots one jittered ray per pixel towards the sun disc, the AO pass shoots cosine-weighted hemisphere rays of limited length (both using [code]GL_EXT_ray_query[/code] against the TLAS, reading the scene depth buffer and normals reconstructed from it), and the denoise pass applies a depth-aware spatial filter and a reprojected, neighbourhood-clamped temporal filter before compositing onto the opaque color buffer. The effect runs at [constant CompositorEffect.EFFECT_CALLBACK_TYPE_POST_OPAQUE], so transparent surfaces are drawn after it. The GLSL of all passes is embedded in the engine.
+		[b]Fallback.[/b] The effect disables itself silently when the rendering device lacks [constant RenderingDevice.SUPPORTS_RAY_QUERY], a shader fails to compile or a resource cannot be created. [method has_failed] reports this; the raster path is never touched. It also does nothing on the Compatibility and Mobile renderers.
+		[b]Driver.[/b] The effect does not scan the scene. A driver node picks the nearest meshes, extracts triangles within a per-update budget using [method extract_triangles], [method pack_positions] and [method pack_indices], and hands the snapshot over with [method submit]. When the effect evicts a BLAS it reports the key through [method take_evicted_keys] and the driver must re-submit that geometry. The static helpers in this class implement that driver-side logic.
+		[codeblock]
+		var effect := CgameRTEffect.new()
+		effect.configure(CgameRTEffect.settings(3))
+		var compositor := Compositor.new()
+		compositor.compositor_effects = [effect]
+		camera.compositor = compositor
+		# Every few frames:
+		effect.submit(instances, new_geometry, sun_direction, sun_angular_radius)
+		[/codeblock]
+		[b]Note:[/b] Ray query is not available on Metal today, so on macOS this effect stays inactive.
+	</description>
+	<methods>
+		<method name="blas_key" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="mesh" type="Mesh" />
+			<param index="1" name="surface" type="int" />
+			<description>
+				Returns the stable key of one mesh surface, shared by all instances of it.
+			</description>
+		</method>
+		<method name="budget_take" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="pending" type="int" />
+			<param index="1" name="per_frame" type="int" />
+			<description>
+				Returns how many of [param pending] expensive operations may run this frame: the smaller of both values, never negative.
+			</description>
+		</method>
+		<method name="builds_this_frame" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="queued" type="int" />
+			<param index="1" name="budget" type="int" />
+			<description>
+				Returns how many BLAS builds to start this frame for [param queued] waiting builds and a per-frame [param budget].
+			</description>
+		</method>
+		<method name="configure">
+			<return type="void" />
+			<param index="0" name="config" type="Dictionary" />
+			<description>
+				Sets the effect configuration from a dictionary such as the one returned by [method settings]. Read keys: [code]shadows[/code], [code]ao[/code], [code]ao_rays[/code], [code]max_instances[/code], [code]blas_builds_per_frame[/code], [code]shadow_tmax[/code], [code]ao_tmax[/code], [code]shadow_strength[/code], [code]ao_strength[/code] and [code]temporal_blend[/code]. Safe to call from the main thread at any time.
+			</description>
+		</method>
+		<method name="eviction_candidates" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="last_used" type="Dictionary" />
+			<param index="1" name="frame" type="int" />
+			<param index="2" name="count" type="int" />
+			<param index="3" name="limit" type="int" />
+			<description>
+				Returns the BLAS keys to evict. [param last_used] maps keys to the frame they were last used. Keys are returned oldest first and only while [param count] exceeds [param limit]; only entries unused for at least [constant EVICT_AGE] frames at [param frame] qualify.
+			</description>
+		</method>
+		<method name="extract_triangles" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="mesh" type="Mesh" />
+			<param index="1" name="surface" type="int" />
+			<description>
+				Returns the triangle data of one surface as a dictionary with [code]ok[/code], [code]vertices[/code] ([PackedVector3Array]) and [code]indices[/code] ([PackedInt32Array]). Indices are generated as [code]0..n-1[/code] for non-indexed surfaces. [code]ok[/code] is [code]false[/code] for invalid surfaces, non-triangle primitives, fewer than three vertices, index counts that are not a multiple of three, and surfaces above [constant MAX_TRIANGLES_PER_SURFACE] triangles.
+			</description>
+		</method>
+		<method name="get_common_source" qualifiers="static">
+			<return type="String" />
+			<description>
+				Returns the GLSL helper block shared by all passes (parameter block, hash, depth reconstruction, normals and ray query helper).
+			</description>
+		</method>
+		<method name="get_pass_source" qualifiers="static">
+			<return type="String" />
+			<param index="0" name="pass_name" type="String" />
+			<description>
+				Returns the embedded GLSL source of a pass: [code]"rt_shadows"[/code], [code]"rt_ao"[/code] or [code]"rt_denoise"[/code]. Returns an empty string for other names. The source contains an include line that [method prepare_source] replaces with [method get_common_source].
+			</description>
+		</method>
+		<method name="group_count" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="pixels" type="int" />
+			<param index="1" name="group_size" type="int" default="8" />
+			<description>
+				Returns the number of compute workgroups needed to cover [param pixels] with groups of [param group_size].
+			</description>
+		</method>
+		<method name="has_failed" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] once the effect has disabled itself because ray queries are unsupported or a resource failed.
+			</description>
+		</method>
+		<method name="is_active" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when the last frame was traced and composited.
+			</description>
+		</method>
+		<method name="is_supported" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="rd" type="RenderingDevice" />
+			<description>
+				Returns [code]true[/code] when [param rd] can build acceleration structures and run ray queries ([constant RenderingDevice.SUPPORTS_RAY_QUERY]).
+			</description>
+		</method>
+		<method name="pack_indices" qualifiers="static">
+			<return type="PackedByteArray" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<description>
+				Returns the 32-bit index stream for a BLAS index buffer.
+			</description>
+		</method>
+		<method name="pack_params" qualifiers="static">
+			<return type="PackedByteArray" />
+			<param index="0" name="inv_proj" type="Projection" />
+			<param index="1" name="cam_to_world" type="Transform3D" />
+			<param index="2" name="prev_view_proj" type="Projection" />
+			<param index="3" name="sun_dir" type="Vector3" />
+			<param index="4" name="sun_radius" type="float" />
+			<param index="5" name="size" type="Vector2i" />
+			<param index="6" name="frame" type="int" />
+			<param index="7" name="ao_rays" type="int" />
+			<param index="8" name="config" type="Dictionary" />
+			<description>
+				Returns the [constant PARAMS_SIZE] byte uniform block used by the passes: three 4x4 matrices (inverse projection, camera to world, previous view-projection), the sun direction and radius, the frame size, frame index and AO ray count, the ray lengths and bias, and the shadow strength, AO strength and temporal blend taken from [param config].
+			</description>
+		</method>
+		<method name="pack_positions" qualifiers="static">
+			<return type="PackedByteArray" />
+			<param index="0" name="vertices" type="PackedVector3Array" />
+			<description>
+				Returns a tightly packed R32G32B32 float position stream for a BLAS vertex buffer.
+			</description>
+		</method>
+		<method name="prepare_source" qualifiers="static">
+			<return type="String" />
+			<param index="0" name="pass_source" type="String" />
+			<param index="1" name="common_source" type="String" />
+			<description>
+				Returns [param pass_source] with the [code]#[lb]compute[rb][/code] header removed and the common include line replaced by [param common_source].
+			</description>
+		</method>
+		<method name="select_nearest" qualifiers="static">
+			<return type="Dictionary[]" />
+			<param index="0" name="candidates" type="Dictionary[]" />
+			<param index="1" name="origin" type="Vector3" />
+			<param index="2" name="max_distance" type="float" />
+			<param index="3" name="max_count" type="int" />
+			<description>
+				Returns the nearest [param max_count] candidates within [param max_distance] of [param origin]. Candidates are dictionaries with [code]position[/code] ([Vector3]) and [code]radius[/code] ([float]) plus any extra keys. They are ordered by surface distance (center distance minus radius, never below zero); ties keep input order.
+			</description>
+		</method>
+		<method name="settings" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="level" type="int" />
+			<param index="1" name="rendering_method" type="String" default="&quot;forward_plus&quot;" />
+			<description>
+				Returns the configuration for a quality level between [code]0[/code] (off) and [code]3[/code]. Only the [code]forward_plus[/code] renderer enables the effect. The dictionary holds [code]enabled[/code], [code]shadows[/code], [code]ao[/code] (level 2 and above), [code]ao_rays[/code], [code]max_distance[/code], [code]max_instances[/code], [code]blas_builds_per_frame[/code], [code]extractions_per_update[/code], [code]update_interval[/code], [code]shadow_tmax[/code], [code]ao_tmax[/code], [code]shadow_strength[/code], [code]ao_strength[/code] and [code]temporal_blend[/code].
+			</description>
+		</method>
+		<method name="shader_path" qualifiers="static">
+			<return type="String" />
+			<param index="0" name="pass_name" type="String" />
+			<description>
+				Returns the project-relative path [code]res://shaders/compute/&lt;pass_name&gt;.glsl[/code] used by the GDScript implementation of the same effect. The native effect reads the embedded sources instead and never loads this file.
+			</description>
+		</method>
+		<method name="submit">
+			<return type="void" />
+			<param index="0" name="instances" type="Array" />
+			<param index="1" name="geometry" type="Dictionary" />
+			<param index="2" name="sun_dir" type="Vector3" />
+			<param index="3" name="sun_radius" type="float" />
+			<description>
+				Hands a snapshot to the render thread. [param instances] is an array of dictionaries with [code]key[/code] (see [method blas_key]) and [code]transform[/code] ([Transform3D]). [param geometry] maps keys of meshes the render thread has not seen yet to dictionaries with [code]vertices[/code] and [code]indices[/code] ([PackedByteArray]), [code]vertex_count[/code] and [code]index_count[/code]. [param sun_dir] points towards the sun; [param sun_radius] is the sun's angular radius in radians.
+			</description>
+		</method>
+		<method name="take_evicted_keys">
+			<return type="Array" />
+			<description>
+				Returns and clears the BLAS keys the render thread dropped. The caller must submit their geometry again before they can be traced.
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="PARAMS_SIZE" value="256">
+			Size in bytes of the parameter uniform block.
+		</constant>
+		<constant name="MAX_BLAS" value="512">
+			Number of acceleration structures kept before eviction starts.
+		</constant>
+		<constant name="EVICT_AGE" value="120">
+			Frames without use before a BLAS may be evicted.
+		</constant>
+		<constant name="MAX_TRIANGLES_PER_SURFACE" value="120000">
+			Surfaces with more triangles are skipped as too costly to extract and build.
+		</constant>
+	</constants>
+</class>

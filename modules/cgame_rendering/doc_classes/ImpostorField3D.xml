@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="ImpostorField3D" inherits="MultiMeshInstance3D" api_type="core" keywords="impostor,billboard,lod,far,multimesh" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Far-distance impostor LOD ring drawn as one MultiMesh.
+	</brief_description>
+	<description>
+		[ImpostorField3D] continues a set of mesh placements past the draw distance of the real meshes. Each placement becomes a camera-facing quad textured from a baked [CgameImpostorBaker] atlas, so distant hills keep their bushes and trees instead of popping to bare ground. All placements are drawn with a single [MultiMesh] and one draw call.
+		The field is visible between [member mesh_range] and [code]mesh_range * range factor[/code] (see [method configure]), with distance fade controlled by [member fade_margin]. It stays hidden until its atlas has been baked; baking starts as soon as the field is inside the scene tree.
+		Performance quality ([code]level == 0[/code]) uses a range factor of [code]0[/code] and draws no impostors: [method rebuild] and [method add] then do nothing.
+		[codeblock]
+		ImpostorField3D.configure(2)
+		var field := ImpostorField3D.add(chunk_node, bush_mesh, bush_transforms, 60.0)
+		[/codeblock]
+	</description>
+	<methods>
+		<method name="add" qualifiers="static">
+			<return type="ImpostorField3D" />
+			<param index="0" name="parent" type="Node3D" />
+			<param index="1" name="mesh" type="Mesh" />
+			<param index="2" name="transforms" type="Transform3D[]" />
+			<param index="3" name="mesh_range" type="float" />
+			<param index="4" name="fade_margin" type="float" default="8.0" />
+			<description>
+				Creates a field for [param mesh] at the given [param transforms], configures its ranges, builds it and adds it to [param parent]. Returns [code]null[/code] when nothing would be drawn: no parent, mesh or transforms, or a range factor of [code]1.0[/code] or less.
+			</description>
+		</method>
+		<method name="configure" qualifiers="static">
+			<return type="void" />
+			<param index="0" name="level" type="int" />
+			<description>
+				Sets the global range factor from a quality level between [code]0[/code] and [code]3[/code]: [code]0.0[/code], [code]1.8[/code], [code]2.2[/code] and [code]2.8[/code]. Applies to fields built afterwards.
+			</description>
+		</method>
+		<method name="end_distance" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="mesh_range" type="float" />
+			<description>
+				Returns the distance at which impostors fade out for a mesh that is visible up to [param mesh_range], using the current range factor.
+			</description>
+		</method>
+		<method name="get_range_factor" qualifiers="static">
+			<return type="float" />
+			<description>
+				Returns the current impostor range factor relative to the mesh range.
+			</description>
+		</method>
+		<method name="is_baked" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] once the atlas has been baked and the field is visible.
+			</description>
+		</method>
+		<method name="rebuild">
+			<return type="bool" />
+			<description>
+				Builds the [MultiMesh], custom bounds, visibility ranges and shadow settings from [member source_mesh], [member placements], [member mesh_range] and [member fade_margin]. The field is hidden until baked. Returns [code]false[/code] and clears the multimesh when nothing would be drawn.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="fade_margin" type="float" setter="set_fade_margin" getter="get_fade_margin" default="8.0">
+			Width of the distance fade at the start of the visibility range. The fade at the end is twice as wide.
+		</member>
+		<member name="mesh_range" type="float" setter="set_mesh_range" getter="get_mesh_range" default="50.0">
+			Distance up to which the real mesh is drawn. Impostors start here.
+		</member>
+		<member name="placements" type="Transform3D[]" setter="set_placements" getter="get_placements" default="[]">
+			World placements of every instance. Call [method rebuild] after changing them.
+		</member>
+		<member name="source_mesh" type="Mesh" setter="set_source_mesh" getter="get_source_mesh">
+			The mesh that is baked into impostors.
+		</member>
+	</members>
+</class>

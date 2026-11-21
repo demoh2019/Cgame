@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameHDROutput" inherits="RefCounted" api_type="core" keywords="hdr,hdr10,edr,display" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Enables HDR display output by quality level.
+	</brief_description>
+	<description>
+		[CgameHDROutput] decides whether the main window should output HDR10 / EDR and drives the [DisplayServer] HDR API accordingly. HDR is wanted only when the display supports it, the renderer is not [code]gl_compatibility[/code], and the quality level is [code]2[/code] (High) or [code]3[/code] (Ultra). SDR screens and lower presets keep the 8-bit path.
+		When HDR is enabled the reference (paper white) luminance is set to 200 nits so UI and diffuse surfaces stay comfortable while highlights such as sun, fire and lightning use the headroom.
+	</description>
+	<methods>
+		<method name="apply" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="level" type="int" />
+			<param index="1" name="rendering_method" type="String" />
+			<description>
+				Requests HDR output on the main window when [method wanted] allows it for the current display, and disables it otherwise. Returns [code]true[/code] when HDR output was requested.
+			</description>
+		</method>
+		<method name="supported" qualifiers="static">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when the main window's display reports HDR support. Always [code]false[/code] on the headless display server.
+			</description>
+		</method>
+		<method name="wanted" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="level" type="int" />
+			<param index="1" name="rendering_method" type="String" />
+			<param index="2" name="supported" type="bool" />
+			<description>
+				Returns [code]true[/code] when HDR output should be used: [param supported] is [code]true[/code], [param rendering_method] is not [code]gl_compatibility[/code] and [param level] (clamped to [code]0..3[/code]) is at least [code]2[/code].
+			</description>
+		</method>
+	</methods>
+</class>

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameInstanceCulling" inherits="RefCounted" api_type="core" keywords="culling,frustum,occlusion,compute,hi-z" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Per-instance frustum and Hi-Z occlusion culling on the GPU with an exact CPU fallback.
+	</brief_description>
+	<description>
+		[CgameInstanceCulling] tests many axis-aligned boxes (or spheres treated as cubes) against frustum planes and an optional single-level Hi-Z depth map, and returns the indices of the visible ones in ascending order. It runs a compute shader on a local [RenderingDevice] and falls back to an exact CPU implementation of the same kernel when no local device exists (headless or dummy renderer) or [member force_cpu] is set. [method get_last_path] reports which path produced the last result.
+		[b]The GPU path is unverified until it has been run on real hardware.[/b] The CPU path is covered by unit tests and is the reference.
+		[b]Conventions.[/b] Frustum planes are outward-facing, as returned by [method Camera3D.get_frustum]; a box is outside when some plane satisfies [code]dot(n, center) - d - dot(abs(n), half_extents) &gt; 0[/code]. The Hi-Z dictionary has the keys [code]view_proj[/code] ([Projection]), [code]width[/code] and [code]height[/code] (texels), [code]depth[/code] ([PackedFloat32Array], one maximum occluder depth per texel, row 0 at normalized device [code]y = -1[/code]) and an optional [code]bias[/code]. Depth values use [code]ndc.z * 0.5 + 0.5[/code]. An instance is occluded when the depth of its nearest corner exceeds the farthest depth of every texel its screen rectangle covers. Boxes that cross the near plane or lie fully off screen are never occlusion-culled.
+		The device buffer starts with an indirect-dispatch friendly header [code]{count, 1, 1, 0}[/code] followed by the compacted indices. GPU results are sorted after read-back.
+	</description>
+	<methods>
+		<method name="cull">
+			<return type="PackedInt32Array" />
+			<param index="0" name="aabbs" type="Array" />
+			<param index="1" name="frustum_planes" type="Array" />
+			<param index="2" name="hiz" type="Dictionary" default="{}" />
+			<description>
+				Culls an array of [AABB] against an array of [Plane] and an optional Hi-Z map. Returns the visible indices.
+			</description>
+		</method>
+		<method name="cull_cpu">
+			<return type="PackedInt32Array" />
+			<param index="0" name="centers" type="PackedVector3Array" />
+			<param index="1" name="halves" type="PackedVector3Array" />
+			<param index="2" name="frustum_planes" type="Array" />
+			<param index="3" name="hiz" type="Dictionary" default="{}" />
+			<description>
+				Exact reference implementation of the compute kernel. Never touches the GPU.
+			</description>
+		</method>
+		<method name="cull_packed">
+			<return type="PackedInt32Array" />
+			<param index="0" name="centers" type="PackedVector3Array" />
+			<param index="1" name="halves" type="PackedVector3Array" />
+			<param index="2" name="frustum_planes" type="Array" />
+			<param index="3" name="hiz" type="Dictionary" default="{}" />
+			<description>
+				Core entry point taking parallel arrays of box centers and half-extents. Uses the GPU when available, otherwise [method cull_cpu].
+			</description>
+		</method>
+		<method name="cull_spheres">
+			<return type="PackedInt32Array" />
+			<param index="0" name="centers" type="PackedVector3Array" />
+			<param index="1" name="radii" type="PackedFloat32Array" />
+			<param index="2" name="frustum_planes" type="Array" />
+			<param index="3" name="hiz" type="Dictionary" default="{}" />
+			<description>
+				Culls bounding spheres, treating each as a cube whose half-extent is the radius. This is conservative. Missing radii count as [code]0.0[/code].
+			</description>
+		</method>
+		<method name="device_available">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when a local [RenderingDevice] could be created and [member force_cpu] is not set.
+			</description>
+		</method>
+		<method name="generate_compute_source" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns the embedded compute shader source, starting with [code]#[lb]compute[rb][/code]. Same as [method get_compute_source].
+			</description>
+		</method>
+		<method name="get_compute_source" qualifiers="static">
+			<return type="String" />
+			<description>
+				Returns the embedded compute shader source, starting with [code]#[lb]compute[rb][/code].
+			</description>
+		</method>
+		<method name="get_last_path" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns [code]"gpu"[/code] or [code]"cpu"[/code] depending on which path computed the last result, or [code]"none"[/code] before the first call.
+			</description>
+		</method>
+		<method name="shutdown">
+			<return type="void" />
+			<description>
+				Frees the compute pipeline and the local rendering device. They are created again on the next culling call.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="force_cpu" type="bool" setter="set_force_cpu" getter="get_force_cpu" default="false">
+			If [code]true[/code], the CPU path is always used and no local rendering device is created.
+		</member>
+	</members>
+	<constants>
+		<constant name="LOCAL_SIZE" value="64">
+			Workgroup size of the compute shader.
+		</constant>
+		<constant name="HEADER_BYTES" value="16">
+			Size in bytes of the header at the start of the device output buffer.
+		</constant>
+	</constants>
+</class>

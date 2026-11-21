@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameFoveatedShading" inherits="RefCounted" api_type="core" keywords="vrs,foveated,variable rate shading" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Builds and applies Variable Rate Shading density maps for a centered subject.
+	</brief_description>
+	<description>
+		[CgameFoveatedShading] implements foveated rendering for games whose camera keeps the player near the screen center (top-down and third-person views). It builds an elliptical shading-rate map: full rate in the middle, a 2x2 ring around it and 4x4 shading in the corners, then assigns it to a [Viewport] using [constant Viewport.VRS_TEXTURE].
+		Quality levels [code]0[/code] (Performance) and [code]1[/code] (Balanced) enable foveation on the [code]forward_plus[/code] and [code]mobile[/code] renderers. Levels [code]2[/code] and [code]3[/code], and the [code]gl_compatibility[/code] renderer, always shade at full rate. GPUs without VRS support ignore the texture.
+		The rate map uses the Godot VRS density encoding: red is the horizontal and green the vertical rate, where [code]0[/code] is 1x, [code]85[/code] is 2x and [code]170[/code] is 4x. The generated texture is cached and reused while the viewport size and profile stay the same.
+	</description>
+	<methods>
+		<method name="apply" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="viewport" type="Viewport" />
+			<param index="1" name="level" type="int" />
+			<param index="2" name="rendering_method" type="String" />
+			<description>
+				Applies the profile for [param level] and [param rendering_method] to [param viewport]. Returns [code]true[/code] when VRS was enabled. When the profile is disabled, VRS is turned off, the texture is cleared and [code]false[/code] is returned. The map is sized in 16 pixel tiles of the viewport's visible rectangle.
+			</description>
+		</method>
+		<method name="build_map" qualifiers="static">
+			<return type="Image" />
+			<param index="0" name="size" type="Vector2i" />
+			<param index="1" name="inner" type="float" />
+			<param index="2" name="outer" type="float" />
+			<description>
+				Builds an [constant Image.FORMAT_RGB8] rate map of [param size] texels (clamped to at least 1x1). [param inner] and [param outer] are radii in normalized screen space where [code]1.0[/code] reaches the middle of an edge. Inside [param inner] the rate is 1x1; between the radii it is 2x2 near the top and bottom and 2x1 near the sides; outside [param outer] it is 4x4.
+			</description>
+		</method>
+		<method name="settings" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="level" type="int" />
+			<param index="1" name="rendering_method" type="String" />
+			<description>
+				Returns the profile for a quality level as a dictionary with [code]enabled[/code] and, when enabled, [code]inner[/code] and [code]outer[/code] radii.
+			</description>
+		</method>
+	</methods>
+</class>

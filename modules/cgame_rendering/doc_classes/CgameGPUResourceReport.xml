@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameGPUResourceReport" inherits="RefCounted" api_type="core" keywords="vram,gpu,memory,profiler,diagnostics" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Estimates GPU memory use of a scene and records a memory timeline.
+	</brief_description>
+	<description>
+		[CgameGPUResourceReport] walks a node tree with [method collect] and estimates the video memory held by meshes, materials, textures and shaders. It also adds the [RenderingServer] memory and draw-call totals, the visible and shadow render-pass statistics of the root's viewport, and keeps a ring-buffer timeline of memory samples.
+		All byte figures are [b]estimates[/b]: driver padding, tiling and compression on upload are not visible from the engine API. [ImageTexture] formats are exact (without mipmaps, which cannot be queried); other textures are assumed to be [constant Image.FORMAT_RGBA8] with mipmaps unless [member probe_compressed] is enabled, which reads each texture back for its real format at a high cost.
+		Walked node types: [MeshInstance3D], [MultiMeshInstance3D], [GPUParticles3D], [Decal] and [Sprite3D]. Entries are keyed by object ID, so shared resources are counted once.
+		[codeblock]
+		var report := CgameGPUResourceReport.new()
+		report.collect(get_tree().current_scene)
+		for texture in report.top(3, "textures"):
+		    print(texture.name, " ", CgameGPUResourceReport.format_bytes(texture.bytes))
+		print(report.to_markdown())
+		[/codeblock]
+	</description>
+	<methods>
+		<method name="collect">
+			<return type="Dictionary" />
+			<param index="0" name="root" type="Node" />
+			<description>
+				Clears the previous results, walks [param root] and returns [method snapshot]. A [code]null[/code] root yields empty results.
+			</description>
+		</method>
+		<method name="format_bpp" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="format" type="int" />
+			<description>
+				Returns the bits per pixel of an [enum Image.Format], or [code]-1[/code] when unknown.
+			</description>
+		</method>
+		<method name="format_bytes" qualifiers="static">
+			<return type="String" />
+			<param index="0" name="bytes" type="int" />
+			<description>
+				Formats [param bytes] as [code]"N B"[/code], [code]"N.N KiB"[/code] or [code]"N.NN MiB"[/code].
+			</description>
+		</method>
+		<method name="is_block_compressed" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="format" type="int" />
+			<description>
+				Returns [code]true[/code] for block-compressed image formats (DXT/BC, ETC, ASTC), which round texture dimensions up to whole 4x4 blocks in the estimate.
+			</description>
+		</method>
+		<method name="rendering_totals" qualifiers="static">
+			<return type="Dictionary" />
+			<description>
+				Returns the current [RenderingServer] totals as a dictionary with the integer keys [code]video_mem[/code], [code]texture_mem[/code], [code]buffer_mem[/code], [code]draw_calls[/code], [code]objects[/code] and [code]primitives[/code].
+			</description>
+		</method>
+		<method name="snapshot" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the results of the last [method collect] as a dictionary with the arrays [code]meshes[/code], [code]materials[/code], [code]textures[/code] and [code]shaders[/code] (one dictionary per resource), [code]nodes[/code] (counts per node type), [code]passes[/code], [code]rendering[/code] (see [method rendering_totals]) and [code]totals[/code] with [code]mesh_bytes[/code], [code]texture_bytes[/code], [code]instance_bytes[/code], [code]estimated_bytes[/code], [code]vertices[/code], [code]indices[/code] and the resource counts.
+			</description>
+		</method>
+		<method name="texture_bytes" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="width" type="int" />
+			<param index="1" name="height" type="int" />
+			<param index="2" name="format" type="int" />
+			<param index="3" name="mipmaps" type="bool" />
+			<param index="4" name="layers" type="int" default="1" />
+			<description>
+				Estimates the bytes of a 2D texture of [param width] by [param height] pixels, optionally including the full mip chain, multiplied by [param layers]. Unknown formats are assumed to use 32 bits per pixel. Returns [code]0[/code] for non-positive dimensions.
+			</description>
+		</method>
+		<method name="timeline" qualifiers="const">
+			<return type="Dictionary[]" />
+			<description>
+				Returns the recorded timeline samples, oldest first.
+			</description>
+		</method>
+		<method name="timeline_peak" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="key" type="String" />
+			<description>
+				Returns the largest value of [param key] (for example [code]video_mem[/code] or [code]estimated_bytes[/code]) among the timeline samples.
+			</description>
+		</method>
+		<method name="timeline_push">
+			<return type="Dictionary" />
+			<description>
+				Records one sample with the current [RenderingServer] totals and the estimate of the last [method collect], and returns it. Once [member timeline_capacity] samples exist, the oldest one is overwritten.
+			</description>
+		</method>
+		<method name="to_markdown" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="top_n" type="int" default="5" />
+			<description>
+				Returns a Markdown report with totals, [RenderingServer] figures, render passes, the [param top_n] largest meshes, materials, textures and shaders, and a timeline summary.
+			</description>
+		</method>
+		<method name="top" qualifiers="const">
+			<return type="Dictionary[]" />
+			<param index="0" name="n" type="int" />
+			<param index="1" name="kind" type="String" />
+			<description>
+				Returns up to [param n] entries of [param kind] ([code]"meshes"[/code], [code]"materials"[/code], [code]"textures"[/code] or [code]"shaders"[/code]) sorted by estimated bytes, largest first. Ties are ordered by name. A negative [param n] returns all entries.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="probe_compressed" type="bool" setter="set_probe_compressed" getter="get_probe_compressed" default="false">
+			If [code]true[/code], non-[ImageTexture] textures are read back through [method Texture2D.get_image] to learn their exact format and mipmap state. This is slow.
+		</member>
+		<member name="timeline_capacity" type="int" setter="set_timeline_capacity" getter="get_timeline_capacity" default="256">
+			Maximum number of timeline samples kept.
+		</member>
+	</members>
+	<constants>
+		<constant name="TIMELINE_CAPACITY" value="256">
+			Default value of [member timeline_capacity].
+		</constant>
+	</constants>
+</class>

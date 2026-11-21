@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameImpostorBaker" inherits="Node" api_type="core" keywords="impostor,billboard,lod,bake" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Bakes meshes into yaw-frame impostor atlases at runtime and caches them.
+	</brief_description>
+	<description>
+		[CgameImpostorBaker] renders a [Mesh] once from [constant FRAMES] yaw angles into a horizontal atlas texture of [constant FRAMES] * [constant RESOLUTION] by [constant RESOLUTION] pixels. Rendering happens inside an isolated [SubViewport] with its own 3D world, an orthogonal camera and flat white ambient light, so scene lights shade the impostor at runtime instead of being baked in twice. The finished atlas is cached per mesh and shared by every [ImpostorField3D] that draws the same mesh.
+		Bakes are queued and processed one mesh at a time by a helper node that [method request] adds to the scene tree root. Each yaw frame waits a few process frames before it is read back. Headless servers never bake: [method can_bake] returns [code]false[/code] and requests stay pending forever.
+		The impostor shader used by [method material_for] is embedded in the engine and shared by all materials; see [method get_impostor_shader].
+		[codeblock]
+		var mesh: Mesh = preload("res://tree.tres")
+		CgameImpostorBaker.request(mesh, get_tree(), func(atlas: Texture2D): print("baked ", atlas.get_size()))
+		[/codeblock]
+	</description>
+	<methods>
+		<method name="can_bake" qualifiers="static">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when a display server that can render is running. Returns [code]false[/code] for the headless display server.
+			</description>
+		</method>
+		<method name="clear_cache" qualifiers="static">
+			<return type="void" />
+			<description>
+				Drops every cached atlas and all pending bake callbacks. Atlases already handed out stay alive while referenced.
+			</description>
+		</method>
+		<method name="frame_size" qualifiers="static">
+			<return type="Vector2" />
+			<param index="0" name="mesh" type="Mesh" />
+			<description>
+				Returns the bake extent of [param mesh]. [code]x[/code] is the side length of the square frame (the larger of the horizontal diagonal and the height of the mesh bounds, plus 5% margin and never below [code]0.0525[/code]), [code]y[/code] is the vertical center of the mesh bounds. Returns [code]Vector2(1.0, 0.5)[/code] for a [code]null[/code] mesh. The same value is used for baking and for sizing the billboard quad.
+			</description>
+		</method>
+		<method name="get_cache_size" qualifiers="static">
+			<return type="int" />
+			<description>
+				Returns the number of baked atlases currently cached.
+			</description>
+		</method>
+		<method name="get_cached" qualifiers="static">
+			<return type="Texture2D" />
+			<param index="0" name="mesh" type="Mesh" />
+			<description>
+				Returns the cached atlas for [param mesh], or [code]null[/code] when it has not been baked yet.
+			</description>
+		</method>
+		<method name="get_impostor_shader" qualifiers="static">
+			<return type="Shader" />
+			<description>
+				Returns the built-in spatial shader used by impostor materials. It draws a camera-facing, vertically aligned quad and picks the baked yaw frame that matches the view direction in the instance's own space. Uniforms: [code]atlas[/code], [code]frames[/code], [code]quad_size[/code] and [code]alpha_cut[/code].
+			</description>
+		</method>
+		<method name="material_for" qualifiers="static">
+			<return type="ShaderMaterial" />
+			<param index="0" name="mesh" type="Mesh" />
+			<param index="1" name="atlas" type="Texture2D" />
+			<description>
+				Creates a [ShaderMaterial] using [method get_impostor_shader] with [param atlas], the frame count and the [method frame_size] of [param mesh].
+			</description>
+		</method>
+		<method name="request" qualifiers="static">
+			<return type="void" />
+			<param index="0" name="mesh" type="Mesh" />
+			<param index="1" name="tree" type="SceneTree" />
+			<param index="2" name="done" type="Callable" />
+			<description>
+				Calls [param done] with the atlas [Texture2D] once [param mesh] is baked. If the atlas is cached the callable runs immediately. Otherwise the mesh is queued; several requests for the same mesh share one bake. Nothing happens when [param mesh] or [param tree] is [code]null[/code], or when [method can_bake] is [code]false[/code].
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="FRAMES" value="8">
+			Number of yaw angles baked into one atlas.
+		</constant>
+		<constant name="RESOLUTION" value="128">
+			Pixel size of one square frame.
+		</constant>
+	</constants>
+</class>

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameShaderWarmup" inherits="Node3D" api_type="core" keywords="shader,pso,precompile,warmup,pipeline" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Precompiles spatial shader pipelines by drawing each shader once off-screen.
+	</brief_description>
+	<description>
+		[CgameShaderWarmup] is a short-lived rig attached to a [Camera3D]. For every spatial shader it creates a sub-pixel quad in front of the camera that casts shadows, so the driver compiles the color and shadow pipelines during loading rather than mid-fight. The rig frees itself after [constant FRAMES_VISIBLE] process frames.
+		Shaders are discovered by scanning directories for [code].gdshader[/code] files (default [code]res://assets/shaders[/code] and [code]res://shaders[/code]); only [constant Shader.MODE_SPATIAL] shaders are used. Nothing is drawn on the headless display server.
+		Use [method get_pipeline_compile_counters] before and after the warm-up to see how many pipelines were compiled.
+		[codeblock]
+		var before := CgameShaderWarmup.get_pipeline_compile_total()
+		CgameShaderWarmup.start($Camera3D)
+		await get_tree().create_timer(0.2).timeout
+		print("compiled ", CgameShaderWarmup.get_pipeline_compile_total() - before)
+		[/codeblock]
+	</description>
+	<methods>
+		<method name="default_shader_dirs" qualifiers="static">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the directories scanned when no directories are given.
+			</description>
+		</method>
+		<method name="get_frames_left" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of process frames before the rig frees itself.
+			</description>
+		</method>
+		<method name="get_pipeline_compile_counters" qualifiers="static">
+			<return type="Dictionary" />
+			<description>
+				Returns the pipeline compilation counters reported by the [RenderingServer] as a dictionary with the integer keys [code]canvas[/code], [code]mesh[/code], [code]surface[/code], [code]draw[/code], [code]specialization[/code] and [code]total[/code] (the sum of the others).
+			</description>
+		</method>
+		<method name="get_pipeline_compile_total" qualifiers="static">
+			<return type="int" />
+			<description>
+				Returns the [code]total[/code] entry of [method get_pipeline_compile_counters].
+			</description>
+		</method>
+		<method name="shader_paths" qualifiers="static">
+			<return type="PackedStringArray" />
+			<param index="0" name="dirs" type="PackedStringArray" default="PackedStringArray()" />
+			<description>
+				Returns the sorted resource paths of all [code].gdshader[/code] files in [param dirs] (or [method default_shader_dirs] when empty). A [code].remap[/code] suffix of exported resources is ignored. Missing directories are skipped.
+			</description>
+		</method>
+		<method name="spatial_shaders" qualifiers="static">
+			<return type="Shader[]" />
+			<param index="0" name="dirs" type="PackedStringArray" default="PackedStringArray()" />
+			<description>
+				Loads the shaders from [method shader_paths] and returns the spatial ones.
+			</description>
+		</method>
+		<method name="start" qualifiers="static">
+			<return type="CgameShaderWarmup" />
+			<param index="0" name="camera" type="Camera3D" />
+			<param index="1" name="dirs" type="PackedStringArray" default="PackedStringArray()" />
+			<description>
+				Attaches a warm-up rig for every spatial shader found in [param dirs] to [param camera] and returns it. Returns [code]null[/code] when [param camera] is [code]null[/code] or the display server is headless.
+			</description>
+		</method>
+		<method name="start_with_shaders" qualifiers="static">
+			<return type="CgameShaderWarmup" />
+			<param index="0" name="camera" type="Camera3D" />
+			<param index="1" name="shaders" type="Shader[]" />
+			<description>
+				Same as [method start] for an explicit shader list. Non-spatial shaders are skipped. Works on every display server.
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="FRAMES_VISIBLE" value="3">
+			Number of process frames the rig stays in the scene.
+		</constant>
+	</constants>
+</class>
