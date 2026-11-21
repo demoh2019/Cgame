@@ -133,9 +133,13 @@ Node *SceneNodePool::_new_instance() {
 	}
 	Node *instance = template_scene->instantiate();
 	if (instance != nullptr) {
+		const ObjectID id = instance->get_instance_id();
 		created_total++;
 		if (instance->has_method(SNAME("on_pool_created"))) {
 			instance->call(SNAME("on_pool_created"));
+		}
+		if (ObjectDB::get_instance(id) != instance || instance->is_queued_for_deletion()) {
+			return nullptr;
 		}
 	}
 	return instance;
