@@ -63,6 +63,7 @@ var _native_senses: Variant = null # Lazy per-infected memory; optional on stock
 var _ai_profiler: Variant = null # Opt-in per-infected target selection profiling.
 var _ai_trace: Variant = null # Opt-in server-only native target decision trace.
 var _ai_lod_staggered: bool = false # Phase only the first distant passive scan.
+var _ai_lod_previous_interval: float = 0.0 # Per-infected nominal passive tier; engine stays stateless.
 static var _ai_lod_checked: bool = false
 static var _ai_lod_scheduler: Variant = null
 var _native_howl_cooldowns: Variant = null # Lazily allocated native event gate for pack howls.
@@ -330,13 +331,26 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 				# exact legacy 0.25s scan, including audible gunshots.
 				var near_range: float = float(data["lose"])
 				var far_range: float = near_range + 24.0
+				# Keep the existing one-time deterministic startup phase; store
+				# the nominal interval, not that initial stagger delay.
+				var nominal: float = float(lod.get_interval(
+					nearest_viewer, near_range, far_range))
 				if not _ai_lod_staggered and nearest_viewer > near_range:
 					think_timer = float(lod.get_staggered_interval(
 						id, nearest_viewer, near_range, far_range))
 					_ai_lod_staggered = true
 				else:
-					think_timer = float(lod.get_interval(
-						nearest_viewer, near_range, far_range))
+					# Passive NPC LOD stabilizes across jittery player distance.
+					# Older Cgame binaries retain the existing distance-only policy.
+					if lod.has_method("get_hysteretic_interval"):
+						nominal = float(lod.get_hysteretic_interval(
+							nearest_viewer, near_range, far_range,
+							_ai_lod_previous_interval, 4.0))
+					think_timer = nominal
+				_ai_lod_previous_interval = nominal
+		elif target_id != -1:
+			# A later passive scan cannot inherit stale LOD during combat.
+			_ai_lod_previous_interval = 0.0
 		if _ai_profiler != null and _ai_profiler.is_enabled():
 			_ai_profiler.end_sample(&"target_selection")
 

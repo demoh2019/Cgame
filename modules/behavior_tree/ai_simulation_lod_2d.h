@@ -58,6 +58,12 @@ public:
 	// there are no eligible viewers; invalid inputs fail closed to near rate.
 	real_t get_interval(real_t p_distance, real_t p_near_distance, real_t p_far_distance, bool p_urgent = false) const;
 
+	// Stable simulation LOD for moving viewers. The caller stores the last
+	// chosen nominal interval; the engine itself stays stateless and sharable.
+	// Entering the near range immediately restores full responsiveness.
+	real_t get_hysteretic_interval(real_t p_distance, real_t p_near_distance, real_t p_far_distance,
+			real_t p_previous_interval, real_t p_hysteresis, bool p_urgent = false) const;
+
 	// One-time deterministic startup phase for distant inactive agents, spread
 	// over 16 bins based on a stable non-negative ID. Do not call every tick.
 	real_t get_staggered_interval(int64_t p_agent_id, real_t p_distance, real_t p_near_distance, real_t p_far_distance, bool p_urgent = false) const;
