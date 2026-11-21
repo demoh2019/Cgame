@@ -65,41 +65,41 @@ func _run() -> void:
     var food := _make_pickup("food", 2)
     food.call("interact", player)
     food.call("interact", player)
-    _expect(int(player.get("food_count")) == 2,
+    _expect(int(player.call("get_item_count", "food")) == 2,
             "a pickup must transfer its quantity exactly once")
     _expect(bool(food.get("collected")), "picked-up food must be marked collected")
 
     player.set("hunger", 65.0)
     player.call("consume_food")
-    _expect(int(player.get("food_count")) == 1,
+    _expect(int(player.call("get_item_count", "food")) == 1,
             "eating must consume exactly one food item")
     _expect(is_equal_approx(float(player.get("hunger")), 100.0),
             "hunger must be clamped at 100")
 
     var water := _make_pickup("water", 1)
     water.call("interact", player)
-    _expect(int(player.get("water_count")) == 1, "water pickup was not transferred")
+    _expect(int(player.call("get_item_count", "water")) == 1, "water pickup was not transferred")
     player.set("thirst", 40.0)
     player.call("consume_water")
-    _expect(int(player.get("water_count")) == 0,
+    _expect(int(player.call("get_item_count", "water")) == 0,
             "drinking must consume exactly one water item")
     _expect(is_equal_approx(float(player.get("thirst")), 85.0),
             "drinking should restore 45 thirst")
 
     player.call("consume_water")
-    _expect(int(player.get("water_count")) == 0,
+    _expect(int(player.call("get_item_count", "water")) == 0,
             "empty inventory should never become negative")
 
     var invalid := _make_pickup("unsupported_type", 3)
     invalid.call("interact", player)
     _expect(not bool(invalid.get("collected")),
             "unsupported pickups must not disappear")
-    _expect(int(player.get("food_count")) == 1,
+    _expect(int(player.call("get_item_count", "food")) == 1,
             "unsupported pickups must not modify inventory")
 
     var negative := _make_pickup("food", -4)
     negative.call("interact", player)
-    _expect(int(player.get("food_count")) == 1,
+    _expect(int(player.call("get_item_count", "food")) == 1,
             "negative pickup quantity must not modify inventory")
     _expect(not bool(negative.get("collected")),
             "invalid quantities must not consume a world pickup")

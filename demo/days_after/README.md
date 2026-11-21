@@ -56,7 +56,10 @@ made from 3 fiber T1 + 2 stone T1 reduces incoming damage by 25%.
 There are four infected with proximity pursuit, contact attacks and
 combat experience rewards. Weapon damage depends on worn equipment, not a
 fixed character class. Additional wood and stone T2 nodes support future gear.
-Current enemy pursuit uses direct movement and can get stuck at obstacles.
+Infected now use sight-gated melee strikes and short-range wall-follow steering.
+Player attacks also require a clear path, so cover blocks both sides.
+This is reactive local avoidance, **not** full navmesh pathfinding;
+enemies can still get stuck in complex ruins.
 
 These are original classless survival/RPG mechanics, not copied assets,
 economy data or gameplay code from existing games. No MMO networking, PvP,
@@ -71,7 +74,13 @@ save/load, durability or player economy is claimed yet.
 The test verifies scene instantiation, one-time scavenging, inventory consumption,
 stat recovery, resource depletion and respawn, skill tiers, tool requirements,
 advanced crafting, bandage healing, melee combat, armor and finite position
-over 10 physics frames.
+over 10 physics frames. Also run the obstacle/cover regression:
+
+```sh
+./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_combat_visibility.gd
+./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_inventory.gd
+```
+
 A separate GitHub Actions smoke job exercises the game with official Godot 4.7.2
 for compatibility; use compiled Cgame for engine-specific integration testing.
 

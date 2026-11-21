@@ -41,6 +41,18 @@ jobs:
           timeout 120s ./godot --headless --path demo/days_after --script res://smoke_test.gd 2>&1 | tee days-after-smoke.log
           grep -F 'PASS: Days After scene, survival, gathering, crafting, tier gates, respawn and 10 physics frames.' days-after-smoke.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed' days-after-smoke.log; then exit 1; fi
+      - name: Run inventory and invalid-pickup regression
+        run: |
+          set -euo pipefail
+          timeout 120s ./godot --headless --path demo/days_after --script res://smoke_test_inventory.gd 2>&1 | tee days-after-inventory.log
+          grep -F 'PASS: Days After player, food, water, one-shot pickup, and inventory bounds.' days-after-inventory.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed' days-after-inventory.log; then exit 1; fi
+      - name: Test cover-aware melee combat
+        run: |
+          set -euo pipefail
+          timeout 120s ./godot --headless --path demo/days_after --script res://smoke_test_combat_visibility.gd 2>&1 | tee days-after-visibility.log
+          grep -F 'PASS: Days After combat line-of-sight blocks walls and permits clear melee.' days-after-visibility.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed' days-after-visibility.log; then exit 1; fi
       - name: Upload smoke test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -50,3 +62,5 @@ jobs:
           path: |
             days-after-import.log
             days-after-smoke.log
+            days-after-inventory.log
+            days-after-visibility.log
