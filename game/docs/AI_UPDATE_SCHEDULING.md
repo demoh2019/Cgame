@@ -84,6 +84,47 @@ batch calculation, threshold cleanup and noncombat-only steering.
 An actual compiled Cgame editor is necessary to run the new C++ logic;
 no unmeasured FPS or CPU benefit is claimed.
 
+## Predictive Mass-style passive crowd steering
+
+The native `AIProximityGrid2D.query_predictive_separation_batch(
+positions, velocities, source_indices, radius, cell_size, max_neighbors,
+horizon)` adds a **short forward prediction** to the previous static
+nearest-neighbor separation. It builds the same bounded 3×3 spatial
+grid on the desired position `position + velocity * horizon` and scores
+only the closest `max_neighbors` future neighbors. When two future
+positions coincide or pass very closely because of opposing velocities,
+deterministic perpendicular steering guides agents to opposite sides
+instead of pushing them backward. Stationary exact overlaps still use stable
+index-based tie breaking.
+
+The horizon is limited to **0..2 seconds**, velocities to 50 m/s and
+the old radius, source, coordinate and neighbor limits remain in
+force. Nonfinite and excessive inputs fail atomically. Horizon zero
+returns the previous static method's result exactly; no scene or
+physics mutation occurs in C++.
+
+Albion After's actual `GameServer` now derives desired velocities
+from each `WANDER` or `INVESTIGATE` actor's existing destination and
+movement speed, and queries **0.75 seconds ahead** in its already
+existing four-times-per-second crowd pass. Rooted/staggered infected
+and active combatants have zero predicted velocity; only passive,
+non-boss infected receive steering. The same existing 35% mixing and
+world collision sweep apply. Combat, AI targets, player positions,
+attacks, authority and networking remain unchanged.
+
+The server retains `query_separation_batch` as an opt-in fallback
+for older Cgame binaries or invalid predictive requests. Stock Godot
+leaves movement untouched. `get_crowd_separation_stats()` now reports
+a server-only `predictive` boolean. Native tests verify head-on
+sidestepping, zero-horizon parity, moving-apart behavior, stationary
+overlaps and invalid inputs. The game test runs a real 32-NPC server
+tick with opposing passive destinations.
+
+References: [Unreal Mass Avoidance](https://dev.epicgames.com/documentation/unreal-engine/mass-avoidance-overview-in-unreal-engine)
+and [Unreal Avoidance Manager's prediction horizon](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Engine/UAvoidanceManager).
+
+No measured FPS or CPU improvement is claimed without runtime benchmarks.
+
 ## Inspect the real server
 
 The diagnostic `GameServer.get_ai_schedule_stats()` method returns a detached Dictionary:
