@@ -80,7 +80,7 @@ func run(t) -> void:
 		"invalid distance cannot yield a partial visible crowd tier batch")
 	var camera_source := FileAccess.get_file_as_string("res://scripts/client/character_anim.gd")
 	t.check(camera_source.contains("visible_mask.append(1 if visible else 0)") and
-		camera_source.contains("CombatAnimationPriority.slots(quality), true, visible_mask"),
+		camera_source.contains("var tiers: PackedInt32Array = plan_crowd_tiers_costed("),
 		"real Albion After crowd pass feeds frustum visibility to the native engine")
 
 	t.current = "native visibility budget agrees with stock-Godot fallback"
