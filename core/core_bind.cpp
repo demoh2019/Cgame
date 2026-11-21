@@ -1222,6 +1222,54 @@ Vector<Color> Geometry2D::bake_heightfield_curvature_colors(const Vector<float> 
 	return result;
 }
 
+
+Vector<float> Geometry2D::sample_scalar_grid_wrapped(const Vector<float> &p_grid, const Vector2i &p_size,
+		const Vector<Vector2> &p_uvs, bool p_smooth) {
+	Vector<float> result;
+	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2048 || p_size.y > 2048, result,
+			"Wrapped grid dimensions must be between 1 and 2048 per axis.");
+	ERR_FAIL_COND_V_MSG(p_grid.size() != p_size.x * p_size.y, result, "Wrapped grid must contain width * height values.");
+	ERR_FAIL_COND_V_MSG(p_uvs.size() > 65536, result, "Wrapped grid sample queries must not exceed 65536.");
+	const float *grid = p_grid.ptr();
+	for (int i = 0; i < p_grid.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(grid[i]), result, "Wrapped grid values must be finite.");
+	}
+	const Vector2 *uvs = p_uvs.ptr();
+	for (int i = 0; i < p_uvs.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!uvs[i].is_finite(), result, "Wrapped sample UVs must be finite.");
+	}
+	if (p_uvs.is_empty()) {
+		return result;
+	}
+	ERR_FAIL_COND_V_MSG(result.resize(p_uvs.size()) != OK, Vector<float>(), "Could not allocate wrapped grid samples.");
+	float *out = result.ptrw();
+	const int width = p_size.x;
+	const int height = p_size.y;
+	// Normalized UVs repeat every integer tile. Reducing modulo one before
+	// converting to texel positions avoids unsafe integer casts for large UVs.
+	for (int i = 0; i < p_uvs.size(); i++) {
+		const real_t sx = Math::fposmod(uvs[i].x, real_t(1.0)) * width;
+		const real_t sy = Math::fposmod(uvs[i].y, real_t(1.0)) * height;
+		const int x0 = CLAMP(int(Math::floor(sx)), 0, width - 1);
+		const int y0 = CLAMP(int(Math::floor(sy)), 0, height - 1);
+		const int x1 = x0 + 1 == width ? 0 : x0 + 1;
+		const int y1 = y0 + 1 == height ? 0 : y0 + 1;
+		real_t tx = sx - x0;
+		real_t ty = sy - y0;
+		if (p_smooth) {
+			tx = tx * tx * (3.0 - 2.0 * tx);
+			ty = ty * ty * (3.0 - 2.0 * ty);
+		}
+		const real_t a = Math::lerp(real_t(grid[y0 * width + x0]), real_t(grid[y0 * width + x1]), tx);
+		const real_t b = Math::lerp(real_t(grid[y1 * width + x0]), real_t(grid[y1 * width + x1]), tx);
+		const real_t value = Math::lerp(a, b, ty);
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(value), Vector<float>(), "Wrapped grid sample became nonfinite.");
+		out[i] = float(value);
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(out[i]), Vector<float>(), "Wrapped grid sample overflowed packed float range.");
+	}
+	return result;
+}
+
 Vector<Vector2> Geometry2D::heightfield_gradients(const Vector<float> &p_heights, const Vector2i &p_size, real_t p_cell_spacing) {
 	Vector<Vector2> result;
 	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2048 || p_size.y > 2048, result,
@@ -1652,6 +1700,7 @@ void Geometry2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("distance_transform_8", "mask", "size", "max_distance"), &Geometry2D::distance_transform_8);
 	ClassDB::bind_method(D_METHOD("max_filter_mask", "mask", "size", "radius"), &Geometry2D::max_filter_mask);
 	ClassDB::bind_method(D_METHOD("heightfield_gradients", "heights", "size", "cell_spacing"), &Geometry2D::heightfield_gradients);
+	ClassDB::bind_method(D_METHOD("sample_scalar_grid_wrapped", "grid", "size", "uvs", "smooth"), &Geometry2D::sample_scalar_grid_wrapped, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("bake_heightfield_curvature_colors", "padded_heights", "size", "cell_spacing", "cavity_start", "cavity_end", "ridge_start", "ridge_end"),
 			&Geometry2D::bake_heightfield_curvature_colors, DEFVAL(0.015), DEFVAL(0.32), DEFVAL(0.015), DEFVAL(0.42));
 

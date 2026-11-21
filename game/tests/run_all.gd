@@ -102,6 +102,7 @@ const SUITES := [
 	"res://tests/test_graphics_eye_adaptation.gd",
 	"res://tests/test_graphics_cinematic_dof.gd",
 	"res://tests/test_cloud_shadow_lut.gd",
+	"res://tests/test_scalar_grid_sampler.gd",
 	"res://tests/test_sky_cloud_lighting_lut.gd",
 	"res://tests/test_weather_cloud_advection.gd",
 	"res://tests/test_scenery_lod.gd",
