@@ -93,3 +93,22 @@ The game smoke checks native/fallback parity, box-only candidate
 coverage, reserved zone safety and regeneration stability. Gameplay
 colliders, resource interactions, AI and networking remain untouched.
 Measure a compiled game to determine actual CPU/GPU benefit.
+
+## Seeded biome-density foliage (native PCG)
+
+The vegetation layer uses `PCGSpatialFilter3D.filter_indices_density()`
+to sample each stable grid-cell ID from a per-cell density field before
+applying the existing spheres/boxes and 2.1-metre spatial thinning.
+The worn north–south approach has density 0.13, the dry northern area
+0.46, the less overgrown western area 0.74 and the outer vegetation 0.94.
+
+Sampling is deterministic for the same seed and IDs, even when source
+points are reordered, and does not mutate the global RNG used by
+gameplay. The scene still instantiates at most 160 decoration-only
+instances in one `MultiMesh`, with no collision, AI, resource or
+networking changes. The GDScript fallback matches the 31-bit native
+integer hash and is smoke-tested for output parity and regeneration.
+
+The density and performance benefits should be measured in a custom
+Cgame build before claiming an FPS increase. 
+
