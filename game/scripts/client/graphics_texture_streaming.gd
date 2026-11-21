@@ -34,3 +34,36 @@ static func apply(level: int, method: String) -> void:
 	if server != null and server.has_method("set_adaptive_detail_prefetch_enabled"):
 		server.call("set_adaptive_detail_prefetch_enabled",
 			adaptive_prefetch_enabled(level, method))
+
+
+## Native equivalent of Unreal STAT STREAMING, exposed as real Godot
+## Performance monitors. These values are cheap atomic gauges published by
+## the texture feedback worker; no object-list traversal on each monitor poll.
+## 0 for "TextureStreamingBudgetBytes" means budget fitting is disabled.
+## "Pending" counts textures not yet at the fitted mip, not active I/O jobs.
+const PROFILER_METRICS := {
+	&"Albion/TextureStreamingActive": &"get_streaming_texture_count",
+	&"Albion/TextureStreamingPending": &"get_streaming_pending_count",
+	&"Albion/TextureStreamingBudgetMipCuts": &"get_streaming_budget_reduction_steps",
+	&"Albion/TextureStreamingRequestedBytes": &"get_streaming_requested_bytes",
+	&"Albion/TextureStreamingFittedBytes": &"get_streaming_fitted_bytes",
+	&"Albion/TextureStreamingBudgetBytes": &"get_streaming_budget_bytes",
+	&"Albion/TextureStreamingResidentBytes": &"get_memory_budget_bytes_used",
+}
+
+
+static func register_profiler_monitors() -> Array[StringName]:
+	var registered: Array[StringName] = []
+	# Stock Godot, Compatibility renderer and pre-telemetry Cgame binaries
+	# must run normally. A registered monitor is removed by online_main.
+	if not Engine.has_singleton("TextureStreaming"):
+		return registered
+	var server: Object = Engine.get_singleton("TextureStreaming")
+	if server == null:
+		return registered
+	for monitor_name: StringName in PROFILER_METRICS:
+		var method_name: StringName = PROFILER_METRICS[monitor_name]
+		if server.has_method(method_name) and not Performance.has_custom_monitor(monitor_name):
+			Performance.add_custom_monitor(monitor_name, Callable(server, method_name))
+			registered.append(monitor_name)
+	return registered
