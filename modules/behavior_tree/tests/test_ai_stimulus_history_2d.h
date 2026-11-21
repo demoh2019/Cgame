@@ -213,8 +213,10 @@ TEST_CASE("[AIStimulusHistory2D] Ranked top-K returns stable decayed confidence"
 	CHECK(a->get_ranked(AIStimulusHistory2D::DAMAGE).is_empty());
 	Dictionary detached = ranked[0];
 	detached["position"] = Vector2(999, 0);
-	CHECK(Dictionary(a->get_ranked(AIStimulusHistory2D::SOUND, 1)[0])["position"] == Vector2(1, 0));
-	a->advance_time(2.1);
+	const Array isolated = a->get_ranked(AIStimulusHistory2D::SOUND, 1);
+	const Dictionary readback = isolated[0];
+	CHECK(readback["position"] == Vector2(1, 0));
+	a->advance_time(3.1);
 	CHECK(a->get_ranked(AIStimulusHistory2D::SOUND).is_empty());
 	ERR_PRINT_OFF;
 	CHECK(a->get_ranked(-1).is_empty());

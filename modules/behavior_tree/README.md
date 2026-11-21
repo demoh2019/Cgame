@@ -347,7 +347,7 @@ senses or limits fail with an empty result, and the old `get_best` and
 `get_recent` contracts remain intact.
 
 Albion After adds `NativeInfectedSenses.get_ranked_confirmed_stimuli()`
-with an older-binary fallback to the existing best event. Infected
+with a no-op fallback on older binaries that cannot rank events. Infected
 investigating a lost target may check **one additional** remembered sound
 location after reaching the first location, provided the event is still
 alive, distinct and inside the existing pursuit leash. No new target
