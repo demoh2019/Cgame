@@ -66,6 +66,8 @@ private:
 	// These hints reorder eligible work, never grow the resident set.
 	Vector3 view_direction;
 	real_t view_priority = 0.0;
+	// 180 degrees preserves the historical heading-only streaming order.
+	real_t view_cone_half_angle_degrees = 180.0;
 	// Optional secondary streaming source for cinematic targets or nearby
 	// waypoints. Its radius and distance from focus are both bounded, so
 	// arbitrarily distant map pins cannot load remote chunks into memory.
@@ -221,6 +223,8 @@ public:
 	void set_view_direction(const Vector3 &p_direction);
 	Vector3 get_view_direction() const { return view_direction; }
 	void set_view_priority(real_t p_weight);
+	void set_view_cone_half_angle_degrees(real_t p_degrees);
+	real_t get_view_cone_half_angle_degrees() const { return view_cone_half_angle_degrees; }
 	void set_fast_view_refresh_degrees(real_t p_degrees);
 	real_t get_fast_view_refresh_degrees() const { return fast_view_refresh_degrees; }
 	real_t get_view_priority() const { return view_priority; }
