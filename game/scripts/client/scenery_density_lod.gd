@@ -104,6 +104,52 @@ static func plan_visible_counts(counts: PackedInt32Array,
 	return _plan_fallback(counts, distances, quality, near_distance, far_distance)
 
 
+## Time-coherent Unreal foliage density planning: a tiny count deadband
+## prevents one/two plants popping on each 0.6-second camera update. A -1
+## previous value explicitly bypasses hysteresis after quality changes.
+const DENSITY_DEADBAND := 2
+const LAST_QUALITY_META := "aa_density_lod_quality"
+
+
+static func _stable_fallback(counts: PackedInt32Array, distances: PackedFloat32Array,
+		previous_counts: PackedInt32Array, quality: int, deadband: int,
+		near_distance: float, far_distance: float) -> PackedInt32Array:
+	var empty := PackedInt32Array()
+	if counts.size() != previous_counts.size() or counts.size() > MAX_CLUSTERS or \
+			deadband < 0 or deadband > 8:
+		return empty
+	for i in counts.size():
+		if previous_counts[i] < -1 or previous_counts[i] > counts[i]:
+			return empty
+	var selected: PackedInt32Array = _plan_fallback(
+		counts, distances, quality, near_distance, far_distance)
+	if selected.size() != counts.size():
+		return empty
+	for i in counts.size():
+		var previous: int = previous_counts[i]
+		var desired: int = selected[i]
+		if previous >= 0 and (counts[i] == 0 or previous > 0) and \
+				absi(previous - desired) <= deadband:
+			selected[i] = previous
+	return selected
+
+
+static func plan_visible_counts_stable(counts: PackedInt32Array,
+		distances: PackedFloat32Array, previous_counts: PackedInt32Array,
+		quality: int, deadband: int = DENSITY_DEADBAND,
+		near_distance: float = NEAR_DISTANCE, far_distance: float = FAR_DISTANCE,
+		prefer_native: bool = true) -> PackedInt32Array:
+	if prefer_native:
+		var native: Object = _engine()
+		# Stock Godot and older Cgame binaries retain the exact same policy.
+		if native != null and native.has_method("plan_visible_counts_stable"):
+			return native.call("plan_visible_counts_stable",
+				counts, distances, previous_counts, quality, deadband,
+				near_distance, far_distance)
+	return _stable_fallback(counts, distances, previous_counts,
+		quality, deadband, near_distance, far_distance)
+
+
 ## Screen-size LOD compares the *projected size of a representative plant*,
 ## not the physical distance of its entire MultiMesh cluster. Perspective FOV,
 ## render resolution and orthographic zoom therefore influence geometry cost.
@@ -257,10 +303,23 @@ static func _apply_projected_plan(instances: Array[MultiMeshInstance3D],
 			quality, NEAR_PIXELS, FAR_PIXELS)
 	if selected.size() != instances.size():
 		return
+	# Preserve same-quality count hysteresis while allowing immediate Ultra
+	# recovery after tier switches. The native projection planner is stateless.
 	for i in instances.size():
-		var multimesh: MultiMesh = instances[i].multimesh
-		if multimesh != null and multimesh.visible_instance_count != selected[i]:
-			multimesh.visible_instance_count = selected[i]
+		var node: MultiMeshInstance3D = instances[i]
+		var multimesh: MultiMesh = node.multimesh
+		if multimesh == null:
+			continue
+		var previous: int = multimesh.visible_instance_count
+		var desired: int = selected[i]
+		var same_quality: bool = int(node.get_meta(LAST_QUALITY_META, -1)) == quality
+		if same_quality and previous >= 0 and previous <= counts[i] and \
+				(counts[i] == 0 or previous > 0) and \
+				absi(previous - desired) <= DENSITY_DEADBAND:
+			desired = previous
+		if multimesh.visible_instance_count != desired:
+			multimesh.visible_instance_count = desired
+		node.set_meta(LAST_QUALITY_META, quality)
 
 
 ## Call once per chunk at a slow refresh cadence. Static authored mesh
@@ -295,16 +354,29 @@ static func _apply_plan(instances: Array[MultiMeshInstance3D],
 		quality: int, prefer_native: bool) -> void:
 	if instances.is_empty():
 		return
-	var selected: PackedInt32Array = plan_visible_counts(
-		counts, distances, quality, NEAR_DISTANCE, FAR_DISTANCE, prefer_native)
-	# Never apply partial results from an invalid native batch.
+	# History belongs to the visual MultiMesh node, not the engine or the
+	# authoritative world. Quality tier switches force immediate recovery.
+	var previous := PackedInt32Array()
+	for i in instances.size():
+		var node: MultiMeshInstance3D = instances[i]
+		var old_visible: int = node.multimesh.visible_instance_count
+		var same_quality: bool = int(node.get_meta(LAST_QUALITY_META, -1)) == quality
+		previous.append(old_visible if same_quality and old_visible >= 0 and
+			old_visible <= counts[i] else -1)
+	var selected: PackedInt32Array = plan_visible_counts_stable(
+		counts, distances, previous, quality, DENSITY_DEADBAND,
+		NEAR_DISTANCE, FAR_DISTANCE, prefer_native)
+	# Never apply partial results from a malformed native batch.
 	if selected.size() != instances.size():
-		selected = _plan_fallback(counts, distances, quality,
-			NEAR_DISTANCE, FAR_DISTANCE)
+		selected = _stable_fallback(counts, distances, previous, quality,
+			DENSITY_DEADBAND, NEAR_DISTANCE, FAR_DISTANCE)
 	if selected.size() != instances.size():
 		return
 	for i in instances.size():
-		var current: MultiMesh = instances[i].multimesh
+		var node: MultiMeshInstance3D = instances[i]
+		var current: MultiMesh = node.multimesh
 		var visible: int = selected[i]
-		if current != null and current.visible_instance_count != visible:
-			current.visible_instance_count = visible
+		if current != null:
+			if current.visible_instance_count != visible:
+				current.visible_instance_count = visible
+			node.set_meta(LAST_QUALITY_META, quality)

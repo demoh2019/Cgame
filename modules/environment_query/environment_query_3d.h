@@ -35,6 +35,7 @@
 #include "core/math/vector2.h"
 #include "core/math/vector3.h"
 #include "core/variant/variant.h"
+#include "core/templates/vector.h"
 
 /**
  * Deterministic, physics-independent spatial candidate filter and scorer.
@@ -64,6 +65,19 @@ class EnvironmentQuery3D : public Resource {
 	double safety_weight = 0.0;
 	double min_threat_distance = 0.0;
 	int max_results = 0;
+
+	// Transient, non-serialized EQS cursor with a copy-on-write snapshot of
+	// the complete scoring context. Mutating the live query mid-step cannot
+	// corrupt an in-flight result; only explicit restart replaces the snapshot.
+	struct IncrementalHit {
+		int index = 0;
+		double score = 0.0;
+	};
+	Ref<EnvironmentQuery3D> incremental_snapshot;
+	Vector<IncrementalHit> incremental_best;
+	int incremental_cursor = 0;
+	int incremental_limit = 0;
+	bool incremental_done = false;
 
 protected:
 	static void _bind_methods();
@@ -128,6 +142,19 @@ public:
 	// Duplicate coordinates retain distinct identities (e.g. Smart Object slots).
 	// O(candidates * K) time, O(K) memory; count must be 1..64.
 	PackedInt32Array query_top_indices(int p_count) const;
+	// True stepwise native EQS: score at most N candidates per call while
+	// preserving a stable query snapshot and the exact ranked top-K output.
+	// Only the final result is readable; incomplete scores cannot drive AI.
+	bool begin_incremental_top_positions(int p_count);
+	bool step_incremental_top_positions(int p_budget);
+	bool is_incremental_top_complete() const { return incremental_snapshot.is_valid() && incremental_done; }
+	int get_incremental_processed_count() const { return incremental_cursor; }
+	PackedInt32Array get_incremental_top_indices() const;
+	PackedVector3Array get_incremental_top_positions() const;
+	// Pick a seeded score-band candidate from the already-scored top K.
+	// For all eligible sources, begin with count >= candidate count.
+	PackedVector3Array get_incremental_random_best_positions(int p_best_percent, int64_t p_seed) const;
+	void cancel_incremental_top_positions();
 	// Rank candidates once, then greedily choose spatially separated points.
 	// Stable score/index order, max_results output cap; optional horizontal spacing.
 	PackedVector3Array query_spread_positions(int p_count, double p_min_separation) const;

@@ -214,6 +214,97 @@ PackedVector2Array AIProximityGrid2D::query_separation_batch(const PackedVector2
 	return result;
 }
 
+// Stateless short-horizon crowd steering: predict desired locations, use the
+// existing nearest-K spatial grid, then return bounded avoidance directions.
+// Prediction is not a collision check and cannot teleport or authorize a hit.
+PackedVector2Array AIProximityGrid2D::query_predictive_separation_batch(
+		const PackedVector2Array &p_positions, const PackedVector2Array &p_velocities,
+		const PackedInt32Array &p_source_indices, double p_radius,
+		double p_cell_size, int p_max_neighbors, double p_horizon) const {
+	PackedVector2Array result;
+	constexpr double MAX_SPEED = 50.0;
+	constexpr double MAX_HORIZON = 2.0;
+	if (p_positions.size() != p_velocities.size() || p_positions.is_empty() ||
+			p_positions.size() > MAX_POINTS || p_source_indices.is_empty() ||
+			p_source_indices.size() > MAX_SOURCES ||
+			!Math::is_finite(p_horizon) || p_horizon < 0.0 || p_horizon > MAX_HORIZON ||
+			!Math::is_finite(p_radius) || p_radius <= 0.0 ||
+			p_max_neighbors < 1 || p_max_neighbors > 64) {
+		return result;
+	}
+	PackedVector2Array predicted;
+	predicted.resize(p_positions.size());
+	for (int i = 0; i < p_positions.size(); i++) {
+		const Vector2 position = p_positions[i];
+		const Vector2 velocity = p_velocities[i];
+		if (!position.is_finite() || !velocity.is_finite() ||
+				velocity.length_squared() > real_t(MAX_SPEED * MAX_SPEED) ||
+				Math::abs(position.x) > MAX_POSITION_ABS ||
+				Math::abs(position.y) > MAX_POSITION_ABS) {
+			return PackedVector2Array();
+		}
+		const double x = double(position.x) + double(velocity.x) * p_horizon;
+		const double y = double(position.y) + double(velocity.y) * p_horizon;
+		if (!Math::is_finite(x) || !Math::is_finite(y) ||
+				Math::abs(x) > MAX_POSITION_ABS || Math::abs(y) > MAX_POSITION_ABS) {
+			return PackedVector2Array();
+		}
+		predicted.set(i, Vector2(real_t(x), real_t(y)));
+	}
+	// The old static result must remain identical at horizon zero, including
+	// overlapping-agent deterministic index tie breaking.
+	if (p_horizon == 0.0) {
+		return query_separation_batch(p_positions, p_source_indices, p_radius, p_cell_size, p_max_neighbors);
+	}
+	const Array nearest_batches = _query_impl(predicted, p_source_indices,
+			p_radius, p_cell_size, p_max_neighbors);
+	if (nearest_batches.size() != p_source_indices.size()) {
+		return result; // Bad source index or cell request: reject atomically.
+	}
+	result.resize(p_source_indices.size());
+	for (int i = 0; i < p_source_indices.size(); i++) {
+		const int source_index = p_source_indices[i];
+		const Vector2 center = predicted[source_index];
+		const PackedInt32Array neighbors = nearest_batches[i];
+		Vector2 separation;
+		for (int j = 0; j < neighbors.size(); j++) {
+			const int neighbor_index = neighbors[j];
+			const Vector2 delta = center - predicted[neighbor_index];
+			const real_t distance = delta.length();
+			if (distance <= real_t(0.0001)) {
+				// A head-on future overlap should sidestep, not stop or push
+				// backward. Swapped agents get opposite tangential directions.
+				const Vector2 relative = p_velocities[source_index] - p_velocities[neighbor_index];
+				if (relative.length_squared() > real_t(0.00000001)) {
+					separation += Vector2(-relative.y, relative.x).normalized();
+				} else {
+					// Truly coincident stationary agents use stable index ties.
+					separation.x += source_index < neighbor_index ? real_t(-1.0) : real_t(1.0);
+				}
+			} else {
+				const real_t weight = real_t(1.0) - distance / real_t(p_radius);
+				const Vector2 current_delta = p_positions[source_index] - p_positions[neighbor_index];
+				const Vector2 relative = p_velocities[source_index] - p_velocities[neighbor_index];
+				// For a near head-on miss, steering backwards is counterproductive.
+				// Use a reproducible tangent only when the two agents are closing
+				// mostly along their shared line; other pairs keep normal repulsion.
+				if (current_delta.length_squared() > real_t(0.00000001) &&
+						relative.length_squared() > real_t(0.00000001) &&
+						current_delta.normalized().dot(relative.normalized()) < real_t(-0.75)) {
+					separation += Vector2(-relative.y, relative.x).normalized() * weight;
+				} else {
+					separation += (delta / distance) * weight;
+				}
+			}
+		}
+		if (separation.length_squared() > real_t(1.0)) {
+			separation.normalize();
+		}
+		result.set(i, separation);
+	}
+	return result;
+}
+
 // Cross-set hashed broadphase for e.g. NPCs versus world traps.
 // Outputs only candidate indices; gameplay must still validate current
 // entities, expiry, allegiance and exact trigger collision after this call.
@@ -299,4 +390,5 @@ void AIProximityGrid2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query_nearest_batch", "positions", "source_indices", "radius", "cell_size", "max_neighbors"), &AIProximityGrid2D::query_nearest_batch);
 	ClassDB::bind_method(D_METHOD("query_separation_batch", "positions", "source_indices", "radius", "cell_size", "max_neighbors"), &AIProximityGrid2D::query_separation_batch);
 	ClassDB::bind_method(D_METHOD("query_cross_radius_batch", "sources", "targets", "radius", "cell_size"), &AIProximityGrid2D::query_cross_radius_batch);
+	ClassDB::bind_method(D_METHOD("query_predictive_separation_batch", "positions", "velocities", "source_indices", "radius", "cell_size", "max_neighbors", "horizon"), &AIProximityGrid2D::query_predictive_separation_batch);
 }

@@ -86,6 +86,23 @@ func run(t) -> void:
         t.eq(selected[9], 1, "lost slot is admitted despite regular quota")
         t.eq(selected.count(1), 3, "urgent work does not displace ordinary work")
 
+    t.current = "Large-crowd server enables incremental EQS only when natively supported"
+    var stepper_supported: bool = ClassDB.class_exists("EnvironmentQuery3D") and \
+        ClassDB.instantiate("EnvironmentQuery3D").has_method("begin_incremental_top_positions")
+    var step_server := GameServer.new(WorldGen.new(714), 714)
+    for index in range(64):
+        var step_mob := Zombie.new(99000 + index, "walker",
+            Vector3(100.0 + index, WorldGen.HUB_HEIGHT, 100.0))
+        step_server.zombies[step_mob.id] = step_mob
+    step_server._budget_eqs_replans(step_server.zombies.values(), 0.05)
+    for mob in step_server.zombies.values():
+        t.eq(mob.flank_incremental_enabled, stepper_supported,
+            "real server opts every large-cohort infected into native incremental work")
+    step_server.zombies.clear()
+    step_server._budget_eqs_replans([], 0.05)
+    t.check(not step_server.get_eqs_replan_stats()["enabled"],
+        "empty cohort disables the time-sliced work flag")
+
     t.current = "EQS throttling never defers pursuit or overwrites an old lease"
     var gated := Zombie.new(867, "walker", Vector3.ZERO)
     gated.flank_replan_allowed = false
@@ -280,6 +297,41 @@ func run(t) -> void:
     else:
         t.eq(crowd_mobs[0]._passive_crowd_separation, Vector2.ZERO,
             "stock and older Godot use unchanged movement")
+
+    t.current = "Real server predicts head-on passive agents before collision"
+    var mass := GameServer.new(WorldGen.new(114), 114)
+    mass.tick_count = 5 # Same 4Hz separation phase used in the actual game.
+    var probe := Zombie.new(61000, "walker", Vector3(0.0, ground, 0.0))
+    var walking_speed: float = float(probe.data["speed"]) * 0.4
+    var meeting_distance: float = walking_speed * 2.0 * GameServer.AI_CROWD_LOOKAHEAD_SECONDS + 0.2
+    for index in range(32):
+        var px: float = 0.0 if index == 0 else (
+            meeting_distance if index == 1 else 1000.0 + float(index) * 20.0)
+        var actor := Zombie.new(61000 + index, "walker", Vector3(px, ground, 0.0))
+        actor.state = Zombie.State.WANDER
+        actor.wander_target = Vector2(100.0, 0.0) if index == 0 else (
+            Vector2(-100.0, 0.0) if index == 1 else Vector2(px, 100.0))
+        actor.think_timer = 100.0
+        mass.zombies[actor.id] = actor
+    mass._tick_zombies(1.0 / 30.0)
+    var predicted_available: bool = ClassDB.class_exists("AIProximityGrid2D") \
+        and ClassDB.instantiate("AIProximityGrid2D").has_method(
+            "query_predictive_separation_batch")
+    var moving_stats: Dictionary = mass.get_crowd_separation_stats()
+    t.eq(bool(moving_stats.get("predictive", false)), predicted_available,
+        "real server selects native desired-velocity lookahead when available")
+    if predicted_available:
+        var first_move: Vector2 = mass.zombies[61000]._passive_crowd_separation
+        var second_move: Vector2 = mass.zombies[61001]._passive_crowd_separation
+        t.check(first_move.y > 0.1 and second_move.y < -0.1,
+            "approaching infected sidestep in opposite directions before meeting")
+        t.check(absf(first_move.x) < 0.1 and absf(second_move.x) < 0.1,
+            "future head-on overlap does not cause backwards steering")
+        t.eq(mass.zombies[61002]._passive_crowd_separation, Vector2.ZERO,
+            "distant passive agent retains zero steering")
+    else:
+        t.check(not bool(moving_stats.get("predictive", false)),
+            "stock and older Cgame retain existing passive separation")
 
     t.current = "GameServer uses native staggering only for large crowds"
     var sim := GameServer.new(WorldGen.new(112), 112)

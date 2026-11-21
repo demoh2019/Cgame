@@ -240,3 +240,64 @@ The native engine CI runs this after a complete editor build,
 alongside the original Days After gameplay smoke and existing
 `[PCGPolylineSampler3D]` C++ tests. Performance should be
 measured in a compiled game rather than assumed from the API.
+
+## Camera-aware visual LOD of ruin debris (native significance)
+
+The prototype now runs **direction-aware** cosmetic admission for
+the existing 96 debris meshes. Cgame's native
+`SignificanceBudgetPlanner.select_world_priority_stable_cone()`
+receives the actual player camera position and facing direction,
+selects at most 18 nearby fragments, and retains the existing
+2 m stable-ID distance hysteresis and strict priority ranking.
+
+- Details outside a 75-degree half-angle (150-degree total cone)
+  no longer compete for presentation budget, **unless** they are
+  within the 5.5 m near-field safety sphere. The 26 m hard cutoff
+  remains absolute; this never hides gameplay colliders, enemies,
+  pickups or interactive props.
+- The GDScript fallback follows the same squared-distance near-field
+  and 3D dot-product gate. The standard `smoke_test.gd` rotates the
+  player camera, checks native/fallback parity, and validates every
+  selected index against the range and viewing cone.
+- This is CPU significance-based cosmetic control, **not**
+  hardware occlusion culling or a substitute for the built-in Godot
+  renderer frustum. Actual frame-time and draw-call results require
+  measured runs in a compiled game.
+
+
+## Live PCG foliage geometry LOD
+
+The survivor now drives a native Cgame `PCGFoliageScalability3D`
+per-instance geometry LOD policy. Unlike the earlier density-scaling
+work, this does **not cull grass, remove points or reroll variants**.
+All plants remain visible, but each is assigned either a detailed
+box/reed/seed-head geometry (LOD0) or a two-triangle camera-facing
+QuadMesh proxy (LOD1). The default transition is 24 meters with
+a 3-meter hysteresis band to avoid rapid flickering.
+
+The existing three weighted types now produce up to **six** reusable
+instanced renderer slots. A Cgame native method groups by mesh type
+and LOD tier, preserving each original source index exactly once.
+The root `FoliageScatter` still represents green LOD0 for backward
+compatibility. It owns two detailed child renderers and three far
+proxy renderers, not one node per plant. Every variant's shape and
+material is cached across camera changes; only affected instancing
+buffers are rebuilt after a 4Hz viewer update. Spatial density,
+trail clearance, building exclusions and the 160-plant cap are unchanged.
+
+The optional stock-Godot `pcg_instance_lod.gd` fallback mirrors
+native threshold validation, hysteresis and group ordering. The
+playable smoke moves the LOD camera far away to check all proxies,
+then regenerates and verifies the original positions, types and
+node identities. No collision, inventory, enemy AI or multiplayer
+state is affected.
+
+```sh
+godot --headless --path games/days_after --script res://pcg_instance_lod_smoke_test.gd
+godot --headless --path games/days_after --script res://smoke_test.gd
+```
+
+This is an explicit multi-MultiMesh CPU LOD demonstrator, **not**
+Unreal Nanite or screen-size-aware GPU instance culling. Max draw
+batches rise from three to six; profile a built game on target
+hardware before claiming better frame time.

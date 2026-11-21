@@ -15,6 +15,9 @@ var look_at_enabled := true
 ## EMA of the optional full-pose SkeletonModifier script pass only; this
 ## excludes animation mixer, GPU skinning and native FootPlacement costs.
 var estimated_full_pose_us: int = 0
+# New Cgame builds profile the entire modifier dispatch centrally. Disable
+# the script-local clock to avoid duplicate timing; stock Godot keeps it.
+var use_engine_profile_timing := false
 
 var _bones: Dictionary = {} # lower-case name -> index
 var _resolved := false
@@ -86,7 +89,7 @@ func _process_modification_with_delta(delta: float) -> void:
 		return
 	# Sample only the expensive full-pose path (not every tier-1 skeleton).
 	# The estimate remains available when the next frame demotes this actor.
-	var measure_pose: bool = look_at_enabled
+	var measure_pose: bool = look_at_enabled and not use_engine_profile_timing
 	var pose_started_us: int = Time.get_ticks_usec() if measure_pose else 0
 	_restore(skeleton)
 	if not _resolved:

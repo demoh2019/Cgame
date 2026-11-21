@@ -50,7 +50,14 @@ static func sync(node: Node, kind: String, state: Dictionary) -> void:
 		return
 	var cues: Object = node.get_meta("gameplay_cues", null) as Object
 	if cues != null and cues.has_method("replace_active"):
-		cues.call("replace_active", active_snapshot(kind, state), 2)
+		var server_status: Dictionary = active_snapshot(kind, state)
+		# Only server-owned Status.* may be replaced from replication.
+		# Persistent Local.* / FX.* cues have independent lifetimes.
+		if cues.has_method("replace_active_branch"):
+			cues.call("replace_active_branch", &"GameplayCue.Status", server_status, 2)
+		else:
+			# Older Cgame binaries retain the original whole-snapshot path.
+			cues.call("replace_active", server_status, 2)
 
 
 ## Bridge repeated native EffectTimeline pulse counts to one cue per tag.

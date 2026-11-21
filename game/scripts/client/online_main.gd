@@ -485,6 +485,16 @@ func _build_environment() -> void:
 	add_child(chunk_root)
 	entities = EntityView.new()
 	add_child(entities)
+	# Measure local visual interpolation recovery separately from server
+	# tick rate and actual network transport loss.
+	for network_monitor in [
+		[&"Albion/NetworkEstimatedMissingSnapshots", Callable(entities, "network_missing_snapshot_estimate")],
+		[&"Albion/NetworkRecoveryHoldRemaining", Callable(entities, "network_recovery_hold_remaining")],
+	]:
+		var network_monitor_name: StringName = network_monitor[0]
+		if not Performance.has_custom_monitor(network_monitor_name):
+			Performance.add_custom_monitor(network_monitor_name, network_monitor[1])
+			_ambient_monitors.append(network_monitor_name)
 	# One GPU draw grounds local/remote players, infected and streamed NPCs.
 	# This avoids a separate transparent shadow MeshInstance for every actor.
 	var ground_shadows := ContactShadowBatch.new()
@@ -1588,6 +1598,12 @@ func _on_welcomed() -> void:
 	add_child(_damage_direction)
 	audio = Audio.new()
 	add_child(audio)
+	# Engine/stock audio voice-steal hold protects new combat audio attacks.
+	var audio_hold_monitor: StringName = &"Albion/AudioVoiceHoldRejects"
+	if not Performance.has_custom_monitor(audio_hold_monitor):
+		Performance.add_custom_monitor(audio_hold_monitor,
+			Callable(audio, "get_voice_hold_rejections"))
+		_ambient_monitors.append(audio_hold_monitor)
 	# Thunder has its own bounded event queue and 3D emitter so storm
 	# arrival never steals slots from short combat and movement sounds.
 	_storm_thunder = StormThunder.new()

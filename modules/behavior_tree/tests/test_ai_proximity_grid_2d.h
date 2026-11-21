@@ -286,4 +286,100 @@ TEST_CASE("[AIProximityGrid2D] Cross-set requests reject malformed cohorts atomi
 	CHECK(grid->query_cross_radius_batch(sources, targets, 1.0, 2.0).size() == 1);
 }
 
+TEST_CASE("[AIProximityGrid2D] Predictive separation sidesteps head-on crossings") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array positions;
+	positions.push_back(Vector2(0, 0));
+	positions.push_back(Vector2(2, 0));
+	PackedVector2Array velocities;
+	velocities.push_back(Vector2(1, 0));
+	velocities.push_back(Vector2(-1, 0));
+	PackedInt32Array sources;
+	sources.push_back(0);
+	sources.push_back(1);
+	const PackedVector2Array now = grid->query_separation_batch(positions, sources, 1.5, 2.0, 8);
+	REQUIRE(now.size() == 2);
+	CHECK(now[0] == Vector2());
+	CHECK(now[1] == Vector2()); // No static neighbors yet.
+	const PackedVector2Array future = grid->query_predictive_separation_batch(
+			positions, velocities, sources, 1.5, 2.0, 8, 1.0);
+	REQUIRE(future.size() == 2);
+	CHECK(future[0].x == real_t(0.0));
+	CHECK(future[0].y > real_t(0.0));
+	CHECK(future[1].x == real_t(0.0));
+	CHECK(future[1].y < real_t(0.0));
+	CHECK(future[0].length() <= real_t(1.0));
+	CHECK(future[1].length() <= real_t(1.0));
+	CHECK(grid->query_predictive_separation_batch(positions, velocities, sources, 1.5, 2.0, 8, 1.0) == future);
+	// A near miss (not exact equality) must still sidestep before contact.
+	positions.set(1, Vector2(2.2, 0));
+	const PackedVector2Array near_miss = grid->query_predictive_separation_batch(
+			positions, velocities, sources, 1.5, 2.0, 8, 1.0);
+	REQUIRE(near_miss.size() == 2);
+	CHECK(near_miss[0].x == real_t(0.0));
+	CHECK(near_miss[0].y > real_t(0.5));
+	CHECK(near_miss[1].x == real_t(0.0));
+	CHECK(near_miss[1].y < real_t(-0.5));
+}
+
+TEST_CASE("[AIProximityGrid2D] Predictions retain zero-horizon parity and static overlap ties") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array positions;
+	positions.push_back(Vector2(-5, 0));
+	positions.push_back(Vector2(-4, 0));
+	positions.push_back(Vector2(10, 0));
+	PackedVector2Array velocities;
+	velocities.push_back(Vector2(-1, 0));
+	velocities.push_back(Vector2(1, 0));
+	velocities.push_back(Vector2());
+	PackedInt32Array sources;
+	sources.push_back(0);
+	sources.push_back(1);
+	const PackedVector2Array static_result = grid->query_separation_batch(positions, sources, 2.5, 3.0, 2);
+	const PackedVector2Array zero_horizon = grid->query_predictive_separation_batch(
+			positions, velocities, sources, 2.5, 3.0, 2, 0.0);
+	CHECK(zero_horizon == static_result);
+	const PackedVector2Array moving_apart = grid->query_predictive_separation_batch(
+			positions, velocities, sources, 2.5, 3.0, 2, 1.0);
+	REQUIRE(moving_apart.size() == 2);
+	CHECK(moving_apart[0] == Vector2());
+	CHECK(moving_apart[1] == Vector2());
+	positions.set(1, Vector2(-5, 0));
+	velocities.set(0, Vector2());
+	velocities.set(1, Vector2());
+	const PackedVector2Array overlapping = grid->query_predictive_separation_batch(
+			positions, velocities, sources, 2.5, 3.0, 2, 1.0);
+	REQUIRE(overlapping.size() == 2);
+	CHECK(overlapping[0] == Vector2(-1, 0));
+	CHECK(overlapping[1] == Vector2(1, 0));
+}
+
+TEST_CASE("[AIProximityGrid2D] Invalid predictive velocities and horizons fail atomically") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array positions;
+	positions.push_back(Vector2(0, 0));
+	PackedVector2Array velocity;
+	velocity.push_back(Vector2(1, 0));
+	PackedInt32Array source;
+	source.push_back(0);
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 3.0, 2, 0.7).size() == 1);
+	CHECK(grid->query_predictive_separation_batch(positions, PackedVector2Array(), source, 2.5, 3.0, 2, 0.7).is_empty());
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 3.0, 2, -1.0).is_empty());
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 3.0, 2, 2.1).is_empty());
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 3.0, 2, Math::INF).is_empty());
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 0.0, 3.0, 2, 0.7).is_empty());
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 2.0, 2, 0.7).is_empty());
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 3.0, 0, 0.7).is_empty());
+	PackedInt32Array invalid_source;
+	invalid_source.push_back(3);
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, invalid_source, 2.5, 3.0, 2, 0.7).is_empty());
+	velocity.set(0, Vector2(60, 0));
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 3.0, 2, 0.7).is_empty());
+	velocity.set(0, Vector2(Math::NaN, 0));
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 3.0, 2, 0.7).is_empty());
+}
+
 } // namespace TestAIProximityGrid2D

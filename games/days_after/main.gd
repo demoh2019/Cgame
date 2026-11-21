@@ -31,6 +31,7 @@ func _ready() -> void:
     var foliage = FOLIAGE_SCATTER_SCRIPT.new()
     foliage.name = "FoliageScatter"
     add_child(foliage)
+    foliage.set_viewer(player) # LOD only; PCG placement remains authoritative.
     var trail = TRAIL_MARKERS_SCRIPT.new()
     trail.name = "TrailMarkers"
     trail.configure(foliage.get_trail_points(),

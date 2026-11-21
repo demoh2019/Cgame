@@ -383,6 +383,7 @@ const AI_CROWD_SEPARATION_MIN := 32
 const AI_CROWD_SEPARATION_MAX := 1024 # Native source index safety limit.
 const AI_CROWD_SEPARATION_TICKS := 5 # 4Hz, not every 20Hz movement tick.
 const AI_CROWD_SEPARATION_RADIUS := 2.5
+const AI_CROWD_LOOKAHEAD_SECONDS := 0.75 # Mass-style desired-velocity anticipation.
 var _crowd_separation_enabled: bool = false
 var last_crowd_separation_stats: Dictionary = {"enabled": false, "population": 0, "sources": 0}
 # Cross-set Mass/Chaos-style native broadphase for PvE snares; script owns exact hits.
@@ -8118,6 +8119,7 @@ func _refresh_passive_crowd_separation(cohort: Array) -> void:
 		last_crowd_separation_stats = {"enabled": false, "population": cohort.size(), "sources": 0}
 		return
 	var positions := PackedVector2Array()
+	var desired_velocities := PackedVector2Array()
 	var source_indices := PackedInt32Array()
 	var source_agents: Array = []
 	for infected in cohort:
@@ -8125,19 +8127,42 @@ func _refresh_passive_crowd_separation(cohort: Array) -> void:
 		if not infected.is_alive() or not infected.position.is_finite():
 			continue
 		var index: int = positions.size()
-		positions.append(Vector2(infected.position.x, infected.position.z))
-		if not infected.raid_boss and not infected.perched \
-				and (infected.state == Zombie.State.WANDER \
-				or infected.state == Zombie.State.INVESTIGATE):
+		var here := Vector2(infected.position.x, infected.position.z)
+		positions.append(here)
+		var desired_velocity := Vector2.ZERO
+		var passive: bool = not infected.raid_boss and not infected.perched \
+			and (infected.state == Zombie.State.WANDER \
+			or infected.state == Zombie.State.INVESTIGATE)
+		if passive:
 			source_indices.append(index)
 			source_agents.append(infected)
+			# The engine is stateless; derive only the game's existing passive
+			# movement intention. Chase/attack agents remain static obstacles.
+			if infected.snared_seconds <= 0.0 and infected.stagger_seconds <= 0.0:
+				var goal: Vector2 = infected.wander_target if infected.state == Zombie.State.WANDER \
+					else infected.last_known_target
+				var toward: Vector2 = goal - here
+				if toward.is_finite() and toward.length_squared() > 0.0001:
+					var speed_factor: float = 0.4 if infected.state == Zombie.State.WANDER else 0.7
+					var speed: float = clampf(float(infected.data["speed"]) * speed_factor, 0.0, 20.0)
+					desired_velocity = toward.normalized() * speed
+		desired_velocities.append(desired_velocity)
 	if source_agents.is_empty():
 		_crowd_separation_enabled = false
 		last_crowd_separation_stats = {"enabled": false, "population": cohort.size(), "sources": 0}
 		return
-	var steering: PackedVector2Array = _pack_spatial_grid.query_separation_batch(
-		positions, source_indices, AI_CROWD_SEPARATION_RADIUS,
-		3.0, 8)
+	var predictive: bool = _pack_spatial_grid.has_method("query_predictive_separation_batch")
+	var steering := PackedVector2Array()
+	if predictive:
+		steering = _pack_spatial_grid.query_predictive_separation_batch(
+			positions, desired_velocities, source_indices,
+			AI_CROWD_SEPARATION_RADIUS, 3.0, 8, AI_CROWD_LOOKAHEAD_SECONDS)
+	if steering.size() != source_agents.size():
+		# An older engine (or a rejected predictive request) retains the
+		# previously shipped static crowd separation, never an invented force.
+		predictive = false
+		steering = _pack_spatial_grid.query_separation_batch(
+			positions, source_indices, AI_CROWD_SEPARATION_RADIUS, 3.0, 8)
 	if steering.size() != source_agents.size():
 		_crowd_separation_enabled = false
 		last_crowd_separation_stats = {"enabled": false, "population": cohort.size(), "sources": 0}
@@ -8146,7 +8171,8 @@ func _refresh_passive_crowd_separation(cohort: Array) -> void:
 		source_agents[i].set_passive_crowd_separation(steering[i])
 	_crowd_separation_enabled = true
 	last_crowd_separation_stats = {"enabled": true, "population": cohort.size(),
-		"sources": source_agents.size(), "period_ticks": AI_CROWD_SEPARATION_TICKS}
+		"sources": source_agents.size(), "period_ticks": AI_CROWD_SEPARATION_TICKS,
+		"predictive": predictive}
 
 
 ## Server-only profiling; candidate counts are prefilters, never confirmed hits.
@@ -8175,6 +8201,7 @@ func _try_trigger_infected_snare(zombie, trap_id: int) -> bool:
 func _budget_eqs_replans(cohort: Array, delta: float) -> void:
 	for agent in cohort:
 		agent.flank_replan_allowed = true
+		agent.flank_incremental_enabled = false
 	var enabled: bool = cohort.size() >= AI_EQS_REPLAN_MIN_POPULATION and \
 			cohort.size() <= 4096 and tick_count >= 0 and \
 			ClassDB.class_exists("EnvironmentQuery3D") and \
@@ -8183,6 +8210,13 @@ func _budget_eqs_replans(cohort: Array, delta: float) -> void:
 		last_eqs_replan_stats = {"enabled": false, "population": cohort.size(),
 			"eligible": 0, "granted": 0, "deferred": 0, "urgent": 0}
 		return
+	# Every active AI query in this large cohort is stepped, never evaluated
+	# to completion, on its assigned scheduling phase. Older engines simply
+	# follow the preexisting synchronous path.
+	var incremental_available: bool = ClassDB.class_has_method(
+		"EnvironmentQuery3D", "begin_incremental_top_positions")
+	for agent in cohort:
+		agent.flank_incremental_enabled = incremental_available
 	var eligible: Array = []
 	var urgent := PackedByteArray()
 	for agent in cohort:

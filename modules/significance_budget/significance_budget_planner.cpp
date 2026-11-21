@@ -714,6 +714,73 @@ PackedInt32Array SignificanceBudgetPlanner::select_world_priority_stable(
 	return result;
 }
 
+PackedInt32Array SignificanceBudgetPlanner::select_world_priority_stable_cone(
+		const PackedVector3Array &p_positions, const Vector3 &p_viewer,
+		const Vector3 &p_forward, const PackedByteArray &p_priorities,
+		const PackedInt64Array &p_ids, const PackedInt64Array &p_retained_ids,
+		int p_budget, double p_max_distance, double p_hysteresis,
+		double p_half_angle_degrees, double p_near_radius) const {
+	PackedInt32Array empty;
+	const int count = p_positions.size();
+	if (count != p_priorities.size() || count != p_ids.size() ||
+			count > MAX_CANDIDATES || p_retained_ids.size() > MAX_BUDGET ||
+			!valid_budget(p_budget) || !p_viewer.is_finite() ||
+			!p_forward.is_finite() ||
+			!Math::is_finite(p_max_distance) || p_max_distance < 0.0 ||
+			p_max_distance > MAX_RANGE ||
+			!Math::is_finite(p_hysteresis) || p_hysteresis < 0.0 ||
+			p_hysteresis > p_max_distance ||
+			!Math::is_finite(p_half_angle_degrees) ||
+			p_half_angle_degrees < 0.0 || p_half_angle_degrees > 180.0 ||
+			!Math::is_finite(p_near_radius) || p_near_radius < 0.0 ||
+			p_near_radius > p_max_distance) {
+		return empty;
+	}
+	const double fx = double(p_forward.x);
+	const double fy = double(p_forward.y);
+	const double fz = double(p_forward.z);
+	const double forward_length = Math::sqrt(fx * fx + fy * fy + fz * fz);
+	if (!Math::is_finite(forward_length) || forward_length <= 1.0e-6) {
+		return empty;
+	}
+	// Validate ALL positions before range or view gating. Later off-screen
+	// malformed input may never silently produce a partial result.
+	for (int i = 0; i < count; ++i) {
+		if (!p_positions[i].is_finite()) {
+			return empty;
+		}
+	}
+	const double cosine_limit = p_half_angle_degrees == 180.0 ? -1.0 :
+			Math::cos(Math::deg_to_rad(p_half_angle_degrees));
+	const double near_squared = p_near_radius * p_near_radius;
+	PackedFloat64Array distances;
+	distances.resize(count);
+	for (int i = 0; i < count; ++i) {
+		const Vector3 point = p_positions[i];
+		const double dx = double(point.x) - double(p_viewer.x);
+		const double dy = double(point.y) - double(p_viewer.y);
+		const double dz = double(point.z) - double(p_viewer.z);
+		const double distance_squared = dx * dx + dy * dy + dz * dz;
+		if (!Math::is_finite(distance_squared)) {
+			return empty;
+		}
+		const double distance = Math::sqrt(distance_squared);
+		bool eligible = distance <= p_max_distance;
+		if (eligible && distance_squared > near_squared && p_half_angle_degrees < 180.0) {
+			const double dot = (dx * fx + dy * fy + dz * fz) /
+					(distance * forward_length);
+			eligible = dot >= cosine_limit;
+		}
+		// A hard disqualification, not just a ranking penalty: high-priority
+		// objects behind the viewer cannot steal scarce visible slots.
+		distances.set(i, eligible ? distance : p_max_distance + 1.0);
+	}
+	// Reuse unique-ID validation, priority ordering and retention hysteresis.
+	// Disqualified candidates stay outside max_distance even with bonus.
+	return select_top_priority_stable(distances, p_priorities, p_ids,
+			p_retained_ids, p_budget, p_max_distance, p_hysteresis);
+}
+
 void SignificanceBudgetPlanner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("select_top", "distances", "priorities", "budget"),
 			&SignificanceBudgetPlanner::select_top);
@@ -731,6 +798,8 @@ void SignificanceBudgetPlanner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("select_shadow_casters", "bounds_min", "bounds_max", "roles", "current", "camera", "role_radii", "budget", "hysteresis"), &SignificanceBudgetPlanner::select_shadow_casters, DEFVAL(16), DEFVAL(5.0));
 	ClassDB::bind_method(D_METHOD("select_world_priority_stable", "positions", "viewers", "priorities", "ids", "retained_ids", "budget", "max_distance", "hysteresis"),
 			&SignificanceBudgetPlanner::select_world_priority_stable, DEFVAL(1000.0), DEFVAL(0.0));
+	ClassDB::bind_method(D_METHOD("select_world_priority_stable_cone", "positions", "viewer", "forward", "priorities", "ids", "retained_ids", "budget", "max_distance", "hysteresis", "half_angle_degrees", "near_radius"),
+			&SignificanceBudgetPlanner::select_world_priority_stable_cone, DEFVAL(1000.0), DEFVAL(0.0), DEFVAL(75.0), DEFVAL(3.0));
 	ClassDB::bind_method(D_METHOD("select_world", "positions", "viewers", "priorities", "budget", "max_distance"),
 			&SignificanceBudgetPlanner::select_world, DEFVAL(1000.0));
 }

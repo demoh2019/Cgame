@@ -43,6 +43,51 @@ func _smoke() -> void:
         if int(lod.call("get_visible_count")) <= 0:
             push_error("Visual LOD did not restore nearby fragments")
             ok = false
+        # Exact independent view-cone validation, not just count checking.
+        var camera: Camera3D = survivor.get_node("Camera3D")
+        var view_state: Dictionary = lod.call("get_view_state")
+        var view_position: Vector3 = view_state["origin"]
+        var view_forward: Vector3 = view_state["forward"]
+        var policy: Vector3 = lod.call("get_view_cone_parameters")
+        var cone_threshold: float = cos(deg_to_rad(policy.x))
+        var source: PackedVector3Array = lod.call("get_source_positions")
+        var selected: PackedInt32Array = lod.call("get_selected_indices")
+        if source.size() != 96 or selected.size() == 0 or selected.size() > 18:
+            push_error("View-cone LOD has an invalid source or selection budget")
+            ok = false
+        for index in selected:
+            if index < 0 or index >= source.size():
+                push_error("View-cone LOD returned an invalid fragment index")
+                ok = false
+                continue
+            var offset: Vector3 = source[index] - view_position
+            var distance: float = offset.length()
+            if distance > policy.z + 0.001:
+                push_error("View-cone LOD kept a fragment outside the hard distance")
+                ok = false
+            elif distance > policy.y + 0.001 and (
+                    offset.dot(view_forward) / maxf(distance, 0.0001) < cone_threshold - 0.0001):
+                push_error("View-cone LOD admitted an off-screen distant fragment")
+                ok = false
+        if not bool(lod.call("verify_native_fallback_parity")):
+            push_error("Native camera-cone LOD differed from GDScript fallback")
+            ok = false
+        var initial_selected: PackedInt32Array = selected.duplicate()
+        var camera_rotation: float = camera.rotation.y
+        camera.rotation.y += PI
+        lod.call("force_refresh")
+        var reversed: PackedInt32Array = lod.call("get_selected_indices")
+        if reversed.size() == 0 or reversed.size() > 18 or reversed == initial_selected:
+            push_error("View-cone LOD did not update after turning the camera around")
+            ok = false
+        if not bool(lod.call("verify_native_fallback_parity")):
+            push_error("Native view-cone LOD parity failed after camera reversal")
+            ok = false
+        camera.rotation.y = camera_rotation
+        lod.call("force_refresh")
+        if not bool(lod.call("verify_native_fallback_parity")):
+            push_error("Native view-cone LOD parity failed after restoring the camera")
+            ok = false
 
     var foliage := game.get_node_or_null("FoliageScatter") as MultiMeshInstance3D
     if foliage == null or foliage.multimesh == null:
@@ -58,8 +103,8 @@ func _smoke() -> void:
         if not foliage.multimesh.use_colors:
             push_error("Weighted foliage variants lost per-instance colors")
             ok = false
-        if foliage.get_child_count() != 2:
-            push_error("Expected two persistent extra instancing batches, not per-plant nodes")
+        if foliage.get_child_count() != 5:
+            push_error("Expected five persistent extra LOD/mesh instancing batches, not per-plant nodes")
             ok = false
         if not bool(foliage.call("verify_variant_partition_native_fallback_parity")):
             push_error("Native variant mesh buckets disagree with GDScript fallback")
@@ -80,52 +125,79 @@ func _smoke() -> void:
         if packed_counts != variant_counts:
             push_error("Per-geometry native PCG instance buckets disagree with visual variants")
             ok = false
+        var lod_tiers: PackedInt32Array = foliage.call("get_lod_tiers")
+        var lod_counts: PackedInt32Array = foliage.call("get_lod_batch_sizes")
+        if lod_tiers.size() != positions.size() or lod_counts.size() != 6:
+            push_error("Two-level PCG geometry LOD is not fully initialized")
+            ok = false
+        if not bool(foliage.call("verify_lod_native_fallback_parity")):
+            push_error("Native LOD hysteresis and mesh bucketing disagreed with GDScript")
+            ok = false
+        var nearby_lod: int = 0
+        var distant_lod: int = 0
+        for tier in lod_tiers:
+            if tier == 0:
+                nearby_lod += 1
+            elif tier == 1:
+                distant_lod += 1
+            else:
+                push_error("Invalid per-instance mesh LOD tier")
+                ok = false
+        if nearby_lod <= 0 or distant_lod <= 0:
+            push_error("Foliage demo did not exercise both near and far geometry LOD")
+            ok = false
         var source_visits := PackedInt32Array()
         source_visits.resize(positions.size())
         var child_renderer_ids := PackedInt64Array()
         for variant in 3:
-            var renderer := foliage.call("get_variant_renderer", variant) as MultiMeshInstance3D
-            if renderer == null or renderer.multimesh == null or renderer.multimesh.mesh == null:
-                push_error("Missing procedural MultiMesh mesh variant %d" % variant)
-                ok = false
-                continue
-            if not renderer.multimesh.use_colors:
-                push_error("Procedural mesh batch lost per-instance colors")
-                ok = false
-            if variant == 0 and not (renderer.multimesh.mesh is BoxMesh):
-                push_error("Green foliage must use box-blade geometry")
-                ok = false
-            elif variant == 1 and not (renderer.multimesh.mesh is CylinderMesh):
-                push_error("Autumn foliage must use tapered reed geometry")
-                ok = false
-            elif variant == 2 and not (renderer.multimesh.mesh is SphereMesh):
-                push_error("Dry foliage must use distinct seed-head geometry")
-                ok = false
-            if variant > 0:
-                child_renderer_ids.append(renderer.get_instance_id())
-            var source_indices: PackedInt32Array = foliage.call(
-                "get_variant_source_indices", variant)
-            if source_indices.size() != renderer.multimesh.instance_count:
-                push_error("PCG per-mesh batch lost instance attributes")
-                ok = false
-                continue
-            for local_index in source_indices.size():
-                var source_index: int = source_indices[local_index]
-                if source_index < 0 or source_index >= weighted.size():
-                    push_error("PCG mesh batch contained an invalid source index")
+            for lod in 2:
+                var renderer := foliage.call(
+                    "get_lod_renderer", variant, lod) as MultiMeshInstance3D
+                if renderer == null or renderer.multimesh == null or renderer.multimesh.mesh == null:
+                    push_error("Missing instanced PCG variant %d LOD%d" % [variant, lod])
                     ok = false
                     continue
-                source_visits[source_index] += 1
-                if weighted[source_index] != variant:
-                    push_error("PCG mesh batch assigned an incorrect geometry")
+                if not renderer.multimesh.use_colors:
+                    push_error("PCG LOD mesh batch lost per-instance colors")
                     ok = false
-                if renderer.multimesh.get_instance_transform(local_index).origin.distance_to(
-                        positions[source_index]) > 0.0001:
-                    push_error("PCG mesh grouping moved a plant from its authored location")
+                if lod == 1 and not (renderer.multimesh.mesh is QuadMesh):
+                    push_error("Far procedural foliage must use a two-triangle quad proxy")
                     ok = false
-                if renderer.multimesh.get_instance_color(local_index).a < 0.99:
-                    push_error("PCG mesh grouping lost the opaque per-plant color")
+                if lod == 0:
+                    if variant == 0 and not (renderer.multimesh.mesh is BoxMesh):
+                        push_error("Green foliage detailed LOD must use box blades")
+                        ok = false
+                    elif variant == 1 and not (renderer.multimesh.mesh is CylinderMesh):
+                        push_error("Autumn foliage detailed LOD must use tapered reeds")
+                        ok = false
+                    elif variant == 2 and not (renderer.multimesh.mesh is SphereMesh):
+                        push_error("Dry foliage detailed LOD must use seed heads")
+                        ok = false
+                if variant > 0 or lod > 0:
+                    child_renderer_ids.push_back(renderer.get_instance_id())
+                var source_indices: PackedInt32Array = foliage.call(
+                    "get_lod_source_indices", variant, lod)
+                if source_indices.size() != renderer.multimesh.instance_count:
+                    push_error("PCG LOD batch lost instances or source index mapping")
                     ok = false
+                    continue
+                for local_index in source_indices.size():
+                    var source_index: int = source_indices[local_index]
+                    if source_index < 0 or source_index >= weighted.size():
+                        push_error("PCG LOD batch contained invalid original source index")
+                        ok = false
+                        continue
+                    source_visits[source_index] += 1
+                    if weighted[source_index] != variant or lod_tiers[source_index] != lod:
+                        push_error("Per-instance geometry LOD reassigned a variant or tier")
+                        ok = false
+                    if renderer.multimesh.get_instance_transform(local_index).origin.distance_to(
+                            positions[source_index]) > 0.0001:
+                        push_error("Foliage LOD moved a plant from its PCG-generated position")
+                        ok = false
+                    if renderer.multimesh.get_instance_color(local_index).a < 0.99:
+                        push_error("Foliage LOD lost its per-plant color")
+                        ok = false
         for visits in source_visits:
             if visits != 1:
                 push_error("PCG mesh grouping duplicated or dropped an instance")
@@ -240,7 +312,28 @@ func _smoke() -> void:
         if not bool(foliage.call("verify_native_fallback_parity")):
             push_error("Native PCG exclusion filter diverged from GDScript fallback")
             ok = false
+        # Forced far-view test must move all instances into low triangle
+        # proxies, then an authored regeneration must recover the initial
+        # near/far split without moving or re-rolling any original plant.
+        if not bool(foliage.call("force_lod_refresh", Vector3(300.0, 0.15, 300.0))):
+            push_error("Foliage LOD did not accept a far-away viewer")
+            ok = false
+        var far_view_tiers: PackedInt32Array = foliage.call("get_lod_tiers")
+        for tier in far_view_tiers:
+            if tier != 1:
+                push_error("Far-view LOD retained detailed plant geometry")
+                ok = false
+                break
+        if int(foliage.call("get_rendered_instance_count")) != positions.size():
+            push_error("Far-view LOD dropped or duplicated visible plants")
+            ok = false
+        if not bool(foliage.call("verify_lod_native_fallback_parity")):
+            push_error("Native LOD hysteresis diverged after changing camera distance")
+            ok = false
         foliage.call("regenerate")
+        if lod_tiers != foliage.call("get_lod_tiers"):
+            push_error("Foliage regeneration did not restore authored near/far LOD")
+            ok = false
         if positions != foliage.call("get_selected_positions"):
             push_error("PCG foliage placement was not deterministic")
             ok = false
@@ -250,16 +343,21 @@ func _smoke() -> void:
             ok = false
         if int(foliage.call("get_rendered_instance_count")) != positions.size() or \
                 foliage.call("get_variant_batch_sizes") != packed_counts or \
-                foliage.get_child_count() != 2:
+                foliage.get_child_count() != 5:
             push_error("PCG mesh batching duplicated or lost instances during regeneration")
             ok = false
-        for variant in range(1, 3):
-            var renderer_after := foliage.call(
-                "get_variant_renderer", variant) as MultiMeshInstance3D
-            if renderer_after == null or child_renderer_ids.size() < variant or \
-                    renderer_after.get_instance_id() != child_renderer_ids[variant - 1]:
-                push_error("PCG regenerate allocated new mesh nodes instead of reusing them")
-                ok = false
+        var child_index: int = 0
+        for variant in 3:
+            for lod in 2:
+                if variant == 0 and lod == 0:
+                    continue
+                var renderer_after := foliage.call(
+                    "get_lod_renderer", variant, lod) as MultiMeshInstance3D
+                if renderer_after == null or child_index >= child_renderer_ids.size() or \
+                        renderer_after.get_instance_id() != child_renderer_ids[child_index]:
+                    push_error("LOD regeneration allocated new mesh nodes instead of reusing them")
+                    ok = false
+                child_index += 1
 
     var trail := game.get_node_or_null("TrailMarkers") as MultiMeshInstance3D
     if trail == null or trail.multimesh == null:
