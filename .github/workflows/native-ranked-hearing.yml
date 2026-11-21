@@ -1,0 +1,79 @@
+name: Native ranked AI hearing and Albion After senses
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_hearing_sensor_2d.cpp'
+      - 'modules/behavior_tree/ai_hearing_sensor_2d.h'
+      - 'modules/behavior_tree/tests/test_ai_hearing_sensor_2d.h'
+      - 'modules/behavior_tree/doc_classes/AIHearingSensor2D.xml'
+      - 'game/scripts/shared/native_infected_senses.gd'
+      - 'game/tests/test_native_infected_senses.gd'
+      - '.github/workflows/native-ranked-hearing.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_hearing_sensor_2d.cpp'
+      - 'modules/behavior_tree/ai_hearing_sensor_2d.h'
+      - 'game/scripts/shared/native_infected_senses.gd'
+      - 'game/tests/test_native_infected_senses.gd'
+      - '.github/workflows/native-ranked-hearing.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ranked-native-hearing:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-ranked-hearing
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-ranked-hearing
+        continue-on-error: true
+      - name: Native ranked sound-memory regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[AIHearingSensor2D]*"
+      - name: Import Albion After and parse gameplay scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee native-hearing-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' native-hearing-import.log; then exit 1; fi
+      - name: Verify native gameplay integration and fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee native-hearing-game.log
+          grep -Fq 'test_native_infected_senses.gd' native-hearing-game.log
+          grep -Eq '0 failures' native-hearing-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' native-hearing-game.log; then exit 1; fi
+      - name: Upload diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ranked-native-hearing-logs
+          if-no-files-found: ignore
+          path: |
+            native-hearing-import.log
+            native-hearing-game.log

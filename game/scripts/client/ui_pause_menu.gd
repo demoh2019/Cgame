@@ -130,6 +130,25 @@ func _build_gameplay() -> void:
 	_check(page, "Toggle sprint", "toggle_sprint")
 	_check(page, "Toggle crouch", "toggle_crouch")
 	_check(page, "Show FPS overlay", "show_fps")
+	# First person (middle mouse): lens, look speed and motion comfort.
+	_row(page, "First-person field of view", _slider(60.0, 110.0, 1.0, "fp_fov"))
+	_row(page, "Mouse sensitivity", _slider(0.1, 4.0, 0.05, "mouse_sensitivity"))
+	_check(page, "Invert mouse Y", "invert_y")
+	_check(page, "First-person head bob", "fp_head_bob")
+
+
+func _slider(min_value: float, max_value: float, step: float, key: String) -> HSlider:
+	var slider := HSlider.new()
+	slider.min_value = min_value
+	slider.max_value = max_value
+	slider.step = step
+	slider.value = float(UiSettings.get_value(key))
+	slider.value_changed.connect(func(value: float) -> void:
+		UiSettings.set_value(key, value, false) # Live while dragging, saved on release.
+		changed.emit(key))
+	slider.drag_ended.connect(func(_moved: bool) -> void:
+		UiSettings.set_value(key, slider.value))
+	return slider
 
 
 func _build_controls() -> void:

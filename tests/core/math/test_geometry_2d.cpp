@@ -37,6 +37,43 @@ TEST_FORCE_LINK(test_geometry_2d)
 
 namespace TestGeometry2D {
 
+TEST_CASE("[CoreBind] Geometry2D nearest point among independent segments") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+	PackedVector2Array segments;
+	segments.push_back(Vector2(0, 0));
+	segments.push_back(Vector2(10, 0));
+	segments.push_back(Vector2(30, 30));
+	segments.push_back(Vector2(30, 30)); // A degenerate segment is a point.
+
+	Dictionary closest = api->get_closest_point_on_segments(Vector2(4, 3), segments);
+	REQUIRE(!closest.is_empty());
+	CHECK(int(closest["segment_index"]) == 0);
+	CHECK(Vector2(closest["point"]).is_equal_approx(Vector2(4, 0)));
+	CHECK(Math::is_equal_approx(real_t(closest["distance"]), (real_t)3.0));
+	CHECK(Math::is_equal_approx(real_t(closest["t"]), (real_t)0.4));
+
+	closest = api->get_closest_point_on_segments(Vector2(31, 30), segments);
+	CHECK(int(closest["segment_index"]) == 1);
+	CHECK(Vector2(closest["point"]).is_equal_approx(Vector2(30, 30)));
+	CHECK(Math::is_equal_approx(real_t(closest["distance"]), (real_t)1.0));
+	CHECK(Math::is_equal_approx(real_t(closest["t"]), (real_t)0.0));
+
+	closest = api->get_closest_point_on_segments(Vector2(15, 0), segments);
+	CHECK(int(closest["segment_index"]) == 0);
+	CHECK(Vector2(closest["point"]).is_equal_approx(Vector2(10, 0)));
+	CHECK(Math::is_equal_approx(real_t(closest["t"]), (real_t)1.0));
+
+	PackedVector2Array tie;
+	tie.push_back(Vector2(0, 0));
+	tie.push_back(Vector2(2, 0));
+	tie.push_back(Vector2(0, 2));
+	tie.push_back(Vector2(2, 2));
+	closest = api->get_closest_point_on_segments(Vector2(1, 1), tie);
+	CHECK(int(closest["segment_index"]) == 0);
+	CHECK(api->get_closest_point_on_segments(Vector2(0, 0), PackedVector2Array()).is_empty());
+}
+
 TEST_CASE("[Geometry2D] Point in circle") {
 	CHECK(Geometry2D::is_point_in_circle(Vector2(0, 0), Vector2(0, 0), 1.0));
 

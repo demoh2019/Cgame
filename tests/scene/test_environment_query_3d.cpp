@@ -302,6 +302,44 @@ TEST_CASE("[EnvironmentQuery3D] Spread rejects invalid requests without corrupti
 	CHECK(q->query_spread_positions(2, 2.0) == PackedVector3Array({ Vector3(2, 0, 0) }));
 }
 
+
+TEST_CASE("[EnvironmentQuery3D] Occupancy exclusions affect full, top-K and spread queries") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(1, 0, 0), Vector3(4, 0, 0), Vector3(8, 0, 0), Vector3(12, 0, 0)
+	});
+	q->set_exclusion_positions({ Vector3(0, 0, 0) });
+	q->set_min_exclusion_distance(4.0);
+	const PackedVector3Array permitted = { Vector3(4, 0, 0), Vector3(8, 0, 0), Vector3(12, 0, 0) };
+	CHECK(q->query_positions() == permitted);
+	CHECK(q->query_top_positions(2) == PackedVector3Array({ Vector3(4, 0, 0), Vector3(8, 0, 0) }));
+	CHECK(q->query_spread_positions(2, 5.0) == PackedVector3Array({ Vector3(4, 0, 0), Vector3(12, 0, 0) }));
+	CHECK(q->query().size() == 3);
+	q->set_min_exclusion_distance(0.0);
+	CHECK(q->query_positions().size() == 4);
+}
+
+TEST_CASE("[EnvironmentQuery3D] Occupancy exclusions honor XZ mode and preserve valid state") {
+	Ref<EnvironmentQuery3D> q = make_query({ Vector3(1, 0, 0), Vector3(6, 0, 0) });
+	q->set_exclusion_positions({ Vector3(1, 30, 0) });
+	q->set_min_exclusion_distance(3.0);
+	CHECK(q->query_positions().size() == 2);
+	q->set_horizontal_only(true);
+	CHECK(q->query_positions() == PackedVector3Array({ Vector3(6, 0, 0) }));
+	const PackedVector3Array original = q->get_exclusion_positions();
+	PackedVector3Array too_many;
+	too_many.resize(129);
+	ERR_PRINT_OFF
+	q->set_exclusion_positions(too_many);
+	q->set_exclusion_positions({ Vector3(Math::NaN, 0, 0) });
+	q->set_min_exclusion_distance(-1.0);
+	q->set_min_exclusion_distance(Math::INF);
+	ERR_PRINT_ON
+	CHECK(q->get_exclusion_positions() == original);
+	CHECK(q->get_min_exclusion_distance() == 3.0);
+	q->set_exclusion_positions(PackedVector3Array());
+	CHECK(q->query_positions().size() == 2);
+}
+
 TEST_CASE("[EnvironmentQuery3D] Zero result cap means unlimited") {
 	Ref<EnvironmentQuery3D> q = make_query({ Vector3(1, 0, 0), Vector3(2, 0, 0) });
 	CHECK(q->get_max_results() == 0);

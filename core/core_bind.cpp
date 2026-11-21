@@ -980,6 +980,50 @@ Vector2 Geometry2D::get_closest_point_to_segment_uncapped(const Vector2 &p_point
 	return ::Geometry2D::get_closest_point_to_segment_uncapped(p_point, p_a, p_b);
 }
 
+Dictionary Geometry2D::get_closest_point_on_segments(const Vector2 &p_point, const PackedVector2Array &p_segment_endpoints) {
+	Dictionary result;
+	ERR_FAIL_COND_V_MSG(!p_point.is_finite(), result, "Query point must have finite coordinates.");
+	ERR_FAIL_COND_V_MSG((p_segment_endpoints.size() % 2) != 0 || p_segment_endpoints.size() > 65536, result,
+			"Segments must contain an even number of endpoints, with at most 32768 segments.");
+
+	const Vector2 *endpoints = p_segment_endpoints.ptr();
+	// Validate the complete array before inspecting any segments.
+	for (int i = 0; i < p_segment_endpoints.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!endpoints[i].is_finite(), result, "Segment endpoints must have finite coordinates.");
+	}
+
+	int best_segment = -1;
+	real_t best_distance_squared = 0.0;
+	Vector2 best_point;
+	real_t best_t = 0.0;
+	for (int i = 0; i < p_segment_endpoints.size(); i += 2) {
+		const Vector2 &a = endpoints[i];
+		const Vector2 &b = endpoints[i + 1];
+		const Vector2 point = ::Geometry2D::get_closest_point_to_segment(p_point, a, b);
+		const real_t distance_squared = p_point.distance_squared_to(point);
+		if (!Math::is_finite(distance_squared)) {
+			continue;
+		}
+		// Stable ties choose the first segment. Zero-length segments remain valid points.
+		if (best_segment == -1 || distance_squared < best_distance_squared) {
+			best_segment = i / 2;
+			best_distance_squared = distance_squared;
+			best_point = point;
+			const Vector2 direction = b - a;
+			const real_t length_squared = direction.length_squared();
+			best_t = length_squared > (real_t)1e-20 ? CLAMP((point - a).dot(direction) / length_squared, (real_t)0.0, (real_t)1.0) : 0.0;
+		}
+	}
+	if (best_segment < 0) {
+		return result;
+	}
+	result["point"] = best_point;
+	result["distance"] = Math::sqrt(best_distance_squared);
+	result["segment_index"] = best_segment;
+	result["t"] = best_t;
+	return result;
+}
+
 bool Geometry2D::point_is_inside_triangle(const Vector2 &p_s, const Vector2 &p_a, const Vector2 &p_b, const Vector2 &p_c) const {
 	return ::Geometry2D::is_point_in_triangle(p_s, p_a, p_b, p_c);
 }
@@ -1162,6 +1206,7 @@ void Geometry2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_closest_point_to_segment", "point", "s1", "s2"), &Geometry2D::get_closest_point_to_segment);
 
 	ClassDB::bind_method(D_METHOD("get_closest_point_to_segment_uncapped", "point", "s1", "s2"), &Geometry2D::get_closest_point_to_segment_uncapped);
+	ClassDB::bind_method(D_METHOD("get_closest_point_on_segments", "point", "segment_endpoints"), &Geometry2D::get_closest_point_on_segments);
 
 	ClassDB::bind_method(D_METHOD("point_is_inside_triangle", "point", "a", "b", "c"), &Geometry2D::point_is_inside_triangle);
 

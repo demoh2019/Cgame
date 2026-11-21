@@ -22,6 +22,26 @@ The executable sandbox `modules/behavior_tree/demo_reactive_ai/` demonstrates th
 
 The engine also provides `BehaviorTreeBlackboardCompare`: a Resource guard supporting equality, numeric ordering, existence checks and optional comparison to a second Blackboard key. The accompanying playable AI sandbox uses it for the native low-health retreat threshold without modifying the main game's authoritative infected targeting logic.
 
+## Opt-in AI CPU profiling
+
+The native `AIExecutionProfiler` measures named AI phases with Godot's monotonic microsecond clock. It tracks the last, min, max, mean and total microseconds, sample counts and overruns of a configurable budget. It is disabled by default, stores at most 32 phase names, and provides an on-demand `get_snapshot()` for investigations rather than an always-on telemetry stream.
+
+For **Albion After**, server-authoritative `Zombie` objects support:
+```gdscript
+var enabled: bool = zombie.enable_ai_profiling(true) # false on stock Godot
+# After zombie.think() runs at least once and target selection is due:
+var metrics: Dictionary = zombie.get_ai_profile_snapshot()
+var categories: Dictionary = metrics.get("categories", {})
+var selection: Dictionary = categories.get("target_selection", {})
+print("Target selection (microseconds): ", selection.get("mean_usec", 0.0))
+zombie.enable_ai_profiling(false)
+zombie.reset_ai_profile()
+```
+
+Only the selected NPC allocates a profiler. A phase named `target_selection` measures the server's actual target-selection routine; no combat rules or network payloads are changed. Per-agent timings are also included in the existing server-only `Zombie.get_ai_debug_snapshot()` response, **never automatically sent to ordinary players**.
+
+The engine's `BehaviorTreeRunner` has `profiling_enabled`, `get_profile_snapshot()` and `reset_profile()` for the complete root task execution, including child evaluation. Finished cached ticks do not count as fresh samples. Use the engine profiler or external system tools for whole-frame or C++ call-stack analysis; this is lightweight per-agent instrumentation, not a replacement.
+
 ## Validation
 
 New automated `game/tests/test_native_infected_senses.gd` is listed in the canonical `game/tests/run_all.gd`. It verifies fallback behavior, temporary sense memory, accepted sound events and safe-zone immunity. Native C++ tests cover perception rules and reactive preemption; sandbox integration scripts cover actual LOS and obstacle A* navigation.

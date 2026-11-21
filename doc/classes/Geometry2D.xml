@@ -63,6 +63,15 @@
 				The operation may result in an outer polygon (boundary) and inner polygon (hole) produced which could be distinguished by calling [method is_polygon_clockwise].
 			</description>
 		</method>
+		<method name="get_closest_point_on_segments">
+			<return type="Dictionary" />
+			<param index="0" name="point" type="Vector2" />
+			<param index="1" name="segment_endpoints" type="PackedVector2Array" />
+			<description>
+				Returns the nearest point on a collection of independent 2D line segments. [param segment_endpoints] stores pairs of endpoints in order: [code][a0, b0, a1, b1, ...][/code]. A zero-length segment is treated as a point. Returns a [Dictionary] with [code]point[/code] ([Vector2]), [code]distance[/code] ([float]), [code]segment_index[/code] ([int], zero-based), and [code]t[/code] ([float], from 0 at the first endpoint to 1 at the second). Equal-distance results deterministically choose the first matching segment.
+				Returns an empty dictionary for an empty set, an odd number of endpoints, a nonfinite coordinate or more than 32768 segments. Values are checked before any search. This is a linear CPU search; callers handling many queries should partition segments spatially.
+			</description>
+		</method>
 		<method name="get_closest_point_to_segment">
 			<return type="Vector2" />
 			<param index="0" name="point" type="Vector2" />

@@ -3,6 +3,8 @@ extends Node3D
 ## network state and what is drawn.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const WoundFx = preload("res://scripts/client/wound_fx.gd")
+const BrawlMeter = preload("res://scripts/client/brawl_meter.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
@@ -27,6 +29,7 @@ const CharacterModel = preload("res://scripts/client/character_model.gd")
 const FirstSteps = preload("res://scripts/client/first_steps.gd")
 const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const FirstPersonView = preload("res://scripts/client/first_person_view.gd")
+const FirstPersonViewmodel = preload("res://scripts/client/first_person_viewmodel.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
 const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
 const AmbientBirds = preload("res://scripts/client/ambient_birds.gd")
@@ -58,6 +61,7 @@ const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const AmbientTickBudget = preload("res://scripts/client/ambient_tick_budget.gd")
+const AMBIENT_CPU_BUDGET_US := [900, 1500, 2500, 4000] # Quality tiers, main-thread cosmetics only.
 const GraphicsCinematicDof = preload("res://scripts/client/graphics_cinematic_dof.gd")
 const RainGear = preload("res://scripts/client/character_rain_gear.gd")
 const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
@@ -105,6 +109,7 @@ var _stream_velocity := Vector3.ZERO
 var chunk_root: Node3D
 var entities: Node3D
 var camera: Camera3D
+var _wound_fx: Node3D # Cuts, bullet wounds, blood spray and severed limbs on struck enemies.
 var sun: DirectionalLight3D
 var environment: Environment
 var water: MeshInstance3D
@@ -186,10 +191,23 @@ var _demo_house_done_at := -1
 var _start_first_person := false # --first-person launch flag (also for screenshots).
 var _jump_time := -1.0 # Seconds into the current cosmetic first-person hop, or -1 on the ground.
 var _crosshair: Control
+var _viewmodel: Node3D # FirstPersonViewmodel: the held item in front of the first-person camera.
+var _bob_phase := 0.0
+var _fp_roll := 0.0
+var _land_time := -1.0 # Seconds since the cosmetic hop landed, -1 when not dipping.
+var _hit_marker := 0.0 # Crosshair hit flash, decays.
+var _own_attack_time := -10.0 # Engine ticks (s) of your last attack, for zombie hit markers.
+var _third_person_near := 0.05
+var _fp_body_refresh := 0.0
+var _brawl_meter: Control
+var _last_charge: Dictionary = {} # peer -> charge of their latest swing (for power-hit gore).
 var _underwater_tint: ColorRect # Blue murk while the camera is below the surface.
 var _breath_label: Label # Air left while diving.
 var _dof_elapsed := 0.35 # Coalesce cinematic focus updates to ~3 Hz.
 var _attack_cooldown := 0.0
+var _charge_msec := -1 # Melee attack held since (ms); release = light swing or power blow.
+const CHARGE_START_MS := 220 # A shorter press is a quick swing.
+const CHARGE_FULL_MS := 850
 var _build_mode := false # U: a ghost wall follows the aim until it is placed or cancelled.
 var _build_yaw := 0.0
 var _build_ghost: MeshInstance3D
@@ -233,7 +251,9 @@ func _ready() -> void:
 	# Godot builds retain the same pure GDScript behaviour automatically.
 	if EngineFeatures.has("FrameUpdateBudget"):
 		var native_budget: Object = EngineFeatures.make("FrameUpdateBudget")
-		if native_budget != null:
+		if native_budget != null and native_budget.has_method("record_cost") \
+				and native_budget.has_method("set_frame_time_budget_us") \
+				and native_budget.has_method("last_frame_cost_us"):
 			var registered_all := true
 			for lane in AmbientTickBudget.LANES:
 				if not bool(native_budget.call("register_lane", StringName(lane))):
@@ -246,6 +266,8 @@ func _ready() -> void:
 		[&"Albion/AmbientSkipped", Callable(_ambient_budget, "skipped_total")],
 		[&"Albion/AmbientSlots", Callable(_ambient_budget, "current_budget")],
 		[&"Albion/AmbientPressurePct", Callable(_ambient_budget, "pressure_percent")],
+		[&"Albion/AmbientCPUus", Callable(_ambient_budget, "last_frame_cost_us")],
+		[&"Albion/AmbientCPUBudgetus", Callable(_ambient_budget, "get_frame_time_budget_us")],
 	]:
 		var monitor_name: StringName = monitor[0]
 		if not Performance.has_custom_monitor(monitor_name):
@@ -1030,6 +1052,16 @@ func _spawn_effects(event: Dictionary) -> void:
 			var source: Dictionary = client.players.get(by, {}) if by > 0 else client.zombies.get(-by, {})
 			if by != -1 and source.has("x"):
 				_damage_direction.on_hit(Vector3(float(source["x"]), 0.0, float(source["z"])), float(event.get("damage", 0.0)))
+	if str(event.get("type", "")) == "attack":
+		_last_charge[int(event.get("peer", -1))] = float(event.get("charge", 0.0))
+	if _wound_fx != null and str(event.get("type", "")) == "hit" and str(event.get("kind", "")) == "zombie":
+		_wound_on_zombie(event)
+	if _wound_fx != null and str(event.get("type", "")) == "ground_finisher":
+		var peer_info: Dictionary = client.players.get(int(event.get("peer", -1)), {})
+		var weapon_id: String = str(client.inventory.weapon) if int(event.get("peer", -1)) == client.peer_id else str(peer_info.get("weapon", ""))
+		_wound_fx.finisher(entities.model_of("zombie", int(event.get("zombie", -1))), weapon_id, true)
+	if str(event.get("type", "")) == "knockdown":
+		entities.play_hit("zombie", int(event.get("zombie", -1)), true)
 	physics_fx.on_event(event, at)
 	match event["type"]:
 		"hit":
@@ -1259,6 +1291,7 @@ func _on_welcomed() -> void:
 	hud.say("F2 shows every control." if not FirstSteps.active() else "Welcome, survivor. Follow FIRST STEPS (top left); F2 lists every control.")
 	UiTheme.apply(hud)
 	client.event_received.connect(_on_skill_event)
+	client.event_received.connect(_first_person_hit_marker) # Crosshair hit flash and held-item swing in first person.
 	_setup_chat()
 	# Streaming: chunks are built from the seed as the player walks.
 	streamer = WorldStreamer.new()
@@ -1322,6 +1355,8 @@ func _on_welcomed() -> void:
 	add_child(_rain_splashes)
 	_damage_numbers = DamageNumbers.new()
 	add_child(_damage_numbers)
+	_wound_fx = WoundFx.new()
+	add_child(_wound_fx)
 	_blood_decals = BloodDecals.new()
 	add_child(_blood_decals)
 	_damage_direction = DamageDirection.new()
@@ -1389,10 +1424,27 @@ func _physics_process(delta: float) -> void:
 	var aim := _aim_direction()
 	var yaw: float = atan2(aim.x, aim.y) if aim != Vector2.ZERO else float(client.yaw)
 	client.send_input(move, sprint, yaw, delta, crouch)
-	if alive and not _build_mode and not hud.is_menu_open() and not _access.is_open() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _attack_cooldown <= 0.0 and aim != Vector2.ZERO:
+	var can_swing: bool = alive and not _build_mode and not hud.is_menu_open() and not _access.is_open() and aim != Vector2.ZERO
+	if can_swing and _melee_equipped():
+		# Brawling: tap to swing, hold to wind up a power blow, release to strike.
+		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			if _charge_msec < 0 and _attack_cooldown <= 0.0:
+				_charge_msec = Time.get_ticks_msec()
+		elif _charge_msec >= 0:
+			var held: int = Time.get_ticks_msec() - _charge_msec
+			_charge_msec = -1
+			if held < CHARGE_START_MS:
+				client.attack(aim)
+			else:
+				client.power_attack(aim, clampf(float(held - CHARGE_START_MS) / float(CHARGE_FULL_MS - CHARGE_START_MS), 0.0, 1.0))
+			_attack_cooldown = 0.18
+			_last_attack_msec = Time.get_ticks_msec()
+	elif can_swing and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _attack_cooldown <= 0.0:
 		client.attack(aim)
 		_attack_cooldown = 0.18
 		_last_attack_msec = Time.get_ticks_msec()
+	else:
+		_charge_msec = -1
 
 
 func _process(delta: float) -> void:
@@ -1439,7 +1491,7 @@ func _process(delta: float) -> void:
 		avatar.rotation.y = lerp_angle(avatar.rotation.y, facing, 1.0 - exp(-12.0 * delta))
 		avatar.visible = bool(client.you.get("alive", true))
 		# Your own body would fill the screen from inside; other players still see it.
-		avatar_model.visible = not _first_person
+		avatar_model.visible = true # In first person its meshes are shadow-only (set_body_shadow_only).
 		avatar_model.set_stance(bool(client.you.get("crouching", false)), bool(client.you.get("mounted", false)) and avatar.visible,
 			float(client.you.get("wading_depth_m", 0.0)) > 1.05)
 		# Chopping shows the axe; otherwise the equipped weapon is in hand.
@@ -1448,7 +1500,13 @@ func _process(delta: float) -> void:
 			in_hand = "axe_1"
 		elif client.you.get("action", {}).has("fish"):
 			in_hand = "fishing_rod"
-		avatar_model.set_weapon(in_hand)
+		if _first_person and in_hand != str(avatar_model.get("_held_id")):
+			avatar_model.set_weapon(in_hand)
+			FirstPersonView.set_body_shadow_only(avatar_model, true) # The new hand item too (added synchronously).
+		else:
+			avatar_model.set_weapon(in_hand)
+		if _viewmodel != null and _first_person:
+			_viewmodel.set_item(in_hand)
 		_update_fishing_line(delta)
 		_update_build_ghost()
 		avatar_model.set_gear(client.inventory.gear)
@@ -1498,9 +1556,7 @@ func _process(delta: float) -> void:
 	if camera_fx.photo_active:
 		camera_fx.photo_camera(camera, position)
 	elif _first_person:
-		camera.global_transform = FirstPersonView.camera_transform(position, _fp_yaw, _fp_pitch,
-			FirstPersonView.eye_height(bool(client.you.get("crouching", false)), bool(client.you.get("mounted", false)))
-			+ FirstPersonView.jump_offset(_jump_time))
+		_update_first_person_camera(position, delta)
 	else:
 		camera.position = camera.position.lerp(target, 1.0 - exp(-10.0 * delta))
 		camera.look_at(position + Vector3(0, 0.8, 0) + camera_fx.look)
@@ -1509,8 +1565,24 @@ func _process(delta: float) -> void:
 		_jump_time += delta
 		if _jump_time >= FirstPersonView.JUMP_SECONDS:
 			_jump_time = -1.0
+			_land_time = 0.0
+	if _land_time >= 0.0:
+		_land_time += delta
+		if _land_time >= 0.35:
+			_land_time = -1.0
 	if _crosshair != null:
 		_crosshair.visible = _first_person and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+		if _crosshair.visible:
+			_hit_marker = move_toward(_hit_marker, 0.0, delta * 4.0)
+			FirstPersonView.layout_crosshair(_crosshair, FirstPersonView.crosshair_spread(
+				avatar_model.speed if avatar_model != null else 0.0, _jump_time >= 0.0), _hit_marker)
+	if _brawl_meter == null and hud != null:
+		_brawl_meter = BrawlMeter.new()
+		hud.add_child(_brawl_meter)
+	if _brawl_meter != null:
+		_brawl_meter.visible = _first_person
+		_brawl_meter.update_state(charge_amount(), _charge_msec >= 0, float(client.you.get("rage", 0.0)),
+			float(client.you.get("rage_seconds", 0.0)), delta)
 	_update_underwater()
 	_tick_first_steps(delta)
 	if _demo == "sky":
@@ -1583,7 +1655,9 @@ func _update_time_of_day(delta: float) -> void:
 	var underground: bool = client != null and client.you.has("x") and Dungeon.is_underground(float(client.you["x"]))
 	# Only cosmetic ambience is time-sliced; network interpolation and combat
 	# still update every frame. Force an immediate refresh across dungeon edges.
-	_ambient_budget.begin_frame(delta, GraphicsQuality.level())
+	var ambient_quality: int = GraphicsQuality.level()
+	_ambient_budget.set_frame_time_budget_us(AMBIENT_CPU_BUDGET_US[ambient_quality])
+	_ambient_budget.begin_frame(delta, ambient_quality)
 	var ambient_force: bool = underground != _ambient_was_underground
 	_ambient_was_underground = underground
 	# Occlusion has a CPU cost: enable it only when enclosed dungeon walls
@@ -1703,29 +1777,37 @@ func _update_time_of_day(delta: float) -> void:
 		if _dust_devils != null:
 			var dust_delta: float = _ambient_budget.consume("dust_devils", delta, ambient_force)
 			if dust_delta > 0.0:
+				var dust_devils_start_us: int = Time.get_ticks_usec()
 				_dust_devils.update_view(client.world, here, _visual_biome, _visual_weather_wind, atmosphere.storm,
 					WorldCycle.daylight(clock), 0 if underground else GraphicsQuality.level(), dust_delta)
+				_ambient_budget.record_cost("dust_devils", maxi(0, Time.get_ticks_usec() - dust_devils_start_us))
 		if _shooting_stars != null:
 			_shooting_stars.update_view(WorldCycle.daylight(clock), atmosphere.storm,
 				0 if underground else GraphicsQuality.level(), delta)
 		if _dragonflies != null:
 			var dragonfly_delta: float = _ambient_budget.consume("dragonflies", delta, ambient_force)
 			if dragonfly_delta > 0.0:
+				var dragonflies_start_us: int = Time.get_ticks_usec()
 				_dragonflies.update_view(client.world, here, WorldCycle.daylight(clock), atmosphere.storm,
 					GraphicsQuality.level(), dragonfly_delta, underground)
+				_ambient_budget.record_cost("dragonflies", maxi(0, Time.get_ticks_usec() - dragonflies_start_us))
 		if _zombie_flies != null:
 			_zombie_flies.update_view(entities, here, WorldCycle.daylight(clock), atmosphere.storm,
 				0 if underground else GraphicsQuality.level(), delta)
 		if _tumbleweeds != null:
 			var tumble_delta: float = _ambient_budget.consume("tumbleweeds", delta, ambient_force)
 			if tumble_delta > 0.0:
+				var tumbleweeds_start_us: int = Time.get_ticks_usec()
 				_tumbleweeds.update_view(client.world, here, _visual_biome, _visual_weather_wind,
 					GraphicsQuality.level(), tumble_delta, underground)
+				_ambient_budget.record_cost("tumbleweeds", maxi(0, Time.get_ticks_usec() - tumbleweeds_start_us))
 		if _dusk_bats != null:
 			var bats_delta: float = _ambient_budget.consume("dusk_bats", delta, ambient_force)
 			if bats_delta > 0.0:
+				var dusk_bats_start_us: int = Time.get_ticks_usec()
 				_dusk_bats.update_view(here, WorldCycle.daylight(clock), atmosphere.storm,
 					GraphicsQuality.level(), bats_delta, underground)
+				_ambient_budget.record_cost("dusk_bats", maxi(0, Time.get_ticks_usec() - dusk_bats_start_us))
 
 
 func _aim_direction() -> Vector2:
@@ -1946,6 +2028,60 @@ func _cast_arcane_bolt() -> void:
 	client.arcane_bolt(direction)
 
 
+## First-person eye: lens from settings (+ the sprint/bike kick from camera_fx), step bob, strafe lean,
+## hop and landing dip, and the held item's pose. Comfort options switch bob and lean off.
+func _update_first_person_camera(feet: Vector3, delta: float) -> void:
+	var crouching := bool(client.you.get("crouching", false))
+	var mounted := bool(client.you.get("mounted", false))
+	var speed: float = avatar_model.speed if avatar_model != null else 0.0
+	var comfort: bool = bool(UiSettings.get_value("fp_head_bob")) and UiSettings.shake_scale() > 0.0
+	camera_fx.base_fov = FirstPersonView.fov(float(UiSettings.get_value("fp_fov")))
+	var grounded: bool = _jump_time < 0.0 and not mounted
+	_bob_phase = FirstPersonView.advance_bob_phase(_bob_phase, speed if grounded else 0.0, delta)
+	var bob: Vector2 = FirstPersonView.head_bob(_bob_phase, speed if grounded else 0.0, comfort)
+	# Sideways speed relative to the view, from the input (right = +x).
+	var lateral: float = _move_input.x * speed
+	_fp_roll = lerpf(_fp_roll, FirstPersonView.strafe_roll(lateral, comfort), 1.0 - exp(-8.0 * delta))
+	var eye: Transform3D = FirstPersonView.camera_transform(feet, _fp_yaw, _fp_pitch,
+		FirstPersonView.eye_height(crouching, mounted) + FirstPersonView.jump_offset(_jump_time)
+		+ FirstPersonView.landing_dip(_land_time) + bob.y)
+	eye.origin += eye.basis.x * bob.x
+	eye.basis = eye.basis * Basis(Vector3.FORWARD, _fp_roll)
+	camera.global_transform = eye
+	# Gear, rain coats and swapped tools add meshes to the body later: keep them all shadow-only.
+	_fp_body_refresh -= delta
+	if _fp_body_refresh <= 0.0:
+		_fp_body_refresh = 0.5
+		FirstPersonView.set_body_shadow_only(avatar_model, true)
+	if _viewmodel != null:
+		var lowered: bool = mounted or float(client.you.get("wading_depth_m", 0.0)) > 1.05 or speed > 5.6 \
+			or not bool(client.you.get("alive", true))
+		_viewmodel.update_pose(delta, bob, lowered)
+
+
+## Your own blows light the crosshair: player hits carry the attacker id; zombie hits have none,
+## so count one shortly after your own attack in front of you.
+func _first_person_hit_marker(event: Dictionary) -> void:
+	if not _first_person or client == null:
+		return
+	match str(event.get("type", "")):
+		"attack":
+			if int(event.get("peer", -1)) == client.peer_id:
+				_own_attack_time = Time.get_ticks_msec() / 1000.0
+				if _viewmodel != null:
+					_viewmodel.play_attack(bool(event.get("ranged", false)))
+		"hit":
+			var mine := false
+			if str(event.get("kind", "")) == "player":
+				mine = int(event.get("by", -2)) == client.peer_id
+			elif event.has("x") and Time.get_ticks_msec() / 1000.0 - _own_attack_time < 0.8:
+				var here: Vector3 = client.display_position()
+				var to := Vector2(float(event["x"]) - here.x, float(event["z"]) - here.z)
+				mine = to.length() < 32.0 and (to.length() < 2.5 or to.normalized().dot(FirstPersonView.forward(_fp_yaw)) > 0.8)
+			if mine:
+				_hit_marker = 1.0
+
+
 func _set_first_person(enabled: bool) -> void:
 	if enabled == _first_person or client == null or not client.welcomed:
 		return
@@ -1958,6 +2094,19 @@ func _set_first_person(enabled: bool) -> void:
 		# Start looking the way the survivor already faces.
 		_fp_yaw = avatar.rotation.y if avatar != null else float(client.yaw)
 		_fp_pitch = 0.0
+		_third_person_near = camera.near
+		camera.near = FirstPersonView.NEAR_CLIP # The held item sits a hand's length from the eye.
+		if _viewmodel == null:
+			_viewmodel = FirstPersonViewmodel.new()
+			_viewmodel.name = "FirstPersonViewmodel"
+			camera.add_child(_viewmodel)
+	else:
+		camera.near = _third_person_near
+		camera_fx.base_fov = camera_fx.BASE_FOV # Back to the narrow isometric lens.
+	if _viewmodel != null:
+		_viewmodel.visible = enabled
+	# Your body stays in the world as a shadow; other players see it as always.
+	FirstPersonView.set_body_shadow_only(avatar_model, enabled)
 	_update_first_person_mouse()
 
 
@@ -1972,7 +2121,10 @@ func _update_first_person_mouse() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _first_person and event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		var look: Vector2 = FirstPersonView.apply_look(_fp_yaw, _fp_pitch, event.relative)
+		var look: Vector2 = FirstPersonView.apply_look_scaled(_fp_yaw, _fp_pitch, event.relative,
+			FirstPersonView.look_sensitivity(float(UiSettings.get_value("mouse_sensitivity")), bool(UiSettings.get_value("invert_y"))))
+		if _viewmodel != null:
+			_viewmodel.add_look(event.relative)
 		_fp_yaw = look.x
 		_fp_pitch = look.y
 		get_viewport().set_input_as_handled()
@@ -2072,6 +2224,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_Q:
 				if Input.is_key_pressed(KEY_SHIFT) and not hud.is_menu_open():
 					client.loot_sweep()
+				elif _first_person and _melee_equipped() and _can_fight() and not hud.is_menu_open():
+					client.kick(_look_direction()) # First person: Q kicks; E still interacts.
 				else:
 					_interact()
 			KEY_1:
@@ -2131,6 +2285,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				elif Input.is_key_pressed(KEY_SHIFT):
 					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 						_quick_use("field_alkali_kit")
+				elif _first_person and float(client.you.get("rage", 0.0)) >= 100.0 and _can_fight():
+					client.rage()
 				else:
 					client.drink()
 			KEY_T:
@@ -2310,6 +2466,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			client.ultimate()
 			get_viewport().set_input_as_handled()
 			return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT \
+			and _first_person and _melee_equipped() and _can_fight() and not hud.is_menu_open():
+		client.parry() # First person melee: right mouse blocks, perfectly timed it parries.
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
 			_set_first_person(not _first_person)
@@ -2708,3 +2867,45 @@ func _update_hover_outline(delta: float) -> void:
 		_hover_outline.set_target({})
 		return
 	_hover_outline.set_target(entities.call("nearest_hoverable", hit, HoverOutline.PICK_RADIUS))
+
+
+## Gore at the point of impact: your own strikes follow your aim, others' come from where the attacker stands.
+func _wound_on_zombie(event: Dictionary) -> void:
+	var model: Node3D = entities.model_of("zombie", int(event.get("id", -1)))
+	if model == null:
+		return
+	var chest: Vector3 = model.global_position + Vector3.UP * 1.25
+	var by: int = int(event.get("by", -1))
+	var origin: Vector3
+	var direction: Vector3
+	if by == client.peer_id and camera != null and camera.global_position.distance_to(chest) < 6.0:
+		origin = camera.global_position
+		direction = -camera.global_transform.basis.z
+		# Melee swings land near the crosshair, not exactly on it.
+		if not bool(event.get("ranged", false)):
+			direction = (direction + Vector3(randf_range(-0.08, 0.08), randf_range(-0.12, 0.08), randf_range(-0.08, 0.08))).normalized()
+	else:
+		var attacker: Dictionary = client.players.get(by, {})
+		origin = Vector3(float(attacker.get("x", chest.x + 1.0)), chest.y + 0.2, float(attacker.get("z", chest.z)))
+		var aim: Vector3 = chest + Vector3(randf_range(-0.25, 0.25), randf_range(-0.6, 0.45), randf_range(-0.25, 0.25))
+		direction = (aim - origin).normalized()
+	_wound_fx.on_hit(model, origin, direction, float(event.get("damage", 0.0)),
+		bool(event.get("ranged", false)), bool(event.get("fatal", false)), true, str(event.get("weapon", "")),
+		float(_last_charge.get(by, 0.0)))
+
+
+## How far the current melee wind-up has charged, 0..1.
+func charge_amount() -> float:
+	if _charge_msec < 0:
+		return 0.0
+	return clampf(float(Time.get_ticks_msec() - _charge_msec - CHARGE_START_MS) / float(CHARGE_FULL_MS - CHARGE_START_MS), 0.0, 1.0)
+
+
+func _melee_equipped() -> bool:
+	var weapon: String = str(client.inventory.weapon) if client != null and client.inventory != null else ""
+	return weapon == "" or str(Defs.item(weapon).get("weapon", "melee")) != "ranged"
+
+
+func _look_direction() -> Vector2:
+	var aim: Vector2 = _aim_direction()
+	return aim if aim != Vector2.ZERO else Vector2(sin(client.yaw), cos(client.yaw))

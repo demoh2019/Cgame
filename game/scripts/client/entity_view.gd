@@ -820,6 +820,14 @@ func play_action_on(kind: String, id: int, animation_name: String) -> void:
 
 
 ## A flinch on whoever was struck.
+## The character model of an entity, or null.
+func model_of(kind: String, id: int) -> Node3D:
+	var key := "%s:%d" % [kind, id]
+	if _nodes.has(key) and is_instance_valid(_nodes[key]) and _nodes[key].has_node("Model"):
+		return _nodes[key].get_node("Model") as Node3D
+	return null
+
+
 func play_hit(kind: String, id: int, heavy: bool = false) -> void:
 	var key := "%s:%d" % [kind, id]
 	if _nodes.has(key) and _nodes[key].has_node("Model"):

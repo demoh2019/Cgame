@@ -558,6 +558,18 @@ func attack(direction: Vector2) -> void:
 	net.c_attack.rpc_id(1, direction.x, direction.y)
 
 
+func power_attack(direction: Vector2, charge: float) -> void:
+	net.c_power_attack.rpc_id(1, direction.x, direction.y, charge)
+
+
+func kick(direction: Vector2) -> void:
+	net.c_kick.rpc_id(1, direction.x, direction.y)
+
+
+func rage() -> void:
+	net.c_rage.rpc_id(1)
+
+
 func skill(direction: Vector2) -> void:
 	net.c_skill.rpc_id(1, direction.x, direction.y)
 

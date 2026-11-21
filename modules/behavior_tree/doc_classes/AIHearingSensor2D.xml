@@ -8,6 +8,14 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="report_noise_ranked">
+			<return type="bool" />
+			<param index="0" name="listener_position" type="Vector2" />
+			<param index="1" name="source_position" type="Vector2" />
+			<param index="2" name="loudness" type="float" />
+			<param index="3" name="occlusion" type="float" default="1.0" />
+			<description>Opt-in prioritized hearing. Reports an explicit noise event and returns [code]true[/code] if audible. Memory is replaced only by stronger events, or for equal strength by the source with lexicographically smaller coordinates; the same source refreshes its own memory. Strength is normalized to [code]max(0, 1 - distance / (hearing_radius * loudness * occlusion))[/code], not a physical decibel value. Weaker events are still heard but do not replace/refresh remembered sound. Invalid coordinates or multipliers do not change memory. Call [method advance_time] to expire memory. Unlike [method report_noise], this method does not always remember the last event.</description>
+		</method>
 		<method name="report_noise">
 			<return type="bool" />
 			<param index="0" name="listener_position" type="Vector2" />
@@ -28,6 +36,10 @@
 		<method name="get_last_heard_position" qualifiers="const">
 			<return type="Vector2" />
 			<description>Most recent audible event position; use [method has_sound_memory] to check validity.</description>
+		</method>
+		<method name="get_last_heard_strength" qualifiers="const">
+			<return type="float" />
+			<description>Normalized [code]0..1[/code] clarity of the winning ranked stimulus, or zero when memory has expired or legacy [method report_noise] was used.</description>
 		</method>
 		<method name="get_last_heard_loudness" qualifiers="const">
 			<return type="float" />
