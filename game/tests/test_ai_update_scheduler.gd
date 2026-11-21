@@ -56,6 +56,18 @@ func run(t) -> void:
     z.think(world, players, 0.1, rng)
     t.eq(z.target_id, 11, "existing combat threat cannot be throttled")
 
+    t.current = "Native simulation LOD cadence remains compatible"
+    var passive := Zombie.new(701, "walker", Vector3(0.0, ground, 0.0))
+    passive.think(world, {}, 0.1, rng)
+    passive.think_timer = 0.0
+    passive.think(world, {}, 0.1, rng)
+    if ClassDB.class_exists("AISimulationLOD2D"):
+        t.eq(passive.think_timer, 1.0,
+            "far passive scans keep their existing native one-second LOD interval")
+    else:
+        t.eq(passive.think_timer, 0.25,
+            "stock Godot retains the legacy passive scan rate")
+
     t.current = "GameServer uses native staggering only for large crowds"
     var sim := GameServer.new(WorldGen.new(112), 112)
     sim.tick_count = 2 # Avoid population maintenance in this isolated tick.
