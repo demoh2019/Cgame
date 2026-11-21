@@ -182,6 +182,15 @@ TEST_CASE("[AIHearingSensor2D] Ranked memory expires and legacy report still ove
 	CHECK(sensor->get_last_heard_strength() == real_t(0.0));
 }
 
+TEST_CASE("[AIHearingSensor2D] Ranked zero-duration memory never retains strength") {
+	Ref<AIHearingSensor2D> sensor;
+	sensor.instantiate();
+	sensor->set_memory_duration(0.0);
+	CHECK(sensor->report_noise_ranked(Vector2(), Vector2(10, 0), 1.0));
+	CHECK_FALSE(sensor->has_sound_memory());
+	CHECK(sensor->get_last_heard_strength() == real_t(0.0));
+}
+
 TEST_CASE("[AIHearingSensor2D] Ranked reports reject nonfinite coordinates and multipliers") {
 	Ref<AIHearingSensor2D> sensor;
 	sensor.instantiate();
