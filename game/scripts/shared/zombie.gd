@@ -402,12 +402,18 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 			var target := Vector2(target_pos.x, target_pos.z)
 			var distance := here.distance_to(target)
 			if distance > float(data["lose"]):
+				var lost_target_id: int = target_id
 				target_id = -1
 				state = State.INVESTIGATE
-				# When the target was heard but not seen recently, investigate the
-				# verified sound instead of its magically updated current location.
+				# Per-actor, already-approved sound memory has precedence over
+				# louder sounds from another survivor. Never use the escaped
+				# player's unobserved CURRENT position or bypass the pursuit leash.
 				if _native_senses != null and not _native_senses.remembers_sight():
-					if _native_senses.remembers_sound():
+					var own_sound: Dictionary = _native_senses.best_confirmed_stimulus_for_source_in_radius(
+						1, lost_target_id, here, float(data["lose"]))
+					if not own_sound.is_empty():
+						last_known_target = own_sound["position"]
+					elif _native_senses.remembers_sound():
 						last_known_target = _native_senses.last_heard_position()
 					else:
 						# A separately confirmed, more recent sound can remain valid

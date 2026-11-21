@@ -290,4 +290,49 @@ TEST_CASE("[AIStimulusHistory2D] Invalid source forget is atomic and does not re
 	CHECK(history->get_recent(1).size() == 1);
 }
 
+TEST_CASE("[AIStimulusHistory2D] Actor-specific perception ignores stronger unrelated sources") {
+	Ref<AIStimulusHistory2D> history;
+	history.instantiate();
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(12, 0), 1.0, 5.0, 77));
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(3, 4), 0.5, 5.0, 41));
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SIGHT, Vector2(6, 0), 0.9, 6.0, 41));
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(1, 0), 0.8, 5.0)); // Anonymous.
+	CHECK(history->get_best(AIStimulusHistory2D::SOUND)["source_id"] == 77);
+	const Dictionary source = history->get_best_for_source(AIStimulusHistory2D::SOUND, 41);
+	CHECK(source["source_id"] == 41);
+	CHECK(source["position"] == Vector2(3, 4));
+	CHECK(history->get_best_for_source(AIStimulusHistory2D::SIGHT, 41)["position"] == Vector2(6, 0));
+	CHECK(history->get_best_for_source(AIStimulusHistory2D::SOUND, 77)["position"] == Vector2(12, 0));
+	CHECK(history->get_best_for_source_in_radius(AIStimulusHistory2D::SOUND, 41, Vector2(), 5.0)["position"] == Vector2(3, 4));
+	CHECK(history->get_best_for_source_in_radius(AIStimulusHistory2D::SOUND, 41, Vector2(), 4.99).is_empty());
+	CHECK(history->get_best_for_source_in_radius(AIStimulusHistory2D::SIGHT, 41, Vector2(), 5.0).is_empty());
+	CHECK(history->get_best_for_source(AIStimulusHistory2D::SOUND, 42).is_empty());
+	CHECK(history->get_event_count() == 4);
+	Dictionary snapshot = history->get_best_for_source(AIStimulusHistory2D::SOUND, 41);
+	snapshot["source_id"] = 900;
+	CHECK(history->get_best_for_source(AIStimulusHistory2D::SOUND, 41)["source_id"] == 41);
+	history->advance_time(5.0);
+	CHECK(history->get_best_for_source(AIStimulusHistory2D::SOUND, 41).is_empty());
+	CHECK(history->get_best_for_source(AIStimulusHistory2D::SIGHT, 41)["source_id"] == 41);
+	CHECK(history->forget_source(41) == 1);
+	CHECK(history->get_best_for_source(AIStimulusHistory2D::SIGHT, 41).is_empty());
+}
+
+TEST_CASE("[AIStimulusHistory2D] Actor query rejects anonymous, malformed and huge spatial requests") {
+	Ref<AIStimulusHistory2D> history;
+	history.instantiate();
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(0, 0), 0.7, 5.0, 7));
+	CHECK(history->get_best_for_source(AIStimulusHistory2D::SOUND, -1).is_empty());
+	CHECK(history->get_best_for_source(AIStimulusHistory2D::SOUND, -2).is_empty());
+	CHECK(history->get_best_for_source(-1, 7).is_empty());
+	CHECK(history->get_best_for_source(3, 7).is_empty());
+	CHECK(history->get_best_for_source_in_radius(AIStimulusHistory2D::SOUND, -1, Vector2(), 0.0).is_empty());
+	CHECK(history->get_best_for_source_in_radius(AIStimulusHistory2D::SOUND, 7, Vector2(Math::NaN, 0), 1.0).is_empty());
+	CHECK(history->get_best_for_source_in_radius(AIStimulusHistory2D::SOUND, 7, Vector2(), Math::INF).is_empty());
+	CHECK(history->get_best_for_source_in_radius(AIStimulusHistory2D::SOUND, 7, Vector2(), -0.1).is_empty());
+	CHECK(history->get_best_for_source_in_radius(AIStimulusHistory2D::SOUND, 7, Vector2(), 1000001.0).is_empty());
+	CHECK(history->get_best_for_source_in_radius(AIStimulusHistory2D::SOUND, 7, Vector2(), 0.0)["source_id"] == 7);
+	CHECK(history->get_event_count() == 1);
+}
+
 } // namespace TestAIStimulusHistory2D
