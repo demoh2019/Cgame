@@ -62,4 +62,13 @@ public:
 	Array query_nearest_batch(const PackedVector2Array &p_positions,
 			const PackedInt32Array &p_source_indices,
 			double p_radius, double p_cell_size, int p_max_neighbors) const;
+
+	// Read-only crowd separation steering, using the nearest bounded neighbors
+	// from the same 3x3-cell broadphase. One finite vector of length <= 1
+	// per source, in input order. Coincident points diverge deterministically
+	// by input index. Invalid inputs return an empty packed array.
+	// This cannot change physics, gameplay targets or actor positions itself.
+	PackedVector2Array query_separation_batch(const PackedVector2Array &p_positions,
+			const PackedInt32Array &p_source_indices,
+			double p_radius, double p_cell_size, int p_max_neighbors) const;
 };

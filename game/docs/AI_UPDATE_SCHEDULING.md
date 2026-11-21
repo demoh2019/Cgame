@@ -44,6 +44,46 @@ Godot continues its original 0.25s passive AI scans. Native unit tests and
 `game/tests/test_ai_update_scheduler.gd` verify distance flapping, urgent
 overrides, startup phasing and real survivor reacquisition.
 
+## Native crowd separation for idle packs
+
+Inspired by the data-oriented neighborhood steering in Unreal Engine
+[Mass Avoidance](https://dev.epicgames.com/documentation/en-us/unreal-engine/mass-avoidance-overview-in-unreal-engine),
+the existing `AIProximityGrid2D` has a new stateless native method:
+
+```gdscript
+var steering: PackedVector2Array = grid.query_separation_batch(
+    zombie_xz_positions, passive_indices, 2.5, 3.0, 8)
+```
+
+It performs the same bounded 3×3 hashed-cell, closest-eight-neighbor
+selection used by native pack alerts. Each source gets one deterministic,
+finite repulsion vector with length at most one; overlapping NPC positions
+use stable source indices to choose opposite directions instead of a
+random nudge. Malformed requests return an empty array, never partial results.
+
+The canonical multiplayer server shares this native grid with pack alerts.
+For 32–1,024 infected it samples passive crowd avoidance **once per five
+simulation ticks** (4Hz at the game's 20Hz tick), and only for
+`WANDER`/`INVESTIGATE` infected. Nearby active infected are still
+obstacles but never receive avoidance-driven combat movement. The game
+blends at most 35% repulsion into these two passive movement directions,
+using the existing world collision sweep and wounded movement speeds;
+it never alters attack checks, target selection, chase, bosses, snares,
+knockback, network packets or authoritative player data.
+
+Stock Godot and older Cgame binaries leave previous movement unchanged,
+and the server immediately clears steering when the population drops below
+32. `GameServer.get_crowd_separation_stats()` is a server-only,
+read-only diagnostic snapshot of active calculation and source counts;
+it is not sent to connected players.
+
+Native regression tests cover coincident and negative coordinates,
+deterministic repeatability, distant NPCs, neighbor limits and invalid
+input. `test_ai_update_scheduler.gd` exercises real `GameServer`
+batch calculation, threshold cleanup and noncombat-only steering.
+An actual compiled Cgame editor is necessary to run the new C++ logic;
+no unmeasured FPS or CPU benefit is claimed.
+
 ## Inspect the real server
 
 The diagnostic `GameServer.get_ai_schedule_stats()` method returns a detached Dictionary:

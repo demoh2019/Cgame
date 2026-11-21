@@ -374,7 +374,13 @@ const AI_STAGGER_SLOTS := 4
 const AI_BATCH_MAX_SIZE := 4096 # Match the native guard; larger populations use safe scalar calls.
 var _ai_update_scheduler: Variant = null
 var _flank_slot_reservations: Variant = null # Shared native AI Smart Object leases per server.
-var _pack_spatial_grid: Variant = null # Optional C++ radius broadphase; old-engine fallback below.
+var _pack_spatial_grid: Variant = null # Shared stateless C++ broadphase for pack alerts and passive separation.
+const AI_CROWD_SEPARATION_MIN := 32
+const AI_CROWD_SEPARATION_MAX := 1024 # Native source index safety limit.
+const AI_CROWD_SEPARATION_TICKS := 5 # 4Hz, not every 20Hz movement tick.
+const AI_CROWD_SEPARATION_RADIUS := 2.5
+var _crowd_separation_enabled: bool = false
+var last_crowd_separation_stats: Dictionary = {"enabled": false, "population": 0, "sources": 0}
 var last_pack_query_stats: Dictionary = {"native": false, "population": 0, "sources": 0, "max_alerts": 12, "alerts_sent": 0}
 var last_ai_schedule_stats: Dictionary = {"enabled": false, "population": 0, "phase_due": 0, "phase_deferred": 0}
 var last_population_query_stats: Dictionary = {} # Last once-per-second maintenance broadphase counters.
@@ -8076,6 +8082,59 @@ func get_ai_schedule_stats() -> Dictionary:
 	return last_ai_schedule_stats.duplicate(true)
 
 
+## Server-only diagnostic snapshot: steering is never replicated to clients.
+func get_crowd_separation_stats() -> Dictionary:
+	return last_crowd_separation_stats.duplicate(true)
+
+
+## Reuse the native pack-neighbor grid to calculate bounded passive steering.
+## Nearby active NPCs are obstacles, but ONLY wander/investigate agents receive
+## a vector. The normal world collider and combat paths are unchanged.
+func _refresh_passive_crowd_separation(cohort: Array) -> void:
+	if _pack_spatial_grid == null and ClassDB.class_exists("AIProximityGrid2D"):
+		_pack_spatial_grid = ClassDB.instantiate("AIProximityGrid2D")
+	var available: bool = _pack_spatial_grid != null \
+		and _pack_spatial_grid.has_method("query_separation_batch") \
+		and cohort.size() >= AI_CROWD_SEPARATION_MIN \
+		and cohort.size() <= AI_CROWD_SEPARATION_MAX
+	if not available:
+		for infected in cohort:
+			infected.set_passive_crowd_separation(Vector2.ZERO)
+		_crowd_separation_enabled = false
+		last_crowd_separation_stats = {"enabled": false, "population": cohort.size(), "sources": 0}
+		return
+	var positions := PackedVector2Array()
+	var source_indices := PackedInt32Array()
+	var source_agents: Array = []
+	for infected in cohort:
+		infected.set_passive_crowd_separation(Vector2.ZERO)
+		if not infected.is_alive() or not infected.position.is_finite():
+			continue
+		var index: int = positions.size()
+		positions.append(Vector2(infected.position.x, infected.position.z))
+		if not infected.raid_boss and not infected.perched \
+				and (infected.state == Zombie.State.WANDER \
+				or infected.state == Zombie.State.INVESTIGATE):
+			source_indices.append(index)
+			source_agents.append(infected)
+	if source_agents.is_empty():
+		_crowd_separation_enabled = false
+		last_crowd_separation_stats = {"enabled": false, "population": cohort.size(), "sources": 0}
+		return
+	var steering: PackedVector2Array = _pack_spatial_grid.query_separation_batch(
+		positions, source_indices, AI_CROWD_SEPARATION_RADIUS,
+		3.0, 8)
+	if steering.size() != source_agents.size():
+		_crowd_separation_enabled = false
+		last_crowd_separation_stats = {"enabled": false, "population": cohort.size(), "sources": 0}
+		return
+	for i in range(source_agents.size()):
+		source_agents[i].set_passive_crowd_separation(steering[i])
+	_crowd_separation_enabled = true
+	last_crowd_separation_stats = {"enabled": true, "population": cohort.size(),
+		"sources": source_agents.size(), "period_ticks": AI_CROWD_SEPARATION_TICKS}
+
+
 func _tick_zombies(delta: float) -> void:
 	var info: Dictionary = {}
 	for player in players.values():
@@ -8120,6 +8179,13 @@ func _tick_zombies(delta: float) -> void:
 	# of infected iterated below. Masks use array indices, never client IDs.
 	# Older engines or cohorts above the safety cap use the scalar native API.
 	var ai_cohort: Array = zombies.values()
+	# A single native 3x3-cell query every five server ticks feeds gentle
+	# steering for noncombat infected only. Clear stale vectors immediately
+	# when the crowd falls below the large-group threshold.
+	if tick_count % AI_CROWD_SEPARATION_TICKS == 0 \
+			or (_crowd_separation_enabled and (ai_cohort.size() < AI_CROWD_SEPARATION_MIN \
+			or ai_cohort.size() > AI_CROWD_SEPARATION_MAX)):
+		_refresh_passive_crowd_separation(ai_cohort)
 	var due_mask := PackedByteArray()
 	if stagger_decisions and _ai_update_scheduler.has_method("get_due_mask") \
 			and ai_cohort.size() <= AI_BATCH_MAX_SIZE:

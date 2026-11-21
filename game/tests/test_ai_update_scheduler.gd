@@ -147,6 +147,66 @@ func run(t) -> void:
         t.check(lod_engine == null or not lod_engine.has_method("get_hysteretic_interval"),
             "stock and older Cgame retain existing AI LOD behavior")
 
+    t.current = "Native crowd separation steers only passive infected"
+    var walker := Zombie.new(704, "walker", Vector3(0.0, ground, 0.0))
+    walker.state = Zombie.State.WANDER
+    walker.set_passive_crowd_separation(Vector2(-1.0, 0.0))
+    walker._move_toward(world, Vector2.ZERO, Vector2(0.0, 10.0), 1.0, 0.033)
+    t.check(walker.yaw < 0.0,
+        "wandering direction includes gentle native separation")
+    var attacker := Zombie.new(705, "walker", Vector3(0.0, ground, 0.0))
+    attacker.state = Zombie.State.CHASE
+    attacker.set_passive_crowd_separation(Vector2(-1.0, 0.0))
+    attacker._move_toward(world, Vector2.ZERO, Vector2(0.0, 10.0), 1.0, 0.033)
+    t.near(attacker.yaw, 0.0, 0.0001,
+        "combat chase ignores ambient crowd steering")
+    walker.set_passive_crowd_separation(Vector2.INF)
+    t.eq(walker._passive_crowd_separation, Vector2.ZERO,
+        "invalid native vectors cannot affect movement")
+    walker.set_passive_crowd_separation(Vector2(100.0, 0.0))
+    t.eq(walker._passive_crowd_separation, Vector2.RIGHT,
+        "movement receives only bounded steering magnitudes")
+
+    t.current = "Authoritative server batches passive crowd avoidance at low frequency"
+    var crowd := GameServer.new(WorldGen.new(113), 113)
+    crowd.tick_count = 5 # Native steering refresh; no spawn-maintenance pass.
+    var crowd_mobs: Array = []
+    for index in range(32):
+        var cx: float = 0.0 if index == 0 else (
+            1.0 if index == 1 else float(index * 10))
+        var passive_mob := Zombie.new(60000 + index, "walker",
+            Vector3(cx, ground, 0.0))
+        passive_mob.state = Zombie.State.WANDER
+        passive_mob.wander_target = Vector2(cx, 20.0)
+        passive_mob.think_timer = 100.0
+        crowd.zombies[passive_mob.id] = passive_mob
+        crowd_mobs.append(passive_mob)
+    crowd._tick_zombies(1.0 / 30.0)
+    var crowd_available: bool = ClassDB.class_exists("AIProximityGrid2D") \
+        and ClassDB.instantiate("AIProximityGrid2D").has_method("query_separation_batch")
+    var crowd_stats: Dictionary = crowd.get_crowd_separation_stats()
+    t.eq(bool(crowd_stats.get("enabled", false)), crowd_available,
+        "native crowd steering is enabled only where API exists")
+    if crowd_available:
+        t.eq(int(crowd_stats.get("sources", -1)), 32,
+            "one spatial batch covers every eligible passive infected")
+        t.check(crowd_mobs[0]._passive_crowd_separation.x < 0.0,
+            "first member receives a safe repulsion from close neighbor")
+        t.check(crowd_mobs[1]._passive_crowd_separation.x > 0.0,
+            "second member receives the opposite repulsion")
+        t.eq(crowd_mobs[31]._passive_crowd_separation, Vector2.ZERO,
+            "distant infected has no spurious avoidance")
+        crowd.zombies.erase(crowd_mobs[31].id)
+        crowd.tick_count = 6 # Below 32: clear even between refresh ticks.
+        crowd._tick_zombies(1.0 / 30.0)
+        t.check(not crowd.get_crowd_separation_stats()["enabled"],
+            "falling below threshold immediately disables crowd steering")
+        t.eq(crowd_mobs[0]._passive_crowd_separation, Vector2.ZERO,
+            "stale steering never persists after crowd despawns")
+    else:
+        t.eq(crowd_mobs[0]._passive_crowd_separation, Vector2.ZERO,
+            "stock and older Godot use unchanged movement")
+
     t.current = "GameServer uses native staggering only for large crowds"
     var sim := GameServer.new(WorldGen.new(112), 112)
     sim.tick_count = 2 # Avoid population maintenance in this isolated tick.
