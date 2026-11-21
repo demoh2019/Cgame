@@ -45,4 +45,5 @@ public:
 	int get_frames_observed() const { return frames_observed; }
 	int get_pressure_percent() const;
 	void reset();
+	CrowdAnimationBudgetGovernor() = default;
 };
