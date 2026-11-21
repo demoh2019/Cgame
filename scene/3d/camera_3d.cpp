@@ -475,6 +475,54 @@ real_t Camera3D::get_pixels_per_meter_at_position(const Vector3 &p_world_pos) co
 	return focal_y_pixels / depth;
 }
 
+// Batch screen-space density: used by instanced grass tile LOD, where
+// calling get_pixels_per_meter_at_position() for each tile would repeatedly
+// recompute the same projection matrix and camera inverse per refresh.
+// The scalar method's visibility and projection semantics are preserved.
+PackedFloat64Array Camera3D::get_pixels_per_meter_at_positions(const PackedVector3Array &p_world_positions) const {
+	PackedFloat64Array result;
+	const int count = p_world_positions.size();
+	ERR_FAIL_COND_V_MSG(!is_inside_tree() || count > 4096, result,
+			"Camera3D batch projection requires a camera in the scene tree and at most 4096 points.");
+	if (count == 0) {
+		return result;
+	}
+	// Reject the entire request before allocating output: a malformed late
+	// world position must not leave the first half of a tile group updated.
+	for (int i = 0; i < count; ++i) {
+		if (!p_world_positions[i].is_finite()) {
+			return PackedFloat64Array();
+		}
+	}
+	const Size2 viewport_size = get_viewport()->get_visible_rect().size;
+	if (!Math::is_finite(viewport_size.y) || viewport_size.y <= 0.0) {
+		return result;
+	}
+	const Projection projection = get_camera_projection();
+	const real_t focal_y_pixels = Math::abs(projection.columns[1][1]) * viewport_size.y * 0.5;
+	if (!Math::is_finite(focal_y_pixels) || focal_y_pixels <= 0.0) {
+		return result;
+	}
+	const bool orthogonal = mode == PROJECTION_ORTHOGONAL;
+	Transform3D inverse_camera;
+	if (!orthogonal) {
+		inverse_camera = get_camera_transform().affine_inverse();
+	}
+	result.resize(count);
+	double *pixels = result.ptrw();
+	for (int i = 0; i < count; ++i) {
+		if (orthogonal) {
+			pixels[i] = double(focal_y_pixels);
+			continue;
+		}
+		const Vector3 camera_space = inverse_camera.xform(p_world_positions[i]);
+		const real_t depth = -camera_space.z;
+		pixels[i] = Math::is_finite(depth) && depth > CMP_EPSILON ?
+				double(focal_y_pixels / depth) : 0.0;
+	}
+	return result;
+}
+
 // Inverse projection footprint for a fixed pixel-sized object. Reuses the
 // existing camera projection computation so aspect-lock and frustum offsets
 // match the renderer; a zero result is safer than a huge billboard for a
@@ -887,6 +935,7 @@ void Camera3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_camera_transform"), &Camera3D::get_camera_transform);
 	ClassDB::bind_method(D_METHOD("get_camera_projection"), &Camera3D::get_camera_projection);
 	ClassDB::bind_method(D_METHOD("get_pixels_per_meter_at_position", "world_point"), &Camera3D::get_pixels_per_meter_at_position);
+	ClassDB::bind_method(D_METHOD("get_pixels_per_meter_at_positions", "world_points"), &Camera3D::get_pixels_per_meter_at_positions);
 	ClassDB::bind_method(D_METHOD("get_world_size_for_pixel_diameter_at_position", "world_point", "pixel_diameter"), &Camera3D::get_world_size_for_pixel_diameter_at_position);
 	ClassDB::bind_method(D_METHOD("get_fov"), &Camera3D::get_fov);
 	ClassDB::bind_method(D_METHOD("get_frustum_offset"), &Camera3D::get_frustum_offset);

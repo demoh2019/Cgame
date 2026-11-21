@@ -54,6 +54,15 @@
 				Returns the projection matrix that this camera uses to render to its associated viewport. The camera must be part of the scene tree to function.
 			</description>
 		</method>
+		<method name="get_pixels_per_meter_at_positions" qualifiers="const">
+			<return type="PackedFloat64Array" />
+			<param index="0" name="world_points" type="PackedVector3Array" />
+			<description>
+				Returns the projected number of logical viewport pixels per world meter at each point, in original input order. All valid entries match [method get_pixels_per_meter_at_position] exactly, including the camera's current projection, aspect mode, frustum offset, adjusted camera transform and zero for positions on or behind the focal plane in perspective/frustum modes. Orthogonal projection returns a distance-independent pixel density.
+				In contrast to calling the scalar method for every point, this Cgame extension computes the camera projection and inverse transform only once for the entire batch. Supports up to [b]4096[/b] points per call and requires the camera to be inside a scene tree. Empty input, invalid world positions, oversized groups or unavailable viewport projection return an empty array instead of partial values; callers can fall back to the scalar API. This is a CPU-side screen-coverage estimate for instanced geometry LOD, foliage, billboards and editor tools, not GPU occlusion/frustum culling, mesh simplification or an automatic render-budget system.
+				[b]Note:[/b] As with the scalar method, results use the logical viewport height. Multiply by [member Viewport.scaling_3d_scale] to account for dynamic 3D render resolution where appropriate. These values are unaffected by gameplay authority, physics and world streaming.
+			</description>
+		</method>
 		<method name="get_pixels_per_meter_at_position" qualifiers="const">
 			<return type="float" />
 			<param index="0" name="world_point" type="Vector3" />

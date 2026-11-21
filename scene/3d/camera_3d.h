@@ -184,6 +184,11 @@ public:
 	// Perspective/frustum use camera-space depth; orthogonal is constant.
 	// This is a geometry LOD hint (before viewport 3D resolution scaling).
 	real_t get_pixels_per_meter_at_position(const Vector3 &p_world_pos) const;
+	// Unreal screen-size LOD-style query for a group of instanced tiles.
+	// Computes the viewport projection and inverse camera transform ONCE
+	// for up to 4096 world points; returns 0 for behind-camera positions.
+	// Invalid input rejects the entire batch without partial results.
+	PackedFloat64Array get_pixels_per_meter_at_positions(const PackedVector3Array &p_world_positions) const;
 	// World-space diameter for a target on-screen pixel width. Useful for
 	// particles, labels and impostors with stable coverage across camera zoom.
 	// Returns 0 for invalid inputs or positions behind perspective cameras.
