@@ -433,7 +433,7 @@ TEST_CASE("[PCGSpatialFilter3D] rotated boxes exclude inclusive faces before spa
 	const PackedVector3Array extents = { Vector3(2, 1, 0.5) };
 	const PackedFloat64Array yaws = { 0.0 };
 	const PackedInt32Array selected = filter->filter_indices_excluding_oriented_volumes(
-			points, {}, {}, {}, {}, centers, extents, yaws, 2.0);
+			points, {}, {}, {}, {}, centers, extents, yaws, 2.5);
 	REQUIRE(selected.size() == 2);
 	CHECK(selected[0] == 1);
 	CHECK(selected[1] == 2);
