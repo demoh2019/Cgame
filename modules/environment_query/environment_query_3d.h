@@ -128,5 +128,8 @@ public:
 	// Generates candidates on the XZ plane. Count/size are bounded to avoid
 	// accidentally allocating millions of points in the editor.
 	static PackedVector3Array sample_ring(const Vector3 &p_center, double p_radius, int p_count, double p_phase = 0.0);
+	// Concentric XZ rings with optional deterministic spiral staggering.
+	// At most 65536 points; one ring samples the outer radius.
+	static PackedVector3Array sample_donut(const Vector3 &p_center, double p_inner_radius, double p_outer_radius, int p_ring_count, int p_points_per_ring, double p_phase = 0.0, bool p_spiral = false);
 	static PackedVector3Array sample_grid(const Vector3 &p_center, const Vector2 &p_half_extents, double p_spacing, int p_max_points = 4096);
 };
