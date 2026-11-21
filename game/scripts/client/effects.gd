@@ -4,6 +4,7 @@ const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const SnowVfx = preload("res://scripts/client/snow_vfx.gd")
 const PoolScript = preload("res://addons/runtime_pool/node_pool.gd")
 const BurstScene = preload("res://scripts/client/pooled_burst.tscn")
+const FxPolicy = preload("res://scripts/client/fx_scalability_policy.gd")
 
 ## Short-lived particle effects (hits, deaths, pickups, level ups, dust), the rain that follows the camera, and the life
 ## of the wilds around the player: pollen drifting in the sun, butterflies, leaves falling in the forest, fireflies at night.
@@ -17,6 +18,10 @@ var _butterflies: CPUParticles3D
 var _leaves: CPUParticles3D
 var _fireflies: CPUParticles3D
 var _burst_pool # Cgame RuntimeNodePool instance
+var _native_fx_budget: Object = null
+var _pending_bursts: Array[Dictionary] = []
+var last_fx_budget_stats: Dictionary = {"requested": 0, "rendered": 0, "dropped": 0, "native": false}
+const MAX_PENDING_BURSTS := 256
 
 const BUTTERFLY_SHADER := """
 shader_type spatial;
@@ -52,6 +57,10 @@ func _ready() -> void:
 	_burst_pool.max_idle = 24
 	_burst_pool.max_active = 48
 	add_child(_burst_pool)
+	if ClassDB.class_exists("SignificanceBudgetPlanner"):
+		var planner: Object = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if planner != null and planner.has_method("select_effects"):
+			_native_fx_budget = planner
 	_build_ambience()
 
 ## A soft round dot, white with an alpha falloff, for pollen and fireflies.
@@ -249,33 +258,96 @@ func ring(position: Vector3, color: Color, radius: float = 4.0, seconds: float =
 	tween.chain().tween_callback(instance.queue_free)
 
 
-## A puff of particles: `color` fades out, `speed` is the initial speed, `size` the particle size in meters.
-func burst(position: Vector3, color: Color, count: int = 14, speed: float = 3.0, lifetime: float = 0.6, size: float = 0.14, gravity: float = 7.0, up: float = 0.6) -> void:
-	if _burst_pool == null:
+## Frame-gather visual descriptors before acquiring pooled particle nodes.
+## Damage, audio, network event delivery and server authority are unaffected.
+func _process(_delta: float) -> void:
+	flush_bursts()
+
+
+func pending_burst_count() -> int:
+	return _pending_bursts.size()
+
+
+func flush_bursts() -> void:
+	if _pending_bursts.is_empty():
 		return
+	var camera: Camera3D = get_viewport().get_camera_3d() if is_inside_tree() else null
+	var viewer: Vector3 = camera.global_position if camera != null else Vector3.ZERO
+	var distances := PackedFloat64Array()
+	var priorities := PackedByteArray()
+	var categories := PackedByteArray()
+	for effect in _pending_bursts:
+		distances.append(viewer.distance_to(effect["position"]) if camera != null else 0.0)
+		priorities.append(int(effect["priority"]))
+		categories.append(int(effect["group"]))
+	var chosen: PackedInt32Array = FxPolicy.select_indices(
+		distances, priorities, categories, GraphicsQuality.level(), _native_fx_budget)
+	var actual: int = 0
+	for index in chosen:
+		if _emit_burst(_pending_bursts[index]):
+			actual += 1
+	last_fx_budget_stats = {
+		"requested": _pending_bursts.size(),
+		"rendered": actual,
+		"dropped": _pending_bursts.size() - actual,
+		"native": _native_fx_budget != null,
+	}
+	_pending_bursts.clear()
+
+
+func _emit_burst(effect: Dictionary) -> bool:
+	if _burst_pool == null:
+		return false
 	var particles: CPUParticles3D = _burst_pool.acquire(self) as CPUParticles3D
 	if particles == null:
+		return false
+	particles.global_position = effect["position"]
+	particles.call("configure_burst", effect["color"], effect["count"],
+		effect["speed"], effect["lifetime"], effect["size"],
+		effect["gravity"], effect["up"])
+	return true
+
+
+## A puff of particles: `color` fades out, `speed` is the initial speed, `size` the particle size in meters.
+func burst(position: Vector3, color: Color, count: int = 14, speed: float = 3.0, lifetime: float = 0.6, size: float = 0.14, gravity: float = 7.0, up: float = 0.6, priority: int = 1, group: int = 1) -> void:
+	if not position.is_finite():
 		return
-	particles.global_position = position
-	particles.call("configure_burst", color, count, speed, lifetime, size, gravity, up)
+	var effect: Dictionary = {
+		"position": position, "color": color, "count": count,
+		"speed": speed, "lifetime": lifetime, "size": size,
+		"gravity": gravity, "up": up,
+		"priority": clampi(priority, 0, 3), "group": clampi(group, 0, 3),
+	}
+	if _pending_bursts.size() >= MAX_PENDING_BURSTS:
+		# Protect critical feedback from already queued cosmetic foot dust.
+		var least: int = -1
+		for i in _pending_bursts.size():
+			if int(_pending_bursts[i]["priority"]) < int(effect["priority"]):
+				if least < 0 or int(_pending_bursts[i]["priority"]) < int(_pending_bursts[least]["priority"]):
+					least = i
+		if least < 0:
+			return
+		_pending_bursts[least] = effect
+	else:
+		_pending_bursts.append(effect)
 
 
 
 func hit_zombie(position: Vector3) -> void:
-	burst(position, Color(0.45, 0.62, 0.2), 12, 3.2, 0.55, 0.09)
+	burst(position, Color(0.45, 0.62, 0.2), 12, 3.2, 0.55, 0.09, 7.0, 0.6, 2, 1)
 
 
 func zombie_died(position: Vector3) -> void:
-	burst(position, Color(0.4, 0.55, 0.2), 28, 4.5, 0.9, 0.12)
+	burst(position, Color(0.4, 0.55, 0.2), 28, 4.5, 0.9, 0.12, 7.0, 0.6, 3, 2)
 	burst(position, Color(0.35, 0.33, 0.3), 12, 2.0, 1.2, 0.3, 1.0, 0.2)
 
 
 func hit_player(position: Vector3) -> void:
-	burst(position, Color(0.78, 0.1, 0.1), 14, 3.4, 0.5, 0.08)
+	burst(position, Color(0.78, 0.1, 0.1), 14, 3.4, 0.5, 0.08, 7.0, 0.6, 3, 2)
 
 
 func muzzle_flash(position: Vector3) -> void:
-	burst(position, Color(1.0, 0.85, 0.35), 8, 5.0, 0.12, 0.1, 0.0, 0.0)
+	burst(position, Color(1.0, 0.85, 0.35), 8, 5.0, 0.12, 0.1, 0.0, 0.0, 2, 2)
 
 
 func gathered(position: Vector3, color: Color) -> void:
@@ -283,11 +355,11 @@ func gathered(position: Vector3, color: Color) -> void:
 
 
 func level_up(position: Vector3) -> void:
-	burst(position, Color(1.0, 0.85, 0.3), 36, 4.0, 1.1, 0.07, -1.5, 1.0)
+	burst(position, Color(1.0, 0.85, 0.3), 36, 4.0, 1.1, 0.07, -1.5, 1.0, 3, 3)
 
 
 func loot(position: Vector3) -> void:
-	burst(position, Color(1.0, 0.9, 0.5), 16, 2.5, 0.8, 0.05, -0.5, 1.0)
+	burst(position, Color(1.0, 0.9, 0.5), 16, 2.5, 0.8, 0.05, -0.5, 1.0, 2, 2)
 
 
 ## Dust kicked up by a runner; call every frame with the measured speed.
@@ -298,4 +370,4 @@ func footsteps(position: Vector3, speed: float, delta: float) -> void:
 	_dust_timer -= delta
 	if _dust_timer <= 0.0:
 		_dust_timer = 0.16
-		burst(position + Vector3(0, 0.1, 0), Color(0.55, 0.5, 0.4, 0.5), 3, 0.9, 0.4, 0.07, -0.3, 0.3)
+		burst(position + Vector3(0, 0.1, 0), Color(0.55, 0.5, 0.4, 0.5), 3, 0.9, 0.4, 0.07, -0.3, 0.3, 0, 0)
