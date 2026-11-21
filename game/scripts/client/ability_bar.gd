@@ -29,6 +29,9 @@ static func slot_label(slot: String, inventory, you: Dictionary) -> String:
 			if skill.is_empty():
 				return "no weapon skill"
 			var name: String = str(skill.get("id", "skill")).replace("_", " ")
+			var mastery: int = int((you.get("weapon_mastery", {}) as Dictionary).get("level", 0))
+			if slot == "weapon" and mastery > 0:
+				name += " M%d" % mastery
 			var cd: float = float(you.get("skill_cd" if slot == "weapon" else "ultimate_cd", 0.0))
 			return ("%s%s" % [name, " (ult)" if slot == "ultimate" else ""]) + ("  %.0fs" % cd if cd > 0.05 else "")
 		_:

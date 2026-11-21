@@ -204,6 +204,7 @@ const SUITES := [
 	"res://tests/test_gear_durability.gd",
 	"res://tests/test_enchanting.gd",
 	"res://tests/test_gear_skills.gd",
+	"res://tests/test_weapon_mastery.gd",
 	"res://tests/test_progression.gd",
 	"res://tests/test_skills.gd",
 	"res://tests/test_json_numbers.gd",

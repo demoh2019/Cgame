@@ -5087,6 +5087,8 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float, ultimate: bool = false)
 	var skill: Dictionary = Combat.active_skill(weapon)
 	if ultimate:
 		skill = GearSkills.ultimate(skill)
+		if not skill.is_empty():
+			skill["damage"] = float(skill["damage"]) * player.progression.mastery_ultimate_multiplier(weapon)
 	if skill.is_empty() or player.inventory.count(weapon) < 1:
 		return {"ok": false, "reason": "no_skill"}
 	var direction := Vector2(dir_x, dir_z)
@@ -8731,6 +8733,10 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"scavenging_level": player.progression.scavenging_level(),
 			"scavenging_xp": player.progression.scavenging_xp,
 			"combat_levels": player.progression.combat_levels(),
+			"weapon_mastery": {"family": Progression.weapon_family(player.inventory.weapon),
+				"level": player.progression.weapon_mastery_level(player.inventory.weapon),
+				"fame": int(player.progression.weapon_fame.get(Progression.weapon_family(player.inventory.weapon), 0)),
+				"item_power": Defs.item_power(player.inventory.weapon) + player.progression.mastery_item_power(player.inventory.weapon)},
 			"contract": player.contract_state.duplicate(true),
 			"discovered_site_ids": WorldDiscovery.ids(player.discovered_sites),
 			"discovered_count": player.discovered_sites.size(),
