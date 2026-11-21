@@ -30,9 +30,17 @@
 
 #include "register_types.h"
 
+#include "ai_hearing_sensor_2d.h"
+#include "ai_visual_sensor_2d.h"
 #include "behavior_tree.h"
 
 #include "core/object/class_db.h"
+
+#ifdef TESTS_ENABLED
+#include "tests/test_ai_visual_sensor_2d.h"
+#include "tests/test_ai_hearing_sensor_2d.h"
+#include "tests/test_reactive_behavior_tree.h"
+#endif
 
 void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
@@ -43,11 +51,15 @@ void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_VIRTUAL_CLASS(BehaviorTreeComposite);
 	GDREGISTER_CLASS(BehaviorTreeSequence);
 	GDREGISTER_CLASS(BehaviorTreeSelector);
+	GDREGISTER_CLASS(BehaviorTreeReactiveSequence);
+	GDREGISTER_CLASS(BehaviorTreeReactiveSelector);
 	GDREGISTER_CLASS(BehaviorTreeInverter);
 	GDREGISTER_CLASS(BehaviorTreeBlackboardCheck);
 	GDREGISTER_CLASS(BehaviorTreeBlackboardSet);
 	GDREGISTER_CLASS(BehaviorTreeWait);
 	GDREGISTER_CLASS(BehaviorTreeRunner);
+	GDREGISTER_CLASS(AIVisualSensor2D);
+	GDREGISTER_CLASS(AIHearingSensor2D);
 }
 
 void uninitialize_behavior_tree_module(ModuleInitializationLevel) {

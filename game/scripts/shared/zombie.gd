@@ -15,6 +15,7 @@ const InfectedWounds = preload("res://scripts/shared/infected_wounds.gd")
 const InfectedResolve = preload("res://scripts/shared/infected_resolve.gd")
 const InfectedSight = preload("res://scripts/shared/infected_sight.gd")
 const InfectedMeleeCover = preload("res://scripts/shared/infected_melee_cover.gd")
+const NativeSenses = preload("res://scripts/shared/native_infected_senses.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
@@ -54,6 +55,7 @@ var contributors: Dictionary = {} # Server: peer -> time + equipped weapon for P
 var behavior: String = "roamer"
 var unseen_seconds: float = 0.0 # Hunter: how long the target has been out of sight.
 var _sight_check: float = 0.0
+var _native_senses: Variant = null # Lazy per-infected memory; optional on stock Godot.
 var _howl_pending: bool = false
 var _howled_at: int = -1 # Howlers scream once per target.
 const HUNTER_MEMORY_SECONDS := 6.0 # A hunter keeps coming this long after losing sight of you.
@@ -97,6 +99,8 @@ func is_alive() -> bool:
 func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator) -> Dictionary:
 	if state == State.DEAD:
 		return {}
+	if _native_senses != null:
+		_native_senses.advance_time(delta)
 	_flank_replan_remaining = maxf(0.0, _flank_replan_remaining - maxf(delta, 0.0))
 	melee_blocked = false
 	attack_timer = maxf(attack_timer - delta, 0.0)
@@ -165,6 +169,10 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 			if distance > float(data["lose"]):
 				target_id = -1
 				state = State.INVESTIGATE
+				# When the target was heard but not seen recently, investigate the
+				# verified sound instead of its magically updated current location.
+				if _native_senses != null and not _native_senses.remembers_sight() and _native_senses.remembers_sound():
+					last_known_target = _native_senses.last_heard_position()
 				investigate_time = HUNTER_SEARCH_SECONDS if behavior == "hunter" else INVESTIGATE_SECONDS
 				return {}
 			if behavior == "territorial" and not _in_territory(target) and forced_target_seconds <= 0.0:
@@ -178,10 +186,22 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 				_sight_check -= delta
 				if _sight_check <= 0.0:
 					_sight_check = 0.3
-					if InfectedSight.clear_path(world, position, target_pos):
+					var clear: bool = InfectedSight.clear_path(world, position, target_pos)
+					if clear:
 						unseen_seconds = 0.0
+						last_known_target = target
 					else:
 						unseen_seconds += 0.3
+					# Native sight memory mirrors only validated server-side raycasts.
+					# advance_time(delta) already aged it at the top of this tick.
+					# Hunters retain the last OBSERVED position, not the target's
+					# current position while the survivor is hidden behind cover.
+					if ClassDB.class_exists("AIVisualSensor2D"):
+						if _native_senses == null:
+							_native_senses = NativeSenses.new()
+						_native_senses.record_confirmed_sight(here, target, float(data["lose"]), clear, 0.0)
+						if _native_senses.remembers_sight():
+							last_known_target = _native_senses.last_seen_position()
 				if unseen_seconds > HUNTER_MEMORY_SECONDS:
 					# Lost you: search the last place you were seen.
 					target_id = -1
@@ -189,7 +209,8 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 					state = State.INVESTIGATE
 					investigate_time = HUNTER_SEARCH_SECONDS
 					return {}
-			last_known_target = target
+			if behavior != "hunter":
+				last_known_target = target
 			if type == "spitter" and AcidSpitter.can_launch(distance):
 				state = State.ATTACK
 				yaw = atan2(target.x - here.x, target.y - here.y)
@@ -334,6 +355,12 @@ func _select_target(world, players: Dictionary, here: Vector2) -> void:
 		if distance <= hearing and distance > scent and peer_id != target_id:
 			heard = InfectedHearing.audible(
 				world, p, position, float(info.get("noise", 0.0)), hearing)
+			if heard and ClassDB.class_exists("AIHearingSensor2D"):
+				if _native_senses == null:
+					_native_senses = NativeSenses.new()
+				# Recording cannot override cover, wind, safe zone, or combat
+				# rules: all of them have already passed their normal checks.
+				_native_senses.record_confirmed_sound(here, Vector2(p.x, p.z), hearing)
 		var nonvisual: bool = heard or distance <= scent
 		var potentially_visible: bool = distance <= maxf(notice, firelight)
 		if distance < best_distance and (peer_id == target_id or nonvisual or

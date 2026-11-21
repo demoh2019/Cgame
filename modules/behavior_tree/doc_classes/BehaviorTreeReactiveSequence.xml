@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeReactiveSequence" inherits="BehaviorTreeComposite" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Rechecks every child in sequence on each tick, aborting invalidated running tasks.</brief_description>
+	<description>Like [BehaviorTreeSequence], returns [constant BehaviorTreeTask.FAILURE] when a guard fails, [constant BehaviorTreeTask.RUNNING] when a task runs, or [constant BehaviorTreeTask.SUCCESS] after all children succeed. Unlike the memory-based sequence, execution always restarts at the first child on each [BehaviorTreeRunner] tick, so blackboard changes can invalidate a running wait immediately. If a previously running child is preempted, its execution state is discarded. This does not undo blackboard changes or send an explicit cancellation callback to a custom script task.</description>
+</class>

@@ -101,6 +101,28 @@ public:
 	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
 };
 
+/** Rescans all children every tick, interrupting any abandoned running task. */
+class BehaviorTreeReactiveSequence : public BehaviorTreeComposite {
+	GDCLASS(BehaviorTreeReactiveSequence, BehaviorTreeComposite);
+
+protected:
+	static void _bind_methods() {}
+
+public:
+	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
+};
+
+/** Rechecks priority from the first child on every tick, preempting old work. */
+class BehaviorTreeReactiveSelector : public BehaviorTreeComposite {
+	GDCLASS(BehaviorTreeReactiveSelector, BehaviorTreeComposite);
+
+protected:
+	static void _bind_methods() {}
+
+public:
+	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
+};
+
 class BehaviorTreeInverter : public BehaviorTreeTask {
 	GDCLASS(BehaviorTreeInverter, BehaviorTreeTask);
 

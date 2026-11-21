@@ -193,6 +193,58 @@ BehaviorTreeTask::Status BehaviorTreeSelector::execute(const Dictionary &p_black
 	return FAILURE;
 }
 
+BehaviorTreeTask::Status BehaviorTreeReactiveSequence::execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+	const int count = get_task_count();
+	const int previous_running = static_cast<int>(r_memory.get(p_path, -1));
+	for (int i = 0; i < count; i++) {
+		const Ref<BehaviorTreeTask> task = get_task(i);
+		if (task.is_null()) {
+			clear_memory(r_memory, p_path);
+			return FAILURE;
+		}
+		const Status status = task->execute(p_blackboard, r_memory, p_path + "/" + itos(i), p_delta);
+		if (status == RUNNING) {
+			if (previous_running >= 0 && previous_running != i) {
+				clear_memory(r_memory, p_path + "/" + itos(previous_running));
+			}
+			r_memory[p_path] = i;
+			return RUNNING;
+		}
+		if (status == FAILURE) {
+			clear_memory(r_memory, p_path);
+			return FAILURE;
+		}
+	}
+	clear_memory(r_memory, p_path);
+	return SUCCESS;
+}
+
+BehaviorTreeTask::Status BehaviorTreeReactiveSelector::execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+	const int count = get_task_count();
+	const int previous_running = static_cast<int>(r_memory.get(p_path, -1));
+	for (int i = 0; i < count; i++) {
+		const Ref<BehaviorTreeTask> task = get_task(i);
+		if (task.is_null()) {
+			clear_memory(r_memory, p_path);
+			return FAILURE;
+		}
+		const Status status = task->execute(p_blackboard, r_memory, p_path + "/" + itos(i), p_delta);
+		if (status == RUNNING) {
+			if (previous_running >= 0 && previous_running != i) {
+				clear_memory(r_memory, p_path + "/" + itos(previous_running));
+			}
+			r_memory[p_path] = i;
+			return RUNNING;
+		}
+		if (status == SUCCESS) {
+			clear_memory(r_memory, p_path);
+			return SUCCESS;
+		}
+	}
+	clear_memory(r_memory, p_path);
+	return FAILURE;
+}
+
 void BehaviorTreeInverter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_task", "task"), &BehaviorTreeInverter::set_task);
 	ClassDB::bind_method(D_METHOD("get_task"), &BehaviorTreeInverter::get_task);

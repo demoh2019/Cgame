@@ -12,11 +12,15 @@ def get_doc_classes():
         "BehaviorTreeComposite",
         "BehaviorTreeSequence",
         "BehaviorTreeSelector",
+        "BehaviorTreeReactiveSequence",
+        "BehaviorTreeReactiveSelector",
         "BehaviorTreeInverter",
         "BehaviorTreeBlackboardCheck",
         "BehaviorTreeBlackboardSet",
         "BehaviorTreeWait",
         "BehaviorTreeRunner",
+        "AIVisualSensor2D",
+        "AIHearingSensor2D",
     ]
 
 
