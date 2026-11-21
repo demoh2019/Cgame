@@ -556,6 +556,10 @@ void BehaviorTreeRunner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_trace_snapshot"), &BehaviorTreeRunner::get_trace_snapshot);
 	ClassDB::bind_method(D_METHOD("get_tree_snapshot"), &BehaviorTreeRunner::get_tree_snapshot);
 	ClassDB::bind_method(D_METHOD("reset_trace"), &BehaviorTreeRunner::reset_trace);
+	ClassDB::bind_method(D_METHOD("set_trace_history_capacity", "capacity"), &BehaviorTreeRunner::set_trace_history_capacity);
+	ClassDB::bind_method(D_METHOD("get_trace_history_capacity"), &BehaviorTreeRunner::get_trace_history_capacity);
+	ClassDB::bind_method(D_METHOD("get_trace_history_frames", "changes_only"), &BehaviorTreeRunner::get_trace_history_frames, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("get_slowest_trace_nodes", "limit"), &BehaviorTreeRunner::get_slowest_trace_nodes, DEFVAL(8));
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "root_task", PROPERTY_HINT_RESOURCE_TYPE, "BehaviorTreeTask"), "set_root_task", "get_root_task");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "blackboard"), "set_blackboard", "get_blackboard");
@@ -775,6 +779,34 @@ void BehaviorTreeRunner::reset_trace() {
 	if (execution_trace.is_valid()) {
 		execution_trace->reset();
 	}
+}
+
+void BehaviorTreeRunner::set_trace_history_capacity(int p_capacity) {
+	ERR_FAIL_COND_MSG(p_capacity < 0 || p_capacity > 32, "BehaviorTree trace history capacity must be in [0,32].");
+	if (p_capacity > 0 && execution_trace.is_null()) {
+		execution_trace.instantiate();
+	}
+	if (execution_trace.is_valid()) {
+		execution_trace->set_history_capacity(p_capacity);
+	}
+}
+
+int BehaviorTreeRunner::get_trace_history_capacity() const {
+	return execution_trace.is_valid() ? execution_trace->get_history_capacity() : 0;
+}
+
+Array BehaviorTreeRunner::get_trace_history_frames(bool p_changes_only) const {
+	if (!trace_enabled || execution_trace.is_null()) {
+		return Array();
+	}
+	return execution_trace->get_history_frames(p_changes_only);
+}
+
+Array BehaviorTreeRunner::get_slowest_trace_nodes(int p_limit) const {
+	if (!trace_enabled || execution_trace.is_null()) {
+		return Array();
+	}
+	return execution_trace->get_slowest_nodes(p_limit);
 }
 
 void BehaviorTreeRunner::reset() {
