@@ -58,6 +58,9 @@ var unseen_seconds: float = 0.0 # Hunter: how long the target has been out of si
 var _sight_check: float = 0.0
 var _native_senses: Variant = null # Lazy per-infected memory; optional on stock Godot.
 var _ai_profiler: Variant = null # Opt-in per-infected target selection profiling.
+var _ai_lod_staggered: bool = false # Phase only the first distant passive scan.
+static var _ai_lod_checked: bool = false
+static var _ai_lod_scheduler: Variant = null
 var _howl_pending: bool = false
 var _howled_at: int = -1 # Howlers scream once per target.
 const HUNTER_MEMORY_SECONDS := 6.0 # A hunter keeps coming this long after losing sight of you.
@@ -78,6 +81,16 @@ func _init(p_id: int, p_type: String, p_position: Vector3, p_spawn_id: int = 0) 
 	last_known_target = home
 	spawn_id = p_spawn_id
 	behavior = str(data.get("behavior", "roamer"))
+
+
+## Shared stateless native simulation LOD policy; no allocation per zombie.
+## Falls back to existing 0.25-second target scans on stock Godot.
+static func _get_ai_lod_scheduler() -> Variant:
+	if not _ai_lod_checked:
+		_ai_lod_checked = true
+		if ClassDB.class_exists("AISimulationLOD2D"):
+			_ai_lod_scheduler = ClassDB.instantiate("AISimulationLOD2D")
+	return _ai_lod_scheduler
 
 
 ## One-way transformation on server-created enemies. Never shared mutable stats.
@@ -131,6 +144,8 @@ func get_ai_debug_snapshot() -> Dictionary:
 		"investigate_seconds": investigate_time,
 		"perception": _native_senses.get_debug_snapshot() if _native_senses != null else {},
 		"profiling": get_ai_profile_snapshot(),
+		"native_simulation_lod": _ai_lod_scheduler != null,
+		"target_scan_in_seconds": maxf(0.0, think_timer),
 	}
 
 
@@ -181,7 +196,24 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 		think_timer = 0.25
 		if _ai_profiler != null and _ai_profiler.is_enabled():
 			_ai_profiler.begin_sample(&"target_selection")
-		_select_target(world, players, here)
+		var nearest_viewer: float = _select_target(world, players, here)
+		# This LOD applies ONLY to unengaged passive acquisition, not the
+		# per-frame motion, attack timers, projectile windups, threat decay,
+		# boss mechanics or active chase/attack target validation.
+		if target_id == -1 and (state == State.IDLE or state == State.WANDER) and not raid_boss:
+			var lod: Variant = _get_ai_lod_scheduler()
+			if lod != null:
+				# Any eligible survivor within the pursuit leash still gets the
+				# exact legacy 0.25s scan, including audible gunshots.
+				var near_range: float = float(data["lose"])
+				var far_range: float = near_range + 24.0
+				if not _ai_lod_staggered and nearest_viewer > near_range:
+					think_timer = float(lod.get_staggered_interval(
+						id, nearest_viewer, near_range, far_range))
+					_ai_lod_staggered = true
+				else:
+					think_timer = float(lod.get_interval(
+						nearest_viewer, near_range, far_range))
 		if _ai_profiler != null and _ai_profiler.is_enabled():
 			_ai_profiler.end_sample(&"target_selection")
 
@@ -326,7 +358,7 @@ func force_taunt(peer_id: int, seconds: float) -> bool:
 	return true
 
 
-func _select_target(world, players: Dictionary, here: Vector2) -> void:
+func _select_target(world, players: Dictionary, here: Vector2) -> float:
 	# Threat is subordinate only during the short guardian focus.
 	# Safe, dead, distant and disconnected taunts are cleared immediately.
 	if forced_target_seconds > 0.0 and players.has(forced_target_id):
@@ -336,7 +368,7 @@ func _select_target(world, players: Dictionary, here: Vector2) -> void:
 			target_id = forced_target_id
 			state = State.CHASE
 			investigate_time = 0.0
-			return
+			return 0.0
 	forced_target_id = -1
 	forced_target_seconds = 0.0
 	# Damage-earning attackers within the leash take priority over passive
@@ -352,17 +384,21 @@ func _select_target(world, players: Dictionary, here: Vector2) -> void:
 			state = State.CHASE
 			investigate_time = 0.0
 			_note_target_acquired()
-		return
+		return 0.0
 	var best := -1
 	var best_distance := INF
+	var nearest_eligible_distance := INF
 	for peer_id in players:
 		var info: Dictionary = players[peer_id]
 		if not info["alive"] or info["safe"]:
 			continue
 		var p: Vector3 = info["position"]
-		if behavior == "territorial" and not _in_territory(Vector2(p.x, p.z)):
+		if not p.is_finite():
 			continue
 		var distance := here.distance_to(Vector2(p.x, p.z))
+		nearest_eligible_distance = minf(nearest_eligible_distance, distance)
+		if behavior == "territorial" and not _in_territory(Vector2(p.x, p.z)):
+			continue
 		# Night makes infected more vigilant; cap new detection by pursuit leash.
 		# Hearing remains independent of night and is always authoritative.
 		var sight_multiplier := clampf(float(info.get("notice_multiplier", 1.0)), 1.0, 1.35)
@@ -424,6 +460,7 @@ func _select_target(world, players: Dictionary, here: Vector2) -> void:
 			investigate_time = 0.0
 			_note_target_acquired()
 
+	return nearest_eligible_distance
 
 ## Nearby infected share an already acquired target. Pack alerts never bypass
 ## server-owned safe-zone, life, or leash checks and cannot overwrite active aggro.
@@ -612,6 +649,10 @@ func take_damage(amount: float, attacker_id: int = -1) -> bool:
 		sunder_until = 0.0
 		threat.clear()
 		return true
+	# Damage-derived threat must interrupt a distant passive LOD timer.
+	# The selector rechecks attacker validity and safe zones next tick.
+	if attacker_id > 0:
+		think_timer = 0.0
 	if state == State.IDLE or state == State.WANDER:
 		state = State.CHASE
 	return false
