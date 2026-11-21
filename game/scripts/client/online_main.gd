@@ -284,6 +284,15 @@ func _ready() -> void:
 		if not Performance.has_custom_monitor(monitor_name):
 			Performance.add_custom_monitor(monitor_name, monitor[1])
 			_ambient_monitors.append(monitor_name)
+	# Optional per-subsystem CPU stats. Older custom native builds keep their
+	# existing aggregate monitors without requiring the new method.
+	if _ambient_budget.has_method("get_lane_last_frame_cost_us"):
+		for lane in AmbientTickBudget.LANES:
+			var lane_monitor := StringName("Albion/AmbientCPUus/" + lane)
+			if not Performance.has_custom_monitor(lane_monitor):
+				Performance.add_custom_monitor(lane_monitor,
+					Callable(_ambient_budget, "get_lane_last_frame_cost_us").bind(StringName(lane)))
+				_ambient_monitors.append(lane_monitor)
 	GraphicsQuality.load_preference()
 	_access = UiAccessibilityLayer.new() # Loads settings, language and key bindings; must precede the menus below.
 	add_child(_access)
