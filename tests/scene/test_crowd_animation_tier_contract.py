@@ -47,6 +47,28 @@ def plan(distances, priority, full_budget, priority_budget, visible=None):
     return tiers
 
 
+
+def plan_stable(distances, priority, visible, retained, full_budget,
+                priority_budget, hysteresis=1.5):
+    """Independent Python oracle for the stateless retained-IK top-K."""
+    if (len(distances) != len(retained) or
+            len(distances) != len(visible) or
+            not math.isfinite(hysteresis) or not 0 <= hysteresis <= 8):
+        return []
+    if not 0 <= full_budget <= 256:
+        return []
+    tiers = plan(distances, priority, 0, priority_budget, visible)
+    if len(tiers) != len(distances):
+        return []
+    candidates = sorted(
+        (i for i, d in enumerate(distances) if d < 22 and visible[i]),
+        key=lambda i: (max(0, distances[i] -
+                           (hysteresis if retained[i] else 0)), i))
+    for i in candidates[:full_budget]:
+        tiers[i] = 0
+    return tiers
+
+
 class TestCrowdPlanner(unittest.TestCase):
     def test_native_source_api(self):
         header = (MODULE / "crowd_animation_tier_planner.h").read_text()
@@ -143,6 +165,69 @@ class TestCrowdPlanner(unittest.TestCase):
         self.assertIn("visible_mask.append(1 if visible else 0)", game)
         self.assertIn("model.is_visible_in_tree()", game)
         self.assertIn("model.set_anim_lod(tiers[i])", game)
+
+    def test_stable_ik_retains_previous_visible_owner(self):
+        d = [10, 10.4, 21, 22, 50]
+        p = [0, 0, 0, 1, 1]
+        v = [1, 1, 1, 1, 1]
+        held = [0, 1, 1, 1, 0]
+        self.assertEqual(plan_stable(d, p, v, held, 1, 1),
+                         [1, 0, 1, 1, 2])
+        self.assertEqual(plan_stable(d, p, [1, 0, 1, 1, 1],
+                                     held, 1, 1),
+                         [0, 2, 1, 1, 2])
+        self.assertEqual(plan_stable([8, 10.4, 21, 22, 50],
+                                     p, v, held, 1, 1),
+                         [0, 1, 1, 1, 2])
+        self.assertEqual(plan_stable(d, p, v, held, 1, 1, 0),
+                         plan(d, p, 1, 1, v))
+        self.assertEqual(plan_stable(d, p, v, [0] * 5, 1, 1),
+                         plan(d, p, 1, 1, v))
+        self.assertEqual(plan_stable(d, p, v, [1], 1, 1), [])
+        self.assertEqual(plan_stable(d, p, v, held, 1, 1, -1), [])
+        self.assertEqual(plan_stable(d, p, v, held, 1, 1, math.nan), [])
+        self.assertEqual(plan_stable(d, p, v, held, 1, 1, 8.1), [])
+        self.assertEqual(plan_stable([10, 11.5, 22], [0]*3,
+                                     [1]*3, [0, 1, 1], 1, 0),
+                         [0, 1, 1])  # Stable index ties at effective 10m.
+
+    def test_stable_ik_random_caps_and_visibility(self):
+        for seed in range(12):
+            rng = random.Random(14150 + seed)
+            d = [rng.randrange(0, 1100) / 10 for _ in range(128)]
+            p = [rng.randrange(0, 2) for _ in d]
+            v = [rng.randrange(0, 2) for _ in d]
+            held = [rng.randrange(0, 2) for _ in d]
+            for cap in (0, 1, 4, 14):
+                for h in (0.0, 1.5, 8.0):
+                    tiers = plan_stable(d, p, v, held, cap, 8, h)
+                    self.assertEqual(len(tiers), len(d))
+                    self.assertLessEqual(tiers.count(0), cap)
+                    for i, tier in enumerate(tiers):
+                        if not v[i]:
+                            self.assertGreaterEqual(tier, 2)
+                        if d[i] >= 22:
+                            self.assertNotEqual(tier, 0)
+                        if d[i] >= 90:
+                            self.assertEqual(tier, 4)
+
+    def test_stable_ik_native_and_runtime_integration(self):
+        header = (MODULE / "crowd_animation_tier_planner.h").read_text()
+        cpp = CPP.read_text()
+        game = GAME.read_text()
+        model = (ROOT / "game/scripts/client/character_model.gd").read_text()
+        xml = ET.parse(MODULE / "doc_classes/CrowdAnimationTierPlanner.xml")
+        self.assertIn("PackedInt32Array plan_visible_tiers_stable(", header)
+        self.assertIn('D_METHOD("plan_visible_tiers_stable"', cpp)
+        self.assertIn("p_retained_full_flags->size() != count", cpp)
+        self.assertIn("distance - (retained ? p_hysteresis : 0.0)", cpp)
+        self.assertIn("tier == 0", cpp)
+        self.assertIn('has_method("plan_visible_tiers_stable")', game)
+        self.assertIn('retained_full_mask.append(', game)
+        self.assertIn('model.set_meta("aa_full_ik_retained", full_ik_now)', game)
+        self.assertIn('set_meta("aa_full_ik_retained", false)', model)
+        self.assertIn('name="plan_visible_tiers_stable"', ET.tostring(
+            xml.getroot(), encoding="unicode"))
 
     def test_reject_corrupt_inputs(self):
         self.assertEqual(plan([1, 2], [1], 1, 1), [])
