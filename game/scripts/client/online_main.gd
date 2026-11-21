@@ -141,6 +141,8 @@ var _ambient_motes
 var _ambient_budget: Variant = AmbientTickBudget.new()
 var _ambient_rates_supported: bool = false
 var _ambient_rate_cache: Dictionary = {}
+var _ambient_deadline_supported: bool = false
+var _ambient_deadline_cache: Dictionary = {}
 var _ambient_was_underground := false
 var _ambient_monitors: Array[StringName] = []
 var _ambient_birds
@@ -270,6 +272,7 @@ func _ready() -> void:
 				_ambient_budget = native_budget
 	# Older custom binaries keep their existing importance/cost scheduler.
 	_ambient_rates_supported = _ambient_budget.has_method("set_lane_rate_scale")
+	_ambient_deadline_supported = _ambient_budget.has_method("set_lane_max_deferred_frames")
 	# Client-side cosmetic update budget, exposed to Godot's built-in profiler.
 	for monitor in [
 		[&"Albion/AmbientUpdates", Callable(_ambient_budget, "updated_total")],
@@ -284,6 +287,14 @@ func _ready() -> void:
 		if not Performance.has_custom_monitor(monitor_name):
 			Performance.add_custom_monitor(monitor_name, monitor[1])
 			_ambient_monitors.append(monitor_name)
+	# Count visually significant lanes currently beyond their soft deferral
+	# deadlines; this is independent of FPS/CPU pressure measurements.
+	if _ambient_budget.has_method("get_deadline_overdue_lane_count"):
+		var overdue_monitor: StringName = &"Albion/AmbientDeadlineOverdue"
+		if not Performance.has_custom_monitor(overdue_monitor):
+			Performance.add_custom_monitor(overdue_monitor,
+				Callable(_ambient_budget, "get_deadline_overdue_lane_count"))
+			_ambient_monitors.append(overdue_monitor)
 	# Optional per-subsystem CPU stats. Older custom native builds keep their
 	# existing aggregate monitors without requiring the new method.
 	if _ambient_budget.has_method("get_lane_last_frame_cost_us"):
@@ -1860,6 +1871,13 @@ func _update_time_of_day(delta: float) -> void:
 			if float(_ambient_rate_cache.get(lane, -1.0)) != rate_scale:
 				if bool(_ambient_budget.call("set_lane_rate_scale", lane, rate_scale)):
 					_ambient_rate_cache[lane] = rate_scale
+		# Updating only on significance-class transitions avoids per-frame
+		# setter calls and keeps low-importance underground work cheap.
+		if _ambient_deadline_supported:
+			var deadline_frames: int = AmbientTickBudget.deadline_frames_for_importance(significance)
+			if int(_ambient_deadline_cache.get(lane, -1)) != deadline_frames:
+				if bool(_ambient_budget.call("set_lane_max_deferred_frames", lane, deadline_frames)):
+					_ambient_deadline_cache[lane] = deadline_frames
 	_ambient_budget.begin_frame(delta, ambient_quality)
 	var ambient_force: bool = underground != _ambient_was_underground
 	_ambient_was_underground = underground
