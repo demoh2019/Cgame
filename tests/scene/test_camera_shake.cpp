@@ -230,7 +230,7 @@ TEST_CASE("[SceneTree][Camera3D] Directional spatial impacts are bounded and lea
 TEST_CASE("[SceneTree][Camera3D] Directional shake respects the camera play space") {
 	Camera3D *camera = memnew(Camera3D);
 	SceneTree::get_singleton()->get_root()->add_child(camera);
-	camera->set_rotation(Vector3(0.0, Math_PI * 0.5, 0.0));
+	camera->set_rotation(Vector3(0.0, Math::PI * 0.5, 0.0));
 	const Vector3 source(5.0, 0.0, 0.0);
 	const Vector3 expected = camera->get_global_transform().basis.orthonormalized().xform_inv(source.normalized());
 	camera->add_directional_spatial_trauma(source, Vector3(), 0.5, 1.0, 9.0);
