@@ -7,6 +7,7 @@ extends RefCounted
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const PointSpacing = preload("res://scripts/client/point_spacing.gd")
 
 const FOLDER := "res://assets/models/polyhaven/baked/plants/"
 const DRAW_DISTANCE := 34.0
@@ -246,10 +247,27 @@ static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted
 		if bool(info["cluster"]):
 			for c in rng.randi_range(1, 3):
 				centers.append(Vector2(tile_x + rng.randf() * TILE, tile_z + rng.randf() * TILE))
+		# PCG-style self-pruning is useful for larger unclustered props. Tiny
+		# grass cards and naturally clustered flowers keep their original
+		# dense distribution; these samples are purely cosmetic.
+		var separation: float = 0.0
+		match species:
+			"boulders":
+				separation = 2.4
+			"shrub_02", "shrub_03", "shrub_04":
+				separation = 1.3
+			"stones":
+				separation = 0.65
+		var spaced_positions := PackedVector2Array()
+		if separation > 0.0 and not grid and centers.is_empty():
+			spaced_positions = PointSpacing.candidates(rng,
+					Rect2(Vector2(tile_x, tile_z), Vector2(TILE, TILE)),
+					mini(wanted * 4, 8192), separation, mini(wanted * 2, 8192))
 		var transforms: Array = []
 		var low := INF
 		var high := -INF
-		for attempt in wanted * 2:
+		var placement_attempts: int = spaced_positions.size() if not spaced_positions.is_empty() else wanted * 2
+		for attempt in placement_attempts:
 			if transforms.size() >= wanted and not grid:
 				break
 			var lx: float
@@ -259,6 +277,9 @@ static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted
 					break
 				lx = tile_x + (float(attempt % grid_side) + rng.randf()) * grid_cell
 				lz = tile_z + (float(attempt / grid_side) + rng.randf()) * grid_cell
+			elif not spaced_positions.is_empty():
+				lx = spaced_positions[attempt].x
+				lz = spaced_positions[attempt].y
 			elif centers.is_empty():
 				lx = tile_x + rng.randf() * TILE
 				lz = tile_z + rng.randf() * TILE
