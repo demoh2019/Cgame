@@ -136,12 +136,18 @@ TEST_CASE("[PCGFoliageScalability3D] combined variant and LOD batches conserve a
 	const PackedInt32Array expected2 = { 3 };
 	const PackedInt32Array expected3 = { 1, 5 };
 	const PackedInt32Array expected4 = { 4 };
-	CHECK(PackedInt32Array(groups[0]) == expected0);
-	CHECK(PackedInt32Array(groups[1]) == expected1);
-	CHECK(PackedInt32Array(groups[2]) == expected2);
-	CHECK(PackedInt32Array(groups[3]) == expected3);
-	CHECK(PackedInt32Array(groups[4]) == expected4);
-	CHECK(PackedInt32Array(groups[5]).is_empty());
+	const PackedInt32Array group0 = groups[0];
+	CHECK(group0 == expected0);
+	const PackedInt32Array group1 = groups[1];
+	CHECK(group1 == expected1);
+	const PackedInt32Array group2 = groups[2];
+	CHECK(group2 == expected2);
+	const PackedInt32Array group3 = groups[3];
+	CHECK(group3 == expected3);
+	const PackedInt32Array group4 = groups[4];
+	CHECK(group4 == expected4);
+	const PackedInt32Array group5 = groups[5];
+	CHECK(group5.is_empty());
 	CHECK(planner->partition_variant_lods(variants, lods, 3) == groups);
 	CHECK(variants == copy);
 	int visited[6] = {};
@@ -161,7 +167,8 @@ TEST_CASE("[PCGFoliageScalability3D] combined variant and LOD batches conserve a
 	const Array empty = planner->partition_variant_lods({}, {}, 3);
 	REQUIRE(empty.size() == 6);
 	for (int i = 0; i < 6; ++i) {
-		CHECK(PackedInt32Array(empty[i]).is_empty());
+		const PackedInt32Array indices = empty[i];
+		CHECK(indices.is_empty());
 	}
 }
 
@@ -201,6 +208,7 @@ TEST_CASE("[PCGFoliageScalability3D] invalid per-point LOD input rejects atomica
 	tiers.resize(16384);
 	const Array max_groups = planner->partition_variant_lods(ids, tiers, 3);
 	REQUIRE(max_groups.size() == 6);
-	CHECK(PackedInt32Array(max_groups[0]).size() == 16384);
+	const PackedInt32Array max_near = max_groups[0];
+	CHECK(max_near.size() == 16384);
 }
 } // namespace TestPCGFoliageScalability3D
