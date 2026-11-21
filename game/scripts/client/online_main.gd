@@ -245,7 +245,9 @@ func _ready() -> void:
 	# Godot builds retain the same pure GDScript behaviour automatically.
 	if EngineFeatures.has("FrameUpdateBudget"):
 		var native_budget: Object = EngineFeatures.make("FrameUpdateBudget")
-		if native_budget != null:
+		if native_budget != null and native_budget.has_method("record_cost") \
+				and native_budget.has_method("set_frame_time_budget_us") \
+				and native_budget.has_method("last_frame_cost_us"):
 			var registered_all := true
 			for lane in AmbientTickBudget.LANES:
 				if not bool(native_budget.call("register_lane", StringName(lane))):
