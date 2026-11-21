@@ -17,6 +17,7 @@ const InfectedSight = preload("res://scripts/shared/infected_sight.gd")
 const InfectedMeleeCover = preload("res://scripts/shared/infected_melee_cover.gd")
 const NativeSenses = preload("res://scripts/shared/native_infected_senses.gd")
 const EffectRules = preload("res://scripts/shared/effect_application_rules.gd")
+const InfectedTargetUtility = preload("res://scripts/shared/infected_target_utility.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
@@ -568,6 +569,7 @@ func _select_target(world, players: Dictionary, here: Vector2) -> float:
 		return 0.0
 	var best := -1
 	var best_distance := INF
+	var best_score := 0.0
 	var nearest_eligible_distance := INF
 	for peer_id in players:
 		var info: Dictionary = players[peer_id]
@@ -630,9 +632,13 @@ func _select_target(world, players: Dictionary, here: Vector2) -> float:
 				_native_senses.record_confirmed_sound(here, Vector2(p.x, p.z), hearing, int(peer_id))
 		var nonvisual: bool = heard or distance <= scent
 		var potentially_visible: bool = distance <= maxf(notice, firelight)
-		if distance < best_distance and (peer_id == target_id or nonvisual or
+		# Utility AI prey choice: proximity dominates; wounds, current focus and noise tip it.
+		var utility: float = InfectedTargetUtility.score(distance, float(data["lose"]),
+			float(info.get("health_fraction", 1.0)), peer_id == target_id, float(info.get("noise", 0.0)) > 0.0)
+		if utility > best_score and (peer_id == target_id or nonvisual or
 				(potentially_visible and InfectedSight.clear_path(world, position, p))):
 			best = peer_id
+			best_score = utility
 			best_distance = distance
 	if best != -1:
 		target_id = best

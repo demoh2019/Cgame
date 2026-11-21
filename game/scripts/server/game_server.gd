@@ -8456,6 +8456,7 @@ func _tick_zombies(delta: float) -> void:
 	var info: Dictionary = {}
 	for player in players.values():
 		info[player.id] = {"position": player.position, "alive": _alive(player),
+			"health_fraction": player.survival.health / maxf(1.0, player.survival.max_health),
 			"safe": _is_safe(player.position), "noise": player.noise_radius if player.noise_timer > 0.0 else 0.0,
 			"wind": Weather.wind_at(world, player.position.x, player.position.z, time),
 			"notice_multiplier": WorldCycle.notice_multiplier(time),
