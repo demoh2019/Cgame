@@ -380,9 +380,12 @@ static func filter_cosmetic_spots_outside_roads(spots: Array, road_pieces: Array
 			spots.size() > 16384 or road_pieces.size() > 256:
 		return _road_spots_fallback(spots, road_pieces, clearance)
 	var candidates := PackedVector3Array()
-	for at in spots:
-		if not (at is Vector2) or not (at as Vector2).is_finite() or \
-				absf(at.x) > 10000000.0 or absf(at.y) > 10000000.0:
+	for item in spots:
+		if not (item is Vector2):
+			return spots
+		var at: Vector2 = item
+		if not at.is_finite() or absf(at.x) > 10000000.0 or \
+				absf(at.y) > 10000000.0:
 			return _road_spots_fallback(spots, road_pieces, clearance)
 		candidates.append(Vector3(at.x, 0.0, at.y))
 	var segments := PackedVector3Array()
