@@ -17,6 +17,7 @@ on:
       - 'game/scripts/client/world_map.gd'
       - 'game/tests/test_auxiliary_streaming_readiness.gd'
       - 'game/tests/run_auxiliary_readiness.gd'
+      - 'tests/scene/test_world_streamer_auxiliary_readiness.cpp'
       - 'tests/scene/test_world_streamer_backpressure_contract.py'
       - '.github/workflows/native-world-streamer-backpressure.yml'
   push:
@@ -34,6 +35,7 @@ on:
       - 'game/scripts/client/world_map.gd'
       - 'game/tests/test_auxiliary_streaming_readiness.gd'
       - 'game/tests/run_auxiliary_readiness.gd'
+      - 'tests/scene/test_world_streamer_auxiliary_readiness.cpp'
       - 'tests/scene/test_world_streamer_backpressure_contract.py'
       - '.github/workflows/native-world-streamer-backpressure.yml'
 
