@@ -81,6 +81,14 @@ public:
 	Array query_cross_radius_batch(const PackedVector2Array &p_sources,
 			const PackedVector2Array &p_targets, double p_radius, double p_cell_size) const;
 
+	// EQS-style nearest candidate across two independent spatial cohorts.
+	// One original target index per source, -1 when none lies within radius.
+	// Equal-distance ties prefer smaller persistent target ID and then index.
+	// All inputs are validated atomically; no scene or gameplay mutations.
+	PackedInt32Array query_cross_nearest_batch(const PackedVector2Array &p_sources,
+			const PackedVector2Array &p_targets, const PackedInt64Array &p_target_ids,
+			double p_radius, double p_cell_size) const;
+
 	// Short-horizon Mass-style steering prediction, using desired velocities
 	// and the existing bounded nearest-neighbor broadphase on projected sites.
 	// Only read-only directions are returned, never positions or gameplay hits.
