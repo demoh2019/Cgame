@@ -17,10 +17,15 @@ static func should_spawn(camera_position: Vector3, decal_position: Vector3,
 			or vertical_fov_deg < 5.0 or vertical_fov_deg > 170.0 \
 			or min_diameter_px < 0.0 or min_diameter_px > 128.0:
 		return false
-	for p in [camera_position, decal_position]:
-		if absf(p.x) > 10000000.0 or absf(p.y) > 10000000.0 \
-				or absf(p.z) > 10000000.0:
-			return false
+	# Direct component checks: no temporary arrays or Variant dictionaries
+	# per combat hit on the stock-Godot fallback path.
+	if absf(camera_position.x) > 10000000.0 \
+			or absf(camera_position.y) > 10000000.0 \
+			or absf(camera_position.z) > 10000000.0 \
+			or absf(decal_position.x) > 10000000.0 \
+			or absf(decal_position.y) > 10000000.0 \
+			or absf(decal_position.z) > 10000000.0:
+		return false
 	var distance: float = camera_position.distance_to(decal_position)
 	if distance > max_distance_m + diameter_m * 0.5:
 		return false
