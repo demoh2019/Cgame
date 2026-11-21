@@ -7,6 +7,15 @@
 		Invalid inputs, mismatched sizes, non-finite or negative distances, or out-of-range budgets return an empty result. Budgets must be from 0 to 256.
 	</description>
 	<methods>
+		<method name="plan_visible_tiers" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priority_flags" type="PackedByteArray" />
+			<param index="2" name="visible_flags" type="PackedByteArray" />
+			<param index="3" name="full_budget" type="int" />
+			<param index="4" name="priority_budget" type="int" />
+			<description>Uses the same deterministic top-K budgets as [method plan_tiers], but characters with zero [param visible_flags] cannot consume costly tier-0 IK slots or combat-priority full-rate slots. Invisible characters receive at least tier 2 (30 Hz) and retain their distance-based tier 3/4 when farther away. Visible characters are ranked by distance and original index, so changing the camera immediately reallocates slots without changing any server or physics state. All three arrays must match in length (maximum 16,384); invalid input returns an empty result. Passing a mask of all ones reproduces [method plan_tiers] exactly. The caller computes visibility; no scene-tree, rendering, or physics queries occur in this class. This is not a GPU occlusion query or an adaptive milliseconds-based animation budget.</description>
+		</method>
 		<method name="plan_tiers" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="distances" type="PackedFloat64Array" />

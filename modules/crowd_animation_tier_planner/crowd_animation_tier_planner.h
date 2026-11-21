@@ -23,4 +23,12 @@ public:
 	// flags[i] != 0 requests a combat-critical full-rate pose (without IK).
 	PackedInt32Array plan_tiers(const PackedFloat64Array &p_distances,
 			const PackedByteArray &p_priority_flags, int p_full_budget, int p_priority_budget) const;
+
+	// Optional per-frame visibility culling for costly procedural IK.
+	// Non-visible actors never claim full-rate or priority slots and receive
+	// at least tier 2 (30 Hz). All-visible calls match plan_tiers exactly.
+	// The caller determines visibility; this class never touches the scene.
+	PackedInt32Array plan_visible_tiers(const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_priority_flags, const PackedByteArray &p_visible_flags,
+			int p_full_budget, int p_priority_budget) const;
 };

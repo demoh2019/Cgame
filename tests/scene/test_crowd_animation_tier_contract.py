@@ -16,8 +16,10 @@ GAME_TEST = ROOT / "game/tests/test_crowd_animation_tier_planner.gd"
 RUNNER = ROOT / "game/tests/run_all.gd"
 
 
-def plan(distances, priority, full_budget, priority_budget):
+def plan(distances, priority, full_budget, priority_budget, visible=None):
     if len(distances) != len(priority) or len(distances) > 16384:
+        return []
+    if visible is not None and len(distances) != len(visible):
         return []
     if not 0 <= full_budget <= 256 or not 0 <= priority_budget <= 256:
         return []
@@ -25,14 +27,20 @@ def plan(distances, priority, full_budget, priority_budget):
         return []
     tiers = [0 if d < 22 else 1 if d < 38 else 2 if d < 60 else
              3 if d < 90 else 4 for d in distances]
-    eligible_full = sorted((i for i, d in enumerate(distances) if d < 22),
-                           key=lambda i: (distances[i], i))
+    if visible is not None:
+        tiers = [max(tier, 2) if not visible[i] else tier
+                 for i, tier in enumerate(tiers)]
+    eligible_full = sorted(
+        (i for i, d in enumerate(distances)
+         if d < 22 and (visible is None or visible[i])),
+        key=lambda i: (distances[i], i))
     for i in eligible_full:
         tiers[i] = 1
     for i in eligible_full[:full_budget]:
         tiers[i] = 0
     eligible_combat = sorted(
-        (i for i, d in enumerate(distances) if priority[i] and d < 90),
+        (i for i, d in enumerate(distances)
+         if priority[i] and d < 90 and (visible is None or visible[i])),
         key=lambda i: (distances[i], i))
     for i in eligible_combat[:priority_budget]:
         tiers[i] = min(tiers[i], 1)
@@ -96,6 +104,45 @@ class TestCrowdPlanner(unittest.TestCase):
                     for i, value in enumerate(result):
                         if d[i] >= 90:
                             self.assertEqual(value, 4)
+
+    def test_visibility_reclaims_full_rate_slots(self):
+        d = [2, 4, 6, 55, 80, 100]
+        priority = [1, 0, 0, 1, 1, 1]
+        visible = [0, 1, 1, 1, 0, 1]
+        self.assertEqual(plan(d, priority, 1, 1, visible), [2, 0, 1, 1, 3, 4])
+        self.assertEqual(plan(d, priority, 16, 16, [0] * 6),
+                         [2, 2, 2, 2, 3, 4])
+        self.assertEqual(plan(d, priority, 1, 1, [1] * 6),
+                         plan(d, priority, 1, 1))
+        self.assertEqual(plan(d, priority, 1, 1, [1]), [])
+        self.assertEqual(plan([5, 5, 5], [0, 0, 0], 1, 0, [0, 1, 1]),
+                         [2, 0, 1])
+        for seed in range(10):
+            rng = random.Random(9000 + seed)
+            dist = [rng.randrange(0, 120) for _ in range(240)]
+            priority = [rng.randrange(0, 2) for _ in dist]
+            visible = [rng.randrange(0, 2) for _ in dist]
+            tiers = plan(dist, priority, 8, 4, visible)
+            self.assertEqual(len(tiers), len(dist))
+            self.assertLessEqual(tiers.count(0), 8)
+            for i, tier in enumerate(tiers):
+                if visible[i] == 0:
+                    self.assertGreaterEqual(tier, 2)
+                if dist[i] >= 90:
+                    self.assertEqual(tier, 4)
+
+    def test_visible_native_game_contracts(self):
+        header = (MODULE / "crowd_animation_tier_planner.h").read_text()
+        cpp = CPP.read_text()
+        game = GAME.read_text()
+        self.assertIn("PackedInt32Array plan_visible_tiers(", header)
+        self.assertIn('D_METHOD("plan_visible_tiers"', cpp)
+        self.assertIn("p_visible_flags->size() != count", cpp)
+        self.assertIn("tiers[i] = visible ?", cpp)
+        self.assertIn('has_method("plan_visible_tiers")', game)
+        self.assertIn("visible_mask.append(1 if visible else 0)", game)
+        self.assertIn("model.is_visible_in_tree()", game)
+        self.assertIn("model.set_anim_lod(tiers[i])", game)
 
     def test_reject_corrupt_inputs(self):
         self.assertEqual(plan([1, 2], [1], 1, 1), [])

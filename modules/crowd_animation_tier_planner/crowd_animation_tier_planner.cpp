@@ -63,14 +63,20 @@ static int distance_tier(double p_distance) {
 void CrowdAnimationTierPlanner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("plan_tiers", "distances", "priority_flags", "full_budget", "priority_budget"),
 			&CrowdAnimationTierPlanner::plan_tiers);
+	ClassDB::bind_method(D_METHOD("plan_visible_tiers", "distances", "priority_flags", "visible_flags", "full_budget", "priority_budget"),
+			&CrowdAnimationTierPlanner::plan_visible_tiers);
 }
 
-PackedInt32Array CrowdAnimationTierPlanner::plan_tiers(
+// Shared budget planner: no second sorting pass and no additional per-actor
+// visibility metadata for legacy callers. Pure data; no scene-tree queries.
+static PackedInt32Array plan_tiers_internal(
 		const PackedFloat64Array &p_distances, const PackedByteArray &p_priority_flags,
-		int p_full_budget, int p_priority_budget) const {
+		const PackedByteArray *p_visible_flags, int p_full_budget, int p_priority_budget) {
 	PackedInt32Array output;
 	const int count = p_distances.size();
 	ERR_FAIL_COND_V_MSG(count != p_priority_flags.size(), output, "Distance and priority arrays must match.");
+	ERR_FAIL_COND_V_MSG(p_visible_flags != nullptr && p_visible_flags->size() != count, output,
+			"Visibility flags must match crowd distances.");
 	ERR_FAIL_COND_V_MSG(count > 16384, output, "Crowd tier planning is limited to 16384 actors.");
 	ERR_FAIL_COND_V_MSG(p_full_budget < 0 || p_full_budget > 256 ||
 					p_priority_budget < 0 || p_priority_budget > 256,
@@ -87,7 +93,13 @@ PackedInt32Array CrowdAnimationTierPlanner::plan_tiers(
 	for (int i = 0; i < count; i++) {
 		const double distance = p_distances[i];
 		const int tier = distance_tier(distance);
-		tiers[i] = tier == 0 ? 1 : tier;
+		const bool visible = p_visible_flags == nullptr || (*p_visible_flags)[i] != 0;
+		// Off-camera actors keep playing at a reduced rate, but never spend
+		// full-IK or combat-priority slots reserved for visible characters.
+		tiers[i] = visible ? (tier == 0 ? 1 : tier) : MAX(tier, 2);
+		if (!visible) {
+			continue;
+		}
 		const RankedCandidate candidate = { distance, i };
 		if (tier == 0) {
 			insert_top(nearest_full, candidate, p_full_budget);
@@ -104,4 +116,17 @@ PackedInt32Array CrowdAnimationTierPlanner::plan_tiers(
 		tiers[index] = MIN(tiers[index], 1);
 	}
 	return output;
+}
+
+
+PackedInt32Array CrowdAnimationTierPlanner::plan_tiers(
+		const PackedFloat64Array &p_distances, const PackedByteArray &p_priority_flags,
+		int p_full_budget, int p_priority_budget) const {
+	return plan_tiers_internal(p_distances, p_priority_flags, nullptr, p_full_budget, p_priority_budget);
+}
+
+PackedInt32Array CrowdAnimationTierPlanner::plan_visible_tiers(
+		const PackedFloat64Array &p_distances, const PackedByteArray &p_priority_flags,
+		const PackedByteArray &p_visible_flags, int p_full_budget, int p_priority_budget) const {
+	return plan_tiers_internal(p_distances, p_priority_flags, &p_visible_flags, p_full_budget, p_priority_budget);
 }
