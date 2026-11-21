@@ -6,6 +6,8 @@ on:
     paths:
       - 'modules/texture_streaming/**'
       - 'game/scripts/client/graphics_texture_streaming.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'tests/scene/test_texture_streaming_metrics_contract.py'
       - 'game/tests/test_graphics_texture_streaming.gd'
       - 'game/tests/run_adaptive_texture_prefetch.gd'
       - '.github/workflows/native-adaptive-texture-prefetch.yml'
@@ -14,6 +16,8 @@ on:
     paths:
       - 'modules/texture_streaming/**'
       - 'game/scripts/client/graphics_texture_streaming.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'tests/scene/test_texture_streaming_metrics_contract.py'
       - 'game/tests/test_graphics_texture_streaming.gd'
       - 'game/tests/run_adaptive_texture_prefetch.gd'
       - '.github/workflows/native-adaptive-texture-prefetch.yml'
@@ -30,6 +34,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Verify stream residency and budget metric source contracts
+        run: python3 -m unittest tests/scene/test_texture_streaming_metrics_contract.py -v
       - uses: ./.github/actions/godot-deps
       - uses: ./.github/actions/godot-build
         with:
