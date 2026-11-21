@@ -13,6 +13,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
 - **Deterministic bounded cross-cell routing:** `find_cell_path(from, to, loaded_only=false)` returns the shortest cardinal corridor of registered `Vector2i` world cells, respecting missing topology and optionally restricting the route to already-instantiated scene roots. Synchronous breadth-first expansion is capped at 512 visited cells (overflow-safe 32-bit coordinates) to prevent runaway CPU. This complements, but does not replace, a baked navigation mesh or obstacle-safe surface paths.
+- **Native bounded dynamic NavMesh dirty scheduler:** `mark_cell_navigation_dirty(cell)` coalesces repeated edits for live opted-in cells and dispatches `rebuild_streaming_navigation_mesh() -> bool` under `max_navigation_rebuilds_per_physics_frame` (1–16, default 1). Uses nearest-first deterministic ordering, max 128 queued cells, no duplicate rebuild grants per physics frame, a two-tick readiness fence and `cell_navigation_mesh_rebuilt` signal. Per-cell revisions and a monotonic world NavMesh generation invalidate stale NPC paths on changes.
 - **Native slope- and obstacle-aware navigation tile generation:** `build_navigation_tile(vertices, resolution, blockers, agent_radius, max_slope_degrees)` builds deterministic walkable NavigationMesh triangles from sampled terrain, rejects excessive slopes and intersects full triangles against circular obstacle footprints expanded by NPC radius. Hard limits: 2..32 cells per tile axis, at most 256 blockers, 2048 triangles, finite positions, validated radii and slope. No Recast bake or implicit physics-server mutation.
 - **Independent streamed NavigationRegion3D tier:** `navigation_radius` (-1 all loaded active/default, 0–32 near observer), `navigation_hysteresis_cells` (0–8), `max_navigation_transitions_per_frame` (1–64), native `cell_navigation_changed` signal, ready and count APIs. Pinned hubs and important/urgent sources can activate navigation outside player radius. Optional scene callback `set_streaming_navigation_active(active)` enables actual authored NavigationRegion3D tiles; `is_streaming_navigation_ready()` reports their state after two physics-frame sync ticks.
 - **Native fixed-physics-frame navigation scheduler:** register up to 128 live Node3D agents, give them priority 0–3, and cap costly path/steering **recalculations** at `max_navigation_updates_per_physics_frame` (1–64, default 2). The engine chooses winners deterministically by priority, least recent update, then agent name, avoiding starvation among equally important active NPCs. Only loaded simulation-active physics-active cells qualify. Grants are consumed once per agent per physics tick and weak ObjectIDs protect against deleted agents; owner-safe unregister prevents stale NPC replacement bugs. Aurora Forest uses these grants to schedule real obstacle raycasts; this is not navmesh baking.
@@ -81,6 +82,37 @@ var safe_loaded_corridor: Array = world.find_cell_path(origin_cell, target_cell,
 The search checks only registered scene paths, **not** terrain collisions, slope, water, NavMesh edges or active navigation region connectivity. `loaded_only=true` additionally requires each route cell to have a live instantiated root; it is still not a gameplay/physics-ready guarantee. To prevent unbounded CPU spikes, breadth-first search is capped at 512 visited cells, returning an empty route if the goal cannot be found within that limit. Equal shortest paths use deterministic neighbor order `+X, +Z, -X, -Z`, and coordinate math is overflow-safe.
 
 The Aurora Forest quest compass uses this native topological path to point toward intermediate registered cells for distant relics rather than blindly pointing through gaps. `smoke_cell_routes.gd` and the native Doctest verify gaps, shortcuts, disconnected regions and the loaded-only option. A full hierarchy/portal graph and true navigation mesh corridor are separate future capabilities.
+
+## Dynamic navigation obstacle updates with bounded rebuild work
+
+Games can edit in-world collision obstacles and refresh a cell's existing `NavigationRegion3D` **without unloading the scene or recreating its foliage**. This feature uses opt-in, scene-owned rebuilding: the native module schedules work; scene code creates and publishes the new `NavigationMesh`.
+
+```gdscript
+world.max_navigation_rebuilds_per_physics_frame = 1
+world.cell_navigation_mesh_rebuilt.connect(_on_navigation_rebuilt)
+
+# After changing the scene-owned obstacle data and collision:
+if world.mark_cell_navigation_dirty(cell):
+    # The native streamer will invoke the scene root's callback at most once
+    # per available physics-frame slot, combining repeated marks.
+    pass
+
+# On the streamed cell scene root:
+func rebuild_streaming_navigation_mesh() -> bool:
+    var new_mesh: NavigationMesh = rebuild_mesh_from_current_obstacles()
+    if new_mesh == null or new_mesh.get_polygon_count() == 0:
+        return false
+    $StreamingNavigationRegion.navigation_mesh = new_mesh
+    return true
+```
+
+The engine enforces **at most 1–16 attempted callbacks per engine physics frame**, even if `update_streaming()` is called multiple times. Repeated marks for one cell are coalesced, and eligible tiles are selected by Manhattan distance to the observer with deterministic X/Z tie-breaking. Only already-loaded scene roots implementing `rebuild_streaming_navigation_mesh()` can be dirtied; at most **128** distinct dirty cells are tracked. Navigation-inactive cells retain pending updates but are not rebuilt until activated. Failed or non-Boolean callbacks remain dirty and cannot pass readiness; they retry at most once per physics frame per budgeted attempt. On unload, pending updates and revision counters are cleared.
+
+`is_cell_navigation_ready(cell)` returns false immediately after a mark, so fast travel and path queries can wait until a successful rebuild **plus two completed physics frames**. A successful refresh emits `cell_navigation_mesh_rebuilt(cell, revision)`, increments the per-cell revision (initially 0), and increments `get_navigation_mesh_generation()` for global path-cache invalidation. The global generation also advances immediately when a tile is first dirtied, and when a cell loads, unloads or changes native navigation activation. While any tile is pending, gameplay can choose to suspend old cached routes and use local steering. This prevents an NPC from keeping an obsolete corridor through a changed **intermediate** tile. It is a versioning signal, not proof that an updated map can still reach its goal.
+
+Aurora Forest demonstrates the path: press **B** to build/remove a physical barricade several meters ahead. Each loaded cell owns one optional barricade, represented by both a visible box collider and a circular NavMesh blocker (which includes the NPC radius). The scene rebuild callback generates a **new** native filtered NavMesh resource, assigns it to its existing NavigationRegion3D, and leaves the terrain, vegetation, and scene root intact. The HUD shows pending dirty tiles; stalkers re-query their path on the next available native steering grant once the updated region is ready. The new `smoke_dynamic_navmesh.gd` tests dirty coalescing, frame caps, physical obstacle geometry, restored polygons, scene preservation and NPC path invalidation.
+
+**Limitations:** the generator remains synchronous on the main thread, bounded by existing mesh resolution (max 32×32) and 256 blockers. Budgeting caps **how many** expensive tile updates happen per physics frame, not their milliseconds. It does not implement background Recast baking, moving obstacle continuous updates, automatic polygon links or server sync forcing; NavMesh server changes still propagate on physics ticks. A permanently failing callback remains queued and can consume one scheduled slot per later frame.
 
 ## Native obstacle-clearance and slope-aware terrain tiles
 
@@ -331,7 +363,7 @@ These counters describe the current state, not a prediction of future memory or 
 
 ## Tests
 
-The module includes 71 Doctest cases across `test_world_partition_3d.h` (35) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 72 Doctest cases across `test_world_partition_3d.h` (36) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
@@ -342,6 +374,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 
 ## Non-goals and limitations
 
+- **Dynamic NavMesh updates are main-thread and scene-owned.** Dirty rebuild limits are explicit per physics frame, but each permitted NavMesh creation can still cost CPU. The native module does not mutate third-party obstacles, force NavigationServer synchronization or guarantee the connectivity of a rebuilt mesh. Failed scene callbacks keep the tile unready.
 - **Native terrain tile filtering is conservative, not full Recast baking.** Per-cell 16×16 tiles reject steep triangles and obstacles approximated as expanded discs; hole cutting is coarse (whole triangles), there is no vertical clearance, off-mesh linkage or automatic dynamic obstacle rebake. Terrain-tile seam connectivity still depends on authored free corridors and Godot physics-server synchronization.
 - **Cell routing is topological, not physical.** `find_cell_path` is a bounded shortest 4-neighbor route of registered PackedScene cells; it does not confirm walkability across individual objects or NavMesh edges, and an empty result can also mean the 512-cell search limit was reached.
 - **Navigation scheduler supplies permits, not pathfinding or a navmesh.** The engine keeps physics, navigation map synchronization and actual movement separate. It limits how often expensive query results can be recomputed, but doesn't guarantee path quality or modify the cost per permitted calculation. Persistent high-priority agents can starve lower priorities; same-priority agents rotate fairly. Registration is bounded at 128 names and invalid/old nodes are weakly tracked.

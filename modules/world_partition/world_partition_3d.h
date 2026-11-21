@@ -69,6 +69,14 @@ class WorldPartition3D : public Node3D {
 	int navigation_radius = -1; // -1 preserves all-loaded behavior.
 	int navigation_hysteresis_cells = 1;
 	int max_navigation_transitions_per_frame = 2;
+	// Dynamic navigation polygons: coalesce repeated dirty requests, execute
+	// a bounded number of scene-owned rebuild callbacks per physics tick.
+	int max_navigation_rebuilds_per_physics_frame = 1;
+	HashSet<Vector2i> navigation_dirty_cells;
+	HashMap<Vector2i, int> navigation_mesh_revisions;
+	int64_t navigation_mesh_generation = 0; // Invalidates cached routes across all affected regions.
+	uint64_t last_navigation_rebuild_frame = UINT64_MAX;
+	static constexpr int MAX_DIRTY_NAVIGATION_CELLS = 128;
 	// Limit expensive steering/path recalculations to a deterministic number
 	// of active agents per *physics* frame (not render frame).
 	int max_navigation_updates_per_physics_frame = 2;
@@ -142,6 +150,7 @@ class WorldPartition3D : public Node3D {
 	void _refresh_cell_physics(const Vector2i &p_center);
 	bool _cell_navigation_active(const Vector2i &p_cell, const Vector2i &p_center, bool p_previously_active = false) const;
 	void _refresh_cell_navigation(const Vector2i &p_center);
+	void _refresh_dirty_navigation_cells(const Vector2i &p_center);
 	bool _is_cell_required_by_important_source(const Vector2i &p_cell) const;
 	void _purge_unused_ready_scenes();
 	bool _instantiate_cell(const Vector2i &p_cell, const Ref<PackedScene> &p_scene);
@@ -211,6 +220,12 @@ public:
 	int get_navigation_active_cell_count() const;
 	bool is_cell_navigation_ready(const Vector2i &p_cell) const;
 	bool is_streaming_source_navigation_ready(const String &p_name) const;
+	void set_max_navigation_rebuilds_per_physics_frame(int p_count);
+	int get_max_navigation_rebuilds_per_physics_frame() const;
+	bool mark_cell_navigation_dirty(const Vector2i &p_cell);
+	int get_navigation_dirty_cell_count() const;
+	int get_cell_navigation_revision(const Vector2i &p_cell) const;
+	int64_t get_navigation_mesh_generation() const;
 
 	void set_max_navigation_updates_per_physics_frame(int p_count);
 	int get_max_navigation_updates_per_physics_frame() const;
