@@ -17,6 +17,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Cap new requests, simultaneous outstanding requests, instantiation work and out-of-range scene unloads per frame. `max_unloads_per_frame` (default 32) smooths out mass cleanup after teleports; manual clear/remove or disabling streaming always unloads immediately.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Dispatch optional streamed-scene lifecycle hooks `streaming_activated(cell)` and `streaming_deactivating(cell)` before the existing load/unload signals. These run after gameplay state restoration and before `queue_free()` respectively. New native signals `cell_activated` and `cell_deactivating` let AI, physics and navigation systems prepare or detach. On-demand `get_cell_simulation_stats(cell)` reports PhysicsServer3D collision objects/shapes and NavigationServer3D regions in the instantiated scene hierarchy.
+- **Persist generic interactive child nodes** with the opt-in `persist_streaming_objects` switch and `streaming_stateful` group. Per-object capture/restore callbacks retain chest, lever, gate and collectible states without per-cell root scripts. A distinct `snapshot_cell_object_states` checkpoint dictionary and `cell_object_state_changed` signal allow immediate gameplay UI refresh.
 - **Persist selected RigidBody3D motion across cell streaming:** set `persist_rigid_bodies=true` and mark individual physics objects using `set_meta("streaming_persistent", true)`. The native runtime captures/restores local transforms, linear/angular velocities, sleep and freeze state separately from quest/gameplay dictionaries. Export `snapshot_cell_physics_states` and import `load_cell_physics_states` for checkpoints; only marked bodies participate, and HLOD proxies need no physics.
 - Preserve per-cell gameplay progress with optional scene-root callbacks `capture_streaming_state() -> Dictionary` and `restore_streaming_state(state: Dictionary)`. The native streamer captures state when a cell unloads and restores it when the scene re-enters, after `_ready()`.
 - Export and import **deep-copied** runtime state with `snapshot_cell_states()` / `load_cell_states(Dictionary)`; read or edit single cells with `get_cell_state`, `set_cell_state`, `has_cell_state`, `erase_cell_state`, `clear_cell_states` and `get_cell_state_count`. State remains cached when scene registrations are removed, until explicitly erased, and is not automatically written to disk.
@@ -70,6 +71,64 @@ re-enabling streaming restores them. If you remove a cell mapping, pinning does
 not re-register the scene.
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Per-object interactive state without scene-root boilerplate
+
+An interactive chest, lever, door or puzzle mechanism can live under any
+streamed cell root as a reusable child component. Instead of teaching the
+root scene about each child, mark the object with the Godot node group
+`streaming_stateful` and implement two small callbacks:
+
+```gdscript
+# In the object's script:
+func _ready() -> void:
+    add_to_group("streaming_stateful")
+
+func capture_streaming_object_state() -> Dictionary:
+    return {"opened": opened, "uses": use_count}
+
+func restore_streaming_object_state(state: Dictionary) -> void:
+    opened = bool(state.get("opened", false))
+    use_count = int(state.get("uses", 0))
+    update_appearance()
+```
+
+The native `WorldPartition3D` opt-in property `persist_streaming_objects`
+defaults to false. Enable it on the detailed scene streamer, and use:
+
+```gdscript
+world.persist_streaming_objects = true
+# Immediately after a player opens a chest:
+world.capture_cell_object_states(Vector2i(0, 0))
+# Save all still-loaded and previously streamed out interactive objects:
+var object_states: Dictionary = world.snapshot_cell_object_states()
+# Rehydrate during checkpoint load (missing objects reset to defaults):
+world.load_cell_object_states(object_states)
+```
+
+The engine traverses **only a loaded cell's subtree** for group members,
+not all world nodes. Each recorded object is keyed by a stable
+scene-relative NodePath string and can be reused in any cell. Unload captures
+children before the cell's deactivation callback; load restores them after
+the cell root's `_ready()` and gameplay/physics state restoration, before
+`streaming_activated()`. Manual capture fires
+`cell_object_state_changed(cell, states)` only when a real change occurs.
+Cache getters return deep copies.
+
+For safe and bounded file persistence, an imported record can have at most
+32 fields and each cell at most 128 objects. Supported values are null,
+bool, int, finite float, short String (max 1024 chars), Vector2/3 and
+integer vector types; nested dictionaries, Arrays, Object references and
+RIDs are rejected. NodePath keys must remain relative and cannot escape
+the loaded root. This supports small interactive flags and counters, not a
+complete arbitrary graph serializer. Changes to authored node hierarchy
+can invalidate path-based save records; for production migrations, keep
+stable node names or translate saved paths by game schema version.
+
+These are *three independent cache domains*: gameplay root-state
+(`snapshot_cell_states()`), RigidBody3D motion
+(`snapshot_cell_physics_states()`) and child-interactable state
+(`snapshot_cell_object_states()`). A game may opt into any subset.
 
 ## Opt-in RigidBody3D streaming persistence
 
@@ -374,7 +433,7 @@ performance on the intended hardware still require validation.
 
 ## Tests
 
-The module includes 101 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (80), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 105 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (84), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"

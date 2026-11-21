@@ -9,6 +9,7 @@ const CHECKPOINT := "user://cgame_native_state_regression.dat"
 
 var layer_notifications: Array[Dictionary] = []
 var cell_notifications: Array[Dictionary] = []
+var object_notifications: Array[Dictionary] = []
 var native_world: Node3D
 var activated_cells: Array[Vector2i] = []
 var deactivating_cells: Array[Vector2i] = []
@@ -34,6 +35,9 @@ func _on_native_cell_deactivating(cell: Vector2i) -> void:
 
 func _on_layer_changed(layer: String, enabled: bool) -> void:
     layer_notifications.append({"name": layer, "enabled": enabled})
+
+func _on_object_state_changed(cell: Vector2i, states: Dictionary) -> void:
+    object_notifications.append({"cell": cell, "states": states.duplicate(true)})
 
 func _on_cell_state_changed(cell: Vector2i, state: Dictionary) -> void:
     cell_notifications.append({"cell": cell, "state": state.duplicate(true)})
@@ -68,8 +72,10 @@ func _run() -> void:
     world.connect("cell_deactivating", Callable(self, "_on_native_cell_deactivating"))
     world.connect("layer_state_changed", Callable(self, "_on_layer_changed"))
     world.connect("cell_state_changed", Callable(self, "_on_cell_state_changed"))
+    world.connect("cell_object_state_changed", Callable(self, "_on_object_state_changed"))
     world.set("cell_size", 128.0)
     world.set("persist_rigid_bodies", true)
+    world.set("persist_streaming_objects", true)
     world.set("load_radius", 0)
     world.set("unload_radius", 1)
     world.set("observer_path", world.get_path_to(observer))
@@ -91,6 +97,16 @@ func _run() -> void:
     assert(activated_cells.has(CELL))
     var first := world.call("get_cell_instance", CELL) as Node3D
     assert(first != null)
+    var treasure := first.get_node("TreasureChest") as Node3D
+    assert(treasure.is_in_group("streaming_stateful"))
+    assert(first.call("interact_world_object"))
+    var object_state: Dictionary = world.call("capture_cell_object_states", CELL)
+    assert(object_state["TreasureChest"]["active"] == true)
+    assert(object_state["TreasureChest"]["uses"] == 1)
+    assert(object_notifications.size() == 1)
+    assert(object_notifications[0]["cell"] == CELL)
+    assert(world.call("capture_cell_object_states", CELL) == object_state)
+    assert(object_notifications.size() == 1)  # No duplicate notification.
     var first_crate := first.get_node("StreamingCrate") as RigidBody3D
     assert(first_crate != null)
     assert(first_crate.get_meta("streaming_persistent") == true)
@@ -116,6 +132,8 @@ func _run() -> void:
     assert(deactivating_cells.has(CELL))
     assert(bool(world.call("has_cell_state", CELL)))
     assert(world.call("get_cell_state", CELL)["reward_claimed"] == true)
+    assert(world.call("get_cell_object_states", CELL)["TreasureChest"]["active"] == true)
+    assert(int(world.call("get_cell_object_state_count")) == 1)
     assert(int(world.call("get_cell_physics_state_count")) == 1)
     var unloaded_physics: Dictionary = world.call("get_cell_physics_state", CELL)
     assert(unloaded_physics["StreamingCrate"]["freeze"] == true)
@@ -130,6 +148,9 @@ func _run() -> void:
     assert(restored_crate.freeze)
     assert(restored_crate.transform.origin.distance_to(saved_transform.origin) < 0.001)
     assert(restored.call("capture_streaming_state")["reward_claimed"] == true)
+    var treasure_again := restored.get_node("TreasureChest") as Node3D
+    assert(treasure_again.call("capture_streaming_object_state")["active"] == true)
+    assert(not restored.call("interact_world_object"))
     assert(not restored.call("claim_hub_reward"))
 
     # Snapshot includes the currently resident scene. Save/loading does not
@@ -146,6 +167,14 @@ func _run() -> void:
     var loaded: Variant = input.get_var(false)
     input.close()
     assert(loaded is Dictionary)
+
+    # Object-state imports reset missing records on loaded nodes, separately
+    # from physics and quest flags; older checkpoint fields remain optional.
+    var saved_objects: Dictionary = world.call("snapshot_cell_object_states")
+    world.call("load_cell_object_states", {})
+    assert(treasure_again.call("capture_streaming_object_state")["active"] == false)
+    world.call("load_cell_object_states", saved_objects)
+    assert(treasure_again.call("capture_streaming_object_state")["active"] == true)
 
     # Omitting a cell record resets an already-active scene.
     world.call("load_cell_states", {})

@@ -10,6 +10,7 @@ const PROXY_STRIDE := 8
 const QUEST_HUB := Vector2i(0, 0)
 const COMBAT_ARENA := Vector2i(4, 2)
 const CHAMPION_SHRINE := Vector2i(5, 3)
+const INTERACTABLE_SCRIPT := preload("res://scripts/streamed_interactable.gd")
 
 var cell_coords: Vector2i = Vector2i(9999, 9999)
 var hub_reward_claimed := false
@@ -76,10 +77,37 @@ func _ready() -> void:
         if grid == QUEST_HUB or grid == COMBAT_ARENA:
             _add_gameplay_landmark(grid == QUEST_HUB)
             _create_persistent_crate()
+            if grid == QUEST_HUB:
+                _create_interactable("TreasureChest", "chest")
+            else:
+                _create_interactable("ArenaSwitch", "switch")
             _refresh_landmark()
         elif grid == CHAMPION_SHRINE:
             _add_champion_shrine()
+            _create_interactable("ChampionGate", "gate")
             _refresh_landmark()
+
+func _create_interactable(node_name: String, object_kind: String) -> void:
+    var interactable := INTERACTABLE_SCRIPT.new() as Node3D
+    interactable.name = node_name
+    interactable.call("configure", object_kind)
+    interactable.position = Vector3(CELL_SIZE * 0.5 - 10.0, 0.0, CELL_SIZE * 0.5 + 9.0)
+    add_child(interactable)
+
+func get_interactable() -> Node3D:
+    if proxy:
+        return null
+    if cell_coords == QUEST_HUB:
+        return get_node_or_null("TreasureChest") as Node3D
+    if cell_coords == COMBAT_ARENA:
+        return get_node_or_null("ArenaSwitch") as Node3D
+    if cell_coords == CHAMPION_SHRINE:
+        return get_node_or_null("ChampionGate") as Node3D
+    return null
+
+func interact_world_object() -> bool:
+    var target := get_interactable()
+    return target != null and bool(target.call("interact"))
 
 func _create_persistent_crate() -> void:
     # WorldPartition3D persists only opt-in RigidBody3D descendants.
