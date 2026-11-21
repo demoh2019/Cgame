@@ -209,3 +209,30 @@ still use the previous pure GDScript loop, and game tests verify native/fallback
 point positions within floating-point tolerance.
 
 Reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/eqs-node-reference-generators-in-unreal-engine
+
+## Bounded oriented cone candidate generator (Unreal EQS Points: Cone)
+
+`sample_cone(center, direction, inner_radius, outer_radius, ring_count,
+points_per_ring, cone_degrees=90.0, include_center=false)` generates an
+oriented sector of XZ candidate locations. The input direction's XZ
+projection establishes the centerline; `cone_degrees` is the **full**
+aperture. Each ring runs from the left edge of the sector to the right
+edge, inclusive; a one-ray sector samples the centerline. Radius increases
+from inner to outer (one ring uses outer), and `include_center` prepends the
+center exactly once.
+
+Generation is deterministic, has no scene/physics/nav side effects and
+rejects nonfinite inputs, invalid radii, direction vectors with no XZ
+component, angles outside 0..360 degrees, counts outside 1..256 rings or
+1..4096 rays, and output allocations greater than 65536 points.
+
+Albion After's raid boss now adds a bounded 2x9 forward sector in the
+second reinforcement wave, facing the nearest **server-verified alive**
+survivor (ties resolved by position). This supplements rather than
+replaces the existing 3x16 donut points. Every added location still
+passes the unchanged server-side zone, terrain, water, collision,
+player-distance, height, infected-occupancy and multi-threat clearance
+checks. A GDScript fallback produces equivalent points on stock Godot
+and older engine binaries.
+
+Reference: https://dev.epicgames.com/documentation/unreal-engine/eqs-node-reference-generators-in-unreal-engine
