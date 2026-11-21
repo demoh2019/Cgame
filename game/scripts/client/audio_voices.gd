@@ -43,3 +43,69 @@ static func _worse(a: Dictionary, b: Dictionary) -> bool:
 	if absf(float(a["audibility"]) - float(b["audibility"])) < 0.5:
 		return float(a["age"]) > float(b["age"])
 	return float(a["audibility"]) < float(b["audibility"])
+
+
+## Local-only event priority for spatial audio concurrency.
+static func priority_for(name: String) -> int:
+	match name:
+		"enemy_destroy":
+			return 3
+		"blaster", "blaster_repeater", "enemy_hurt", "enemy_attack":
+			return 2
+		"break", "coin":
+			return 1
+		_:
+			return 0
+
+
+## Pure policy matching native AudioVoiceAdmissionPlanner. Same-sound caps
+## take precedence over the shared active pool, then priority and audibility.
+static func prioritized_victim(voices: Array, name: String, new_db: float,
+		new_priority: int, max_voices: int = MAX_VOICES,
+		same_max: int = SAME_SOUND_MAX) -> int:
+	if name.is_empty() or not is_finite(new_db) or new_priority < 0 \
+			or new_priority > 3 or max_voices < 1 or max_voices > 128 \
+			or same_max < 1 or same_max > max_voices or voices.size() > 128:
+		return DROP_NEW
+	var same: Array[int] = []
+	for i in voices.size():
+		var v: Variant = voices[i]
+		if not (v is Dictionary) or not v.has("name") or not v.has("audibility") \
+				or not v.has("age"):
+			return DROP_NEW
+		if not (v["name"] is String) \
+				or not (v["audibility"] is float or v["audibility"] is int) \
+				or not (v["age"] is float or v["age"] is int):
+			return DROP_NEW
+		var priority: Variant = v.get("priority", 0)
+		if not (priority is int or priority is float) \
+				or (priority is float and not is_finite(float(priority))) \
+				or str(v["name"]).is_empty() or not is_finite(float(v["audibility"])) \
+				or not is_finite(float(v["age"])) or float(v["age"]) < 0.0 \
+				or int(priority) < 0 or int(priority) > 3:
+			return DROP_NEW
+		if v["name"] == name:
+			same.append(i)
+	if same.size() < same_max and voices.size() < max_voices:
+		return ROOM
+	var candidates: Array[int] = []
+	if same.size() >= same_max:
+		candidates = same.duplicate()
+	else:
+		for i in voices.size():
+			candidates.append(i)
+	if candidates.is_empty():
+		return DROP_NEW
+	var worst: int = candidates[0]
+	for i in candidates:
+		var a: Dictionary = voices[i]
+		var b: Dictionary = voices[worst]
+		if int(a.get("priority", 0)) < int(b.get("priority", 0)):
+			worst = i
+		elif int(a.get("priority", 0)) == int(b.get("priority", 0)) and _worse(a, b):
+			worst = i
+	if new_priority < int(voices[worst].get("priority", 0)) or \
+			(new_priority == int(voices[worst].get("priority", 0)) \
+			and float(voices[worst]["audibility"]) > new_db + 3.0):
+		return DROP_NEW
+	return worst

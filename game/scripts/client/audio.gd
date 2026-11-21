@@ -16,6 +16,7 @@ const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 const CONCURRENCY_GROUPS := {"enemy_hurt": 4, "coin": 3, "blaster": 4, "blaster_repeater": 4, "break": 3}
 var _concurrency: Node = null
 var _concurrency_tried := false
+var _native_voice_admission: Object = null
 var _sfx_bus := -1
 var _sfx_lowpass := -1
 var _rain: AudioStreamPlayer
@@ -68,6 +69,7 @@ func _ready() -> void:
 	AudioMix.load_all()
 	_native_duck = EngineFeatures.make("AudioDuckMix")
 	_native_mix_snapshots = EngineFeatures.make("AudioMixSnapshotController")
+	_native_voice_admission = EngineFeatures.make("AudioVoiceAdmissionPlanner")
 	_ambience = AudioStreamPlayer.new()
 	_ambience.bus = "Ambience"
 	_ambience.stream = Assets.sound("ambience")
@@ -214,11 +216,34 @@ func play_gore(bone: bool, position: Vector3, volume_db: float = -6.0) -> void:
 	player.finished.connect(player.queue_free)
 
 
+## Native C++ when available, stock Godot retains the identical script policy.
+func _choose_voice_victim(snapshot: Array, sound_name: String,
+		loudness: float, priority: int) -> int:
+	if _native_voice_admission != null and _native_voice_admission.has_method("select_victim"):
+		return int(_native_voice_admission.call("select_victim",
+			snapshot, sound_name, loudness, priority,
+			AudioVoices.MAX_VOICES, AudioVoices.SAME_SOUND_MAX))
+	return AudioVoices.prioritized_victim(snapshot, sound_name, loudness, priority)
+
+
 func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> void:
 	if not enabled:
 		return
 	var stream := Assets.sound(sound_name)
 	if stream == null:
+		return
+	# Plan sound admission before creating a 3D voice Node.
+	var distance := position.distance_to(_listener)
+	var loudness := AudioVoices.audibility(volume_db, distance, 14.0)
+	var priority: int = AudioVoices.priority_for(sound_name)
+	var now := Time.get_ticks_msec() / 1000.0
+	var snapshot: Array = []
+	for v in _voices:
+		snapshot.append({"name": v["name"], "audibility": v["audibility"],
+			"age": maxf(0.0, now - float(v["born"])),
+			"priority": int(v.get("priority", 0))})
+	var cull: int = _choose_voice_victim(snapshot, sound_name, loudness, priority)
+	if cull == AudioVoices.DROP_NEW:
 		return
 	var player := AudioStreamPlayer3D.new()
 	player.stream = stream
@@ -226,17 +251,6 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	player.unit_size = 14.0
 	player.max_distance = 90.0
 	player.bus = ReverbZones.BUS
-	var distance := position.distance_to(_listener)
-	# Voice limiting: cull the quietest/oldest voice, or drop this one when it is the weakest.
-	var loudness := AudioVoices.audibility(volume_db, distance, player.unit_size)
-	var now := Time.get_ticks_msec() / 1000.0
-	var snapshot: Array = []
-	for v in _voices:
-		snapshot.append({"name": v["name"], "audibility": v["audibility"], "age": now - float(v["born"])})
-	var cull := AudioVoices.victim(snapshot, sound_name, loudness)
-	if cull == AudioVoices.DROP_NEW:
-		player.free()
-		return
 	if cull >= 0:
 		var old: Dictionary = _voices[cull]
 		_voices.remove_at(cull)
@@ -270,7 +284,7 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	add_child(player)
 	player.global_position = position
 	var record := {
-		"player": player, "name": sound_name,
+		"player": player, "name": sound_name, "priority": priority,
 		"audibility": loudness + AudioSpatial.obstruction_db(initial_obstruction),
 		"born": now, "base_audibility": loudness, "terrain_blocked": occluded,
 		"obstruction": initial_obstruction,
