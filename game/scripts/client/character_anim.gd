@@ -104,12 +104,13 @@ static func adaptive_pose_budget_snapshot(quality: int) -> Dictionary:
 			"pressure_percent": int(_native_budget_governor.call("get_pressure_percent")),
 			"samples": int(_native_budget_governor.call("get_frames_observed"))
 		}
+	var same_quality: bool = _fallback_budget_quality == quality
+	var process_us: int = _fallback_process_ema_us if same_quality else 0
 	return {
 		"source": "script", "base_us": base,
-		"allowance_us": _fallback_budget_us if _fallback_budget_quality == quality else base,
-		"process_ema_us": _fallback_process_ema_us if _fallback_budget_quality == quality else 0,
-		"pressure_percent": int(_fallback_process_ema_us * 100 / POSE_PROCESS_TARGET_US)
-			if _fallback_budget_quality == quality else 0
+		"allowance_us": _fallback_budget_us if same_quality else base,
+		"process_ema_us": process_us,
+		"pressure_percent": mini(1000, int(process_us * 100 / POSE_PROCESS_TARGET_US))
 	}
 
 
