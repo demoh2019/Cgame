@@ -42,6 +42,10 @@ Only the selected NPC allocates a profiler. A phase named `target_selection` mea
 
 The engine's `BehaviorTreeRunner` has `profiling_enabled`, `get_profile_snapshot()` and `reset_profile()` for the complete root task execution, including child evaluation. Finished cached ticks do not count as fresh samples. Use the engine profiler or external system tools for whole-frame or C++ call-stack analysis; this is lightweight per-agent instrumentation, not a replacement.
 
+## Large-group AI scheduling
+
+The engine now provides `AIUpdateScheduler` for deterministic per-agent update slots. The canonical `GameServer` uses it to spread nonurgent target selection only when at least 128 infected are present, with combat and first-selection bypasses and a stock-Godot fallback. See [AI Update Scheduling](AI_UPDATE_SCHEDULING.md) for the precise behavior, server diagnostics and tests.
+
 ## Validation
 
 New automated `game/tests/test_native_infected_senses.gd` is listed in the canonical `game/tests/run_all.gd`. It verifies fallback behavior, temporary sense memory, accepted sound events and safe-zone immunity. Native C++ tests cover perception rules and reactive preemption; sandbox integration scripts cover actual LOS and obstacle A* navigation.
