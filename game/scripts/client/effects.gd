@@ -17,7 +17,8 @@ var _pollen: CPUParticles3D
 var _butterflies: CPUParticles3D
 var _leaves: CPUParticles3D
 var _fireflies: CPUParticles3D
-var _burst_pool # Cgame RuntimeNodePool instance
+var _burst_pool # Native SceneNodePool or stock-compatible script fallback.
+var _burst_pool_budgeted := false
 var _native_fx_budget: Object = null
 var _pending_bursts: Array[Dictionary] = []
 var last_fx_budget_stats: Dictionary = {"requested": 0, "rendered": 0, "dropped": 0, "native": false}
@@ -56,6 +57,10 @@ func _ready() -> void:
 	_burst_pool.prewarm_count = 12
 	_burst_pool.max_idle = 24
 	_burst_pool.max_active = 48
+	# Avoid instantiating the whole emitter cache in one _ready() callback.
+	# Older native engine builds keep their legacy prewarm behavior.
+	_burst_pool_budgeted = _burst_pool.has_method("maintain_residency")
+	_burst_pool.prewarm_on_ready = not _burst_pool_budgeted
 	add_child(_burst_pool)
 	if ClassDB.class_exists("SignificanceBudgetPlanner"):
 		var planner: Object = ClassDB.instantiate("SignificanceBudgetPlanner")
@@ -261,6 +266,12 @@ func ring(position: Vector3, color: Color, radius: float = 4.0, seconds: float =
 ## Frame-gather visual descriptors before acquiring pooled particle nodes.
 ## Damage, audio, network event delivery and server authority are unaffected.
 func _process(_delta: float) -> void:
+	if _burst_pool_budgeted and is_instance_valid(_burst_pool):
+		# At most 1-2 PackedScene instantiations or frees per render frame.
+		# Active particle emitters count toward this target and finish naturally.
+		_burst_pool.call("maintain_residency",
+			FxPolicy.pool_resident_target(GraphicsQuality.level()),
+			FxPolicy.pool_changes_per_frame(GraphicsQuality.level()))
 	flush_bursts()
 
 
