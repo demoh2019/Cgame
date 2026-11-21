@@ -99,8 +99,8 @@ func run(t) -> void:
     history_senses.record_confirmed_sound(Vector2.ZERO, Vector2(80, 0), 20.0, 99)
     if history_senses.has_native_history() and history_senses.has_native_hearing():
         var first_sound: Dictionary = history_senses.best_confirmed_stimulus(1)
-        t.eq(first_sound.get("source_id"), 12,
-            "decayed sound strength favors recent confirmed stimuli")
+        t.eq(first_sound.get("source_id"), 11,
+            "stronger unexpired sound still wins while it is active")
         history_senses.advance_time(1.6)
         t.check(not history_senses.remembers_sound(),
             "ranked primary sound memory expires even when weak noise remains")
@@ -110,9 +110,10 @@ func run(t) -> void:
         t.eq(later_sound.get("position"), Vector2(16, 0),
             "secondary investigation location is still server-confirmed")
         var recent: Array = history_senses.get_recent_confirmed_stimuli()
-        t.eq(recent.size(), 1, "all older sight and stronger sound signals expired")
+        t.eq(recent.size(), 2,
+            "expired stronger sound is gone while younger sound and sight persist")
         var view: Dictionary = history_senses.get_debug_snapshot()
-        t.eq(view.get("stimulus_count"), 1,
+        t.eq(view.get("stimulus_count"), 2,
             "server diagnostic reports the bounded active event history")
         history_senses.reset()
         t.eq(history_senses.get_recent_confirmed_stimuli().size(), 0,
