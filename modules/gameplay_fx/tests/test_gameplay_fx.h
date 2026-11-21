@@ -715,7 +715,7 @@ TEST_CASE("[GameplayFX] CooldownTracker scoped snapshot rolls back on invalid in
 	Ref<GameplayCooldownTracker> full;
 	full.instantiate();
 	for (int i = 0; i < GameplayCooldownTracker::MAX_COOLDOWNS - 1; i++) {
-		CHECK(full->set_remaining(StringName("Local.Cooldown." + itos(i)), 3.0));
+		CHECK(full->set_remaining(StringName(String("Local.Cooldown.") + itos(i)), 3.0));
 	}
 	Dictionary too_many;
 	too_many[StringName("Ability.Weapon")] = 5.0;
