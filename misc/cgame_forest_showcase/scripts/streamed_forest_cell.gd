@@ -130,6 +130,8 @@ func _create_barricade_visual() -> void:
 func toggle_dynamic_barricade(at_world: Vector3) -> bool:
     if not is_node_ready() or streaming_lod != 0:
         return false
+    if not barricade_active and not at_world.is_finite():
+        return false
     var partition := get_parent() as WorldPartition3D
     if partition == null or not partition.mark_cell_navigation_dirty(Vector2i(cell_x, cell_z)):
         return false # Never change collision without scheduling a NavMesh update.
@@ -140,8 +142,6 @@ func toggle_dynamic_barricade(at_world: Vector3) -> bool:
             barricade_body = null
     else:
         var local: Vector3 = to_local(at_world)
-        if not local.is_finite():
-            return false
         local.x = clampf(local.x, 3.0, CELL_SIZE - 3.0)
         local.z = clampf(local.z, 3.0, CELL_SIZE - 3.0)
         local.y = _world_height(local.x, local.z) + 0.8
