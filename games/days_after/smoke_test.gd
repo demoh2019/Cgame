@@ -54,6 +54,21 @@ func _smoke() -> void:
         var radii: PackedFloat64Array = foliage.call("get_exclusion_radii")
         var box_mins: PackedVector3Array = foliage.call("get_exclusion_box_mins")
         var box_maxs: PackedVector3Array = foliage.call("get_exclusion_box_maxs")
+        var obb_centers: PackedVector3Array = foliage.call("get_oriented_box_centers")
+        var obb_halves: PackedVector3Array = foliage.call("get_oriented_box_half_extents")
+        var obb_yaws: PackedFloat64Array = foliage.call("get_oriented_box_yaws")
+        var fence := game.get_node_or_null("DiagonalFence") as StaticBody3D
+        if fence == null or obb_centers.size() != 1 or obb_halves.size() != 1 or obb_yaws.size() != 1:
+            push_error("Rotated PCG exclusion or its physical fence is missing")
+            ok = false
+        else:
+            if fence.position.distance_to(obb_centers[0]) > 0.0001 or \
+                    absf(fence.rotation.y - obb_yaws[0]) > 0.0001:
+                push_error("Rotated PCG exclusion does not match the actual solid geometry")
+                ok = false
+        if int(foliage.call("get_oriented_box_only_candidate_count")) < 1:
+            push_error("Oriented volume does not exclude additional foliage outside existing spheres/AABBs")
+            ok = false
         if box_mins.size() != 6 or box_mins.size() != box_maxs.size():
             push_error("PCG rectangle exclusion zone configuration is incomplete")
             ok = false
@@ -122,6 +137,17 @@ func _smoke() -> void:
                 var point: Vector3 = positions[i]
                 if point.x >= lo.x and point.x <= hi.x and point.y >= lo.y and point.y <= hi.y and point.z >= lo.z and point.z <= hi.z:
                     push_error("PCG foliage appeared inside an inclusive rectangular exclusion volume")
+                    ok = false
+                    break
+            # Independent geometric check, using the engine Basis inverse
+            # instead of the gameplay helper's hand-written yaw projection.
+            for b in range(obb_centers.size()):
+                var local_point: Vector3 = Basis(Vector3.UP, obb_yaws[b]).inverse() * (
+                    positions[i] - obb_centers[b])
+                if absf(local_point.x) <= obb_halves[b].x and \
+                        absf(local_point.y) <= obb_halves[b].y and \
+                        absf(local_point.z) <= obb_halves[b].z:
+                    push_error("PCG foliage appeared inside a rotated exclusion box")
                     ok = false
                     break
             for previous in range(i):
