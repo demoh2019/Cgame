@@ -168,8 +168,8 @@ func run(t) -> void:
 			t.eq(index_query.call("query_top_indices", 3), PackedInt32Array([0, 1]),
 				"native index query honors caller cap and resource maximum")
 			index_query.set("max_results", 0)
-			t.check(index_query.call("query_top_indices", 0).is_empty(),
-				"invalid zero top-K request never fabricates item identities")
+			t.eq(index_query.call("query_top_indices", 3), ids,
+				"clearing the resource cap restores original stable EQS ordering")
 		else:
 			t.check(true, "older Cgame binary keeps the position-only EQS fallback")
 		var first_spot: Vector2 = first._flank_goal(here, target)
