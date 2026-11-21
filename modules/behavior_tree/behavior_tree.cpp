@@ -52,6 +52,24 @@ BehaviorTreeTask::Status BehaviorTreeTask::execute(const Dictionary &p_blackboar
 	return FAILURE;
 }
 
+BehaviorTreeTask::Status BehaviorTreeTask::execute_traced(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+	// A single cheap Dictionary key test for normal non-debug gameplay;
+	// only explicitly traced runners read clocks or construct step records.
+	if (!r_memory.has(SNAME("__bt_trace_sink"))) {
+		return execute(p_blackboard, r_memory, p_path, p_delta);
+	}
+	Ref<AIBehaviorTrace> trace = r_memory.get(SNAME("__bt_trace_sink"), Variant());
+	if (trace.is_null()) {
+		return execute(p_blackboard, r_memory, p_path, p_delta);
+	}
+	const int token = trace->begin_step(p_path, String(get_class()));
+	const Status status = execute(p_blackboard, r_memory, p_path, p_delta);
+	if (token >= 0) {
+		trace->end_step(token, int(status));
+	}
+	return status;
+}
+
 bool BehaviorTreeTask::contains_task(const BehaviorTreeTask *p_target, int p_depth) const {
 	return this == p_target || p_depth >= 64;
 }
@@ -153,7 +171,7 @@ BehaviorTreeTask::Status BehaviorTreeSequence::execute(const Dictionary &p_black
 			clear_memory(r_memory, p_path);
 			return FAILURE;
 		}
-		const Status status = task->execute(p_blackboard, r_memory, p_path + "/" + itos(index), p_delta);
+		const Status status = task->execute_traced(p_blackboard, r_memory, p_path + "/" + itos(index), p_delta);
 		if (status == RUNNING) {
 			r_memory[p_path] = index;
 			return RUNNING;
@@ -180,7 +198,7 @@ BehaviorTreeTask::Status BehaviorTreeSelector::execute(const Dictionary &p_black
 			clear_memory(r_memory, p_path);
 			return FAILURE;
 		}
-		const Status status = task->execute(p_blackboard, r_memory, p_path + "/" + itos(index), p_delta);
+		const Status status = task->execute_traced(p_blackboard, r_memory, p_path + "/" + itos(index), p_delta);
 		if (status == RUNNING) {
 			r_memory[p_path] = index;
 			return RUNNING;
@@ -203,7 +221,7 @@ BehaviorTreeTask::Status BehaviorTreeReactiveSequence::execute(const Dictionary 
 			clear_memory(r_memory, p_path);
 			return FAILURE;
 		}
-		const Status status = task->execute(p_blackboard, r_memory, p_path + "/" + itos(i), p_delta);
+		const Status status = task->execute_traced(p_blackboard, r_memory, p_path + "/" + itos(i), p_delta);
 		if (status == RUNNING) {
 			if (previous_running >= 0 && previous_running != i) {
 				clear_memory(r_memory, p_path + "/" + itos(previous_running));
@@ -229,7 +247,7 @@ BehaviorTreeTask::Status BehaviorTreeReactiveSelector::execute(const Dictionary 
 			clear_memory(r_memory, p_path);
 			return FAILURE;
 		}
-		const Status status = task->execute(p_blackboard, r_memory, p_path + "/" + itos(i), p_delta);
+		const Status status = task->execute_traced(p_blackboard, r_memory, p_path + "/" + itos(i), p_delta);
 		if (status == RUNNING) {
 			if (previous_running >= 0 && previous_running != i) {
 				clear_memory(r_memory, p_path + "/" + itos(previous_running));
@@ -266,7 +284,7 @@ BehaviorTreeTask::Status BehaviorTreeInverter::execute(const Dictionary &p_black
 	if (task.is_null()) {
 		return FAILURE;
 	}
-	const Status status = task->execute(p_blackboard, r_memory, p_path + "/0", p_delta);
+	const Status status = task->execute_traced(p_blackboard, r_memory, p_path + "/0", p_delta);
 	if (status == SUCCESS) {
 		return FAILURE;
 	}
@@ -332,7 +350,7 @@ BehaviorTreeTask::Status BehaviorTreeTimeout::execute(const Dictionary &p_blackb
 		clear_branch_memory(r_memory, p_path);
 		return FAILURE;
 	}
-	const Status status = child->execute(p_blackboard, r_memory, p_path + "/0", safe_delta);
+	const Status status = child->execute_traced(p_blackboard, r_memory, p_path + "/0", safe_delta);
 	if (status == RUNNING) {
 		r_memory[p_path] = elapsed;
 	} else {
@@ -368,7 +386,7 @@ BehaviorTreeTask::Status BehaviorTreeCooldown::execute(const Dictionary &p_black
 		}
 		r_memory.erase(p_path);
 	}
-	const Status status = child->execute(p_blackboard, r_memory, p_path + "/0", safe_delta);
+	const Status status = child->execute_traced(p_blackboard, r_memory, p_path + "/0", safe_delta);
 	if (status != RUNNING) {
 		clear_branch_memory(r_memory, p_path);
 		if (status == SUCCESS && duration > 0.0) {
@@ -533,11 +551,16 @@ void BehaviorTreeRunner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_profiling_enabled"), &BehaviorTreeRunner::is_profiling_enabled);
 	ClassDB::bind_method(D_METHOD("get_profile_snapshot"), &BehaviorTreeRunner::get_profile_snapshot);
 	ClassDB::bind_method(D_METHOD("reset_profile"), &BehaviorTreeRunner::reset_profile);
+	ClassDB::bind_method(D_METHOD("set_trace_enabled", "enabled"), &BehaviorTreeRunner::set_trace_enabled);
+	ClassDB::bind_method(D_METHOD("is_trace_enabled"), &BehaviorTreeRunner::is_trace_enabled);
+	ClassDB::bind_method(D_METHOD("get_trace_snapshot"), &BehaviorTreeRunner::get_trace_snapshot);
+	ClassDB::bind_method(D_METHOD("reset_trace"), &BehaviorTreeRunner::reset_trace);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "root_task", PROPERTY_HINT_RESOURCE_TYPE, "BehaviorTreeTask"), "set_root_task", "get_root_task");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "blackboard"), "set_blackboard", "get_blackboard");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_tick"), "set_auto_tick", "is_auto_tick_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "profiling_enabled"), "set_profiling_enabled", "is_profiling_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "trace_enabled"), "set_trace_enabled", "is_trace_enabled");
 	ADD_SIGNAL(MethodInfo("tree_finished", PropertyInfo(Variant::INT, "status", PROPERTY_HINT_ENUM, "Success,Failure,Running")));
 }
 
@@ -574,7 +597,16 @@ BehaviorTreeTask::Status BehaviorTreeRunner::tick(double p_delta) {
 	if (profiling) {
 		execution_profiler->begin_sample(SNAME("behavior_tree"));
 	}
-	last_status = root_task->execute(blackboard, execution_memory, "root", p_delta);
+	if (trace_enabled && execution_trace.is_valid()) {
+		execution_trace->begin_tick();
+		execution_memory[SNAME("__bt_trace_sink")] = execution_trace;
+	}
+	last_status = root_task->execute_traced(blackboard, execution_memory, "root", p_delta);
+	// The context is transient: it never survives in normal execution memory
+	// nor appears in snapshots or serialized game state.
+	if (trace_enabled) {
+		execution_memory.erase(SNAME("__bt_trace_sink"));
+	}
 	if (profiling) {
 		execution_profiler->end_sample(SNAME("behavior_tree"));
 	}
@@ -597,6 +629,7 @@ Dictionary BehaviorTreeRunner::get_debug_snapshot() const {
 	// The inspection API is read-only by contract for such Object values.
 	result["blackboard"] = blackboard.duplicate(true);
 	result["execution_memory"] = execution_memory.duplicate(true);
+	result["trace"] = get_trace_snapshot();
 	return result;
 }
 
@@ -628,6 +661,36 @@ Dictionary BehaviorTreeRunner::get_profile_snapshot() const {
 void BehaviorTreeRunner::reset_profile() {
 	if (execution_profiler.is_valid()) {
 		execution_profiler->reset();
+	}
+}
+
+void BehaviorTreeRunner::set_trace_enabled(bool p_enabled) {
+	if (p_enabled && execution_trace.is_null()) {
+		execution_trace.instantiate();
+	}
+	trace_enabled = p_enabled;
+	if (!trace_enabled && execution_trace.is_valid()) {
+		execution_trace->reset();
+	}
+}
+
+Dictionary BehaviorTreeRunner::get_trace_snapshot() const {
+	Dictionary snapshot;
+	if (execution_trace.is_valid()) {
+		snapshot = execution_trace->get_snapshot();
+	} else {
+		snapshot["tick_index"] = int64_t(0);
+		snapshot["max_steps"] = 128;
+		snapshot["truncated"] = 0;
+		snapshot["steps"] = Array();
+	}
+	snapshot["enabled"] = trace_enabled;
+	return snapshot;
+}
+
+void BehaviorTreeRunner::reset_trace() {
+	if (execution_trace.is_valid()) {
+		execution_trace->reset();
 	}
 }
 
