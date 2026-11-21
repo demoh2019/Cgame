@@ -552,11 +552,106 @@ PackedInt32Array AIProximityGrid2D::query_cylinder_counts_batch(
 	return result;
 }
 
+// Variable per-observer range, inspired by data-oriented perception queries.
+// Hash targets once using the largest source radius, then exactly test each
+// source's own distance threshold. Never creates sightings or game state.
+Array AIProximityGrid2D::query_cross_variable_radius_batch(
+		const PackedVector2Array &p_sources, const PackedFloat32Array &p_radii,
+		const PackedVector2Array &p_targets) const {
+	Array result;
+	constexpr int MAX_VARIABLE_SOURCES = 4096;
+	constexpr int MAX_VARIABLE_HITS = 32768;
+	if (p_sources.is_empty() || p_sources.size() != p_radii.size() ||
+			p_sources.size() > MAX_VARIABLE_SOURCES || p_targets.size() > MAX_POINTS) {
+		return result;
+	}
+	double max_radius = 0.0;
+	for (int i = 0; i < p_sources.size(); i++) {
+		const Vector2 point = p_sources[i];
+		const double radius = p_radii[i];
+		if (!point.is_finite() || Math::abs(point.x) > MAX_POSITION_ABS ||
+				Math::abs(point.y) > MAX_POSITION_ABS ||
+				!Math::is_finite(radius) || radius < 0.0 || radius > MAX_QUERY_RADIUS) {
+			return Array();
+		}
+		max_radius = MAX(max_radius, radius);
+	}
+	for (int i = 0; i < p_targets.size(); i++) {
+		const Vector2 point = p_targets[i];
+		if (!point.is_finite() || Math::abs(point.x) > MAX_POSITION_ABS ||
+				Math::abs(point.y) > MAX_POSITION_ABS) {
+			return Array();
+		}
+	}
+	// Empty targets are a valid per-source empty answer, unlike invalid data.
+	if (p_targets.is_empty()) {
+		for (int i = 0; i < p_sources.size(); i++) {
+			result.push_back(PackedInt32Array());
+		}
+		return result;
+	}
+	// With cell size >= every source radius, no true match can lie
+	// outside the 3x3 neighborhood. Zero-radius queries use unit cells.
+	const double cell_size = MAX(max_radius, 1.0);
+	HashMap<Vector2i, Vector<int>> cells;
+	for (int i = 0; i < p_targets.size(); i++) {
+		const Vector2 point = p_targets[i];
+		const Vector2i cell(int(Math::floor(point.x / cell_size)),
+				int(Math::floor(point.y / cell_size)));
+		Vector<int> *bucket = cells.getptr(cell);
+		if (bucket != nullptr) {
+			bucket->push_back(i);
+		} else {
+			Vector<int> first;
+			first.push_back(i);
+			cells.insert(cell, first);
+		}
+	}
+	int total_hits = 0;
+	for (int i = 0; i < p_sources.size(); i++) {
+		const Vector2 center = p_sources[i];
+		const Vector2i origin(int(Math::floor(center.x / cell_size)),
+				int(Math::floor(center.y / cell_size)));
+		const double radius = p_radii[i];
+		const double radius_squared = radius * radius;
+		Vector<int> indices;
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dy = -1; dy <= 1; dy++) {
+				const Vector<int> *bucket = cells.getptr(origin + Vector2i(dx, dy));
+				if (bucket == nullptr) {
+					continue;
+				}
+				for (int j = 0; j < bucket->size(); j++) {
+					const int target_index = (*bucket)[j];
+					const Vector2 target = p_targets[target_index];
+					const double x = double(center.x) - double(target.x);
+					const double y = double(center.y) - double(target.y);
+					if (x * x + y * y <= radius_squared) {
+						indices.push_back(target_index);
+						if (++total_hits > MAX_VARIABLE_HITS) {
+							return Array(); // No partial perception admission.
+						}
+					}
+				}
+			}
+		}
+		indices.sort();
+		PackedInt32Array hits;
+		hits.resize(indices.size());
+		for (int j = 0; j < indices.size(); j++) {
+			hits.set(j, indices[j]);
+		}
+		result.push_back(hits);
+	}
+	return result;
+}
+
 void AIProximityGrid2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query_radius_batch", "positions", "source_indices", "radius", "cell_size"), &AIProximityGrid2D::query_radius_batch);
 	ClassDB::bind_method(D_METHOD("query_nearest_batch", "positions", "source_indices", "radius", "cell_size", "max_neighbors"), &AIProximityGrid2D::query_nearest_batch);
 	ClassDB::bind_method(D_METHOD("query_separation_batch", "positions", "source_indices", "radius", "cell_size", "max_neighbors"), &AIProximityGrid2D::query_separation_batch);
 	ClassDB::bind_method(D_METHOD("query_cross_radius_batch", "sources", "targets", "radius", "cell_size"), &AIProximityGrid2D::query_cross_radius_batch);
+	ClassDB::bind_method(D_METHOD("query_cross_variable_radius_batch", "sources", "radii", "targets"), &AIProximityGrid2D::query_cross_variable_radius_batch);
 	ClassDB::bind_method(D_METHOD("query_cross_nearest_batch", "sources", "targets", "target_ids", "radius", "cell_size"), &AIProximityGrid2D::query_cross_nearest_batch);
 	ClassDB::bind_method(D_METHOD("query_cylinder_counts_batch", "centers", "targets", "radius", "max_height", "max_count"), &AIProximityGrid2D::query_cylinder_counts_batch);
 	ClassDB::bind_method(D_METHOD("query_predictive_separation_batch", "positions", "velocities", "source_indices", "radius", "cell_size", "max_neighbors", "horizon"), &AIProximityGrid2D::query_predictive_separation_batch);
