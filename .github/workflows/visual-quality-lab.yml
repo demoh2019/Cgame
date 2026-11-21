@@ -73,7 +73,11 @@ jobs:
             res://tests/test_inventory_component.gd \
             res://tests/test_inventory_crafting.gd \
             res://tests/test_inventory_persistence.gd \
-            res://tests/test_inventory_gameplay.gd; do
+            res://tests/test_inventory_gameplay.gd \
+            res://tests/test_attributes.gd \
+            res://tests/test_abilities.gd \
+            res://tests/test_equipment.gd \
+            res://tests/test_equipment_persistence.gd; do
             /tmp/godot-bin/Godot_v4.6.3-stable_linux.x86_64 --headless --path . --script "$script"
           done
 
