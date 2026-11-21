@@ -15,6 +15,14 @@ static func prefetch_mips(level: int, method: String) -> int:
 	return PREFETCH_MIPS[clampi(level, 0, PREFETCH_MIPS.size() - 1)]
 
 
+## Adaptive prefetch is useful only when Forward+ has speculative detail
+## residency. Low tiers and Compatibility keep their previous predictable use.
+## The native worker changes only speculative mip prefetch, not visible mip
+## feedback or the budget fitter's approved target.
+static func adaptive_prefetch_enabled(level: int, method: String) -> bool:
+	return method == "forward_plus" and prefetch_mips(level, method) > 0
+
+
 static func apply(level: int, method: String) -> void:
 	# Stock Godot and Compatibility builds must still run this game.
 	if not Engine.has_singleton("TextureStreaming"):
@@ -22,3 +30,7 @@ static func apply(level: int, method: String) -> void:
 	var server: Object = Engine.get_singleton("TextureStreaming")
 	if server != null and server.has_method("set_detail_prefetch_mips"):
 		server.call("set_detail_prefetch_mips", prefetch_mips(level, method))
+	# Feature-detect to support older Cgame binaries and stock Godot.
+	if server != null and server.has_method("set_adaptive_detail_prefetch_enabled"):
+		server.call("set_adaptive_detail_prefetch_enabled",
+			adaptive_prefetch_enabled(level, method))

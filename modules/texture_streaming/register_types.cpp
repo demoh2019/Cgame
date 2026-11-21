@@ -32,6 +32,10 @@
 
 #include "texture_streaming.h"
 
+#ifdef TESTS_ENABLED
+#include "tests/test_adaptive_prefetch_policy.h"
+#endif
+
 #include "core/config/engine.h"
 #include "core/object/class_db.h"
 

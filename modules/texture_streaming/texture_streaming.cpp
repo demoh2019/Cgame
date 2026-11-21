@@ -115,6 +115,9 @@ uint64_t TextureStreaming::get_memory_budget_bytes_used() {
 void TextureStreaming::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_detail_prefetch_mips"), &TextureStreaming::get_detail_prefetch_mips);
 	ClassDB::bind_method(D_METHOD("set_detail_prefetch_mips", "mips"), &TextureStreaming::set_detail_prefetch_mips);
+	ClassDB::bind_method(D_METHOD("set_adaptive_detail_prefetch_enabled", "enabled"), &TextureStreaming::set_adaptive_detail_prefetch_enabled);
+	ClassDB::bind_method(D_METHOD("is_adaptive_detail_prefetch_enabled"), &TextureStreaming::is_adaptive_detail_prefetch_enabled);
+	ClassDB::bind_method(D_METHOD("get_effective_detail_prefetch_mips"), &TextureStreaming::get_effective_detail_prefetch_mips);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "detail_prefetch_mips", PROPERTY_HINT_RANGE, "0,2,1"),
 			"set_detail_prefetch_mips", "get_detail_prefetch_mips");
 
@@ -552,7 +555,7 @@ void TextureStreaming::_process_material_feedback_buffer(MaterialFeedbackBuffer 
 				// The existing budget fitter can still choose a coarser mip.
 				const uint8_t clamped_mip = TextureStreamingFeedbackPolicy::prefetch_mip(
 						TextureStreamingFeedbackPolicy::mip_from_coverage(texel_coverage, state->get_mip_count()),
-						detail_prefetch_mips.load(std::memory_order_relaxed));
+						effective_detail_prefetch_mips.load(std::memory_order_relaxed));
 
 				// Update feedback if this is a better (lower) mip level than previously recorded
 				// Lower mip = higher quality needed
@@ -690,6 +693,15 @@ void TextureStreaming::_feedback_buffer_process(uint64_t p_ticks_msec) {
 	// Phase 2: Budget fitting - iteratively reduce textures until within memory budget.
 	uint64_t assigned_bytes = total_requested_bytes;
 	const uint64_t budget_bytes = setting_budget_enabled ? uint64_t(_get_memory_budget_mb()) * 1024ull * 1024ull : 0;
+	// Adapt only speculative sharper-mip prefetch. The existing memory fitter
+	// retains final authority over fit_mip, I/O queues and total pool usage.
+	const uint8_t desired_prefetch = detail_prefetch_mips.load(std::memory_order_relaxed);
+	const uint8_t previous_prefetch = effective_detail_prefetch_mips.load(std::memory_order_relaxed);
+	const uint8_t effective_prefetch = TextureStreamingFeedbackPolicy::adaptive_prefetch_mips(
+			desired_prefetch, previous_prefetch,
+			texture_streaming_total_memory.load(std::memory_order_relaxed), budget_bytes,
+			adaptive_detail_prefetch_enabled.load(std::memory_order_relaxed));
+	effective_detail_prefetch_mips.store(effective_prefetch, std::memory_order_relaxed);
 	if (budget_bytes > 0) {
 		// Symmetric hysteresis with a 10% total deadband.
 		const uint64_t budget_high = budget_bytes + (budget_bytes / 20); // +5% = trigger reduction
@@ -849,7 +861,7 @@ void TextureStreaming::_do_texture_reload(RID p_state_rid) {
 	// Explicit flush still uploads the exact target in one operation.
 	const uint8_t next_mip = is_flushing ? target_mip :
 			TextureStreamingFeedbackPolicy::next_reload_mip(current, target_mip,
-					detail_prefetch_mips.load(std::memory_order_relaxed));
+					effective_detail_prefetch_mips.load(std::memory_order_relaxed));
 
 	// Perform the actual texture reload at the new mip level.
 	state->reload_callable.call(next_mip);

@@ -1,0 +1,66 @@
+name: Adaptive texture prefetch native policy and Albion integration
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/texture_streaming/**'
+      - 'game/scripts/client/graphics_texture_streaming.gd'
+      - 'game/tests/test_graphics_texture_streaming.gd'
+      - 'game/tests/run_adaptive_texture_prefetch.gd'
+      - '.github/workflows/native-adaptive-texture-prefetch.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/texture_streaming/**'
+      - 'game/scripts/client/graphics_texture_streaming.gd'
+      - 'game/tests/test_graphics_texture_streaming.gd'
+      - 'game/tests/run_adaptive_texture_prefetch.gd'
+      - '.github/workflows/native-adaptive-texture-prefetch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-adaptive-prefetch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native adaptive prefetch doctests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*TextureStreaming*" --no-colors 2>&1 | tee adaptive-prefetch-native.log
+      - name: Import Albion After
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee adaptive-prefetch-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' adaptive-prefetch-import.log; then exit 1; fi
+      - name: Game adaptive texture prefetch policy
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_adaptive_texture_prefetch.gd 2>&1 | tee adaptive-prefetch-game.log
+          grep -E '^ADAPTIVE TEX PREFETCH TOTAL: [0-9]+ checks, 0 failures$' adaptive-prefetch-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' adaptive-prefetch-game.log; then exit 1; fi
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-adaptive-texture-prefetch
+          if-no-files-found: ignore
+          path: |
+            adaptive-prefetch-native.log
+            adaptive-prefetch-import.log
+            adaptive-prefetch-game.log
