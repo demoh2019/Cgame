@@ -135,4 +135,7 @@ public:
 	// No physics, scene nodes or navigation work; at most 65536 output points.
 	static PackedVector3Array sample_cone(const Vector3 &p_center, const Vector3 &p_direction, double p_inner_radius, double p_outer_radius, int p_ring_count, int p_points_per_ring, double p_cone_degrees = 90.0, bool p_include_center = false);
 	static PackedVector3Array sample_grid(const Vector3 &p_center, const Vector2 &p_half_extents, double p_spacing, int p_max_points = 4096);
+	// Context-relative XZ grid: local +Z follows the input forward direction.
+	// Pure geometry, with bounded allocation and deterministic row-major order.
+	static PackedVector3Array sample_oriented_grid(const Vector3 &p_center, const Vector3 &p_forward, const Vector2 &p_half_extents, double p_spacing, int p_max_points = 4096);
 };

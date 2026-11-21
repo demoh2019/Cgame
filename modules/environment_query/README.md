@@ -236,3 +236,26 @@ checks. A GDScript fallback produces equivalent points on stock Godot
 and older engine binaries.
 
 Reference: https://dev.epicgames.com/documentation/unreal-engine/eqs-node-reference-generators-in-unreal-engine
+
+## Native context-facing rectangular grid (Unreal EQS-style grid generator)
+
+`sample_oriented_grid(center, forward, half_extents, spacing, max_points=4096)`
+adds a **direction-relative** rectangular grid alongside the old world-aligned
+`sample_grid()`. Local +Z aligns with the XZ projection of `forward`, while
+local +X points to the actor's right. The grid is emitted in stable row-major
+order with unchanged center Y. Supplying a forward axis of `Vector3(0,0,1)` reproduces
+`sample_grid()` exactly. The native method validates all inputs, including
+direction, extents and bounded point counts, and never touches physics,
+navigation, scene nodes or GPU resources.
+
+Albion After uses the grid as a **secondary** search for guards around public
+supply drops and dangerous ruin ambush caches when all usable ring candidates
+are consumed. The grid aligns away from the closest finite survivor, with an
+explicit position tiebreaker and a bounded 5x5 (25-point) budget. Existing
+rings always have first priority. Every grid candidate must still pass the
+exact same authoritative zone, terrain, slope, water, collision, survivor,
+infected and pairwise separation tests as the original guards. Stock Godot
+and older engine binaries use a corresponding GDScript fallback.
+
+Inspired by Unreal EQS Points: Grid and context-relative generators:
+https://dev.epicgames.com/documentation/en-us/unreal-engine/eqs-node-reference-generators-in-unreal-engine

@@ -205,6 +205,7 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_donut", "center", "inner_radius", "outer_radius", "ring_count", "points_per_ring", "phase", "spiral"), &EnvironmentQuery3D::sample_donut, DEFVAL(0.0), DEFVAL(false));
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_cone", "center", "direction", "inner_radius", "outer_radius", "ring_count", "points_per_ring", "cone_degrees", "include_center"), &EnvironmentQuery3D::sample_cone, DEFVAL(90.0), DEFVAL(false));
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_grid", "center", "half_extents", "spacing", "max_points"), &EnvironmentQuery3D::sample_grid, DEFVAL(4096));
+	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_oriented_grid", "center", "forward", "half_extents", "spacing", "max_points"), &EnvironmentQuery3D::sample_oriented_grid, DEFVAL(4096));
 
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "candidates"), "set_candidates", "get_candidates");
 	ADD_GROUP("Distance Filter", "");
@@ -558,6 +559,49 @@ PackedVector3Array EnvironmentQuery3D::sample_cone(const Vector3 &p_center, cons
 			const Vector3 point = p_center + Vector3(Math::cos(angle) * radius, 0.0, Math::sin(angle) * radius);
 			ERR_FAIL_COND_V_MSG(!point.is_finite(), PackedVector3Array(), "Cone sample coordinates must be finite.");
 			ptr[offset + ring * p_points_per_ring + ray] = point;
+		}
+	}
+	return output;
+}
+
+// Context-facing EQS grid. Unlike the world-aligned sample_grid(), this
+// rotates an XZ lattice to the caller's forward axis. No scene or physics work.
+PackedVector3Array EnvironmentQuery3D::sample_oriented_grid(const Vector3 &p_center, const Vector3 &p_forward, const Vector2 &p_half_extents, double p_spacing, int p_max_points) {
+	PackedVector3Array output;
+	ERR_FAIL_COND_V_MSG(!p_center.is_finite() || !p_forward.is_finite() || !p_half_extents.is_finite(),
+			output, "Oriented grid center, forward and half extents must be finite.");
+	ERR_FAIL_COND_V_MSG(p_half_extents.x < 0.0 || p_half_extents.y < 0.0 ||
+			!Math::is_finite(p_spacing) || p_spacing <= 0.0,
+			output, "Oriented grid half extents must be nonnegative and spacing positive.");
+	ERR_FAIL_COND_V_MSG(p_max_points < 1 || p_max_points > 65536,
+			output, "Oriented grid point limit must be between 1 and 65536.");
+	const double axis_length = Math::sqrt(double(p_forward.x) * p_forward.x + double(p_forward.z) * p_forward.z);
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(axis_length) || axis_length <= CMP_EPSILON,
+			output, "Oriented grid forward direction must have a nonzero XZ projection.");
+	const double cells_x = Math::floor(2.0 * p_half_extents.x / p_spacing);
+	const double cells_z = Math::floor(2.0 * p_half_extents.y / p_spacing);
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(cells_x) || !Math::is_finite(cells_z) ||
+			cells_x >= p_max_points || cells_z >= p_max_points,
+			output, "Oriented grid size exceeds its point limit.");
+	const int count_x = int(cells_x) + 1;
+	const int count_z = int(cells_z) + 1;
+	ERR_FAIL_COND_V_MSG(int64_t(count_x) * count_z > p_max_points,
+			output, "Oriented grid size exceeds its point limit.");
+	const double forward_x = double(p_forward.x) / axis_length;
+	const double forward_z = double(p_forward.z) / axis_length;
+	const double right_x = forward_z;
+	const double right_z = -forward_x;
+	output.resize(count_x * count_z);
+	Vector3 *ptr = output.ptrw();
+	for (int z = 0; z < count_z; z++) {
+		const double local_z = -p_half_extents.y + double(z) * p_spacing;
+		for (int x = 0; x < count_x; x++) {
+			const double local_x = -p_half_extents.x + double(x) * p_spacing;
+			const Vector3 point = p_center + Vector3(
+					right_x * local_x + forward_x * local_z, 0.0,
+					right_z * local_x + forward_z * local_z);
+			ERR_FAIL_COND_V_MSG(!point.is_finite(), PackedVector3Array(), "Oriented grid sample coordinates must be finite.");
+			ptr[z * count_x + x] = point;
 		}
 	}
 	return output;
