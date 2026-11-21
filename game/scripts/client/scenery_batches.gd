@@ -29,6 +29,93 @@ static func partition(transforms: Array[Transform3D]) -> Array:
 	return result
 
 
+
+## Unreal PCG-style minimum-distance sampling for client-only decorations.
+## The native filter uses a spatial hash; on older/stock engines the same
+## greedy stable-input policy is implemented with GDScript buckets.
+## Importantly, callers generate transforms before thinning, so the seeded
+## RNG stream for subsequent scenery categories is unchanged.
+static var _pcg_native: Object = null
+static var _pcg_checked := false
+const PCG_MAX_CANDIDATES := 16384
+const PCG_MAX_SELECTED := 4096
+
+
+static func _pcg_filter_fallback(candidates: PackedVector2Array,
+		min_spacing: float, max_selected: int = PCG_MAX_SELECTED) -> PackedInt32Array:
+	var result := PackedInt32Array()
+	if candidates.size() > PCG_MAX_CANDIDATES or max_selected < 0 or \
+			max_selected > PCG_MAX_SELECTED or not is_finite(min_spacing) or \
+			min_spacing < 0.0 or min_spacing > 10000.0 or \
+			(min_spacing > 0.0 and min_spacing < 0.05):
+		return result
+	for p in candidates:
+		if not p.is_finite() or absf(p.x) > 10000000.0 or absf(p.y) > 10000000.0:
+			return result
+	if min_spacing == 0.0:
+		for i in mini(max_selected, candidates.size()):
+			result.append(i)
+		return result
+	var cells: Dictionary = {}
+	var distance_sq: float = min_spacing * min_spacing
+	for i in candidates.size():
+		if result.size() >= max_selected:
+			break
+		var p: Vector2 = candidates[i]
+		var cell := Vector2i(floori(p.x / min_spacing), floori(p.y / min_spacing))
+		var blocked := false
+		for cy in range(-1, 2):
+			for cx in range(-1, 2):
+				for index in cells.get(cell + Vector2i(cx, cy), []):
+					if p.distance_squared_to(candidates[index]) < distance_sq:
+						blocked = true
+						break
+				if blocked:
+					break
+			if blocked:
+				break
+		if blocked:
+			continue
+		result.append(i)
+		var indices: Array = cells.get(cell, [])
+		indices.append(i)
+		cells[cell] = indices
+	return result
+
+
+## Returns original candidate indices; use prefer_native=false in parity tests.
+static func pcg_filter_indices(candidates: PackedVector2Array,
+		min_spacing: float, max_selected: int = PCG_MAX_SELECTED,
+		prefer_native: bool = true) -> PackedInt32Array:
+	if prefer_native:
+		if not _pcg_checked:
+			_pcg_checked = true
+			if ClassDB.class_exists("PCGSpatialFilter2D"):
+				var instance: Object = ClassDB.instantiate("PCGSpatialFilter2D")
+				if instance != null and instance.has_method("filter_indices"):
+					_pcg_native = instance
+		if _pcg_native != null:
+			return _pcg_native.call("filter_indices", candidates, min_spacing, max_selected)
+	return _pcg_filter_fallback(candidates, min_spacing, max_selected)
+
+
+## Runs exclusively on already built cosmetic MultiMesh transforms; does not
+## modify terrain, interactive resource nodes, server spawns or collisions.
+static func thin_cosmetic_transforms(transforms: Array[Transform3D],
+		min_spacing: float, prefer_native: bool = true) -> Array[Transform3D]:
+	if min_spacing <= 0.0 or transforms.is_empty() or transforms.size() > PCG_MAX_CANDIDATES:
+		return transforms
+	var points := PackedVector2Array()
+	for transform in transforms:
+		points.append(Vector2(transform.origin.x, transform.origin.z))
+	var indices: PackedInt32Array = pcg_filter_indices(
+		points, min_spacing, PCG_MAX_SELECTED, prefer_native)
+	var result: Array[Transform3D] = []
+	for index in indices:
+		result.append(transforms[index])
+	return result
+
+
 ## Custom bounds are in the parent's local coordinates, matching MultiMesh transforms.
 ## Include full mesh extents and rotation; using only placement centers could clip trees.
 static func bounds_for(mesh: Mesh, transforms: Array) -> AABB:

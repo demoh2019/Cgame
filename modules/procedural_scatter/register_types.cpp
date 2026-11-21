@@ -1,0 +1,23 @@
+/**************************************************************************/
+/*  register_types.cpp                                                      */
+/*                         This file is part of: GODOT ENGINE              */
+/* SPDX-License-Identifier: MIT                                            */
+/**************************************************************************/
+#include "register_types.h"
+
+#include "pcg_spatial_filter_2d.h"
+#include "core/object/class_db.h"
+
+#ifdef TESTS_ENABLED
+#include "tests/test_pcg_spatial_filter_2d.h"
+#endif
+
+void initialize_procedural_scatter_module(ModuleInitializationLevel p_level) {
+	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
+		return;
+	}
+	GDREGISTER_CLASS(PCGSpatialFilter2D);
+}
+
+void uninitialize_procedural_scatter_module(ModuleInitializationLevel p_level) {
+}
