@@ -18,13 +18,11 @@ class CacheableChunk extends Node3D:
 
 
 var generated: Array[Vector3i] = []
-var returned_chunks: Array[CacheableChunk] = []
 
 
 func _make_cacheable(cell: Vector3i) -> Node:
 	generated.append(cell)
 	var chunk := CacheableChunk.new()
-	returned_chunks.append(chunk)
 	return chunk
 
 
@@ -158,7 +156,7 @@ func run(t) -> void:
 	t.eq(invalidation.get_cached_chunk_count(), 0,
 		"changing cell coordinates discards stale node geometry")
 	invalidation.refresh()
-	invalidation.focus_position = Vector3(96, 0, 8)
+	invalidation.focus_position = Vector3(104, 0, 8)
 	invalidation.refresh()
 	t.check(invalidation.get_cached_chunk_count() > 0,
 		"new grid produces cache entries normally")
@@ -167,7 +165,7 @@ func run(t) -> void:
 		"changing the generator invalidates cached scene objects")
 	invalidation.focus_position = Vector3(8, 0, 8)
 	invalidation.refresh()
-	invalidation.focus_position = Vector3(96, 0, 8)
+	invalidation.focus_position = Vector3(104, 0, 8)
 	invalidation.refresh()
 	t.eq(invalidation.get_cached_chunk_count(), 0,
 		"without a root opt-in method, the engine always frees on unload")
