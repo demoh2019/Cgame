@@ -142,3 +142,50 @@ The idea builds on Unreal Niagara's per-Effect-Type budgeting and
 significance features; this policy is a Cgame-specific soft quota and is
 not a direct copy of the Unreal implementation:
 https://dev.epicgames.com/documentation/en-us/unreal-engine/performance-budgeting-using-effect-types-in-niagara-for-unreal-engine
+
+## Camera-cone significance for decorative world detail
+
+`select_world_priority_stable_cone(positions, viewer, forward,
+priorities, ids, retained_ids, budget, max_distance=1000,
+hysteresis=0, half_angle_degrees=75, near_radius=3)` extends stable
+world significance with **direction-aware cosmetic admission**:
+
+```gdscript
+var plan := SignificanceBudgetPlanner.new()
+var selected := plan.select_world_priority_stable_cone(
+    debris_positions, camera.global_position, -camera.global_basis.z,
+    priority_tiers, stable_ids, previously_selected_ids,
+    18, 26.0, 2.0, 75.0, 5.5)
+```
+
+- Rejects distant points behind the camera or outside a configurable
+  inclusive **3D view cone**. Near-field points (within near_radius)
+  remain eligible from all directions to prevent nearby detail holes
+  during quick camera turns. The hard distance cap always applies.
+- **Priority remains absolute** among eligible points. Retained IDs
+  receive only the same within-tier distance hysteresis as the existing
+  planner; low-priority decoration can never supersede a higher-priority
+  candidate merely through retention.
+- Full-cone half-angle=180 disables directional filtering and matches
+  the one-viewer `select_world_priority_stable()` behavior. A 0-degree
+  cone admits exactly aligned forward points plus the near-field.
+- Up to 16,384 finite positions, matching priority/unique positive
+  stable IDs, up to 128 prior IDs, and 0–128 selected indices. Camera
+  vectors must be finite, forward nonzero; half-angle 0–180 degrees,
+  max distance 0–1e6 and near radius 0–max distance. Invalid requests
+  return empty atomically. No state, physics, scene edits or RNG.
+- A fast O(N) validation/admission pass reuses the original bounded
+  O(N × K) stable top-K selector, avoiding a full-world sort.
+  This is a **cosmetic scheduling/cone heuristic**, not the renderer's
+  actual frustum-plane test or GPU occlusion culling.
+
+`games/days_after/debris_lod.gd` now uses this API for 96 small
+ruin fragments, with a strict 18-fragment presentation budget.
+Camera direction updates which details are considered while the 5.5m
+near field keeps close items from disappearing behind the camera.
+Stock Godot runs a matching GDScript implementation. The gameplay
+smoke turns the camera 180 degrees and asserts native/fallback parity,
+full-distance cutoff, view-cone eligibility and restoration.
+
+Reference: [Unreal Engine visibility and occlusion culling](https://dev.epicgames.com/documentation/en-us/unreal-engine/visibility-and-occlusion-culling-in-unreal-engine).
+

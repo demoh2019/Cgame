@@ -650,4 +650,123 @@ TEST_CASE("[SignificanceBudget] stable world input validation is atomic") {
 	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, {}, 2, 10.0, 11.0).is_empty());
 }
 
+TEST_CASE("[SignificanceBudget] view cone skips distant off-screen points but preserves near field") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	const PackedVector3Array points = {
+		Vector3(0, 0, -4), Vector3(0, 0, 10), Vector3(1, 0, -8),
+		Vector3(0, 0, -12), Vector3(0, 0, 2), Vector3(0, 0, -26)
+	};
+	const PackedByteArray priorities = { 0, 1, 0, 0, 0, 3 };
+	const PackedInt64Array ids = { 101, 102, 103, 104, 105, 106 };
+	const PackedInt32Array expected = { 4, 0, 2, 3 };
+	CHECK(planner->select_world_priority_stable_cone(points, Vector3(),
+			Vector3(0, 0, -1), priorities, ids, {}, 6, 20.0, 2.0,
+			55.0, 3.0) == expected);
+	// An off-screen high-priority point never steals a visual slot,
+	// even when its stable ID was retained on the previous frame.
+	CHECK(planner->select_world_priority_stable_cone(points, Vector3(),
+			Vector3(0, 0, -1), priorities, ids, { 102, 106 }, 6,
+			20.0, 2.0, 55.0, 3.0) == expected);
+	CHECK(planner->select_world_priority_stable_cone(points, Vector3(),
+			Vector3(0, 0, -5), priorities, ids, {}, 6, 20.0, 2.0,
+			55.0, 3.0) == expected);
+	CHECK(planner->select_world_priority_stable_cone(points, Vector3(),
+			Vector3(0, 0, -1), priorities, ids, {}, 6, 20.0, 0.0,
+			0.0, 3.0) == PackedInt32Array({ 4, 0, 3 }));
+	CHECK(points[0] == Vector3(0, 0, -4));
+}
+
+TEST_CASE("[SignificanceBudget] full cone matches legacy world ranking and tiered hysteresis") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	const PackedVector3Array points = {
+		Vector3(0, 0, 8), Vector3(0, 0, -8.8),
+		Vector3(0, 0, -10), Vector3(0, 0, -2)
+	};
+	const PackedByteArray priorities = { 1, 1, 2, 0 };
+	const PackedInt64Array ids = { 10, 11, 12, 13 };
+	const PackedInt64Array retained = { 10, 11 };
+	const PackedInt32Array old = planner->select_world_priority_stable(
+			points, { Vector3() }, priorities, ids, retained, 3, 20.0, 2.0);
+	CHECK(planner->select_world_priority_stable_cone(points, Vector3(),
+			Vector3(1, 0, 0), priorities, ids, retained, 3, 20.0,
+			2.0, 180.0, 0.0) == old);
+	const PackedInt32Array front = planner->select_world_priority_stable_cone(
+			points, Vector3(), Vector3(0, 0, -1), priorities,
+			ids, retained, 3, 20.0, 2.0, 60.0, 3.0);
+	CHECK(front == PackedInt32Array({ 2, 1, 3 }));
+	const PackedVector3Array competing = {
+		Vector3(0, 0, -8), Vector3(0, 0, -8.8)
+	};
+	const PackedByteArray equal_priority = { 0, 0 };
+	CHECK(planner->select_world_priority_stable_cone(competing, Vector3(),
+			Vector3(0, 0, -1), equal_priority, { 11, 12 }, { 12 }, 1,
+			20.0, 2.0, 75.0, 3.0) == PackedInt32Array({ 1 }));
+	CHECK(planner->select_world_priority_stable_cone(competing, Vector3(),
+			Vector3(0, 0, -1), equal_priority, { 11, 12 }, {}, 1,
+			20.0, 2.0, 75.0, 3.0) == PackedInt32Array({ 0 }));
+	CHECK(planner->select_world_priority_stable_cone(
+			{ Vector3(0, 0, 0), Vector3(0, 0, 0.1) }, Vector3(),
+			Vector3(0, 0, -1), { 0, 0 }, { 4, 5 }, {}, 2,
+			0.0, 0.0, 0.0, 0.0) == PackedInt32Array({ 0 }));
+}
+
+TEST_CASE("[SignificanceBudget] view-cone validation fails atomically") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	const PackedVector3Array points = {
+		Vector3(0, 0, -1), Vector3(0, 0, -2)
+	};
+	const PackedByteArray priorities = { 0, 0 };
+	const PackedInt64Array ids = { 11, 12 };
+	const Vector3 origin;
+	const Vector3 facing(0, 0, -1);
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			Vector3(), priorities, ids, {}, 2).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			Vector3(Math::NaN, 0, 1), priorities, ids, {}, 2).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points,
+			Vector3(Math::INF, 0, 0), facing, priorities, ids, {}, 2).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			facing, { 0 }, ids, {}, 2).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			facing, priorities, { 11 }, {}, 2).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			facing, priorities, { 11, 11 }, {}, 2).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			facing, priorities, ids, { 12, 12 }, 2).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			facing, priorities, ids, {}, 129).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			facing, priorities, ids, {}, 2, -1.0).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			facing, priorities, ids, {}, 2, 1000001.0).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			facing, priorities, ids, {}, 2, 10.0, -1.0).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			facing, priorities, ids, {}, 2, 10.0, 11.0).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			facing, priorities, ids, {}, 2, 10.0, 0.0, Math::NaN).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			facing, priorities, ids, {}, 2, 10.0, 0.0, 181.0).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			facing, priorities, ids, {}, 2, 10.0, 0.0, 75.0, -1.0).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(points, origin,
+			facing, priorities, ids, {}, 2, 10.0, 0.0, 75.0, 11.0).is_empty());
+	CHECK(planner->select_world_priority_stable_cone(
+			{ Vector3(0, 0, -1), Vector3(0, Math::NaN, -2) },
+			origin, facing, priorities, ids, {}, 2).is_empty());
+	PackedVector3Array too_many;
+	PackedByteArray many_priorities;
+	PackedInt64Array many_ids;
+	for (int i = 0; i < 16385; ++i) {
+		too_many.push_back(Vector3(0, 0, -i));
+		many_priorities.push_back(0);
+		many_ids.push_back(i + 1);
+	}
+	CHECK(planner->select_world_priority_stable_cone(too_many, origin,
+			facing, many_priorities, many_ids, {}, 2).is_empty());
+}
+
 } // namespace TestSignificanceBudgetPlanner

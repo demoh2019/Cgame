@@ -43,6 +43,51 @@ func _smoke() -> void:
         if int(lod.call("get_visible_count")) <= 0:
             push_error("Visual LOD did not restore nearby fragments")
             ok = false
+        # Exact independent view-cone validation, not just count checking.
+        var camera: Camera3D = survivor.get_node("Camera3D")
+        var view_state: Dictionary = lod.call("get_view_state")
+        var view_position: Vector3 = view_state["origin"]
+        var view_forward: Vector3 = view_state["forward"]
+        var policy: Vector3 = lod.call("get_view_cone_parameters")
+        var cone_threshold: float = cos(deg_to_rad(policy.x))
+        var source: PackedVector3Array = lod.call("get_source_positions")
+        var selected: PackedInt32Array = lod.call("get_selected_indices")
+        if source.size() != 96 or selected.size() == 0 or selected.size() > 18:
+            push_error("View-cone LOD has an invalid source or selection budget")
+            ok = false
+        for index in selected:
+            if index < 0 or index >= source.size():
+                push_error("View-cone LOD returned an invalid fragment index")
+                ok = false
+                continue
+            var offset: Vector3 = source[index] - view_position
+            var distance: float = offset.length()
+            if distance > policy.z + 0.001:
+                push_error("View-cone LOD kept a fragment outside the hard distance")
+                ok = false
+            elif distance > policy.y + 0.001 and (
+                    offset.dot(view_forward) / maxf(distance, 0.0001) < cone_threshold - 0.0001):
+                push_error("View-cone LOD admitted an off-screen distant fragment")
+                ok = false
+        if not bool(lod.call("verify_native_fallback_parity")):
+            push_error("Native camera-cone LOD differed from GDScript fallback")
+            ok = false
+        var initial_selected: PackedInt32Array = selected.duplicate()
+        var camera_rotation: float = camera.rotation.y
+        camera.rotation.y += PI
+        lod.call("force_refresh")
+        var reversed: PackedInt32Array = lod.call("get_selected_indices")
+        if reversed.size() == 0 or reversed.size() > 18 or reversed == initial_selected:
+            push_error("View-cone LOD did not update after turning the camera around")
+            ok = false
+        if not bool(lod.call("verify_native_fallback_parity")):
+            push_error("Native view-cone LOD parity failed after camera reversal")
+            ok = false
+        camera.rotation.y = camera_rotation
+        lod.call("force_refresh")
+        if not bool(lod.call("verify_native_fallback_parity")):
+            push_error("Native view-cone LOD parity failed after restoring the camera")
+            ok = false
 
     var foliage := game.get_node_or_null("FoliageScatter") as MultiMeshInstance3D
     if foliage == null or foliage.multimesh == null:
