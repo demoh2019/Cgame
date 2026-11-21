@@ -1604,12 +1604,29 @@ func _update_grass_lods() -> void:
 	_grass_last_tile_count = _grass_tiles.size()
 	_grass_last_camera_y = view_camera.global_position.y
 	_grass_last_camera_forward = camera_forward
-	for tile in _grass_tiles:
-		var tile_center: Vector3 = to_global(tile.custom_aabb.position + tile.custom_aabb.size * 0.5)
+	# Unreal screen-size LOD-style native batch query: ONE projection matrix
+	# and ONE inverse camera transform for all tile centres. The old engine
+	# and stock Godot fallback retain the same original scalar calculation.
+	# Do not allocate any batch if an unchanged camera skipped this refresh.
+	var tile_centers := PackedVector3Array()
+	var batch_density := PackedFloat64Array()
+	var batch_supported: bool = native_projection and _grass_tiles.size() <= 4096 and \
+		view_camera.has_method("get_pixels_per_meter_at_positions")
+	if batch_supported:
+		for tile in _grass_tiles:
+			tile_centers.append(to_global(tile.custom_aabb.position + tile.custom_aabb.size * 0.5))
+		batch_density = view_camera.call("get_pixels_per_meter_at_positions", tile_centers)
+	# The native API rejects corrupted late points atomically. A missing or
+	# invalid result must never partially update the tile LOD group.
+	var batch_ready: bool = batch_supported and batch_density.size() == _grass_tiles.size()
+	for i in _grass_tiles.size():
+		var tile: MultiMeshInstance3D = _grass_tiles[i]
+		var tile_center: Vector3 = tile_centers[i] if batch_ready else \
+			to_global(tile.custom_aabb.position + tile.custom_aabb.size * 0.5)
 		var distance: float = camera_xz.distance_to(Vector2(tile_center.x, tile_center.z))
 		if native_projection:
-			var pixels_per_meter: float = float(view_camera.call(
-				"get_pixels_per_meter_at_position", tile_center)) * render_scale
+			var pixels_per_meter: float = (float(batch_density[i]) if batch_ready else \
+				float(view_camera.call("get_pixels_per_meter_at_position", tile_center))) * render_scale
 			distance = GrassField.projected_lod_distance(
 				distance, pixels_per_meter, raw_focal_ratio)
 		var previous: int = int(tile.get_meta("blade_lod", 0))
