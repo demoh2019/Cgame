@@ -129,9 +129,15 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 				stack_container.call("replace_stacks", counts)
 	# Render-only native timers are independent from counted tag branches.
 	var timeline: Object = node.get_meta("effect_timeline", null) as Object
-	if timeline != null and timeline.has_method("replace_snapshot"):
+	if timeline != null:
 		var effects: Dictionary = runtime_effect_snapshot(kind, snapshot)
-		if bool(timeline.call("replace_snapshot", effects)) and timeline.has_method("set_periodic"):
+		var applied := false
+		# Preserve client-local visual timers and periodic pulses across server snapshots.
+		if timeline.has_method("replace_effect_branch"):
+			applied = bool(timeline.call("replace_effect_branch", StringName("Runtime"), effects))
+		elif timeline.has_method("replace_snapshot"):
+			applied = bool(timeline.call("replace_snapshot", effects))
+		if applied and timeline.has_method("set_periodic"):
 			# Only cosmetic pulses: gameplay and timer ownership remain server-side.
 			if effects.has(StringName("Runtime.Status.Sundered")):
 				timeline.call("set_periodic", StringName("Runtime.Status.Sundered"), 0.75, false)
@@ -222,3 +228,18 @@ static func runtime_has_resolve(node: Node, fallback_stacks: int = 0) -> bool:
 			if _resolve_visual_query != null:
 				return bool(_resolve_visual_query.call("matches_stacks", stacks))
 	return runtime_stack_count(node, "Runtime.Status.Resolve", fallback_stacks) >= 2
+
+## Cosmetic only: stackable native hit feedback for rapid consecutive hits.
+## The Local.Visual namespace is never authoritative gameplay state.
+static func hit_feedback_strength(node: Node, base_strength: float) -> float:
+	if not is_finite(base_strength) or base_strength <= 0.0:
+		return 0.0
+	var timeline: Object = null
+	if node != null:
+		timeline = node.get_meta("effect_timeline", null) as Object
+	if timeline != null and timeline.has_method("apply_effect") and timeline.has_method("get_stacks"):
+		var tag := StringName("Local.Visual.RecentHit")
+		if bool(timeline.call("apply_effect", tag, 0.22, 1, 4, 0)):
+			var hits: int = int(timeline.call("get_stacks", tag))
+			return base_strength * (1.0 + 0.12 * float(clampi(hits, 1, 4) - 1))
+	return base_strength

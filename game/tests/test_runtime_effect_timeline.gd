@@ -58,6 +58,30 @@ func run(t) -> void:
 		Features.sync_runtime_tags(actor, "zombie", zombie)
 		t.eq(Features.tick_runtime_effects(actor, 0.8).get(StringName(
 			"Runtime.Status.Sundered"), 0), 0, "expired effect produces no further pulse")
+		var timeline: Object = actor.get_meta("effect_timeline", null) as Object
+		if timeline != null and timeline.has_method("replace_effect_branch"):
+			t.current = "scoped native effects and consecutive-hit visual feedback"
+			t.check(bool(timeline.call("apply_effect", StringName("Local.Visual.Hit"), 2.0)),
+				"client timed visual effect starts")
+			zombie["stagger_seconds"] = 1.0
+			Features.sync_runtime_tags(actor, "zombie", zombie)
+			t.near(Features.runtime_effect_remaining(actor, "Local.Visual.Hit"), 2.0, 0.001,
+				"authoritative refresh preserves local timer")
+			t.near(Features.runtime_effect_remaining(actor, "Runtime.Status.Staggered"), 1.0, 0.001,
+				"server-owned timer still refreshes")
+			var first: float = Features.hit_feedback_strength(actor, 1.0)
+			var second: float = Features.hit_feedback_strength(actor, 1.0)
+			t.near(first, 1.0, 0.001, "first hit intensity unchanged")
+			t.check(second > first, "consecutive hits increase cosmetic intensity")
+			Features.tick_runtime_effects(actor, 0.4)
+			t.near(Features.runtime_effect_remaining(actor, "Local.Visual.Hit"), 1.6, 0.001,
+				"independent visual timer advances")
+			zombie["stagger_seconds"] = 0.0
+			Features.sync_runtime_tags(actor, "zombie", zombie)
+			t.eq(Features.runtime_effect_remaining(actor, "Runtime.Status.Staggered"), 0.0,
+				"expired server status removed")
+			t.near(Features.runtime_effect_remaining(actor, "Local.Visual.Hit"), 1.6, 0.001,
+				"server expiry does not erase local timer")
 	else:
 		t.eq(Features.tick_runtime_effects(actor, 0.4), {},
 			"older engine binaries and stock Godot do not invent periodic triggers")
