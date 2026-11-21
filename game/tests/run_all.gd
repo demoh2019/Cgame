@@ -66,6 +66,7 @@ const SUITES := [
 	"res://tests/test_predictive_streaming.gd",
 	"res://tests/test_world_streamer_shared_budget.gd",
 	"res://tests/test_waypoint_streaming_source.gd",
+	"res://tests/test_world_streamer_retry.gd",
 	"res://tests/test_postprocess_sharpen.gd",
 	"res://tests/test_graphics_lens_rain.gd",
 	"res://tests/test_postprocess_deband.gd",
