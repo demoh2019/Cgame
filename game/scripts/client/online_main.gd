@@ -80,6 +80,7 @@ const OutdoorReflectionBudget = preload("res://scripts/client/outdoor_reflection
 const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.gd")
 const GraphicsVramBudget = preload("res://scripts/client/graphics_vram_budget.gd")
 const ShaderWarmup = preload("res://scripts/client/shader_warmup.gd")
+const FrameHitchAnalyzer = preload("res://scripts/client/frame_hitch_analyzer.gd")
 const GraphicsDynamicResolution = preload("res://scripts/client/graphics_dynamic_resolution.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
 const WorldMap = preload("res://scripts/client/world_map.gd")
@@ -172,6 +173,7 @@ var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
 var _auto_quality := GraphicsAutoQuality.new()
 var _vram_budget := GraphicsVramBudget.new()
+var _hitch_analyzer := FrameHitchAnalyzer.new()
 var _adaptive_resolution := GraphicsDynamicResolution.new()
 var _auto_graphics := true
 var _quality_picker: OptionButton
@@ -1720,6 +1722,11 @@ func _physics_process(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_frames += 1
+	# Attribute frame hitches to shader compiles, streaming or VRAM growth.
+	var hitch: Dictionary = _hitch_analyzer.sample(delta, FrameHitchAnalyzer.read_counters(
+		streamer.get_loaded_count() if streamer != null else 0), Time.get_ticks_msec() / 1000.0)
+	if not hitch.is_empty():
+		print_verbose("CLIENT hitch %.0f ms (median %.1f ms): %s" % [hitch["ms"], hitch["median_ms"], hitch["cause"]])
 	# Resize only the Forward+ 3D target before changing costly world LOD.
 	if _auto_graphics and client != null and client.welcomed:
 		var rd: bool = RenderingServer.get_current_rendering_method() == "forward_plus"
@@ -3130,6 +3137,7 @@ func _run_demo() -> void:
 				print("CLIENT streaming: loaded=%d queued=%d threaded=%d visual=%d" % [
 					streamer.get_loaded_count(), streamer.get_queued_generation_count(),
 					streamer.get_pending_count(), streamer.get_pending_visual_details_count()])
+			print("CLIENT " + _hitch_analyzer.describe())
 			print("CLIENT screenshot saved: ", _screenshot_path)
 			get_tree().quit()
 

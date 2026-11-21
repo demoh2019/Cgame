@@ -174,6 +174,11 @@ func _initialize() -> void:
 			return
 		print("SERVER siege outbox restored %d unacknowledged guild victories" %
 			net._siege_ledger_pending.size())
+		var trade_journal_path: String = "user://albion_after_trade_journal_%d.json" % world_seed
+		if not net.configure_trade_journal(trade_journal_path):
+			printerr("SERVER refused invalid or inaccessible trade journal: " + trade_journal_path)
+			quit(3)
+			return
 	peer = ENetMultiplayerPeer.new()
 	if not _solo_stop_path.is_empty():
 		# A solo save slot must not be exposed as a public guest server.

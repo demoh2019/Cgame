@@ -3,6 +3,7 @@ extends RefCounted
 ## connect them. It has no networking and no scene: the network layer only feeds it commands and
 ## reads snapshots out of it, so the whole game can be tested by calling it directly.
 
+const LagCompensation = preload("res://scripts/server/lag_compensation.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
@@ -219,6 +220,9 @@ const STARTER_KIT := {"bandage": 2, "canned_food": 2, "water_bottle": 2}
 var world
 var rng := RandomNumberGenerator.new()
 var time: float = 0.0
+## PvP lag compensation: recent survivor positions and each peer's measured round trip (seconds).
+var lag_history := LagCompensation.new()
+var peer_round_trip: Dictionary = {}
 var tick_count: int = 0
 
 class Player:
@@ -6621,6 +6625,8 @@ func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: flo
 			best_distance = distance
 	# PvP zones remain unchanged; only the mutually accepted hub opponent
 	# may be targetable in the otherwise peaceful settlement.
+	# Judge survivors where the attacker saw them (zombies are server-paced, never rewound).
+	var rewind: float = LagCompensation.rewind_for(float(peer_round_trip.get(attacker.id, 0.0)))
 	if ZoneRisk.allows_pvp(attacker_zone) or training_matches.has(attacker.id) or attacker.faction_flagged:
 		for other in players.values():
 			if other.id == attacker.id or not _alive(other) or ignored.has("player:" + str(other.id)):
@@ -6635,7 +6641,9 @@ func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: flo
 			if not training and not ZoneRisk.can_pvp(attacker_zone, world.zone_at(other.position.x, other.position.z)) \
 					and not _faction_enemies(attacker, other):
 				continue
-			var distance := _hit_distance(origin, direction, Vector2(other.position.x, other.position.z), reach, ranged, 0.5)
+			var seen: Vector3 = other.position if rewind <= 0.0 else \
+				lag_history.position_at(other.id, time - rewind, other.position)
+			var distance := _hit_distance(origin, direction, Vector2(seen.x, seen.z), reach, ranged, 0.5)
 			if distance >= 0.0 and distance < best_distance and distance < cover_distance:
 				best = {"kind": "player", "id": other.id}
 				best_distance = distance
@@ -7076,6 +7084,10 @@ func tick(delta: float) -> void:
 	_tick_trades()
 	parties.expire(time)
 	_tick_players(delta)
+	for tracked in players.values():
+		lag_history.record(tracked.id, time, tracked.position)
+	if tick_count % 64 == 0:
+		lag_history.prune(players)
 	_tick_siege_charges()
 	if tick_count % WorldDiscovery.SCAN_EVERY_TICKS == 0:
 		_tick_site_discoveries()
