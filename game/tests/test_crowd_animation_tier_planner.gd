@@ -326,7 +326,7 @@ func run(t) -> void:
 	var cap_source: String = FileAccess.get_file_as_string("res://scripts/client/character_anim.gd")
 	var modifier_source: String = FileAccess.get_file_as_string(
 		"res://scripts/client/character_anim_modifier.gd")
-	t.check(cap_source.contains("tiers = cap_full_pose_cost(tiers, distances") and
+	t.check(cap_source.contains("tiers = cap_full_pose_cost_grouped(tiers, distances") and
 		cap_source.contains("retained_combat_mask, 1.5") and
 		cap_source.contains("full_pose_cost_us.append("),
 		"real game passes independent combat, live full-IK history and measured costs")
@@ -546,3 +546,99 @@ func run(t) -> void:
 		source_anim_budget.contains("allowance_us = mini(allowance_us, pose_budget_us)") and
 		source_anim_budget.contains("CombatAnimationPriority.slots(quality)"),
 		"adaptive budget affects only optional tier-0 IK after combat priorities")
+
+
+	t.current = "weighted group shares protect player and boss IK without altering combat tiers"
+	var grouped_tiers := PackedInt32Array([0, 0, 0, 0, 1, 2])
+	var grouped_distances := PackedFloat64Array([1.0, 2.0, 5.0, 8.0, 50.0, 90.0])
+	var grouped_retained := PackedByteArray([0, 0, 0, 0, 0, 0])
+	var grouped_costs := PackedInt32Array([100, 100, 100, 100, 100, 100])
+	var grouped_ids := PackedByteArray([1, 1, 0, 0, 2, 3])
+	var equal_group_weights := PackedFloat64Array([1.0, 1.0, 1.0, 1.0])
+	t.eq(CharacterAnim.cap_full_pose_cost_grouped(grouped_tiers, grouped_distances,
+		grouped_retained, grouped_costs, grouped_ids, equal_group_weights, 200, 1.5, false),
+		PackedInt32Array([0, 1, 0, 1, 1, 2]),
+		"one player and one infected can keep procedural IK under contention")
+	t.eq(CharacterAnim.cap_full_pose_cost(grouped_tiers, grouped_distances,
+		grouped_retained, grouped_costs, 200, 1.5, false),
+		PackedInt32Array([0, 0, 1, 1, 1, 2]),
+		"legacy nearest-first CPU cap cannot reserve time for player group")
+	t.eq(CharacterAnim.cap_full_pose_cost_grouped(grouped_tiers, grouped_distances,
+		grouped_retained, grouped_costs, grouped_ids, equal_group_weights, 0, 1.5, false),
+		grouped_tiers, "zero work cap preserves all selected poses")
+	t.eq(grouped_tiers[2], 0, "grouped second-stage budget never mutates input tiers")
+	var weighted_distances := PackedFloat64Array([2.0, 3.0, 4.0, 5.0, 50.0, 90.0])
+	var weighted_costs := PackedInt32Array([100, 100, 200, 100, 0, 0])
+	var weighted_groups := PackedByteArray([1, 1, 0, 2, 1, 3])
+	t.eq(CharacterAnim.cap_full_pose_cost_grouped(grouped_tiers, weighted_distances,
+		grouped_retained, weighted_costs, weighted_groups,
+		CharacterAnim.FULL_POSE_GROUP_WEIGHTS, 400, 1.5, false),
+		PackedInt32Array([0, 1, 0, 0, 1, 2]),
+		"player, elite boss and ordinary infected share measured CPU allowance")
+	t.eq(CharacterAnim.cap_full_pose_cost_grouped(grouped_tiers, weighted_distances,
+		grouped_retained, PackedInt32Array([100, 100, 100, 100, 0, 0]),
+		PackedByteArray([1, 1, 1, 1, 1, 1]),
+		CharacterAnim.FULL_POSE_GROUP_WEIGHTS, 200, 1.5, false),
+		CharacterAnim.cap_full_pose_cost(grouped_tiers, weighted_distances,
+			grouped_retained, PackedInt32Array([100, 100, 100, 100, 0, 0]),
+			200, 1.5, false),
+		"a single active group receives the full CPU budget (no stranded reservation)")
+	t.eq(CharacterAnim.cap_full_pose_cost_grouped(grouped_tiers, grouped_distances,
+		grouped_retained, grouped_costs, PackedByteArray([0, 4, 0, 0, 0, 0]),
+		equal_group_weights, 200, 1.5, false).size(), 0,
+		"invalid group identifier rejects the complete batch")
+	t.eq(CharacterAnim.cap_full_pose_cost_grouped(grouped_tiers, grouped_distances,
+		grouped_retained, grouped_costs, grouped_ids,
+		PackedFloat64Array([1.0, 1.0]), 200, 1.5, false).size(), 0,
+		"all four group weights are required")
+	t.eq(CharacterAnim.cap_full_pose_cost_grouped(grouped_tiers, grouped_distances,
+		grouped_retained, grouped_costs, grouped_ids,
+		PackedFloat64Array([3.0, NAN, 2.0, 1.0]), 200, 1.5, false).size(), 0,
+		"nonfinite group weights fail atomically")
+	t.eq(CharacterAnim.cap_full_pose_cost_grouped(grouped_tiers, grouped_distances,
+		grouped_retained, grouped_costs, grouped_ids, equal_group_weights,
+		1000001, 1.5, false).size(), 0,
+		"invalid work budget fails before allocating any group quota")
+
+	t.current = "native and stock Godot share the same group-fair work allocation"
+	t.eq(CharacterAnim.cap_full_pose_cost_grouped(grouped_tiers, weighted_distances,
+		grouped_retained, weighted_costs, weighted_groups,
+		CharacterAnim.FULL_POSE_GROUP_WEIGHTS, 400),
+		PackedInt32Array([0, 1, 0, 0, 1, 2]),
+		"native-first dispatch or old-engine fallback admits player and elite")
+	if ClassDB.class_exists("CrowdAnimationTierPlanner"):
+		var native_grouped: Object = ClassDB.instantiate("CrowdAnimationTierPlanner")
+		if native_grouped != null and native_grouped.has_method("cap_full_pose_cost_grouped"):
+			var group_rng := RandomNumberGenerator.new()
+			group_rng.seed = 2026112102
+			for trial in 32:
+				var d := PackedFloat64Array()
+				var tiers := PackedInt32Array()
+				var retained := PackedByteArray()
+				var costs := PackedInt32Array()
+				var groups := PackedByteArray()
+				for actor in 100:
+					d.append(float(group_rng.randi_range(0, 1000)) * 0.1)
+					tiers.append(0 if actor % 5 == 0 else group_rng.randi_range(1, 4))
+					retained.append(group_rng.randi_range(0, 1))
+					costs.append(group_rng.randi_range(0, 900))
+					groups.append(group_rng.randi_range(0, 3))
+				for cap in [0, 100, 250, 500, 1200, 2750]:
+					var script_result: PackedInt32Array = CharacterAnim.cap_full_pose_cost_grouped(
+						tiers, d, retained, costs, groups,
+						CharacterAnim.FULL_POSE_GROUP_WEIGHTS, cap, 1.5, false)
+					var native_result: PackedInt32Array = native_grouped.call(
+						"cap_full_pose_cost_grouped", tiers, d, retained, costs,
+						groups, CharacterAnim.FULL_POSE_GROUP_WEIGHTS, cap, 1.5)
+					t.eq(native_result, script_result,
+						"native/group-fair GDScript parity trial %d limit %d" % [trial, cap])
+	var group_source := FileAccess.get_file_as_string("res://scripts/client/character_anim.gd")
+	var groups_model_source := FileAccess.get_file_as_string("res://scripts/client/character_model.gd")
+	var groups_view_source := FileAccess.get_file_as_string("res://scripts/client/entity_view.gd")
+	t.check(group_source.contains("tiers = cap_full_pose_cost_grouped(tiers, distances") and
+		group_source.contains("full_pose_group_ids.append(") and
+		group_source.contains("CombatAnimationPriority.slots(quality)"),
+		"real crowd pipeline uses grouped IK work budget after unchanged combat planning")
+	t.check(groups_model_source.contains("animation_budget_group = 1 if zombie else 0") and
+		groups_view_source.contains("model.animation_budget_group = 2"),
+		"live Albion models distinguish player, ordinary infected and elite/boss")

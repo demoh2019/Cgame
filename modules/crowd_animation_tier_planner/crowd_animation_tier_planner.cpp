@@ -71,6 +71,8 @@ void CrowdAnimationTierPlanner::_bind_methods() {
 			&CrowdAnimationTierPlanner::plan_visible_tiers_temporal);
 	ClassDB::bind_method(D_METHOD("cap_full_pose_cost", "tiers", "distances", "retained_full_flags", "full_pose_cost_us", "full_pose_budget_us", "hysteresis"),
 			&CrowdAnimationTierPlanner::cap_full_pose_cost, DEFVAL(1.5));
+	ClassDB::bind_method(D_METHOD("cap_full_pose_cost_grouped", "tiers", "distances", "retained_full_flags", "full_pose_cost_us", "group_ids", "group_weights", "full_pose_budget_us", "hysteresis"),
+			&CrowdAnimationTierPlanner::cap_full_pose_cost_grouped, DEFVAL(1.5));
 }
 
 // Shared budget planner: no second sorting pass and no additional per-actor
@@ -228,6 +230,115 @@ PackedInt32Array CrowdAnimationTierPlanner::cap_full_pose_cost(
 			// Never defer base locomotion or urgent combat: tier 1 is still
 			// full rate, but without optional foot IK and head look-at.
 			output.set(idx, 1);
+		}
+	}
+	return output;
+}
+
+
+PackedInt32Array CrowdAnimationTierPlanner::cap_full_pose_cost_grouped(
+		const PackedInt32Array &p_tiers, const PackedFloat64Array &p_distances,
+		const PackedByteArray &p_retained_full_flags, const PackedInt32Array &p_full_pose_cost_us,
+		const PackedByteArray &p_group_ids, const PackedFloat64Array &p_group_weights,
+		int p_full_pose_budget_us, double p_hysteresis) const {
+	PackedInt32Array rejected;
+	const int count = p_tiers.size();
+	ERR_FAIL_COND_V_MSG(count > 16384 || p_distances.size() != count ||
+					p_retained_full_flags.size() != count || p_full_pose_cost_us.size() != count ||
+					p_group_ids.size() != count || p_group_weights.size() != 4,
+			rejected, "Grouped full-pose admission requires matching actors and four group weights.");
+	ERR_FAIL_COND_V_MSG(p_full_pose_budget_us < 0 || p_full_pose_budget_us > 1000000 ||
+					!Math::is_finite(p_hysteresis) || p_hysteresis < 0.0 || p_hysteresis > 8.0,
+			rejected, "Grouped full-pose budget or IK hysteresis is outside valid bounds.");
+	for (int group = 0; group < 4; ++group) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(p_group_weights[group]) ||
+						p_group_weights[group] < 0.25 || p_group_weights[group] > 8.0,
+				rejected, "Group importance weights must be finite and in 0.25..8.");
+	}
+
+	int full_count = 0;
+	bool active_group[4] = { false, false, false, false };
+	for (int i = 0; i < count; ++i) {
+		ERR_FAIL_COND_V_MSG(p_tiers[i] < 0 || p_tiers[i] > 4 ||
+						!Math::is_finite(p_distances[i]) || p_distances[i] < 0.0 ||
+						p_full_pose_cost_us[i] < 0 || p_full_pose_cost_us[i] > 100000 ||
+						p_group_ids[i] > 3,
+				rejected, "Invalid actor tier, group, distance or measured IK work-unit cost.");
+		if (p_tiers[i] == 0) {
+			++full_count;
+			active_group[p_group_ids[i]] = true;
+		}
+	}
+	ERR_FAIL_COND_V_MSG(full_count > 256, rejected,
+			"Grouped full-pose CPU budgeting supports at most 256 existing IK owners.");
+	// Zero means the extra cost gate is disabled; preserve prior planner
+	// results exactly, including all full-rate combat and LOD decisions.
+	if (p_full_pose_budget_us == 0 || full_count == 0) {
+		return p_tiers;
+	}
+
+	double active_weight = 0.0;
+	for (int group = 0; group < 4; ++group) {
+		if (active_group[group]) {
+			active_weight += p_group_weights[group];
+		}
+	}
+	int64_t quota_us[4] = { 0, 0, 0, 0 };
+	int64_t reserved_group_us[4] = { 0, 0, 0, 0 };
+	for (int group = 0; group < 4; ++group) {
+		if (active_group[group]) {
+			quota_us[group] = int64_t(double(p_full_pose_budget_us) *
+					p_group_weights[group] / active_weight);
+		}
+	}
+
+	Vector<RankedCandidate> ranked_full;
+	for (int i = 0; i < count; ++i) {
+		if (p_tiers[i] != 0) {
+			continue;
+		}
+		const double effective_distance = MAX(0.0, p_distances[i] -
+				(p_retained_full_flags[i] != 0 ? p_hysteresis : 0.0));
+		// Group significance affects who receives excess capacity, not
+		// whether a candidate earned an IK slot in the initial planner.
+		const double weighted_distance = effective_distance / p_group_weights[p_group_ids[i]];
+		insert_top(ranked_full, { weighted_distance, i }, full_count);
+	}
+
+	PackedByteArray selected;
+	selected.resize(count); // Zero-initialized; one byte per original actor.
+	int64_t total_reserved_us = 0;
+	// Phase 1: spend each active group's own weighted share. No large
+	// cohort of one type can claim other groups' reserved work time.
+	for (const RankedCandidate &candidate : ranked_full) {
+		const int idx = candidate.index;
+		const int group = p_group_ids[idx];
+		const int64_t work_us = p_full_pose_cost_us[idx] == 0 ? 100 : p_full_pose_cost_us[idx];
+		if (reserved_group_us[group] + work_us <= quota_us[group]) {
+			selected.set(idx, 1);
+			reserved_group_us[group] += work_us;
+			total_reserved_us += work_us;
+		}
+	}
+	// Phase 2: unused quota / integer-rounding remainder spills over to
+	// other existing tier-0 owners in weighted significance order.
+	for (const RankedCandidate &candidate : ranked_full) {
+		const int idx = candidate.index;
+		if (selected[idx] != 0) {
+			continue;
+		}
+		const int64_t work_us = p_full_pose_cost_us[idx] == 0 ? 100 : p_full_pose_cost_us[idx];
+		if (total_reserved_us + work_us <= p_full_pose_budget_us) {
+			selected.set(idx, 1);
+			total_reserved_us += work_us;
+		}
+	}
+	PackedInt32Array output = p_tiers;
+	for (const RankedCandidate &candidate : ranked_full) {
+		if (selected[candidate.index] == 0) {
+			// Tier 1 is still full-rate locomotion / combat, only optional
+			// procedural IK and head look-at are omitted for this frame.
+			output.set(candidate.index, 1);
 		}
 	}
 	return output;

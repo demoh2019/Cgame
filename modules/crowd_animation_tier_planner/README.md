@@ -180,6 +180,61 @@ claimed until native CI and in-game profiling complete.
 Unreal comparison:
 https://dev.epicgames.com/documentation/unreal-engine/animation-budget-allocator-in-unreal-engine
 
+## Group-fair measured IK CPU allocation (Unreal Significance Manager pattern)
+
+A significant remaining gap was that `cap_full_pose_cost` always
+consumed the optional IK CPU allowance nearest-first, even when a dense
+group of ordinary infected monopolized the budget ahead of nearby
+players or elite enemies. Unreal Engine's Significance Manager
+explicitly supports different budgets by actor category; this is an
+independent, small data-only counterpart in Cgame.
+
+`cap_full_pose_cost_grouped(tiers, distances, retained_full_flags,
+full_pose_cost_us, group_ids, group_weights, full_pose_budget_us,
+hysteresis=1.5)` is a **second-stage cost admission** applied to
+existing tier-0 actors from the visibility-aware/temporal planner.
+Up to four groups (0..3) compete for a shared estimated CPU allowance.
+Four caller-selected finite weights (0.25..8) reserve proportional
+microseconds **only for groups that have eligible tier-0 actors**.
+
+1. The first pass admits affordable tier-0 winners within each group's
+   weighted reservation. Inside each group, nearest retained actors
+   retain deterministic preference and index-stable ties.
+2. Remaining unspent quota and integer-rounding remainders are shared
+   in a second pass across remaining eligible tier-0 winners, ranked
+   by `max(0, distance - retained_hysteresis) / group_weight`.
+3. Unadmitted owners become **tier 1**, retaining full-rate base
+   locomotion and combat. Existing tier-1/2/3/4 poses never change.
+   This function never promotes outside the original IK slot winners.
+
+One active group gets the full original budget; zero CPU allowance
+disables the additional cost gate entirely. A missing cost sample uses
+a 100us estimate. Up to 16,384 actors and 256 full IK owners are
+supported; group identifiers 0..3 and arrays are validated atomically.
+Weighted shares are **soft**: a group can fail to fit a single
+expensive work unit within its share, and leftover time is then
+redistributed. This is not a minimum number of animations per cohort,
+nor a guarantee about actual CPU frame time.
+
+Albion After passes the measured combined scripted/native IK work-unit
+costs and the already adaptive `CrowdAnimationBudgetGovernor`
+allowance. The live `CharacterModel.setup` assigns group 0 to
+players and 1 to normal infected. `entity_view.gd` elevates elite
+infected and raid bosses to group 2. Group 3 remains available for
+future cinematic/quest actors. Weights default to
+`[3.0, 1.0, 2.0, 2.0]`. Pooled model reconfiguration resets its
+category, so old occupants cannot steal another group's reservation.
+
+Both custom Cgame and stock Godot use equivalent deterministic
+numeric algorithms, selected by optional ClassDB availability.
+Combat-priority full-rate slots and authoritative AI/network/physics
+ticks remain unchanged. No measured FPS gain is claimed until native
+CI/build and real gameplay profiling verify the implementation.
+
+References:
+- https://dev.epicgames.com/documentation/unreal-engine/significance-manager-in-unreal-engine
+- https://dev.epicgames.com/documentation/unreal-engine/animation-budget-allocator-in-unreal-engine
+
 ## Safety and portability
 
 - At most 16,384 actors; priority flags must match distances 1:1.

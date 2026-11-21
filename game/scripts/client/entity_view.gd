@@ -632,6 +632,11 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		var hue := float(abs(int(entity["id"]) * 2654435761 % 1000)) / 1000.0
 		var character: String = Assets.CHARACTER_NAMES[int(abs(int(entity["id"]))) % Assets.CHARACTER_NAMES.size()]
 		model.setup(Color.WHITE if Assets.has_characters() else Color.from_hsv(hue, 0.45, 1.0), 2.0, 1.0, character, false, int(abs(int(entity["id"]))) / Assets.CHARACTER_NAMES.size())
+	# Boss and elite visual IK gets its own weighted CPU share when
+	# ordinary infected crowd the camera. This does not affect AI or hits.
+	if kind == "zombie" and (bool(entity.get("elite", false)) or
+			bool(entity.get("raid_boss", false))):
+		model.animation_budget_group = 2
 	model.set_wetness_step(_wetness_step)
 	root.add_child(model)
 	if _world != null and GraphicsQuality.level() >= 2: # High and Ultra; no-op without the native class.

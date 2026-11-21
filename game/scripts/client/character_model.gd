@@ -45,6 +45,9 @@ var _hit_flash_tween: Tween
 
 # Pack mode state.
 var _zombie := false
+# Caller-controlled visual IK work group (0 player, 1 infected,
+# 2 elite/boss, 3 future cinematic characters). No gameplay authority.
+var animation_budget_group: int = 0
 var _zombie_state := 0 # Zombie.State: 0 idle, 1 wander, 2 chase, 3 attack, 4 dead.
 var _action_loop := ""
 var _oneshot := ""
@@ -63,6 +66,7 @@ var _gear_shown: Dictionary = {} # Gear slot -> item id currently drawn on the b
 func setup(tint: Color, scale_factor: float, walk_speed: float = 1.0, model_name: String = "", zombie: bool = false, look_seed: int = 0) -> void:
 	_walk_speed = walk_speed
 	_zombie = zombie
+	animation_budget_group = 1 if zombie else 0
 	# A reused character never inherits a freed skeleton or previous leg solver.
 	# Deactivate the old one before detaching its cached reference.
 	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier):

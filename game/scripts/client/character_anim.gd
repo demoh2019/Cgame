@@ -19,6 +19,9 @@ const NEAR_CAMERA_VISIBILITY_RADIUS := 3.0 # Matches the animation LOD close-cam
 const IK_RETENTION_HYSTERESIS_METRES := 1.5 # Keeps a prior on-screen IK owner during small camera moves.
 # The soft CPU cap applies only to the optional script full-pose modifier.
 const FULL_POSE_CPU_BUDGET_US := [0, 750, 1500, 2750]
+# 0: players, 1: standard infected, 2: elite / raid boss, 3: reserved
+# for future scripted characters. Only active groups receive CPU shares.
+static var FULL_POSE_GROUP_WEIGHTS := PackedFloat64Array([3.0, 1.0, 2.0, 2.0])
 const POSE_PROCESS_TARGET_US := 12500 # Main-thread process time, not FPS or GPU frame duration.
 
 ## Clears CPU pressure history when the world/session or rendering policy
@@ -355,6 +358,99 @@ static func cap_full_pose_cost(tiers: PackedInt32Array, distances: PackedFloat64
 
 # --- Smoothing / springs --------------------------------------------------------------------------------------------------
 
+
+## Reserve a proportional share of the current measured IK allowance for
+## each active actor type, then redistribute unused shares in weighted
+## significance order. Uses ONLY the tier-0 actors that the existing planner
+## already selected. Never promotes tier-1/2/3/4 or slows combat locomotion.
+static func cap_full_pose_cost_grouped(tiers: PackedInt32Array,
+		distances: PackedFloat64Array, retained_full_flags: PackedByteArray,
+		full_pose_cost_us: PackedInt32Array, group_ids: PackedByteArray,
+		group_weights: PackedFloat64Array, full_pose_budget_us: int,
+		hysteresis: float = IK_RETENTION_HYSTERESIS_METRES,
+		prefer_native: bool = true) -> PackedInt32Array:
+	var count: int = tiers.size()
+	if count != distances.size() or count != retained_full_flags.size() or \
+			count != full_pose_cost_us.size() or count != group_ids.size() or \
+			count > 16384 or group_weights.size() != 4 or \
+			full_pose_budget_us < 0 or full_pose_budget_us > 1000000 or \
+			not is_finite(hysteresis) or hysteresis < 0.0 or hysteresis > 8.0:
+		return PackedInt32Array()
+	for weight in group_weights:
+		if not is_finite(weight) or weight < 0.25 or weight > 8.0:
+			return PackedInt32Array()
+	var present: Array[bool] = [false, false, false, false]
+	var full_count: int = 0
+	for i in count:
+		if tiers[i] < 0 or tiers[i] > 4 or not is_finite(distances[i]) or \
+				distances[i] < 0.0 or full_pose_cost_us[i] < 0 or \
+				full_pose_cost_us[i] > 100000 or group_ids[i] > 3:
+			return PackedInt32Array()
+		if tiers[i] == 0:
+			full_count += 1
+			present[group_ids[i]] = true
+	if full_count > 256:
+		return PackedInt32Array()
+	if full_pose_budget_us == 0 or full_count == 0:
+		return tiers
+	if prefer_native and ClassDB.class_exists("CrowdAnimationTierPlanner"):
+		if _native_tier_planner == null:
+			_native_tier_planner = ClassDB.instantiate("CrowdAnimationTierPlanner")
+		if _native_tier_planner != null and _native_tier_planner.has_method(
+				"cap_full_pose_cost_grouped"):
+			var native_tiers: PackedInt32Array = _native_tier_planner.call(
+				"cap_full_pose_cost_grouped", tiers, distances, retained_full_flags,
+				full_pose_cost_us, group_ids, group_weights, full_pose_budget_us,
+				hysteresis)
+			if native_tiers.size() == count:
+				return native_tiers
+	# Entirely deterministic fallback for stock Godot / older Cgame.
+	var active_weight: float = 0.0
+	for group in 4:
+		if present[group]:
+			active_weight += group_weights[group]
+	var quota_us: Array[int] = [0, 0, 0, 0]
+	var spent_group_us: Array[int] = [0, 0, 0, 0]
+	for group in 4:
+		if present[group]:
+			quota_us[group] = int(float(full_pose_budget_us) *
+				group_weights[group] / active_weight)
+	var order: Array[int] = []
+	for i in count:
+		if tiers[i] == 0:
+			order.append(i)
+	order.sort_custom(func(a: int, b: int) -> bool:
+		var da: float = maxf(0.0, distances[a] -
+			(hysteresis if retained_full_flags[a] != 0 else 0.0)) / group_weights[group_ids[a]]
+		var db: float = maxf(0.0, distances[b] -
+			(hysteresis if retained_full_flags[b] != 0 else 0.0)) / group_weights[group_ids[b]]
+		return da < db if da != db else a < b
+	)
+	var selected := PackedByteArray()
+	selected.resize(count)
+	var total_spent_us: int = 0
+	for idx in order:
+		var group: int = group_ids[idx]
+		var work_us: int = full_pose_cost_us[idx] if full_pose_cost_us[idx] > 0 else 100
+		if spent_group_us[group] + work_us <= quota_us[group]:
+			spent_group_us[group] += work_us
+			total_spent_us += work_us
+			selected[idx] = 1
+	# No reservation is wasted if its group has no eligible/affordable work.
+	for idx in order:
+		if selected[idx] != 0:
+			continue
+		var work_us: int = full_pose_cost_us[idx] if full_pose_cost_us[idx] > 0 else 100
+		if total_spent_us + work_us <= full_pose_budget_us:
+			total_spent_us += work_us
+			selected[idx] = 1
+	var out: PackedInt32Array = tiers.duplicate()
+	for idx in order:
+		if selected[idx] == 0:
+			out[idx] = 1
+	return out
+
+
 ## Exponential smoothing independent of frame rate.
 static func smooth(current: float, target: float, delta: float, rate: float) -> float:
 	return lerpf(current, target, 1.0 - exp(-rate * maxf(delta, 0.0)))
@@ -506,6 +602,7 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 	var retained_full_mask := PackedByteArray()
 	var retained_combat_mask := PackedByteArray()
 	var full_pose_cost_us := PackedInt32Array()
+	var full_pose_group_ids := PackedByteArray()
 	for model in models:
 		var distance: float = model.global_position.distance_to(cam)
 		distances.append(distance)
@@ -520,6 +617,7 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 		# The model combines that with scripted breathing/look-at cost; stock
 		# Godot has no native foot sample, so only the script cost is used.
 		full_pose_cost_us.append(model.estimated_full_pose_cost_us())
+		full_pose_group_ids.append(clampi(int(model.animation_budget_group), 0, 3))
 		# Combat urgency is visual-only, and the native mixer controller
 		# already handles critical poses when external_anim_lod is enabled.
 		var critical: bool = not bool(model.get("external_anim_lod")) \
@@ -537,8 +635,9 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 	var allowance_us: int = FULL_POSE_CPU_BUDGET_US[clampi(quality, 0, 3)]
 	if pose_budget_us >= 0:
 		allowance_us = mini(allowance_us, pose_budget_us)
-	tiers = cap_full_pose_cost(tiers, distances, retained_full_mask,
-		full_pose_cost_us, allowance_us, IK_RETENTION_HYSTERESIS_METRES)
+	tiers = cap_full_pose_cost_grouped(tiers, distances, retained_full_mask,
+		full_pose_cost_us, full_pose_group_ids, FULL_POSE_GROUP_WEIGHTS,
+		allowance_us, IK_RETENTION_HYSTERESIS_METRES)
 	if tiers.size() != models.size():
 		return
 	for i in models.size():
