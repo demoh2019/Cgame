@@ -723,6 +723,50 @@ void EditorDockManager::make_dock_floating(EditorDock *p_dock) {
 	}
 }
 
+void EditorDockManager::host_dock(EditorDock *p_dock, Control *p_host) {
+	ERR_FAIL_NULL(p_dock);
+	ERR_FAIL_NULL(p_host);
+	ERR_FAIL_COND_MSG(!all_docks.has(p_dock), vformat("Cannot host unknown dock '%s'.", p_dock->get_display_title()));
+	ERR_FAIL_COND_MSG(p_dock->is_open, vformat("Cannot host dock '%s' because it is part of the layout.", p_dock->get_display_title()));
+
+	_move_dock(p_dock, p_host);
+	p_dock->update_layout(EditorDock::DOCK_LAYOUT_HORIZONTAL, EditorDock::DOCK_SLOT_BOTTOM);
+	p_dock->show();
+}
+
+void EditorDockManager::set_focus_override(EditorDock *p_dock, const Callable &p_callable) {
+	focus_override_dock = p_dock;
+	focus_override_callable = p_callable;
+}
+
+void EditorDockManager::unhost_dock(EditorDock *p_dock) {
+	ERR_FAIL_NULL(p_dock);
+	ERR_FAIL_COND_MSG(!all_docks.has(p_dock), vformat("Cannot unhost unknown dock '%s'.", p_dock->get_display_title()));
+
+	if (p_dock->is_open || p_dock->get_parent() == closed_dock_parent) {
+		return;
+	}
+
+	_move_dock(p_dock, closed_dock_parent);
+	p_dock->hide();
+}
+
+void EditorDockManager::pin_dock(EditorDock *p_dock, EditorDock::DockSlot p_slot) {
+	ERR_FAIL_NULL(p_dock);
+	ERR_FAIL_INDEX(p_slot, EditorDock::DOCK_SLOT_MAX);
+	ERR_FAIL_COND_MSG(!all_docks.has(p_dock), vformat("Cannot pin unknown dock '%s'.", p_dock->get_display_title()));
+
+	if (p_dock->is_open) {
+		return;
+	}
+
+	p_dock->dock_slot_index = p_slot;
+	p_dock->previous_tab_index = -1;
+	p_dock->emit_signal("opened");
+	open_dock(p_dock, true);
+	_make_dock_visible(p_dock, false);
+}
+
 void EditorDockManager::_make_dock_visible(EditorDock *p_dock, bool p_grab_focus) {
 	if (p_dock->dock_window) {
 		if (p_grab_focus) {
@@ -753,6 +797,11 @@ void EditorDockManager::focus_dock(EditorDock *p_dock) {
 	ERR_FAIL_COND_MSG(!all_docks.has(p_dock), vformat("Cannot focus unknown dock '%s'.", p_dock->get_display_title()));
 
 	if (!p_dock->enabled) {
+		return;
+	}
+
+	if (!p_dock->is_open && p_dock == focus_override_dock && focus_override_callable.is_valid()) {
+		focus_override_callable.call();
 		return;
 	}
 

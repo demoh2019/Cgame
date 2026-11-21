@@ -5511,7 +5511,14 @@ void EditorInspector::edit(Object *p_object) {
 		can_favorite = Object::cast_to<Node>(object) || Object::cast_to<Resource>(object) || Object::cast_to<MultiNodeEdit>(object);
 		_update_current_favorites();
 
-		update_tree();
+		// Large multi-selections are expensive to rebuild. Coalesce the rebuild into the next
+		// process frame, so repeated selection changes (key repeat, drag-select) cost one rebuild.
+		const MultiNodeEdit *multi_edit = Object::cast_to<MultiNodeEdit>(object);
+		if (multi_edit && multi_edit->get_node_count() >= COALESCE_MULTI_SELECTION_THRESHOLD && get_root_inspector() == this && is_visible_in_tree()) {
+			update_tree_pending = true;
+		} else {
+			update_tree();
+		}
 	}
 
 	// Keep it available until the end so it works with both main and sub inspectors.

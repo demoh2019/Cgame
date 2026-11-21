@@ -86,7 +86,10 @@
 #include "editor/gui/editor_file_dialog.h"
 #include "editor/gui/editor_icon_manager.h"
 #include "editor/gui/editor_quick_open_dialog.h"
+#include "editor/gui/content_drawer.h"
+#include "editor/gui/editor_status_bar.h"
 #include "editor/gui/editor_title_bar.h"
+#include "editor/gui/editor_ue_toolbar.h"
 #include "editor/gui/editor_toaster.h"
 #include "editor/gui/progress_dialog.h"
 #include "editor/gui/window_wrapper.h"
@@ -141,6 +144,7 @@
 #include "editor/script/script_text_editor.h"
 #include "editor/script/text_editor.h"
 #include "editor/settings/editor_build_profile.h"
+#include "editor/settings/editor_cgame_ux.h"
 #include "editor/settings/editor_command_palette.h"
 #include "editor/settings/editor_feature_profile.h"
 #include "editor/settings/editor_layouts_dialog.h"
@@ -445,6 +449,8 @@ void EditorNode::shortcut_input(const Ref<InputEvent> &p_event) {
 			editor_main_screen->select_prev();
 		} else if (ED_IS_SHORTCUT("editor/command_palette", p_event)) {
 			_open_command_palette();
+		} else if (ED_IS_SHORTCUT("editor/browse_to_asset", p_event)) {
+			_browse_to_asset();
 		} else if (ED_IS_SHORTCUT("editor/toggle_last_opened_bottom_panel", p_event)) {
 			bottom_panel->toggle_last_opened_bottom_panel();
 		} else if (ED_IS_SHORTCUT("editor/toggle_selected_nodes_visibility", p_event)) {
@@ -1081,6 +1087,9 @@ void EditorNode::_notification(int p_what) {
 				bottom_docks.append(dock->get_effective_layout_key());
 			}
 			default_layout->set_value("docks", "dock_9", String(",").join(bottom_docks));
+			if (classic_layout.is_valid()) {
+				classic_layout->set_value("docks", "dock_9", String(",").join(bottom_docks));
+			}
 
 			RenderingServer::get_singleton()->viewport_set_disable_2d(get_scene_root()->get_viewport_rid(), true);
 			RenderingServer::get_singleton()->viewport_set_environment_mode(get_viewport()->get_viewport_rid(), RSE::VIEWPORT_ENVIRONMENT_DISABLED);
@@ -6332,14 +6341,23 @@ void EditorNode::progress_end_task(const String &p_task) {
 
 void EditorNode::progress_add_task_bg(const String &p_task, const String &p_label, int p_steps) {
 	singleton->progress_hb->add_task(p_task, p_label, p_steps);
+	if (singleton->status_bar) {
+		singleton->status_bar->get_tasks()->add_task(p_task, p_label, p_steps);
+	}
 }
 
 void EditorNode::progress_task_step_bg(const String &p_task, int p_step) {
 	singleton->progress_hb->task_step(p_task, p_step);
+	if (singleton->status_bar) {
+		singleton->status_bar->get_tasks()->task_step(p_task, p_step);
+	}
 }
 
 void EditorNode::progress_end_task_bg(const String &p_task) {
 	singleton->progress_hb->end_task(p_task);
+	if (singleton->status_bar) {
+		singleton->status_bar->get_tasks()->end_task(p_task);
+	}
 }
 
 void EditorNode::_progress_dialog_visibility_changed() {
@@ -6700,6 +6718,8 @@ void EditorNode::_load_editor_layout() {
 			ep.step(TTR("Loading docks..."), 1, true);
 			// Initialize some default values.
 			bottom_panel->load_layout_from_config(default_layout, EDITOR_NODE_CONFIG_SECTION);
+			// Cgame layout: the FileSystem is not docked by default, the Content Drawer (Ctrl+Space) hosts it.
+			editor_dock_manager->close_dock(FileSystemDock::get_singleton());
 		}
 	} else {
 		ep.step(TTR("Loading docks..."), 1, true);
@@ -6980,6 +7000,227 @@ void EditorNode::cleanup() {
 	_init_callbacks.clear();
 }
 
+void EditorNode::_build_default_layouts(EditorDock *p_audio_bus_dock) {
+	const String docks_section = "docks";
+	const String scene_key = SceneTreeDock::get_singleton()->get_effective_layout_key();
+	const String import_key = ImportDock::get_singleton()->get_effective_layout_key();
+	const String filesystem_key = FileSystemDock::get_singleton()->get_effective_layout_key();
+	const String history_key = history_dock->get_effective_layout_key();
+	const String inspector_key = InspectorDock::get_singleton()->get_effective_layout_key();
+	const String signals_key = SignalsDock::get_singleton()->get_effective_layout_key();
+	const String groups_key = GroupsDock::get_singleton()->get_effective_layout_key();
+
+	const String _2d_key = CanvasItemEditor::get_singleton()->get_effective_layout_key();
+	const String _3d_key = Node3DEditor::get_singleton()->get_effective_layout_key();
+	const String script_key = ScriptEditor::get_singleton()->get_effective_layout_key();
+	String game_key;
+	if (GameView::get_dock()) {
+		game_key = GameView::get_dock()->get_effective_layout_key();
+	}
+	String asset_lib_key;
+	if (AssetLibraryEditorPlugin::get_library()) {
+		asset_lib_key = AssetLibraryEditorPlugin::get_library()->get_effective_layout_key();
+	}
+	const String main_screen_docks = vformat("%s,%s,%s,%s,%s", _2d_key, _3d_key, script_key, game_key, asset_lib_key);
+
+	const String output_key = log->get_effective_layout_key();
+	const String audio_key = p_audio_bus_dock->get_effective_layout_key();
+	const String shader_key = ShaderEditorPlugin::get_singleton()->get_shader_dock()->get_effective_layout_key();
+	Dictionary bottom_offsets;
+	bottom_offsets[output_key] = -270;
+	bottom_offsets[audio_key] = -450;
+	bottom_offsets[shader_key] = -348;
+
+	// Cgame (UE-style): Outliner top-right, Details below it, FileSystem in the Content Drawer.
+	// Used for new projects and by the "Default", "Cgame (UE-style)" and "Reset to Cgame Layout" menu entries.
+	default_layout.instantiate();
+	{
+		const int right_upper = EditorDock::DOCK_SLOT_RIGHT_UL;
+		const int right_lower = EditorDock::DOCK_SLOT_RIGHT_BL;
+		const int bottom_left = EditorDock::DOCK_SLOT_BOTTOM_L;
+		default_layout->set_value(docks_section, DockTabContainer::get_config_key(right_upper), vformat("%s,%s", scene_key, import_key));
+		default_layout->set_value(docks_section, DockTabContainer::get_config_key(right_upper) + "_selected_tab_idx", 0);
+		default_layout->set_value(docks_section, DockTabContainer::get_config_key(right_lower), vformat("%s,%s,%s,%s", inspector_key, signals_key, groups_key, history_key));
+		default_layout->set_value(docks_section, DockTabContainer::get_config_key(right_lower) + "_selected_tab_idx", 0);
+		default_layout->set_value(docks_section, DockTabContainer::get_config_key(bottom_left), filesystem_key);
+		Array closed_docks;
+		closed_docks.push_back(filesystem_key);
+		default_layout->set_value(docks_section, "dock_closed", closed_docks);
+		default_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_MAIN_SCREEN), main_screen_docks);
+
+		// Right column about 340 px wide, Outliner about 40 percent of its height.
+		const int ue_dock_hsize = 340;
+		int hsplits[] = { 0, 0, -ue_dock_hsize, 0 };
+		for (int i = 0; i < (int)std_size(hsplits); i++) {
+			default_layout->set_value(docks_section, "dock_hsplit_" + itos(i + 1), hsplits[i]);
+		}
+		for (int i = 0; i < editor_dock_manager->get_vsplit_count(); i++) {
+			default_layout->set_value(docks_section, "dock_split_" + itos(i + 1), i == 2 ? -60 : 0);
+		}
+		default_layout->set_value(EDITOR_NODE_CONFIG_SECTION, "bottom_panel_offsets", bottom_offsets);
+	}
+
+	// Godot Classic: the layout of upstream Godot.
+	classic_layout.instantiate();
+	{
+		classic_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_LEFT_UR), vformat("%s,%s", scene_key, import_key));
+		classic_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_LEFT_UR) + "_selected_tab_idx", 0);
+		classic_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_LEFT_BR), vformat("%s,%s", filesystem_key, history_key));
+		classic_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_LEFT_BR) + "_selected_tab_idx", 0);
+		classic_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_RIGHT_UL), vformat("%s,%s,%s", inspector_key, signals_key, groups_key));
+		classic_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_RIGHT_UL) + "_selected_tab_idx", 0);
+		classic_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_MAIN_SCREEN), main_screen_docks);
+
+		const int classic_dock_hsize = 280;
+		int hsplits[] = { 0, classic_dock_hsize, -classic_dock_hsize, 0 };
+		for (int i = 0; i < (int)std_size(hsplits); i++) {
+			classic_layout->set_value(docks_section, "dock_hsplit_" + itos(i + 1), hsplits[i]);
+		}
+		for (int i = 0; i < editor_dock_manager->get_vsplit_count(); i++) {
+			classic_layout->set_value(docks_section, "dock_split_" + itos(i + 1), 0);
+		}
+		classic_layout->set_value(EDITOR_NODE_CONFIG_SECTION, "bottom_panel_offsets", bottom_offsets);
+	}
+}
+
+void EditorNode::_apply_cgame_layout() {
+	content_drawer->close_drawer(false);
+	editor_dock_manager->load_docks_from_config(default_layout, "docks");
+	bottom_panel->load_layout_from_config(default_layout, EDITOR_NODE_CONFIG_SECTION);
+	_save_editor_layout();
+}
+
+void EditorNode::_status_bar_show_log() {
+	editor_dock_manager->focus_dock(log);
+}
+
+void EditorNode::_status_bar_show_history() {
+	editor_dock_manager->focus_dock(history_dock);
+}
+
+void EditorNode::_ue_add_menu_pressed(int p_id) {
+	switch (p_id) {
+		case EditorUEToolbar::ADD_NODE: {
+			SceneTreeDock::get_singleton()->open_add_node_dialog();
+		} break;
+		case EditorUEToolbar::ADD_INSTANCE_SCENE: {
+			SceneTreeDock::get_singleton()->open_instantiate_scene_dialog();
+		} break;
+	}
+}
+
+void EditorNode::_browse_to_asset() {
+	// Prefer the resource shown in the Inspector, then fall back to the edited scene file.
+	String path;
+	Object *edited = InspectorDock::get_inspector_singleton()->get_edited_object();
+	Resource *resource = Object::cast_to<Resource>(edited);
+	if (resource && resource->get_path().is_resource_file()) {
+		path = resource->get_path();
+	}
+	if (path.is_empty() && get_edited_scene()) {
+		path = get_edited_scene()->get_scene_file_path();
+	}
+
+	if (path.is_empty()) {
+		EditorToaster::get_singleton()->popup_str(TTR("Nothing to browse to: the selection is not saved as an asset."), EditorToaster::SEVERITY_INFO);
+		return;
+	}
+
+	content_drawer->open_drawer();
+	FileSystemDock::get_singleton()->navigate_to_path(path);
+}
+
+void EditorNode::_toggle_debug_menu_item(const String &p_shortcut_path) {
+	// The Debug menu owns the state and the side effects (remote scene updates), so trigger its own item.
+	Ref<Shortcut> shortcut = ED_GET_SHORTCUT(p_shortcut_path);
+	for (int i = 0; i < debug_menu->get_item_count(); i++) {
+		if (debug_menu->get_item_shortcut(i) == shortcut) {
+			debug_menu->emit_signal(SceneStringName(id_pressed), debug_menu->get_item_id(i));
+			return;
+		}
+	}
+}
+
+void EditorNode::_rebuild_quick_settings_menu() {
+	PopupMenu *popup = ue_toolbar->get_quick_settings_button()->get_popup();
+	popup->clear();
+
+	EditorSettings *settings = EditorSettings::get_singleton();
+	Node3DEditor *editor_3d = Node3DEditor::get_singleton();
+	if (editor_3d) {
+		popup->add_check_item(TTRC("3D Snapping"), QS_SNAP_3D);
+		popup->set_item_checked(-1, editor_3d->is_snap_toggled());
+		popup->add_check_item(TTRC("3D Grid"), QS_GRID_3D);
+		popup->set_item_checked(-1, editor_3d->is_grid_visible());
+		popup->add_check_item(TTRC("Game View (hide editor visuals)"), QS_GAME_VIEW);
+		popup->set_item_checked(-1, editor_3d->is_game_view_enabled());
+		popup->add_separator();
+	}
+
+	popup->add_check_item(TTRC("Visible Collision Shapes"), QS_VISIBLE_COLLISIONS);
+	popup->set_item_checked(-1, settings->get_project_metadata("debug_options", "run_debug_collisions", false));
+	popup->add_check_item(TTRC("Visible Paths"), QS_VISIBLE_PATHS);
+	popup->set_item_checked(-1, settings->get_project_metadata("debug_options", "run_debug_paths", false));
+	popup->add_check_item(TTRC("Visible Navigation"), QS_VISIBLE_NAVIGATION);
+	popup->set_item_checked(-1, settings->get_project_metadata("debug_options", "run_debug_navigation", false));
+	popup->add_separator();
+
+	popup->add_check_item(TTRC("Save Scenes Before Running"), QS_SAVE_BEFORE_RUN);
+	popup->set_item_checked(-1, EDITOR_GET("run/auto_save/save_before_running"));
+	popup->add_check_item(TTRC("Update Continuously"), QS_UPDATE_CONTINUOUSLY);
+	popup->set_item_checked(-1, EDITOR_GET("interface/editor/display/update_continuously"));
+	popup->add_separator();
+
+	popup->add_item(TTRC("Editor Settings..."), QS_EDITOR_SETTINGS);
+	popup->add_item(TTRC("Project Settings..."), QS_PROJECT_SETTINGS);
+	popup->add_item(TTRC("Reset to Cgame Layout"), QS_RESET_LAYOUT);
+}
+
+void EditorNode::_quick_settings_pressed(int p_id) {
+	Node3DEditor *editor_3d = Node3DEditor::get_singleton();
+	switch (p_id) {
+		case QS_SNAP_3D: {
+			if (editor_3d) {
+				editor_3d->set_snap_toggled(!editor_3d->is_snap_toggled());
+			}
+		} break;
+		case QS_GRID_3D: {
+			if (editor_3d) {
+				editor_3d->set_grid_visible(!editor_3d->is_grid_visible());
+			}
+		} break;
+		case QS_GAME_VIEW: {
+			if (editor_3d) {
+				editor_3d->set_game_view_enabled(!editor_3d->is_game_view_enabled());
+			}
+		} break;
+		case QS_VISIBLE_COLLISIONS: {
+			_toggle_debug_menu_item("editor/visible_collision_shapes");
+		} break;
+		case QS_VISIBLE_PATHS: {
+			_toggle_debug_menu_item("editor/visible_paths");
+		} break;
+		case QS_VISIBLE_NAVIGATION: {
+			_toggle_debug_menu_item("editor/visible_navigation");
+		} break;
+		case QS_SAVE_BEFORE_RUN: {
+			EditorSettings::get_singleton()->set_setting("run/auto_save/save_before_running", !bool(EDITOR_GET("run/auto_save/save_before_running")));
+		} break;
+		case QS_UPDATE_CONTINUOUSLY: {
+			_menu_option(bool(EDITOR_GET("interface/editor/display/update_continuously")) ? SPINNER_UPDATE_WHEN_CHANGED : SPINNER_UPDATE_CONTINUOUSLY);
+		} break;
+		case QS_EDITOR_SETTINGS: {
+			_menu_option(EDITOR_OPEN_SETTINGS);
+		} break;
+		case QS_PROJECT_SETTINGS: {
+			project_settings_editor->popup_project_settings();
+		} break;
+		case QS_RESET_LAYOUT: {
+			_layout_menu_option(LAYOUT_RESET_CGAME);
+		} break;
+	}
+}
+
 void EditorNode::_update_layouts_menu() {
 	editor_layouts->clear();
 	overridden_default_layout = false;
@@ -6997,6 +7238,9 @@ void EditorNode::_update_layouts_menu() {
 	}
 
 	editor_layouts->add_shortcut(ED_SHORTCUT("layout/default", overridden_default_layout ? TTRC("Default (Overridden)") : TTRC("Default")), LAYOUT_DEFAULT);
+	editor_layouts->add_item(TTRC("Cgame (UE-style)"), LAYOUT_CGAME);
+	editor_layouts->add_item(TTRC("Godot Classic"), LAYOUT_CLASSIC);
+	editor_layouts->add_item(TTRC("Reset to Cgame Layout"), LAYOUT_RESET_CGAME);
 
 	if (err != OK) {
 		return; // No config.
@@ -7023,6 +7267,17 @@ void EditorNode::_layout_menu_option(int p_id) {
 			current_menu_option = p_id;
 			layout_dialog->set_save_mode_enabled(false);
 			layout_dialog->popup_centered();
+		} break;
+
+		case LAYOUT_CGAME:
+		case LAYOUT_RESET_CGAME: {
+			_apply_cgame_layout();
+		} break;
+
+		case LAYOUT_CLASSIC: {
+			content_drawer->close_drawer(false);
+			editor_dock_manager->load_docks_from_config(classic_layout, "docks");
+			_save_editor_layout();
 		} break;
 
 		case LAYOUT_DEFAULT: {
@@ -9133,6 +9388,8 @@ EditorNode::EditorNode() {
 	gui_base->set_anchor(SIDE_BOTTOM, Control::ANCHOR_END);
 	gui_base->set_end(Point2(0, 0));
 
+	CgameEditorUX::register_settings();
+
 	main_vbox = memnew(VBoxContainer);
 
 #ifdef ANDROID_ENABLED
@@ -9167,7 +9424,20 @@ EditorNode::EditorNode() {
 	main_vsplit->set_name("DockVSplitMain");
 	main_vsplit->set_vertical(true);
 	main_vsplit->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+
+	// Unreal-style main toolbar row (Save/Add, centered play group, Platforms/Quick Settings).
+	ue_toolbar = memnew(EditorUEToolbar);
+	ue_toolbar->set_visible(bool(EDITOR_GET("interface/cgame_ux/show_main_toolbar")));
+	main_vbox->add_child(ue_toolbar);
+
 	main_vbox->add_child(main_vsplit);
+
+	// Persistent bottom status bar (Content Drawer, Output, Undo History, background tasks, VCS branch).
+	status_bar = memnew(EditorStatusBar);
+	status_bar->set_visible(bool(EDITOR_GET("interface/cgame_ux/show_status_bar")));
+	main_vbox->add_child(status_bar);
+	status_bar->get_log_button()->connect(SceneStringName(pressed), callable_mp(this, &EditorNode::_status_bar_show_log));
+	status_bar->get_history_button()->connect(SceneStringName(pressed), callable_mp(this, &EditorNode::_status_bar_show_history));
 
 	main_hsplit = memnew(DockSplitContainer);
 	main_hsplit->set_name("DockHSplitMain");
@@ -9344,6 +9614,8 @@ EditorNode::EditorNode() {
 	ED_SHORTCUT_AND_COMMAND("editor/distraction_free_mode", TTRC("Distraction Free Mode"), KeyModifierMask::CTRL | KeyModifierMask::SHIFT | Key::F11);
 	ED_SHORTCUT_OVERRIDE("editor/distraction_free_mode", "macos", KeyModifierMask::META | KeyModifierMask::SHIFT | Key::D);
 	ED_SHORTCUT_AND_COMMAND("editor/toggle_last_opened_bottom_panel", TTRC("Toggle Last Opened Bottom Panel"), KeyModifierMask::CMD_OR_CTRL | Key::J);
+	// Unbound by default; the optional "Unreal-style" shortcut preset binds it to Ctrl+B.
+	ED_SHORTCUT_AND_COMMAND("editor/browse_to_asset", TTRC("Browse to Asset in Content Drawer"), Key::NONE);
 	distraction_free->set_shortcut(ED_GET_SHORTCUT("editor/distraction_free_mode"));
 	distraction_free->set_tooltip_text(TTRC("Toggle distraction-free mode."));
 	distraction_free->set_toggle_mode(true);
@@ -9589,6 +9861,13 @@ EditorNode::EditorNode() {
 	project_run_bar->connect("play_pressed", callable_mp(this, &EditorNode::_project_run_started));
 	project_run_bar->connect("stop_pressed", callable_mp(this, &EditorNode::_project_run_stopped));
 
+	ue_toolbar->setup(project_run_bar);
+	ue_toolbar->get_save_button()->connect(SceneStringName(pressed), callable_mp(this, &EditorNode::_menu_option).bind((int)SCENE_SAVE_SCENE));
+	ue_toolbar->get_add_button()->get_popup()->connect(SceneStringName(id_pressed), callable_mp(this, &EditorNode::_ue_add_menu_pressed));
+	ue_toolbar->get_platforms_button()->get_popup()->connect(SceneStringName(id_pressed), callable_mp(this, &EditorNode::_menu_option));
+	ue_toolbar->get_quick_settings_button()->get_popup()->connect("about_to_popup", callable_mp(this, &EditorNode::_rebuild_quick_settings_menu));
+	ue_toolbar->get_quick_settings_button()->get_popup()->connect(SceneStringName(id_pressed), callable_mp(this, &EditorNode::_quick_settings_pressed));
+
 	right_menu_hb = memnew(HBoxContainer);
 	right_menu_hb->set_mouse_filter(Control::MOUSE_FILTER_STOP);
 	title_bar->add_child(right_menu_hb);
@@ -9678,6 +9957,11 @@ EditorNode::EditorNode() {
 	get_project_settings()->connect_filesystem_dock_signals(filesystem_dock);
 	editor_dock_manager->add_dock(filesystem_dock);
 
+	content_drawer = memnew(ContentDrawer);
+	gui_base->add_child(content_drawer);
+	content_drawer->setup(filesystem_dock, status_bar);
+	status_bar->get_drawer_button()->connect(SceneStringName(pressed), callable_mp(content_drawer, &ContentDrawer::toggle_drawer));
+
 	memnew(InspectorDock(editor_data));
 	editor_dock_manager->add_dock(InspectorDock::get_singleton());
 
@@ -9690,11 +9974,9 @@ EditorNode::EditorNode() {
 	history_dock = memnew(HistoryDock);
 	editor_dock_manager->add_dock(history_dock);
 
-	// Add some offsets to make LEFT_R and RIGHT_L docks wider than minsize.
-	const int dock_hsize = 280;
-	// By default there is only 3 visible, so set 2 split offsets for them.
-	const int dock_hsize_scaled = dock_hsize * EDSCALE;
-	main_hsplit->set_split_offsets({ dock_hsize_scaled, -dock_hsize_scaled });
+	// Make the RIGHT_L column wider than its minimum size. By default only the center and this column are visible.
+	const int dock_hsize_scaled = 340 * EDSCALE;
+	main_hsplit->set_split_offsets({ -dock_hsize_scaled });
 
 	// Bottom panels.
 
@@ -10067,61 +10349,12 @@ EditorNode::EditorNode() {
 
 	// Define the default layout after everything is initialized.
 
-	default_layout.instantiate();
-	const String docks_section = "docks";
-	{
-		const String scene_key = SceneTreeDock::get_singleton()->get_effective_layout_key();
-		const String import_key = ImportDock::get_singleton()->get_effective_layout_key();
-		default_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_LEFT_UR), vformat("%s,%s", scene_key, import_key));
-		default_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_LEFT_UR) + "_selected_tab_idx", 0);
-	}
-	{
-		const String filesystem_key = filesystem_dock->get_effective_layout_key();
-		const String history_key = history_dock->get_effective_layout_key();
-		default_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_LEFT_BR), vformat("%s,%s", filesystem_key, history_key));
-		default_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_LEFT_BR) + "_selected_tab_idx", 0);
-	}
-	{
-		const String inspector_key = InspectorDock::get_singleton()->get_effective_layout_key();
-		const String signals_key = SignalsDock::get_singleton()->get_effective_layout_key();
-		const String groups_key = GroupsDock::get_singleton()->get_effective_layout_key();
-		default_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_RIGHT_UL), vformat("%s,%s,%s", inspector_key, signals_key, groups_key));
-		default_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_RIGHT_UL) + "_selected_tab_idx", 0);
-	}
-	{
-		const String _2d_key = CanvasItemEditor::get_singleton()->get_effective_layout_key();
-		const String _3d_key = Node3DEditor::get_singleton()->get_effective_layout_key();
-		const String script_key = ScriptEditor::get_singleton()->get_effective_layout_key();
-		String game_key;
-		if (GameView::get_dock()) {
-			game_key = GameView::get_dock()->get_effective_layout_key();
-		}
-		String asset_lib_key;
-		if (AssetLibraryEditorPlugin::get_library()) {
-			asset_lib_key = AssetLibraryEditorPlugin::get_library()->get_effective_layout_key();
-		}
-		default_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_MAIN_SCREEN), vformat("%s,%s,%s,%s,%s", _2d_key, _3d_key, script_key, game_key, asset_lib_key));
-	}
+	_build_default_layouts(audio_bus_editor);
 
-	int hsplits[] = { 0, dock_hsize, -dock_hsize, 0 };
-	for (int i = 0; i < (int)std_size(hsplits); i++) {
-		default_layout->set_value(docks_section, "dock_hsplit_" + itos(i + 1), hsplits[i]);
-	}
-	for (int i = 0; i < editor_dock_manager->get_vsplit_count(); i++) {
-		default_layout->set_value(docks_section, "dock_split_" + itos(i + 1), 0);
-	}
+	command_palette->add_command(TTR("Reset to Cgame Layout"), "editor/reset_cgame_layout", callable_mp(this, &EditorNode::_layout_menu_option).bind((int)LAYOUT_RESET_CGAME));
 
-	{
-		const String output_key = log->get_effective_layout_key();
-		const String audio_key = audio_bus_editor->get_effective_layout_key();
-		const String shader_key = ShaderEditorPlugin::get_singleton()->get_shader_dock()->get_effective_layout_key();
-
-		Dictionary offsets;
-		offsets[output_key] = -270;
-		offsets[audio_key] = -450;
-		offsets[shader_key] = -348;
-		default_layout->set_value(EDITOR_NODE_CONFIG_SECTION, "bottom_panel_offsets", offsets);
-	}
+	// Optional Unreal-style key bindings. Does nothing unless the preset setting is enabled.
+	CgameEditorUX::apply_shortcut_preset();
 
 	_update_layouts_menu();
 }

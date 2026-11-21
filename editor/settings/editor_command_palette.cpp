@@ -30,16 +30,24 @@
 
 #include "editor_command_palette.h"
 
+#include "core/config/project_settings.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "core/os/keyboard.h"
 #include "core/os/os.h"
+#include "editor/docks/filesystem_dock.h"
+#include "editor/editor_data.h"
 #include "editor/editor_node.h"
 #include "editor/editor_string_names.h"
+#include "editor/file_system/editor_file_system.h"
+#include "editor/gui/content_drawer.h"
 #include "editor/gui/editor_toaster.h"
 #include "editor/gui/filter_line_edit.h"
 #include "editor/settings/editor_settings.h"
+#include "editor/settings/editor_settings_dialog.h"
+#include "editor/settings/project_settings_editor.h"
 #include "editor/themes/editor_scale.h"
+#include "scene/main/node.h"
 #include "scene/gui/margin_container.h"
 #include "scene/gui/tree.h"
 
@@ -67,15 +75,196 @@ float EditorCommandPalette::_score_path(const String &p_search, const String &p_
 	return score * 0.69f;
 }
 
-void EditorCommandPalette::_update_command_search(const String &search_text) {
+void EditorCommandPalette::_cache_settings() {
+	cached_editor_settings.clear();
+	cached_project_settings.clear();
+
+	List<PropertyInfo> props;
+	EditorSettings::get_singleton()->get_property_list(&props);
+	for (const PropertyInfo &pi : props) {
+		if (pi.name.contains_char('/') && (pi.usage & PROPERTY_USAGE_EDITOR) && pi.name != "shortcuts" && !pi.name.begins_with("_")) {
+			cached_editor_settings.push_back(pi.name);
+		}
+	}
+
+	props.clear();
+	ProjectSettings::get_singleton()->get_property_list(&props);
+	for (const PropertyInfo &pi : props) {
+		if (pi.name.contains_char('/') && (pi.usage & PROPERTY_USAGE_EDITOR) && !pi.name.begins_with("_")) {
+			cached_project_settings.push_back(pi.name);
+		}
+	}
+}
+
+void EditorCommandPalette::_collect_node_results(const String &p_query, Vector<CommandEntry> &r_entries) {
+	Node *root = EditorNode::get_singleton()->get_edited_scene();
+	if (!root) {
+		return;
+	}
+
+	Vector<CommandEntry> found;
+	Vector<Node *> stack;
+	stack.push_back(root);
+	int scanned = 0;
+	while (!stack.is_empty() && scanned < MAX_SCANNED_ITEMS) {
+		Node *node = stack[stack.size() - 1];
+		stack.resize(stack.size() - 1);
+		scanned++;
+
+		const String node_name = node->get_name();
+		if (p_query.is_subsequence_ofn(node_name)) {
+			CommandEntry e;
+			e.key_name = "@node:" + String(root->get_path_to(node));
+			e.section = "Nodes";
+			e.display_name = vformat("%s  [%s]", node_name, node->get_class());
+			e.shortcut_text = String(root->get_path_to(node));
+			e.score = _score_path(p_query, node_name.to_lower()) * 0.95f;
+			found.push_back(e);
+		}
+
+		for (int i = node->get_child_count(false) - 1; i >= 0; i--) {
+			stack.push_back(node->get_child(i, false));
+		}
+	}
+
+	SortArray<CommandEntry, CommandEntryComparator> sorter;
+	sorter.sort(found.ptrw(), found.size());
+	for (int i = 0; i < MIN(found.size(), MAX_DYNAMIC_RESULTS); i++) {
+		r_entries.push_back(found[i]);
+	}
+}
+
+void EditorCommandPalette::_collect_file_results(const String &p_query, Vector<CommandEntry> &r_entries) {
+	if (!EditorFileSystem::get_singleton()) {
+		return;
+	}
+	EditorFileSystemDirectory *root_dir = EditorFileSystem::get_singleton()->get_filesystem();
+	if (!root_dir) {
+		return;
+	}
+
+	Vector<CommandEntry> found;
+	Vector<EditorFileSystemDirectory *> stack;
+	stack.push_back(root_dir);
+	int scanned = 0;
+	while (!stack.is_empty() && scanned < MAX_SCANNED_ITEMS) {
+		EditorFileSystemDirectory *dir = stack[stack.size() - 1];
+		stack.resize(stack.size() - 1);
+
+		for (int i = 0; i < dir->get_file_count(); i++) {
+			scanned++;
+			const String file_name = dir->get_file(i);
+			if (!p_query.is_subsequence_ofn(file_name)) {
+				continue;
+			}
+			CommandEntry e;
+			e.key_name = "@file:" + dir->get_file_path(i);
+			e.section = "Files";
+			e.display_name = file_name;
+			e.shortcut_text = dir->get_path();
+			e.score = _score_path(p_query, file_name.to_lower()) * 0.9f;
+			found.push_back(e);
+		}
+
+		for (int i = 0; i < dir->get_subdir_count(); i++) {
+			stack.push_back(dir->get_subdir(i));
+		}
+	}
+
+	SortArray<CommandEntry, CommandEntryComparator> sorter;
+	sorter.sort(found.ptrw(), found.size());
+	for (int i = 0; i < MIN(found.size(), MAX_DYNAMIC_RESULTS); i++) {
+		r_entries.push_back(found[i]);
+	}
+}
+
+void EditorCommandPalette::_collect_setting_results(const String &p_query, Vector<CommandEntry> &r_entries) {
+	if (cached_editor_settings.is_empty() && cached_project_settings.is_empty()) {
+		_cache_settings();
+	}
+
+	Vector<CommandEntry> found;
+	for (int pass = 0; pass < 2; pass++) {
+		const Vector<String> &names = pass == 0 ? cached_editor_settings : cached_project_settings;
+		for (const String &name : names) {
+			const String readable = name.replace("/", " > ").replace("_", " ");
+			if (!p_query.is_subsequence_ofn(name) && !p_query.is_subsequence_ofn(readable)) {
+				continue;
+			}
+			CommandEntry e;
+			e.key_name = (pass == 0 ? "@editor_setting:" : "@project_setting:") + name;
+			e.section = pass == 0 ? "Editor Settings" : "Project Settings";
+			e.display_name = readable;
+			e.shortcut_text = name;
+			e.score = MAX(_score_path(p_query, name.to_lower()), _score_path(p_query, readable.to_lower())) * 0.85f;
+			found.push_back(e);
+		}
+	}
+
+	SortArray<CommandEntry, CommandEntryComparator> sorter;
+	sorter.sort(found.ptrw(), found.size());
+	for (int i = 0; i < MIN(found.size(), MAX_DYNAMIC_RESULTS); i++) {
+		r_entries.push_back(found[i]);
+	}
+}
+
+void EditorCommandPalette::_execute_dynamic_result(const String &p_key) {
+	if (p_key.begins_with("@node:")) {
+		Node *root = EditorNode::get_singleton()->get_edited_scene();
+		Node *node = root ? root->get_node_or_null(NodePath(p_key.trim_prefix("@node:"))) : nullptr;
+		if (node) {
+			EditorSelection *selection = EditorNode::get_singleton()->get_editor_selection();
+			selection->clear();
+			selection->add_node(node);
+		}
+	} else if (p_key.begins_with("@file:")) {
+		const String path = p_key.trim_prefix("@file:");
+		const String type = EditorFileSystem::get_singleton()->get_file_type(path);
+		if (type == "PackedScene") {
+			EditorNode::get_singleton()->load_scene(path);
+		} else {
+			if (ContentDrawer::get_singleton()) {
+				ContentDrawer::get_singleton()->open_drawer();
+			}
+			FileSystemDock::get_singleton()->navigate_to_path(path);
+		}
+	} else if (p_key.begins_with("@editor_setting:")) {
+		const String name = p_key.trim_prefix("@editor_setting:");
+		EditorSettingsDialog::get_singleton()->popup_edit_settings();
+		EditorSettingsDialog::get_singleton()->set_current_section(name.get_slicec('/', 0));
+	} else if (p_key.begins_with("@project_setting:")) {
+		const String name = p_key.trim_prefix("@project_setting:");
+		ProjectSettingsEditor *project_settings = EditorNode::get_singleton()->get_project_settings();
+		project_settings->popup_project_settings(true);
+		project_settings->set_filter(name.get_slicec('/', name.get_slice_count("/") - 1).replace("_", " "));
+	}
+}
+
+void EditorCommandPalette::_update_command_search(const String &p_search_text) {
 	ERR_FAIL_COND(commands.is_empty());
 
 	HashMap<String, TreeItem *> sections;
 	TreeItem *first_section = nullptr;
 
+	// Parse an optional search prefix that restricts the kind of results.
+	String search_text = p_search_text;
+	int kinds = KIND_ALL;
+	const char *prefixes[] = { "cmd:", "node:", "file:", "setting:" };
+	const int prefix_kinds[] = { KIND_COMMANDS, KIND_NODES, KIND_FILES, KIND_SETTINGS };
+	for (int i = 0; i < 4; i++) {
+		if (search_text.begins_with(prefixes[i])) {
+			kinds = prefix_kinds[i];
+			search_text = search_text.substr(String(prefixes[i]).length()).strip_edges();
+			break;
+		}
+	}
+
 	// Filter possible candidates.
 	Vector<CommandEntry> entries;
 	for (const KeyValue<String, Command> &E : commands) {
+		if (!(kinds & KIND_COMMANDS)) {
+			break;
+		}
 		CommandEntry r;
 		r.key_name = E.key;
 		r.display_name = E.value.name;
@@ -94,6 +283,19 @@ void EditorCommandPalette::_update_command_search(const String &search_text) {
 			}
 
 			entries.push_back(r);
+		}
+	}
+
+	// Dynamic results are only searched for real queries, to keep the empty palette fast and short.
+	if (search_text.length() >= 2) {
+		if (kinds & KIND_NODES) {
+			_collect_node_results(search_text, entries);
+		}
+		if (kinds & KIND_FILES) {
+			_collect_file_results(search_text, entries);
+		}
+		if (kinds & KIND_SETTINGS) {
+			_collect_setting_results(search_text, entries);
 		}
 	}
 
@@ -116,7 +318,7 @@ void EditorCommandPalette::_update_command_search(const String &search_text) {
 
 	const int entry_limit = MIN(entries.size(), 300);
 	for (int i = 0; i < entry_limit; i++) {
-		String section_name = entries[i].key_name.get_slicec('/', 0);
+		String section_name = entries[i].section.is_empty() ? entries[i].key_name.get_slicec('/', 0) : entries[i].section;
 		TreeItem *section;
 
 		if (sections.has(section_name)) {
@@ -187,11 +389,16 @@ void EditorCommandPalette::_confirmed() {
 	const String command_key = selected_option != nullptr ? selected_option->get_metadata(0) : "";
 	if (!command_key.is_empty()) {
 		hide();
-		execute_command(command_key);
+		if (command_key.begins_with("@")) {
+			_execute_dynamic_result(command_key);
+		} else {
+			execute_command(command_key);
+		}
 	}
 }
 
 void EditorCommandPalette::open_popup() {
+	_cache_settings();
 	_update_command_search(String());
 	if (was_showed) {
 		popup(prev_rect);
@@ -327,8 +534,8 @@ EditorCommandPalette::EditorCommandPalette() {
 	add_child(vbc);
 
 	command_search_box = memnew(FilterLineEdit);
-	command_search_box->set_placeholder(TTRC("Filter Commands"));
-	command_search_box->set_accessibility_name(TTRC("Filter Commands"));
+	command_search_box->set_placeholder(TTRC("Search commands, nodes, files and settings (prefix: cmd: node: file: setting:)"));
+	command_search_box->set_accessibility_name(TTRC("Search commands, nodes, files and settings"));
 	command_search_box->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	command_search_box->connect(SceneStringName(text_changed), callable_mp(this, &EditorCommandPalette::_update_command_search));
 	MarginContainer *margin_container_csb = memnew(MarginContainer);

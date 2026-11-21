@@ -831,6 +831,7 @@ private:
 	bool mark_unsaved = true;
 
 	float refresh_countdown;
+	static constexpr int COALESCE_MULTI_SELECTION_THRESHOLD = 32;
 	bool update_tree_pending = false;
 	StringName _prop_edited;
 	StringName property_selected;

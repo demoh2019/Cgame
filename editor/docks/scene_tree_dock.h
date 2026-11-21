@@ -355,6 +355,10 @@ public:
 
 	void _focus_node();
 
+	// Entry points for the main toolbar "Add" menu.
+	void open_add_node_dialog() { _tool_selected(TOOL_NEW); }
+	void open_instantiate_scene_dialog() { _tool_selected(TOOL_INSTANTIATE); }
+
 	void add_root_node(Node *p_node);
 	void set_edited_scene(Node *p_scene);
 	void instantiate(const String &p_file);

@@ -71,6 +71,7 @@ class Window;
 class AudioStreamImportSettingsDialog;
 class AudioStreamPreviewGenerator;
 class BackgroundProgress;
+class ContentDrawer;
 class DependencyErrorDialog;
 class DockSplitContainer;
 class DynamicFontImportSettingsDialog;
@@ -78,6 +79,7 @@ class EditorAbout;
 class EditorBuildProfileManager;
 class EditorBottomPanel;
 class EditorCommandPalette;
+class EditorDock;
 class EditorDockManager;
 class EditorExport;
 class EditorExportPreset;
@@ -96,7 +98,9 @@ class EditorRunBar;
 class EditorSceneTabs;
 class EditorSelectionHistory;
 class EditorSettingsDialog;
+class EditorStatusBar;
 class EditorTitleBar;
+class EditorUEToolbar;
 class ExportTemplateManager;
 class EditorQuickOpenDialog;
 class FBXImporterManager;
@@ -206,6 +210,9 @@ public:
 		LAYOUT_SAVE,
 		LAYOUT_DELETE,
 		LAYOUT_DEFAULT,
+		LAYOUT_CGAME,
+		LAYOUT_CLASSIC,
+		LAYOUT_RESET_CGAME,
 
 		// Help menu.
 		HELP_SEARCH,
@@ -283,6 +290,36 @@ private:
 	EditorSelection *editor_selection = nullptr;
 	EditorSettingsDialog *editor_settings_dialog = nullptr;
 	HistoryDock *history_dock = nullptr;
+
+	// Cgame UE-style UX.
+	enum QuickSettingsItem {
+		QS_SNAP_3D,
+		QS_GRID_3D,
+		QS_GAME_VIEW,
+		QS_VISIBLE_COLLISIONS,
+		QS_VISIBLE_PATHS,
+		QS_VISIBLE_NAVIGATION,
+		QS_SAVE_BEFORE_RUN,
+		QS_UPDATE_CONTINUOUSLY,
+		QS_EDITOR_SETTINGS,
+		QS_PROJECT_SETTINGS,
+		QS_RESET_LAYOUT,
+	};
+
+	ContentDrawer *content_drawer = nullptr;
+	EditorUEToolbar *ue_toolbar = nullptr;
+	EditorStatusBar *status_bar = nullptr;
+	Ref<ConfigFile> classic_layout;
+
+	void _build_default_layouts(EditorDock *p_audio_bus_dock);
+	void _apply_cgame_layout();
+	void _rebuild_quick_settings_menu();
+	void _quick_settings_pressed(int p_id);
+	void _toggle_debug_menu_item(const String &p_shortcut_path);
+	void _ue_add_menu_pressed(int p_id);
+	void _status_bar_show_log();
+	void _status_bar_show_history();
+	void _browse_to_asset();
 
 	ProjectExportDialog *project_export = nullptr;
 	ProjectSettingsEditor *project_settings_editor = nullptr;

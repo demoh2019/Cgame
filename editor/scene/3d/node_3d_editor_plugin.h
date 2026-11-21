@@ -204,6 +204,7 @@ private:
 		MENU_VIEW_ORIGIN,
 		MENU_VIEW_GRID,
 		MENU_VIEW_GIZMOS_3D_ICONS,
+		MENU_VIEW_GAME_VIEW,
 		MENU_VIEW_CAMERA_SETTINGS,
 		MENU_LOCK_SELECTED,
 		MENU_UNLOCK_SELECTED,
@@ -236,6 +237,9 @@ private:
 	ConfirmationDialog *settings_dialog = nullptr;
 
 	bool snap_enabled = false;
+	bool game_view_enabled = false;
+	bool game_view_prev_grid = false;
+	bool game_view_prev_origin = false;
 	bool vertex_snap_origin_mode = false;
 	bool vertex_snap_use_collision = false;
 	EditorSpinSlider *snap_translate = nullptr;
@@ -460,6 +464,13 @@ public:
 	bool is_preserve_children_transform_enabled() const;
 	bool can_preserve_owned_children_transform(Node *p_node) const;
 	bool is_snap_enabled() const;
+	bool is_snap_toggled() const { return snap_enabled; }
+	void set_snap_toggled(bool p_enabled);
+	bool is_grid_visible() const { return grid_enabled; }
+	void set_grid_visible(bool p_visible);
+	// Game View hides editor-only visuals (grid, origin) to preview the scene like the running game.
+	bool is_game_view_enabled() const { return game_view_enabled; }
+	void set_game_view_enabled(bool p_enabled);
 	bool is_vertex_snap_origin_mode() const { return vertex_snap_origin_mode; }
 	bool is_vertex_snap_use_collision() const;
 	real_t get_translate_snap() const;

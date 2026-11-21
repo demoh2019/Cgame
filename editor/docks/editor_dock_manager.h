@@ -111,6 +111,8 @@ private:
 	PopupMenu *docks_menu = nullptr;
 	LocalVector<EditorDock *> docks_menu_docks;
 	Control *closed_dock_parent = nullptr;
+	EditorDock *focus_override_dock = nullptr;
+	Callable focus_override_callable;
 
 	EditorDock *_get_dock_tab_dragged();
 	void _dock_drag_stopped();
@@ -161,6 +163,14 @@ public:
 	void focus_dock(EditorDock *p_dock);
 	void force_focus_dock(EditorDock *p_dock); // Ignore can_switch_dock().
 	void make_dock_floating(EditorDock *p_dock);
+
+	// Hosting API used by transient overlays such as the Content Drawer.
+	// A hosted dock is not part of the layout: it stays closed and is saved as such.
+	void host_dock(EditorDock *p_dock, Control *p_host);
+	void unhost_dock(EditorDock *p_dock);
+	void pin_dock(EditorDock *p_dock, EditorDock::DockSlot p_slot);
+	// While `p_dock` is closed, focusing it calls `p_callable` instead of docking it into its last slot.
+	void set_focus_override(EditorDock *p_dock, const Callable &p_callable);
 
 	void set_docks_visible(bool p_show);
 	bool are_docks_visible() const;

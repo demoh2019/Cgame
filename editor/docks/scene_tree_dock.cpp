@@ -5262,7 +5262,8 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
 	set_name(TTRC("Scene"));
 	set_icon_name("PackedScene");
 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_scene", TTRC("Open Scene Dock")));
-	set_default_slot(EditorDock::DOCK_SLOT_LEFT_UR);
+		// Cgame (UE-style) default layout: Outliner, top of the right column.
+	set_default_slot(EditorDock::DOCK_SLOT_RIGHT_UL);
 
 	singleton = this;
 	editor_data = &p_editor_data;

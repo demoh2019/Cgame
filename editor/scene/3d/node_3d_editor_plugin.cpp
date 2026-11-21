@@ -977,6 +977,9 @@ void Node3DEditor::_menu_item_pressed(int p_option) {
 			view_layout_menu->get_popup()->set_item_checked(view_layout_menu->get_popup()->get_item_index(p_option), grid_enabled);
 
 		} break;
+		case MENU_VIEW_GAME_VIEW: {
+			set_game_view_enabled(!game_view_enabled);
+		} break;
 		case MENU_VIEW_CAMERA_SETTINGS: {
 			settings_dialog->popup_centered(settings_vbc->get_combined_minimum_size() + Size2(50, 50));
 		} break;
@@ -3751,6 +3754,7 @@ Node3DEditor::Node3DEditor() {
 	p->add_separator();
 	p->add_check_shortcut(ED_SHORTCUT("spatial_editor/view_origin", TTRC("View Origin")), MENU_VIEW_ORIGIN);
 	p->add_check_shortcut(ED_SHORTCUT("spatial_editor/view_grid", TTRC("View Grid"), Key::NUMBERSIGN), MENU_VIEW_GRID);
+	p->add_check_shortcut(ED_SHORTCUT("spatial_editor/game_view", TTRC("Game View"), Key::NONE), MENU_VIEW_GAME_VIEW);
 
 	p->add_separator();
 	p->add_submenu_node_item(TTRC("Preview Translation"), memnew(EditorTranslationPreviewMenu));
@@ -4348,6 +4352,45 @@ bool Node3DEditor::is_preserve_children_transform_enabled() const {
 
 bool Node3DEditor::can_preserve_owned_children_transform(Node *p_node) const {
 	return !p_node->is_instance() || !p_node->get_owner() || p_node->get_owner()->is_editable_instance(p_node);
+}
+
+void Node3DEditor::set_snap_toggled(bool p_enabled) {
+	// The button emits `toggled`, which updates `snap_enabled`.
+	tool_option_button[TOOL_OPT_USE_SNAP]->set_pressed(p_enabled);
+}
+
+void Node3DEditor::set_grid_visible(bool p_visible) {
+	if (grid_enabled != p_visible) {
+		_menu_item_pressed(MENU_VIEW_GRID);
+	}
+}
+
+void Node3DEditor::set_game_view_enabled(bool p_enabled) {
+	if (game_view_enabled == p_enabled) {
+		return;
+	}
+	game_view_enabled = p_enabled;
+
+	if (p_enabled) {
+		game_view_prev_grid = grid_enabled;
+		game_view_prev_origin = origin_enabled;
+		if (grid_enabled) {
+			_menu_item_pressed(MENU_VIEW_GRID);
+		}
+		if (origin_enabled) {
+			_menu_item_pressed(MENU_VIEW_ORIGIN);
+		}
+	} else {
+		if (game_view_prev_grid != grid_enabled) {
+			_menu_item_pressed(MENU_VIEW_GRID);
+		}
+		if (game_view_prev_origin != origin_enabled) {
+			_menu_item_pressed(MENU_VIEW_ORIGIN);
+		}
+	}
+
+	PopupMenu *popup = view_layout_menu->get_popup();
+	popup->set_item_checked(popup->get_item_index(MENU_VIEW_GAME_VIEW), p_enabled);
 }
 
 bool Node3DEditor::is_snap_enabled() const {

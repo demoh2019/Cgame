@@ -51,8 +51,22 @@ class EditorCommandPalette : public ConfirmationDialog {
 		int last_used = 0; // Store time as int, because doubles have problems with text serialization.
 	};
 
+	// Universal search: besides registered commands, the palette can search nodes of the edited
+	// scene, project files and editor/project settings. Prefixes narrow the search ("node:", "file:", "setting:", "cmd:").
+	enum SearchKind {
+		KIND_COMMANDS = 1,
+		KIND_NODES = 2,
+		KIND_FILES = 4,
+		KIND_SETTINGS = 8,
+		KIND_ALL = KIND_COMMANDS | KIND_NODES | KIND_FILES | KIND_SETTINGS,
+	};
+
+	static constexpr int MAX_DYNAMIC_RESULTS = 40;
+	static constexpr int MAX_SCANNED_ITEMS = 50000;
+
 	struct CommandEntry {
 		String key_name;
+		String section;
 		String display_name;
 		String shortcut_text;
 		int last_used = 0;
@@ -78,7 +92,15 @@ class EditorCommandPalette : public ConfirmationDialog {
 	HashMap<String, Command> commands;
 	HashMap<String, Pair<String, Ref<Shortcut>>> unregistered_shortcuts;
 
-	void _update_command_search(const String &search_text);
+	Vector<String> cached_editor_settings;
+	Vector<String> cached_project_settings;
+
+	void _update_command_search(const String &p_search_text);
+	void _cache_settings();
+	void _collect_node_results(const String &p_query, Vector<CommandEntry> &r_entries);
+	void _collect_file_results(const String &p_query, Vector<CommandEntry> &r_entries);
+	void _collect_setting_results(const String &p_query, Vector<CommandEntry> &r_entries);
+	void _execute_dynamic_result(const String &p_key);
 	float _score_path(const String &p_search, const String &p_path);
 	void _confirmed();
 	void _add_command(String p_command_name, String p_key_name, Callable p_binded_action, String p_shortcut_text = "None");
@@ -95,6 +117,7 @@ public:
 	void get_actions_list(List<String> *p_list) const;
 	void add_command(String p_command_name, String p_key_name, Callable p_action, const Ref<Shortcut> &p_shortcut = Ref<Shortcut>());
 	void execute_command(const String &p_command_name);
+	bool has_command(const String &p_key_name) const { return commands.has(p_key_name); }
 	void register_shortcuts_as_command();
 	Ref<Shortcut> add_shortcut_command(const String &p_command, const String &p_key, Ref<Shortcut> p_shortcut);
 	void remove_command(String p_key_name);
