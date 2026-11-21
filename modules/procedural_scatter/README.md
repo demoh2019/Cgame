@@ -134,3 +134,37 @@ regeneration, and native/fallback parity.
 Upstream reference:
 [Unreal PCG Framework Node Reference](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).
 
+
+## Attribute-only Density Remap and Stable-ID Selection
+
+The new reusable `PCGDensitySelector` engine class complements (and **does
+not replace**) the existing `PCGSpatialFilter3D.filter_indices_density()`
+spatial sampler:
+
+- `remap_densities(densities, input_min=0, input_max=1,
+  output_min=0, output_max=1, clamp_input=true)` transforms author-defined
+  point density masks before the spatial phase, with inverse output ranges
+  and finite all-or-nothing validation. Up to 16,384 packed values.
+- `select_indices(densities, stable_ids, seed=0, max_selected=4096)`
+  offers an **attribute-only** probability selector for non-spatial PCG
+  streams (or for feeding a later spatial node). Each selection is based on
+  a 32-bit avalanche hash of its stable ID and seed, not the global RNG.
+  With no output truncation, reordering source points does not change which
+  IDs are kept. Stable IDs must be integers in [0,2147483647], densities
+  finite in [0,1], seed nonnegative; invalid data fails closed.
+
+The existing spatial selector continues using its original 31-bit hash,
+spacing and sphere/box exclusion semantics. The two native selection
+algorithms are *independent* alternatives, not drop-in compatible random
+streams. Both algorithms remain deterministic within their own API.
+
+Days After now calls `PCGDensitySelector.remap_densities()` in the live
+foliage generation path to apply an adjustable cosmetic quality ceiling
+over the already-authored four-region biome density mask; the downstream
+`PCGSpatialFilter3D.filter_indices_density()` and exclusion routines
+are unchanged. The new `pcg_density_policy.gd` provides stock-Godot
+fallback parity for the generic remap and attribute-only selector.
+Regression tests cover native/fallback parity, remap boundaries, seeded
+stable IDs, and reversible density changes in the playable game.
+
+Reference: [Unreal PCG Density Remap nodes](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).
