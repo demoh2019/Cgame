@@ -125,7 +125,7 @@ void vertex() {
 // Wherever the near tile is magnified (under ~1 texel per pixel) the same layer is also sampled at a
 // 4.5x finer, rotated scale and applied as luminance detail: crisp grit underfoot, no extra textures.
 const float AA_MICRO_SCALE = 0.22;
-const float AA_PARALLAX_DEPTH = 0.09; // Metres of apparent relief at full displacement contrast.
+const float AA_PARALLAX_DEPTH = 0.14; // Metres of apparent relief at full displacement contrast.
 const float AA_CAVITY_STRENGTH = 0.5; // How dark the deepest cracks and gaps between stones get.
 
 // Parallax occlusion mapping: march the view ray through the layer's height field (4-14 steps,

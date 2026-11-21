@@ -22,41 +22,41 @@ const SPECIES := {
 	# Lush green carpet: crossed photo cards of the dense tufts photographed in the grass_medium_01 atlas.
 	# ~16 triangles a tuft, so thousands per tile; this is what covers the terrain.
 	"lush_grass": {"cards": true, "biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 1150, "scale": [0.6, 1.5],
-		"big": 0.1, "cluster": false, "variants": 5, "distance": 72.0},
+		"big": 0.1, "cluster": false, "variants": 3, "distance": 72.0},
 	# The grass carpet itself: the most common, everywhere, many variants, every size from short tufts to big clumps.
 	"grass_medium_01": {"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 180, "scale": [1.2, 4.4], "big": 0.2,
-		"cluster": false, "variants": 6, "distance": 60.0},
+		"cluster": false, "variants": 3, "distance": 60.0},
 	"grass_medium_02": {"biomes": ["plains", "forest", "swamp", "mountain"], "count": 90, "scale": [1.2, 4.0], "big": 0.2,
-		"cluster": false, "variants": 4, "distance": 60.0},
-	"dandelion_01": {"biomes": ["plains", "forest"], "count": 40, "scale": [1.1, 2.4], "cluster": true, "variants": 2},
-	"celandine_01": {"biomes": ["forest", "swamp", "plains"], "count": 34, "scale": [1.1, 2.4], "cluster": true, "variants": 2},
-	"nettle_plant": {"biomes": ["forest", "swamp", "plains"], "count": 30, "scale": [2.4, 5.5], "big": 0.15, "cluster": true, "variants": 2},
-	"weed_plant_02": {"biomes": ["plains", "beach", "mountain", "forest"], "count": 40, "scale": [1.2, 3.0], "cluster": false, "variants": 2},
-	"periwinkle_plant": {"biomes": ["forest", "swamp"], "count": 30, "scale": [1.1, 2.4], "cluster": true, "variants": 2},
+		"cluster": false, "variants": 2, "distance": 60.0},
+	"dandelion_01": {"biomes": ["plains", "forest"], "count": 40, "scale": [1.1, 2.4], "cluster": true},
+	"celandine_01": {"biomes": ["forest", "swamp", "plains"], "count": 34, "scale": [1.1, 2.4], "cluster": true},
+	"nettle_plant": {"biomes": ["forest", "swamp", "plains"], "count": 30, "scale": [2.4, 5.5], "big": 0.15, "cluster": true},
+	"weed_plant_02": {"biomes": ["plains", "beach", "mountain", "forest"], "count": 40, "scale": [1.2, 3.0], "cluster": false},
+	"periwinkle_plant": {"biomes": ["forest", "swamp"], "count": 30, "scale": [1.1, 2.4], "cluster": true},
 	"shrub_sorrel_01": {"biomes": ["forest", "plains", "swamp"], "count": 30, "scale": [1.4, 3.2], "cluster": true},
 	"moss_01": {"biomes": ["forest", "swamp", "mountain"], "count": 50, "scale": [2.0, 5.0], "cluster": false},
-	"fern_02": {"biomes": ["forest", "swamp"], "count": 22, "scale": [0.7, 2.0], "big": 0.15, "cluster": true, "variants": 2},
-	"shrub_02": {"biomes": ["forest", "plains", "swamp"], "count": 5, "scale": [0.5, 1.2], "big": 0.2, "cluster": false, "variants": 2},
-	"shrub_03": {"biomes": ["plains", "forest", "mountain"], "count": 18, "scale": [1.2, 3.2], "cluster": false, "variants": 2},
+	"fern_02": {"biomes": ["forest", "swamp"], "count": 22, "scale": [0.7, 2.0], "big": 0.15, "cluster": true},
+	"shrub_02": {"biomes": ["forest", "plains", "swamp"], "count": 5, "scale": [0.5, 1.2], "big": 0.2, "cluster": false},
+	"shrub_03": {"biomes": ["plains", "forest", "mountain"], "count": 18, "scale": [1.2, 3.2], "cluster": false},
 	"shrub_04": {"biomes": ["plains", "beach", "mountain"], "count": 10, "scale": [0.8, 2.4], "cluster": false},
-	"flower_empodium": {"biomes": ["plains"], "count": 26, "scale": [1.1, 2.0], "cluster": true, "variants": 2},
-	"flower_gazania": {"biomes": ["plains", "beach"], "count": 26, "scale": [1.1, 2.2], "cluster": true, "variants": 2},
-	"flower_ursinia": {"biomes": ["plains"], "count": 26, "scale": [1.1, 2.0], "cluster": true, "variants": 2},
+	"flower_empodium": {"biomes": ["plains"], "count": 26, "scale": [1.1, 2.0], "cluster": true},
+	"flower_gazania": {"biomes": ["plains", "beach"], "count": 26, "scale": [1.1, 2.2], "cluster": true},
+	"flower_ursinia": {"biomes": ["plains"], "count": 26, "scale": [1.1, 2.0], "cluster": true},
 	"flower_stinkkruid": {"biomes": ["plains", "beach"], "count": 18, "scale": [1.1, 2.0], "cluster": true},
 	"flower_heliophila": {"biomes": ["plains"], "count": 14, "scale": [0.9, 1.8], "cluster": true},
 	# Scanned stones, sticks, branches, bark and roots lying in the grass, every size.
 	"pebbles": {"files": ["rock_9.res", "stone_scatter.res", "rock_7.res"],
-		"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 130, "scale": [0.03, 0.22], "cluster": true,
-		"variants": 3, "distance": 32.0},
+		"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 170, "scale": [0.05, 0.32], "cluster": true,
+		"variants": 2, "distance": 36.0, "embed": 0.35},
 	"stones": {"files": ["rock_7.res", "rock_9.res", "mossy_rock_1.res", "mossy_rock_3.res", "mossy_rock_5.res", "stone_scatter.res"],
-		"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 50, "scale": [0.12, 0.7], "big": 0.12, "cluster": false,
-		"variants": 4, "distance": 80.0},
+		"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 60, "scale": [0.14, 0.75], "big": 0.12, "cluster": false,
+		"variants": 2, "distance": 80.0, "embed": 0.3},
 	# Knee-high boulders (no collision, so they stay below a survivor's knees).
 	"boulders": {"files": ["boulder_01.res", "boulder_02.res", "boulder_04.res", "boulder_05.res", "mossy_rock_2.res",
 		"mossy_rock_4.res", "mossy_rock_6.res"], "biomes": ["plains", "forest", "mountain", "beach", "swamp"], "count": 4,
-		"scale": [0.18, 0.45], "cluster": false, "variants": 2, "distance": 140.0},
+		"scale": [0.18, 0.45], "cluster": false, "variants": 1, "distance": 140.0, "embed": 0.25},
 	"wood": {"files": ["stick_1.res", "stick_2.res", "branches.res", "bark_debris.res", "single_root.res", "pine_roots.res"],
-		"biomes": ["forest", "swamp", "plains"], "count": 80, "scale": [0.2, 1.2], "big": 0.1, "cluster": false, "variants": 5,
+		"biomes": ["forest", "swamp", "plains"], "count": 140, "scale": [0.2, 1.2], "big": 0.1, "cluster": false, "variants": 3, "embed": 0.15,
 		"distance": 55.0},
 }
 
@@ -275,7 +275,13 @@ static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted
 				s = float(info["scale"][1]) * rng.randf_range(1.0, 1.8) # The odd huge clump or boulder.
 			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s * rng.randf_range(0.85, 1.15), s))
 			var h: float = float(here["h"])
-			transforms.append(Transform3D(basis, Vector3(lx, h - 0.03, lz)))
+			var sink: float = 0.03
+			if info.has("embed"):
+				# Stones and sticks settle into the soil, tilted any way, like real ones.
+				var tilt_axis := Vector3(rng.randf_range(-1.0, 1.0), 0.0, rng.randf_range(-1.0, 1.0)).normalized()
+				basis = Basis(tilt_axis, rng.randf_range(0.0, 0.45)) * basis
+				sink = plant_mesh.get_aabb().size.y * s * float(info["embed"])
+			transforms.append(Transform3D(basis, Vector3(lx, h - sink, lz)))
 			low = minf(low, h)
 			high = maxf(high, h)
 		if transforms.is_empty():
