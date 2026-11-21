@@ -31,4 +31,14 @@ public:
 	PackedInt32Array plan_visible_tiers(const PackedFloat64Array &p_distances,
 			const PackedByteArray &p_priority_flags, const PackedByteArray &p_visible_flags,
 			int p_full_budget, int p_priority_budget) const;
+
+	// Optional temporal retention for visible, near (<22m) IK users.
+	// p_retained_full_flags is a per-actor hint from the preceding frame:
+	// retained actors compete using max(0, distance - hysteresis), but only
+	// while still visible/eligible. Priority combat slots use real distance.
+	// No scene state, clock or actor references are kept by the planner.
+	PackedInt32Array plan_visible_tiers_stable(const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_priority_flags, const PackedByteArray &p_visible_flags,
+			const PackedByteArray &p_retained_full_flags, int p_full_budget,
+			int p_priority_budget, double p_hysteresis = 1.5) const;
 };
