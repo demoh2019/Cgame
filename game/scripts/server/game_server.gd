@@ -5876,6 +5876,8 @@ func _tick_percher(zombie) -> void:
 		var hurt: float = _hurt_player(prey, TreeAmbush.damage(zone))
 		if hurt > 0.0:
 			events.append({"type": "hit", "kind": "player", "id": prey.id, "damage": hurt, "by": -zombie.id})
+			if not _alive(prey):
+				_on_player_death(prey, -zombie.id) # The landing can be the killing blow.
 
 
 ## Stagger, shove and — if already reeling — knock the infected flat.
@@ -7440,6 +7442,11 @@ func _tick_players(delta: float) -> void:
 		if player.noise_timer <= 0.0:
 			player.noise_radius = 0.0
 		if not _alive(player):
+			if player.respawn_timer <= 0.0 and player.survival.health <= 0.0:
+				# Safety net: a damage path that skipped its death check must still drop
+				# the loot and count the death, never grant a free instant respawn.
+				_on_player_death(player, -1)
+				continue
 			player.respawn_timer -= delta
 			if player.respawn_timer <= 0.0:
 				_spawn_player(player)
