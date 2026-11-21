@@ -128,7 +128,7 @@ TEST_CASE("[PCGPolylineSampler3D] transform frames follow 3D path with orthonorm
 		CHECK(frame.basis.get_column(2).distance_to(Vector3(0, 0, 1)) < 0.00001);
 		CHECK(frame.basis.get_column(0).distance_to(Vector3(1, 0, 0)) < 0.00001);
 		CHECK(frame.basis.get_column(1).distance_to(Vector3(0, 1, 0)) < 0.00001);
-		CHECK(Math::is_equal_approx(frame.basis.determinant(), 1.0));
+		CHECK(Math::is_equal_approx(frame.basis.determinant(), real_t(1.0)));
 	}
 	CHECK(sampler->sample_transforms(path, 2.0) == frames);
 }
@@ -149,7 +149,7 @@ TEST_CASE("[PCGPolylineSampler3D] centered tangent bisectors turn smoothly throu
 	CHECK(corner.basis.get_column(2).distance_to(
 			Vector3(1, 0, 1).normalized()) < 0.00001);
 	CHECK(after.basis.get_column(2).distance_to(Vector3(0, 0, 1)) < 0.00001);
-	CHECK(Math::is_equal_approx(corner.basis.determinant(), 1.0));
+	CHECK(Math::is_equal_approx(corner.basis.determinant(), real_t(1.0)));
 	CHECK(Math::abs(corner.basis.get_column(0).dot(corner.basis.get_column(2))) < 0.00001);
 	CHECK(Math::abs(corner.basis.get_column(1).dot(corner.basis.get_column(2))) < 0.00001);
 }
@@ -165,7 +165,7 @@ TEST_CASE("[PCGPolylineSampler3D] vertical segments U-turns and single points ha
 		CHECK(frame.basis.get_column(2).distance_to(Vector3(0, 1, 0)) < 0.00001);
 		CHECK(frame.basis.get_column(0).is_finite());
 		CHECK(frame.basis.get_column(1).is_finite());
-		CHECK(Math::is_equal_approx(frame.basis.determinant(), 1.0));
+		CHECK(Math::is_equal_approx(frame.basis.determinant(), real_t(1.0)));
 	}
 	const Array loop = sampler->sample_transforms(
 			{ Vector3(0, 0, 0), Vector3(2, 0, 0), Vector3(0, 0, 0) }, 1.0);
@@ -175,7 +175,7 @@ TEST_CASE("[PCGPolylineSampler3D] vertical segments U-turns and single points ha
 		CHECK(frame.basis.get_column(0).is_finite());
 		CHECK(frame.basis.get_column(1).is_finite());
 		CHECK(frame.basis.get_column(2).is_finite());
-		CHECK(Math::is_equal_approx(frame.basis.determinant(), 1.0));
+		CHECK(Math::is_equal_approx(frame.basis.determinant(), real_t(1.0)));
 	}
 	const Transform3D reversal = loop[2];
 	CHECK(reversal.origin == Vector3(2, 0, 0));

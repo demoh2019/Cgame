@@ -90,7 +90,7 @@ PackedInt32Array PCGFoliageScalability3D::plan_visible_counts(
 			result.set(i, count);
 			continue;
 		}
-		const double t = Math::clamp((double(p_distances[i]) - p_near_distance) /
+		const double t = CLAMP((double(p_distances[i]) - p_near_distance) /
 				(p_far_distance - p_near_distance), 0.0, 1.0);
 		const double smooth = t * t * (3.0 - 2.0 * t);
 		const double fraction = NEAR_DENSITY[p_quality] +
@@ -286,7 +286,7 @@ PackedInt32Array PCGFoliageScalability3D::plan_projected_visible_counts(
 		}
 		const double pixels = double(p_mesh_diameters[i]) * p_focal_pixels /
 				(p_orthographic ? 1.0 : MAX(depth, 0.1));
-		const double t = Math::clamp((p_near_pixels - pixels) /
+		const double t = CLAMP((p_near_pixels - pixels) /
 				(p_near_pixels - p_far_pixels), 0.0, 1.0);
 		const double smooth = t * t * (3.0 - 2.0 * t);
 		const double fraction = NEAR_DENSITY[p_quality] +

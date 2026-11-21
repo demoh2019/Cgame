@@ -183,7 +183,7 @@ bool GameplayEffectTimeline::replace_snapshot(const Dictionary &p_effects) {
 		return false;
 	}
 	Vector<Effect> validated;
-	for (const Variant &key : p_effects) {
+	for (const Variant &key : p_effects.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
@@ -289,7 +289,7 @@ bool GameplayEffectTimeline::_replace_effect_branch(const StringName &p_branch, 
 	// optional periodic phase and normalization collisions, before any commit.
 	Vector<Effect> validated;
 	Vector<StringName> seen;
-	for (const Variant &key : p_effects) {
+	for (const Variant &key : p_effects.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
@@ -415,7 +415,7 @@ bool GameplayEffectTimeline::_replace_effect_branch(const StringName &p_branch, 
 	// Replication reconciliation retains pending pulses for continuing tags,
 	// even when authoritative remaining time or stack counts change.
 	Vector<StringName> expired_pulses;
-	for (const Variant &key : pending_pulses) {
+	for (const Variant &key : pending_pulses.keys()) {
 		const StringName tag = key;
 		if (_timeline_effect_in_branch(tag, p_branch) &&
 				(!p_preserve_pending || !continuing_pulses.has(tag))) {

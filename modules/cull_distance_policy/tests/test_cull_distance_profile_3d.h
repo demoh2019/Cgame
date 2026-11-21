@@ -68,12 +68,12 @@ TEST_CASE("[CullDistanceProfile3D] invalid input is distinguishable from no cull
 	CHECK(policy->get_cull_distance(AABB(Vector3(), Vector3(-1, 1, 1)), sizes, ranges) == -1.0);
 	CHECK(policy->get_cull_distance(AABB(Vector3(), Vector3(1000001, 1, 1)), sizes, ranges) == -1.0);
 	CHECK(policy->get_cull_distance(AABB(Vector3(10000001, 0, 0), Vector3(1, 1, 1)), sizes, ranges) == -1.0);
-	ranges[0] = Math::NaN;
+	ranges.set(0, Math::NaN);
 	CHECK(policy->get_cull_distance(box, sizes, ranges) == -1.0);
-	ranges[0] = 50.0f;
-	sizes[0] = -1.0f;
+	ranges.set(0, 50.0f);
+	sizes.set(0, -1.0f);
 	CHECK(policy->get_cull_distance(box, sizes, ranges) == -1.0);
-	sizes[0] = 2.0f;
+	sizes.set(0, 2.0f);
 	for (int i = 1; i < 129; ++i) {
 		sizes.push_back(2.0f);
 		ranges.push_back(50.0f);

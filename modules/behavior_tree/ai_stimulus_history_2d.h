@@ -35,6 +35,7 @@
 #include "core/templates/vector.h"
 #include "core/variant/array.h"
 #include "core/variant/dictionary.h"
+#include "core/variant/binder_common.h"
 
 /**
  * Bounded, source-aware event memory for already-authorized AI perceptions.

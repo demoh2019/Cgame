@@ -258,7 +258,7 @@ TEST_CASE("[EnvironmentQuery3D] Top-K honors max results and safety") {
 
 TEST_CASE("[EnvironmentQuery3D] Bounded top-K rejects unsafe requests and malformed points") {
 	Ref<EnvironmentQuery3D> q = make_query({
-		Vector3(NaN, 0, 0), Vector3(5, 0, 0)
+		Vector3(Math::NaN, 0, 0), Vector3(5, 0, 0)
 	});
 	ERR_PRINT_OFF
 	CHECK(q->query_top_positions(0).is_empty());
@@ -320,12 +320,12 @@ TEST_CASE("[EnvironmentQuery3D] Spread honors multiple threats and safety filter
 }
 
 TEST_CASE("[EnvironmentQuery3D] Spread rejects invalid requests without corrupting query state") {
-	Ref<EnvironmentQuery3D> q = make_query({ Vector3(NaN, 0, 0), Vector3(2, 0, 0) });
+	Ref<EnvironmentQuery3D> q = make_query({ Vector3(Math::NaN, 0, 0), Vector3(2, 0, 0) });
 	ERR_PRINT_OFF
 	CHECK(q->query_spread_positions(0, 2.0).is_empty());
 	CHECK(q->query_spread_positions(65, 2.0).is_empty());
 	CHECK(q->query_spread_positions(2, -1.0).is_empty());
-	CHECK(q->query_spread_positions(2, INF).is_empty());
+	CHECK(q->query_spread_positions(2, Math::INF).is_empty());
 	ERR_PRINT_ON
 	CHECK(q->query_spread_positions(2, 2.0) == PackedVector3Array({ Vector3(2, 0, 0) }));
 }
@@ -358,9 +358,9 @@ TEST_CASE("[EnvironmentQuery3D] Occupancy exclusions honor XZ mode and preserve 
 	too_many.resize(129);
 	ERR_PRINT_OFF
 	q->set_exclusion_positions(too_many);
-	q->set_exclusion_positions({ Vector3(NaN, 0, 0) });
+	q->set_exclusion_positions({ Vector3(Math::NaN, 0, 0) });
 	q->set_min_exclusion_distance(-1.0);
-	q->set_min_exclusion_distance(INF);
+	q->set_min_exclusion_distance(Math::INF);
 	ERR_PRINT_ON
 	CHECK(q->get_exclusion_positions() == original);
 	CHECK(q->get_min_exclusion_distance() == 3.0);
@@ -449,9 +449,9 @@ TEST_CASE("[EnvironmentQuery3D] Directional filter uses its own context and vali
 	const Vector3 original_axis = q->get_direction_axis();
 	ERR_PRINT_OFF
 	q->set_direction_axis(Vector3());
-	q->set_direction_axis(Vector3(NaN, 0, 0));
-	q->set_direction_origin(Vector3(INF, 0, 0));
-	q->set_min_direction_dot(INF);
+	q->set_direction_axis(Vector3(Math::NaN, 0, 0));
+	q->set_direction_origin(Vector3(Math::INF, 0, 0));
+	q->set_min_direction_dot(Math::INF);
 	q->set_min_direction_dot(-1.01);
 	q->set_min_direction_dot(1.01);
 	ERR_PRINT_ON
@@ -491,7 +491,7 @@ TEST_CASE("[EnvironmentQuery3D] Weighted scoring combines distance and safety") 
 }
 
 TEST_CASE("[EnvironmentQuery3D] Nonfinite candidate positions are skipped") {
-	Ref<EnvironmentQuery3D> q = make_query({ Vector3(NaN, 0, 0), Vector3(1, 0, 0) });
+	Ref<EnvironmentQuery3D> q = make_query({ Vector3(Math::NaN, 0, 0), Vector3(1, 0, 0) });
 	CHECK(q->query().size() == 1);
 	CHECK(int(first_result(q)["index"]) == 1);
 }
@@ -501,8 +501,8 @@ TEST_CASE("[EnvironmentQuery3D] Invalid origin and threat positions are rejected
 	q->set_origin(Vector3(2, 0, 0));
 	q->set_threat_position(Vector3(3, 0, 0));
 	ERR_PRINT_OFF
-	q->set_origin(Vector3(INF, 0, 0));
-	q->set_threat_position(Vector3(NaN, 0, 0));
+	q->set_origin(Vector3(Math::INF, 0, 0));
+	q->set_threat_position(Vector3(Math::NaN, 0, 0));
 	ERR_PRINT_ON
 	CHECK(q->get_origin() == Vector3(2, 0, 0));
 	CHECK(q->get_threat_position() == Vector3(3, 0, 0));
@@ -512,10 +512,10 @@ TEST_CASE("[EnvironmentQuery3D] Reject invalid limits and weights") {
 	Ref<EnvironmentQuery3D> q = make_query();
 	ERR_PRINT_OFF
 	q->set_min_distance(-1);
-	q->set_max_distance(NaN);
+	q->set_max_distance(Math::NaN);
 	q->set_desired_distance(-3);
 	q->set_distance_weight(-2);
-	q->set_safety_weight(INF);
+	q->set_safety_weight(Math::INF);
 	q->set_min_threat_distance(-1);
 	q->set_max_results(-1);
 	ERR_PRINT_ON
@@ -591,7 +591,7 @@ TEST_CASE("[EnvironmentQuery3D] Multi-threat limits, invalid actors, and legacy 
 	too_many.resize(33);
 	ERR_PRINT_OFF
 	q->set_threat_positions(too_many);
-	q->set_threat_positions({ Vector3(0, NaN, 0) });
+	q->set_threat_positions({ Vector3(0, Math::NaN, 0) });
 	ERR_PRINT_ON
 	CHECK(q->get_threat_positions().size() == 2);
 	CHECK(q->query_positions() == baseline);
@@ -611,14 +611,14 @@ TEST_CASE("[EnvironmentQuery3D] Random-best run modes honor score percentage cut
 	CHECK(best5[0] == Vector3(10, 0, 0)); // 0.9 best; cutoff 0.855.
 	const PackedVector3Array best25 = q->query_random_best_positions(25, 123);
 	REQUIRE(best25.size() == 1);
-	CHECK(best25[0] == Vector3(10, 0, 0) || best25[0] == Vector3(30, 0, 0));
+	CHECK((best25[0] == Vector3(10, 0, 0) || best25[0] == Vector3(30, 0, 0)));
 	CHECK(q->query_random_best_positions(25, 123) == best25);
 	q->set_max_results(1);
 	CHECK(q->query_random_best_positions(25, 123) == best25); // Cap is output-only.
 	CHECK(q->query_random_best_positions(0, -3) == best5);
 	const PackedVector3Array any = q->query_random_best_positions(100, -3);
 	REQUIRE(any.size() == 1);
-	CHECK(any[0] == Vector3(10, 0, 0) || any[0] == Vector3(30, 0, 0) || any[0] == Vector3(40, 0, 0));
+	CHECK((any[0] == Vector3(10, 0, 0) || any[0] == Vector3(30, 0, 0) || any[0] == Vector3(40, 0, 0)));
 }
 
 TEST_CASE("[EnvironmentQuery3D] Random-best varies seed across tied scores without gameplay RNG") {
@@ -645,7 +645,7 @@ TEST_CASE("[EnvironmentQuery3D] Random-best varies seed across tied scores witho
 
 TEST_CASE("[EnvironmentQuery3D] Random-best keeps all safety filters and fails closed") {
 	Ref<EnvironmentQuery3D> q = make_query({
-		Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 8), Vector3(NaN, 0, 0)
+		Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 8), Vector3(Math::NaN, 0, 0)
 	});
 	q->set_max_distance(10.0);
 	q->set_horizontal_only(true);
@@ -741,9 +741,9 @@ TEST_CASE("[EnvironmentQuery3D] Donut rejects invalid geometry and respects hard
 	ERR_PRINT_OFF
 	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), -1.0, 4.0, 3, 4).is_empty());
 	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 5.0, 4.0, 3, 4).is_empty());
-	CHECK(EnvironmentQuery3D::sample_donut(Vector3(NaN, 0, 0), 1.0, 4.0, 3, 4).is_empty());
+	CHECK(EnvironmentQuery3D::sample_donut(Vector3(Math::NaN, 0, 0), 1.0, 4.0, 3, 4).is_empty());
 	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 0.0, Math::INF, 3, 4).is_empty());
-	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 4.0, 3, 4, NaN).is_empty());
+	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 4.0, 3, 4, Math::NaN).is_empty());
 	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 4.0, 0, 4).is_empty());
 	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 4.0, 257, 4).is_empty());
 	CHECK(EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 4.0, 3, 0).is_empty());
@@ -781,13 +781,13 @@ TEST_CASE("[EnvironmentQuery3D] Cone invalid geometry fails closed before alloca
 	ERR_PRINT_OFF
 	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(), 1.0, 4.0, 2, 3).is_empty());
 	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(0, 1, 0), 1.0, 4.0, 2, 3).is_empty());
-	CHECK(EnvironmentQuery3D::sample_cone(Vector3(NaN, 0, 0), Vector3(1, 0, 0), 1.0, 4.0, 2, 3).is_empty());
-	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(INF, 0, 0), 1.0, 4.0, 2, 3).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(Math::NaN, 0, 0), Vector3(1, 0, 0), 1.0, 4.0, 2, 3).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(Math::INF, 0, 0), 1.0, 4.0, 2, 3).is_empty());
 	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), -1.0, 4.0, 2, 3).is_empty());
 	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 5.0, 4.0, 2, 3).is_empty());
 	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 2, 3, 361.0).is_empty());
 	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 2, 3, -0.1).is_empty());
-	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 2, 3, NaN).is_empty());
+	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 2, 3, Math::NaN).is_empty());
 	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 0, 3).is_empty());
 	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 2, 4097).is_empty());
 	CHECK(EnvironmentQuery3D::sample_cone(Vector3(), Vector3(1, 0, 0), 1.0, 4.0, 17, 4096).is_empty());
@@ -852,10 +852,10 @@ TEST_CASE("[EnvironmentQuery3D] Oriented grid validates input and enforces memor
 	ERR_PRINT_OFF
 	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(), Vector2(1, 1), 1).is_empty());
 	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 1, 0), Vector2(1, 1), 1).is_empty());
-	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(INF, 0, 0), Vector3(0, 0, 1), Vector2(1, 1), 1).is_empty());
-	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(NaN, 0, 1), Vector2(1, 1), 1).is_empty());
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(Math::INF, 0, 0), Vector3(0, 0, 1), Vector2(1, 1), 1).is_empty());
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(Math::NaN, 0, 1), Vector2(1, 1), 1).is_empty());
 	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 0, 1), Vector2(-1, 1), 1).is_empty());
-	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 0, 1), Vector2(1, INF), 1).is_empty());
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 0, 1), Vector2(1, Math::INF), 1).is_empty());
 	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 0, 1), Vector2(1, 1), 0).is_empty());
 	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 0, 1), Vector2(1, 1), 1, 0).is_empty());
 	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 0, 1), Vector2(1, 1), 1, 65537).is_empty());
@@ -891,17 +891,17 @@ TEST_CASE("[EnvironmentQuery3D] Fibonacci annulus accepts zero-radius and thin a
 	const PackedVector3Array thin = EnvironmentQuery3D::sample_fibonacci_annulus(center, 4.0, 4.0, 13);
 	REQUIRE(thin.size() == 13);
 	for (const Vector3 &point : thin) {
-		CHECK(Math::is_equal_approx((point - center).length(), 4.0));
+		CHECK(Math::is_equal_approx((point - center).length(), real_t(4.0)));
 	}
 }
 
 TEST_CASE("[EnvironmentQuery3D] Fibonacci annulus rejects invalid geometry before allocation") {
 	ERR_PRINT_OFF
-	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(INF, 0, 0), 1, 4, 8).is_empty());
+	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(Math::INF, 0, 0), 1, 4, 8).is_empty());
 	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), -1, 4, 8).is_empty());
 	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 5, 4, 8).is_empty());
-	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 1, INF, 8).is_empty());
-	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 1, 4, 8, NaN).is_empty());
+	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 1, Math::INF, 8).is_empty());
+	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 1, 4, 8, Math::NaN).is_empty());
 	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 1, 4, 0).is_empty());
 	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 1, 4, 65537).is_empty());
 	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 1, 1e250, 8).is_empty());
@@ -970,7 +970,7 @@ TEST_CASE("[EnvironmentQuery3D] EQS query budget invalid requests fail closed") 
 TEST_CASE("[EnvironmentQuery3D] Incremental top-K matches one-shot ranking and exact indices") {
 	Ref<EnvironmentQuery3D> q = make_query({
 		Vector3(3, 0, 0), Vector3(1, 0, 0), Vector3(3, 0, 0),
-		Vector3(8, 0, 0), Vector3(5, 0, 0), Vector3(NaN, 0, 0),
+		Vector3(8, 0, 0), Vector3(5, 0, 0), Vector3(Math::NaN, 0, 0),
 		Vector3(4, 0, 0), Vector3(9, 0, 0)
 	});
 	q->set_max_distance(8);

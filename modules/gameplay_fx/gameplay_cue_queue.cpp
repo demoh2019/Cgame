@@ -179,7 +179,7 @@ bool GameplayCueQueue::replace_active(const Dictionary &p_snapshot, int p_priori
 		return false;
 	}
 	Vector<ActiveCue> validated;
-	for (const Variant &key : p_snapshot) {
+	for (const Variant &key : p_snapshot.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
@@ -243,7 +243,7 @@ bool GameplayCueQueue::replace_active_branch(const StringName &p_branch, const D
 	Vector<StringName> seen;
 	int wanted = 0;
 	bool unchanged = true;
-	for (const Variant &key : p_snapshot) {
+	for (const Variant &key : p_snapshot.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
@@ -285,7 +285,7 @@ bool GameplayCueQueue::replace_active_branch(const StringName &p_branch, const D
 			combined.erase(cue.tag);
 		}
 	}
-	for (const Variant &key : p_snapshot) {
+	for (const Variant &key : p_snapshot.keys()) {
 		const int64_t stacks = int64_t(p_snapshot[key]);
 		if (stacks > 0) {
 			combined[StringName(key)] = stacks;

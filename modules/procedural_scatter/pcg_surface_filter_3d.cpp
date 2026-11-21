@@ -119,7 +119,7 @@ Array PCGSurfaceFilter3D::align_transforms(const Array &p_transforms,
 		const Vector3 axis = Vector3::UP.cross(target_up);
 		Basis tilt;
 		if (max_tilt > 0.0 && axis.length_squared() > 1.0e-12) {
-			const double slope = Math::acos(Math::clamp(double(target_up.y), 0.0, 1.0));
+			const double slope = Math::acos(CLAMP(double(target_up.y), 0.0, 1.0));
 			tilt = Basis(axis.normalized(), MIN(slope, max_tilt));
 		}
 		aligned[i] = Transform3D(tilt * original.basis, original.origin);

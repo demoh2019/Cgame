@@ -53,7 +53,7 @@ bool AIThreatTable2D::record(Dictionary p_entries, int64_t p_peer_id, double p_d
 		// Stable lowest-ID tie breaking: independent of packet / Dictionary order.
 		// A weak incidental hit cannot evict an established participant.
 		int64_t smallest_id = -1;
-		double smallest = INF;
+		double smallest = Math::INF;
 		const Array keys = p_entries.keys();
 		for (int i = 0; i < keys.size(); ++i) {
 			const Variant key = keys[i];

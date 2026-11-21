@@ -10,6 +10,7 @@
 #include "core/string/string_name.h"
 #include "core/templates/vector.h"
 #include "core/variant/dictionary.h"
+#include "core/variant/binder_common.h"
 #include "core/variant/variant.h"
 
 // A reusable deterministic timeline: time moves only when tick(delta) is called.

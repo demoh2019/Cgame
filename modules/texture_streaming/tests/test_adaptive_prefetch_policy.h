@@ -38,10 +38,10 @@ TEST_CASE("[TextureStreaming] VRAM pressure suppresses only speculative mip pref
 }
 
 TEST_CASE("[TextureStreaming] integer budget thresholds are overflow-safe") {
-	constexpr uint64_t HUGE = UINT64_MAX;
-	CHECK(adaptive_prefetch_mips(2, 2, HUGE, HUGE, true) == 0);
-	CHECK(adaptive_prefetch_mips(2, 0, 0, HUGE, true) == 2);
-	CHECK(adaptive_prefetch_mips(2, 0, HUGE / 2, HUGE, true) == 2);
+	constexpr uint64_t HUGE_BUDGET = UINT64_MAX;
+	CHECK(adaptive_prefetch_mips(2, 2, HUGE_BUDGET, HUGE_BUDGET, true) == 0);
+	CHECK(adaptive_prefetch_mips(2, 0, 0, HUGE_BUDGET, true) == 2);
+	CHECK(adaptive_prefetch_mips(2, 0, HUGE_BUDGET / 2, HUGE_BUDGET, true) == 2);
 	CHECK(adaptive_prefetch_mips(2, 1, 0, 1, true) == 2);
 	CHECK(adaptive_prefetch_mips(2, 0, 1, 1, true) == 0);
 }
