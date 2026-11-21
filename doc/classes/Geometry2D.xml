@@ -63,6 +63,17 @@
 				The operation may result in an outer polygon (boundary) and inner polygon (hole) produced which could be distinguished by calling [method is_polygon_clockwise].
 			</description>
 		</method>
+		<method name="prune_points_min_distance">
+			<return type="PackedInt32Array" />
+			<param index="0" name="points" type="PackedVector2Array" />
+			<param index="1" name="min_distance" type="float" />
+			<param index="2" name="max_kept" type="int" default="-1" />
+			<description>
+				Cgame extension: performs deterministic greedy 2D point self-pruning, returning indices of kept points in their original order. Each point is kept only when it is at least [param min_distance] away from [b]every previously kept point[/b]; exactly equal distances are allowed. The first candidate is always retained when [param max_kept] is positive or unlimited. This is an ordered filter, not a stochastic Poisson-disk generator or a reorder/sort operation. [param max_kept] limits the result count; -1 keeps all qualifying points.
+				Ordinary inputs use a 2D spatial hash with a 3×3 neighborhood query. Extreme coordinate-to-radius ratios fall back to an exact full scan rather than overflowing grid coordinates. The entire input is validated before pruning: at most 8192 finite points, finite nonnegative [param min_distance] with a finite squared value, and [param max_kept] between -1 and 8192. Invalid input returns an empty array. A zero minimum distance retains all points, including duplicates, up to the requested maximum. The input array is not modified.
+				Useful for procedural scatter placement, vegetation, props, decals and candidate collision filtering. Does not inspect actual mesh bounds or physics bodies.
+			</description>
+		</method>
 		<method name="get_nearest_neighbors">
 			<return type="PackedInt32Array[]" />
 			<param index="0" name="points" type="PackedVector2Array" />
