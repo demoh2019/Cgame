@@ -1824,7 +1824,8 @@ func _build_nature_decor_entry(entry: Dictionary) -> void:
 	# thinning, so streamed chunks keep all later seeded categories unchanged.
 	# Gatherables, collisions, landmarks and server zombie spawns are untouched.
 	if file.begins_with("Bush"):
-		# Cliff ledges need full 3D spacing, not XZ-only pruning.
+		# Cliff ledges use height-aware, scale-dependent 3D PCG pruning.
+		# Large bushes reserve more room; separate terraces remain populated.
 		transforms = SceneryBatches.thin_cosmetic_transforms_3d(transforms, 1.6)
 	elif file.begins_with("Pebble"):
 		# Surface debris keeps planar spacing, now accounting for each pebble's randomized scale.
