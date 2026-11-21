@@ -902,20 +902,22 @@ static func enchanted_id(base: String, level: int) -> String:
 
 
 ## The unenchanted item an id belongs to ("club_2@3" -> "club_2").
-static func base_id(id: String) -> String:
-	return id.get_slice("@", 0)
+static func unenchanted_id(id: String) -> String:
+	return base_id(id).get_slice("@", 0)
 
 
 static func enchant_of(id: String) -> int:
 	return int(item(id).get("enchant", 0))
 
 
-## Albion item power: 300 + 100 per tier + 100 per enchantment level (T4.1 = 800).
+## Albion item power: 300 + 100 per tier + 100 per enchantment level (T4.1 = 800),
+## plus the quality bonus (Good +20, Outstanding +40, Excellent +60, Masterpiece +100).
 static func item_power(id: String) -> int:
 	var tier: int = tier_of(id)
 	if tier <= 0:
 		return 0
-	return 300 + 100 * tier + 100 * enchant_of(id)
+	var quality_bonus: int = [0, 0, 20, 40, 60, 100][clampi(int(item(id).get("quality", 1)), 0, 5)]
+	return 300 + 100 * tier + 100 * enchant_of(id) + quality_bonus
 
 
 ## What enchanting `id` one level further costs: {material: count, "silver": n}, or {} if it cannot be enchanted.

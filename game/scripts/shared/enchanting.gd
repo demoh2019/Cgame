@@ -31,7 +31,8 @@ static func enchant(inventory, item_id: String) -> Dictionary:
 		return {"ok": false, "reason": "cannot_enchant"}
 	if not inventory.has_all(cost):
 		return {"ok": false, "reason": "need_materials", "cost": cost}
-	var next_id: String = Defs.enchanted_id(Defs.base_id(item_id), Defs.enchant_of(item_id) + 1)
+	# Quality (e.g. "+4" Excellent) is kept; only the enchantment level goes up.
+	var next_id: String = Defs.with_quality(Defs.enchanted_id(Defs.unenchanted_id(item_id), Defs.enchant_of(item_id) + 1), Defs.quality_of(item_id))
 	if not Defs.is_item(next_id):
 		return {"ok": false, "reason": "cannot_enchant"}
 	var was_equipped: bool = inventory.is_equipped(item_id)

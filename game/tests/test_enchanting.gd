@@ -14,9 +14,11 @@ func run(t) -> void:
 	t.check(Defs.is_item("club_2@1") and Defs.is_item("club_2@3"), "gear has .1-.3 variants")
 	t.check(not Defs.is_item("club_2@4"), "enchantment stops at .3")
 	t.check(not Defs.is_item("wood_2@1"), "resources are not enchantable")
-	t.eq(Defs.base_id("club_2@2"), "club_2", "base id strips the enchant")
+	t.eq(Defs.unenchanted_id("club_2@2+3"), "club_2", "unenchanted id strips enchant and quality")
 	t.eq(Defs.item_power("club_4"), 700, "T4 flat is 700 IP (Albion scale)")
 	t.eq(Defs.item_power("club_4@1"), 800, "each enchant adds 100 IP")
+	t.eq(Defs.item_power("club_4@1+5"), 900, "Masterpiece adds 100 IP on top")
+	t.check(Defs.is_item("club_4@2+3"), "enchant and quality combine")
 	t.check(Combat.weapon_damage("club_2@2") > Combat.weapon_damage("club_2"), "enchanted weapons hit harder")
 	t.eq(Defs.tier_of("club_2@3"), 2, "tier is unchanged")
 	t.eq(Defs.enchant_cost("club_2@3"), {}, ".3 cannot go further")
@@ -43,6 +45,13 @@ func run(t) -> void:
 	t.near(bag.durability("club_2@1"), 60.0, 0.001, "durability carries over")
 	t.eq(bag.count("rune"), 0, "runes are spent")
 	t.eq(bag.count("silver"), 0, "silver fee is spent")
+
+	var fine := Inventory.new()
+	fine.add("club_2+4", 1)
+	var fine_cost: Dictionary = Defs.enchant_cost("club_2+4")
+	for id in fine_cost:
+		fine.add(str(id), int(fine_cost[id]))
+	t.eq(Enchanting.enchant(fine, "club_2+4").get("item"), "club_2@1+4", "enchanting keeps item quality")
 
 	t.current = "drops scale with risk and enemy"
 	var rng := RandomNumberGenerator.new()
