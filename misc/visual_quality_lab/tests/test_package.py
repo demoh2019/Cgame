@@ -509,11 +509,37 @@ class VisualQualityPackageTests(unittest.TestCase):
             self.assertIn(token, demo)
         self.assertIn('attributes.health <= 0.0', character)
         for filename in ('test_combat_component.gd', 'test_combat_selection.gd',
-                         'test_hostile_sentry.gd', 'test_combat_streaming_runtime.gd'):
+                         'test_hostile_sentry.gd', 'test_combat_streaming_runtime.gd', 'test_combat_visibility.gd', 'test_combat_visibility_runtime.gd'):
             self.assertTrue((ROOT / 'tests' / filename).is_file())
 
+    def test_v18_combat_visibility_uses_godot_physics_safe_queries(self):
+        source = (ROOT / "addons/visual_quality/combat_visibility.gd").read_text()
+        for token in ("WorldCombatVisibility3D", "PhysicsRayQueryParameters3D.create",
+                      "direct_space_state.intersect_ray", "Array[RID]",
+                      "is_instance_valid(target)", "hit_is_clear", "origin.is_finite()"):
+            self.assertIn(token, source)
+        self.assertIn('get_rid()', source)
+
+    def test_v18_physics_tick_input_queue_and_cover_in_game(self):
+        director = (ROOT / "addons/visual_quality/combat_controller.gd").read_text()
+        sentry = (ROOT / "addons/visual_quality/hostile_sentry.gd").read_text()
+        demo = (ROOT / "demo.gd").read_text()
+        for token in ('request_strike', 'request_shockwave', '_queued_strike',
+                      '_queued_shockwave', 'max_visibility_checks', 'cover_collision_mask',
+                      'Visibility.has_clear_path', 'visibility_checks_last'):
+            self.assertIn(token, director)
+        self.assertIn('Visibility.has_clear_path', sentry)
+        self.assertIn('combat_director.request_strike()', demo)
+        self.assertIn('combat_director.request_shockwave()', demo)
+        self.assertLess(director.index('func _physics_process'), director.index('func request_strike'))
+        self.assertNotIn('combat_director.strike()', demo)
+
+    def test_v18_combat_visibility_test_suites_exist(self):
+        for file in ('test_combat_visibility.gd', 'test_combat_visibility_runtime.gd'):
+            self.assertTrue((ROOT / 'tests' / file).is_file())
+
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd', 'test_world_telemetry.gd', 'test_world_budget_governor.gd', 'test_streaming_planner.gd', 'test_streaming_cell_profiler.gd', 'test_predictive_streaming_runtime.gd', 'test_world_interaction.gd', 'test_world_interaction_runtime.gd', 'test_inventory_component.gd', 'test_inventory_crafting.gd', 'test_inventory_persistence.gd', 'test_inventory_gameplay.gd', 'test_attributes.gd', 'test_abilities.gd', 'test_equipment.gd', 'test_equipment_persistence.gd', 'test_combat_component.gd', 'test_combat_selection.gd', 'test_hostile_sentry.gd', 'test_combat_streaming_runtime.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd', 'test_world_telemetry.gd', 'test_world_budget_governor.gd', 'test_streaming_planner.gd', 'test_streaming_cell_profiler.gd', 'test_predictive_streaming_runtime.gd', 'test_world_interaction.gd', 'test_world_interaction_runtime.gd', 'test_inventory_component.gd', 'test_inventory_crafting.gd', 'test_inventory_persistence.gd', 'test_inventory_gameplay.gd', 'test_attributes.gd', 'test_abilities.gd', 'test_equipment.gd', 'test_equipment_persistence.gd', 'test_combat_component.gd', 'test_combat_selection.gd', 'test_hostile_sentry.gd', 'test_combat_streaming_runtime.gd', 'test_combat_visibility.gd', 'test_combat_visibility_runtime.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
