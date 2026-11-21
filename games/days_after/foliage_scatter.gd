@@ -353,7 +353,7 @@ func regenerate() -> void:
     # Selection runs only when a cosmetic batch is rebuilt, never per frame.
     # Stable physical cell IDs preserve the visual variant on regeneration.
     _selected_variants = WeightedVariants.choose_variants(
-        _selected_stable_ids, VARIANT_WEIGHTS, VARIANT_SEED)
+        _selected_stable_ids, PackedFloat32Array(VARIANT_WEIGHTS), VARIANT_SEED)
     if _selected_variants.size() != _selected_positions.size():
         _selected_variants.resize(_selected_positions.size())
         _selected_variants.fill(0) # Fail open: retain all cosmetic plants.
