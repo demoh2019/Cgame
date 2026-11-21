@@ -57,6 +57,7 @@ const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const AmbientTickBudget = preload("res://scripts/client/ambient_tick_budget.gd")
 const GraphicsCinematicDof = preload("res://scripts/client/graphics_cinematic_dof.gd")
 const RainGear = preload("res://scripts/client/character_rain_gear.gd")
 const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
@@ -129,6 +130,9 @@ var _visual_weather_wind := Vector2.ZERO
 var _visual_biome := "plains"
 var atmosphere
 var _ambient_motes
+var _ambient_budget = AmbientTickBudget.new()
+var _ambient_was_underground := false
+var _ambient_monitors: Array[StringName] = []
 var _ambient_birds
 var _fish_shoals
 var _dusk_bats
@@ -213,6 +217,9 @@ var _demo_frames := 0 # Frames since the first snapshot arrived.
 
 
 func _exit_tree() -> void:
+	for monitor_name in _ambient_monitors:
+		Performance.remove_custom_monitor(monitor_name)
+	_ambient_monitors.clear()
 	# GPU timestamp queries belong to the active online viewport only.
 	if get_viewport() != null:
 		RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), false)
@@ -222,6 +229,17 @@ func _exit_tree() -> void:
 
 func _ready() -> void:
 	Engine.physics_ticks_per_second = 30
+	# Client-side cosmetic update budget, exposed to Godot's built-in profiler.
+	for monitor in [
+		[&"Albion/AmbientUpdates", Callable(_ambient_budget, "updated_total")],
+		[&"Albion/AmbientSkipped", Callable(_ambient_budget, "skipped_total")],
+		[&"Albion/AmbientSlots", Callable(_ambient_budget, "current_budget")],
+		[&"Albion/AmbientPressurePct", Callable(_ambient_budget, "pressure_percent")],
+	]:
+		var monitor_name: StringName = monitor[0]
+		if not Performance.has_custom_monitor(monitor_name):
+			Performance.add_custom_monitor(monitor_name, monitor[1])
+			_ambient_monitors.append(monitor_name)
 	GraphicsQuality.load_preference()
 	_access = UiAccessibilityLayer.new() # Loads settings, language and key bindings; must precede the menus below.
 	add_child(_access)
@@ -1547,6 +1565,11 @@ func _update_time_of_day(delta: float) -> void:
 	var storming: bool = demo_storm or (str(weather.get("condition", "clear")) == "storm" and not bool(weather.get("sheltered", false)))
 	var clock: float = client.server_time if demo_phase < 0.0 else demo_phase * WorldCycle.DAY_LENGTH
 	var underground: bool = client != null and client.you.has("x") and Dungeon.is_underground(float(client.you["x"]))
+	# Only cosmetic ambience is time-sliced; network interpolation and combat
+	# still update every frame. Force an immediate refresh across dungeon edges.
+	_ambient_budget.begin_frame(delta, GraphicsQuality.level())
+	var ambient_force: bool = underground != _ambient_was_underground
+	_ambient_was_underground = underground
 	# Occlusion has a CPU cost: enable it only when enclosed dungeon walls
 	# provide opportunities to hide other rooms behind them.
 	DungeonOcclusion.update_viewport(get_viewport(), GraphicsQuality.level(),
@@ -1662,23 +1685,31 @@ func _update_time_of_day(delta: float) -> void:
 			_damage_direction.update_view(here, delta)
 		_update_hover_outline(delta)
 		if _dust_devils != null:
-			_dust_devils.update_view(client.world, here, _visual_biome, _visual_weather_wind, atmosphere.storm,
-				WorldCycle.daylight(clock), 0 if underground else GraphicsQuality.level(), delta)
+			var dust_delta: float = _ambient_budget.consume("dust_devils", delta, ambient_force)
+			if dust_delta > 0.0:
+				_dust_devils.update_view(client.world, here, _visual_biome, _visual_weather_wind, atmosphere.storm,
+					WorldCycle.daylight(clock), 0 if underground else GraphicsQuality.level(), dust_delta)
 		if _shooting_stars != null:
 			_shooting_stars.update_view(WorldCycle.daylight(clock), atmosphere.storm,
 				0 if underground else GraphicsQuality.level(), delta)
 		if _dragonflies != null:
-			_dragonflies.update_view(client.world, here, WorldCycle.daylight(clock), atmosphere.storm,
-				GraphicsQuality.level(), delta, underground)
+			var dragonfly_delta: float = _ambient_budget.consume("dragonflies", delta, ambient_force)
+			if dragonfly_delta > 0.0:
+				_dragonflies.update_view(client.world, here, WorldCycle.daylight(clock), atmosphere.storm,
+					GraphicsQuality.level(), dragonfly_delta, underground)
 		if _zombie_flies != null:
 			_zombie_flies.update_view(entities, here, WorldCycle.daylight(clock), atmosphere.storm,
 				0 if underground else GraphicsQuality.level(), delta)
 		if _tumbleweeds != null:
-			_tumbleweeds.update_view(client.world, here, _visual_biome, _visual_weather_wind,
-				GraphicsQuality.level(), delta, underground)
+			var tumble_delta: float = _ambient_budget.consume("tumbleweeds", delta, ambient_force)
+			if tumble_delta > 0.0:
+				_tumbleweeds.update_view(client.world, here, _visual_biome, _visual_weather_wind,
+					GraphicsQuality.level(), tumble_delta, underground)
 		if _dusk_bats != null:
-			_dusk_bats.update_view(here, WorldCycle.daylight(clock), atmosphere.storm,
-				GraphicsQuality.level(), delta, underground)
+			var bats_delta: float = _ambient_budget.consume("dusk_bats", delta, ambient_force)
+			if bats_delta > 0.0:
+				_dusk_bats.update_view(here, WorldCycle.daylight(clock), atmosphere.storm,
+					GraphicsQuality.level(), bats_delta, underground)
 
 
 func _aim_direction() -> Vector2:
