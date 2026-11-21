@@ -1,11 +1,13 @@
 extends MultiMeshInstance3D
 ## Procedural, collision-free foliage in one instanced draw batch.
 ## Exclusion spheres protect spawn, scavenging resources, and ruined structures.
-## The native engine filter and the stock-Godot fallback share stable input order.
+## Native PCG and stock-Godot fallback agree on stable-ID density and exclusions.
 
 const GRID_SIZE: int = 25
 const MAX_INSTANCES: int = 160
 const MIN_SPACING: float = 2.1
+const DENSITY_SEED: int = 90421
+const DENSITY_MODULUS: int = 2147483647
 const ZONE_CENTERS = [
     Vector3(0.0, 0.0, 3.0),    # Player spawn
     Vector3(-2.0, 0.0, -3.0),  # Water scavenging cluster
@@ -65,6 +67,56 @@ func get_exclusion_box_maxs() -> PackedVector3Array:
     return PackedVector3Array(BOX_MAXS)
 
 
+func _make_ids() -> PackedInt32Array:
+    var stable_ids := PackedInt32Array()
+    for index in range(GRID_SIZE * GRID_SIZE):
+        # Physical grid-cell ID, independent of input-array order.
+        stable_ids.push_back((index * 137) % (GRID_SIZE * GRID_SIZE))
+    return stable_ids
+
+
+func _make_densities() -> PackedFloat32Array:
+    var densities := PackedFloat32Array()
+    for index in range(GRID_SIZE * GRID_SIZE):
+        var cell: int = (index * 137) % (GRID_SIZE * GRID_SIZE)
+        var x: int = cell % GRID_SIZE
+        var z: int = floori(float(cell) / float(GRID_SIZE))
+        # A worn north-south approach has little vegetation, while
+        # undisturbed outer woodland is much denser.
+        var density: float = 0.94
+        if x >= 10 and x <= 14:
+            density = 0.13
+        elif z < 6:
+            density = 0.46
+        elif x < 8:
+            density = 0.74
+        densities.push_back(density)
+    return densities
+
+
+func get_density_values() -> PackedFloat32Array:
+    return _make_densities()
+
+
+func _density_accepts(stable_id: int, density: float) -> bool:
+    var hashed: int = (stable_id * 48271 + DENSITY_SEED * 69621 + 1729) % DENSITY_MODULUS
+    hashed = (hashed * 16807 + 13) % DENSITY_MODULUS
+    return float(hashed) / float(DENSITY_MODULUS) < density
+
+
+func _density_fallback(densities: PackedFloat32Array,
+        stable_ids: PackedInt32Array) -> PackedInt32Array:
+    var indices := PackedInt32Array()
+    for i in range(densities.size()):
+        if _density_accepts(stable_ids[i], densities[i]):
+            indices.push_back(i)
+    return indices
+
+
+func get_density_sampled_count() -> int:
+    return _density_fallback(_make_densities(), _make_ids()).size()
+
+
 func _make_candidates() -> PackedVector3Array:
     var candidates := PackedVector3Array()
     # 137 is coprime to 625, so each grid cell is visited exactly once.
@@ -94,9 +146,10 @@ func _in_any_box(point: Vector3,
 
 func _filter_fallback(candidates: PackedVector3Array,
         centers: PackedVector3Array, radii: PackedFloat64Array,
-        box_mins: PackedVector3Array, box_maxs: PackedVector3Array) -> PackedInt32Array:
+        box_mins: PackedVector3Array, box_maxs: PackedVector3Array,
+        sampled_indices: PackedInt32Array) -> PackedInt32Array:
     var indices := PackedInt32Array()
-    for index in range(candidates.size()):
+    for index in sampled_indices:
         var point: Vector3 = candidates[index]
         if _in_any_box(point, box_mins, box_maxs):
             continue
@@ -121,13 +174,28 @@ func _filter_fallback(candidates: PackedVector3Array,
 
 func _select_indices(candidates: PackedVector3Array,
         centers: PackedVector3Array, radii: PackedFloat64Array,
-        box_mins: PackedVector3Array, box_maxs: PackedVector3Array) -> PackedInt32Array:
-    if ClassDB.class_exists("PCGSpatialFilter3D"):
+        box_mins: PackedVector3Array, box_maxs: PackedVector3Array,
+        prefer_native: bool = true) -> PackedInt32Array:
+    var densities := _make_densities()
+    var stable_ids := _make_ids()
+    if prefer_native and ClassDB.class_exists("PCGSpatialFilter3D"):
         var filter: Object = ClassDB.instantiate("PCGSpatialFilter3D")
-        if filter != null and filter.has_method("filter_indices_excluding_volumes"):
-            return filter.call("filter_indices_excluding_volumes", candidates,
+        if (filter != null and filter.has_method("filter_indices_density")
+                and filter.has_method("filter_indices_excluding_volumes")):
+            var sampled: PackedInt32Array = filter.call("filter_indices_density",
+                candidates, densities, stable_ids, DENSITY_SEED, 4096)
+            var sampled_positions := PackedVector3Array()
+            for index in sampled:
+                sampled_positions.push_back(candidates[index])
+            var local_indices: PackedInt32Array = filter.call(
+                "filter_indices_excluding_volumes", sampled_positions,
                 centers, radii, box_mins, box_maxs, MIN_SPACING, MAX_INSTANCES)
-    return _filter_fallback(candidates, centers, radii, box_mins, box_maxs)
+            var selected := PackedInt32Array()
+            for local_index in local_indices:
+                selected.push_back(sampled[local_index])
+            return selected
+    return _filter_fallback(candidates, centers, radii, box_mins,
+        box_maxs, _density_fallback(densities, stable_ids))
 
 
 func get_box_only_candidate_count() -> int:
@@ -158,7 +226,7 @@ func verify_native_fallback_parity() -> bool:
     var box_mins := get_exclusion_box_mins()
     var box_maxs := get_exclusion_box_maxs()
     return (_select_indices(candidates, centers, radii, box_mins, box_maxs)
-        == _filter_fallback(candidates, centers, radii, box_mins, box_maxs))
+        == _select_indices(candidates, centers, radii, box_mins, box_maxs, false))
 
 
 func regenerate() -> void:

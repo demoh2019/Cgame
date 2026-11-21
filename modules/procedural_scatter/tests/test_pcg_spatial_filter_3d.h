@@ -297,4 +297,86 @@ TEST_CASE("[PCGSpatialFilter3D] mixed volumes reject invalid boxes and points at
 			many_mins, many_maxs, 1.0).is_empty());
 }
 
+
+TEST_CASE("[PCGSpatialFilter3D] seeded density is stable by ID across reorder and positions") {
+	Ref<PCGSpatialFilter3D> filter;
+	filter.instantiate();
+	PackedVector3Array candidates;
+	for (int i = 0; i < 9; ++i) {
+		candidates.push_back(Vector3(i * 2, 0, 0));
+	}
+	const PackedFloat32Array densities = { 1.0f, 0.0f, 0.5f, 0.25f, 0.9f, 1.0f, 0.1f, 0.2f, 0.75f };
+	const PackedInt32Array ids = { 100, 101, 102, 103, 104, 105, 106, 107, 108 };
+	const PackedInt32Array expected = { 0, 2, 4, 5, 8 };
+	CHECK(filter->filter_indices_density(candidates, densities, ids, 7) == expected);
+	CHECK(filter->filter_indices_density(candidates, densities, ids, 7) == expected);
+	CHECK(filter->filter_indices_density(candidates, densities, ids, 8) ==
+			PackedInt32Array({ 0, 4, 5, 8 }));
+	CHECK(filter->filter_indices_density(candidates, densities, ids, 7, 3) ==
+			PackedInt32Array({ 0, 2, 4 }));
+	PackedVector3Array reversed_positions;
+	PackedFloat32Array reversed_densities;
+	PackedInt32Array reversed_ids;
+	for (int i = 8; i >= 0; --i) {
+		reversed_positions.push_back(candidates[i] + Vector3(0, 20, 0));
+		reversed_densities.push_back(densities[i]);
+		reversed_ids.push_back(ids[i]);
+	}
+	CHECK(filter->filter_indices_density(reversed_positions, reversed_densities,
+			reversed_ids, 7) == PackedInt32Array({ 0, 3, 4, 6, 8 }));
+	const PackedFloat32Array binary = { 1.0f, 0.0f, 1.0f };
+	const PackedInt32Array binary_ids = { 3, 4, 5 };
+	CHECK(filter->filter_indices_density(
+			{ Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(2, 0, 0) },
+			binary, binary_ids, 99) == PackedInt32Array({ 0, 2 }));
+	CHECK(candidates[0] == Vector3(0, 0, 0));
+	CHECK(ids[0] == 100);
+}
+
+TEST_CASE("[PCGSpatialFilter3D] density rejects invalid input atomically and caps outputs") {
+	Ref<PCGSpatialFilter3D> filter;
+	filter.instantiate();
+	const PackedVector3Array points = { Vector3(0, 0, 0), Vector3(2, 0, 0) };
+	const PackedFloat32Array valid_densities = { 1.0f, 1.0f };
+	const PackedInt32Array valid_ids = { 1, 2 };
+	CHECK(filter->filter_indices_density(points, valid_densities, valid_ids, 7, 0).is_empty());
+	CHECK(filter->filter_indices_density(points, { 1.0f }, valid_ids, 7).is_empty());
+	CHECK(filter->filter_indices_density(points, valid_densities, { 1 }, 7).is_empty());
+	CHECK(filter->filter_indices_density(points, valid_densities, { 1, 1 }, 7).is_empty());
+	CHECK(filter->filter_indices_density(points, valid_densities, { -1, 2 }, 7).is_empty());
+	CHECK(filter->filter_indices_density(points, valid_densities, { 2147483647, 2 }, 7).is_empty());
+	CHECK(filter->filter_indices_density(points, { Math::NaN, 1.0f }, valid_ids, 7).is_empty());
+	CHECK(filter->filter_indices_density(points, { 1.0f, Math::INF }, valid_ids, 7).is_empty());
+	CHECK(filter->filter_indices_density(points, { -0.01f, 1.0f }, valid_ids, 7).is_empty());
+	CHECK(filter->filter_indices_density(points, { 1.01f, 1.0f }, valid_ids, 7).is_empty());
+	CHECK(filter->filter_indices_density(points, valid_densities, valid_ids, -1).is_empty());
+	CHECK(filter->filter_indices_density(points, valid_densities, valid_ids, 2147483647LL).is_empty());
+	CHECK(filter->filter_indices_density(points, valid_densities, valid_ids, 7, -1).is_empty());
+	CHECK(filter->filter_indices_density(points, valid_densities, valid_ids, 7, 4097).is_empty());
+	CHECK(filter->filter_indices_density(
+			{ Vector3(0, 0, 0), Vector3(Math::NaN, 0, 0) },
+			valid_densities, valid_ids, 7).is_empty());
+	CHECK(filter->filter_indices_density(
+			{ Vector3(0, 0, 0), Vector3(10000001, 0, 0) },
+			valid_densities, valid_ids, 7).is_empty());
+	PackedVector3Array lots_of_points;
+	PackedFloat32Array lots_of_densities;
+	PackedInt32Array lots_of_ids;
+	for (int i = 0; i < 16385; ++i) {
+		lots_of_points.push_back(Vector3(i, 0, 0));
+		lots_of_densities.push_back(1.0f);
+		lots_of_ids.push_back(i);
+	}
+	CHECK(filter->filter_indices_density(
+			lots_of_points, lots_of_densities, lots_of_ids, 7).is_empty());
+	lots_of_points.resize(16384);
+	lots_of_densities.resize(16384);
+	lots_of_ids.resize(16384);
+	const PackedInt32Array capped = filter->filter_indices_density(
+			lots_of_points, lots_of_densities, lots_of_ids, 7);
+	REQUIRE(capped.size() == 4096);
+	CHECK(capped[0] == 0);
+	CHECK(capped[4095] == 4095);
+}
+
 } // namespace TestPCGSpatialFilter3D
