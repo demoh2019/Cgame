@@ -193,12 +193,13 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 					else:
 						unseen_seconds += 0.3
 					# Native sight memory mirrors only validated server-side raycasts.
+					# advance_time(delta) already aged it at the top of this tick.
 					# Hunters retain the last OBSERVED position, not the target's
 					# current position while the survivor is hidden behind cover.
 					if ClassDB.class_exists("AIVisualSensor2D"):
 						if _native_senses == null:
 							_native_senses = NativeSenses.new()
-						_native_senses.record_confirmed_sight(here, target, float(data["lose"]), clear, 0.3)
+						_native_senses.record_confirmed_sight(here, target, float(data["lose"]), clear, 0.0)
 						if _native_senses.remembers_sight():
 							last_known_target = _native_senses.last_seen_position()
 				if unseen_seconds > HUNTER_MEMORY_SECONDS:
