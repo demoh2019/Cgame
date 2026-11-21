@@ -1807,7 +1807,7 @@ func _update_time_of_day(delta: float) -> void:
 			if float(_ambient_rate_cache.get(lane, -1.0)) != rate_scale:
 				if bool(_ambient_budget.call("set_lane_rate_scale", lane, rate_scale)):
 					_ambient_rate_cache[lane] = rate_scale
-# Underground atmospheric effects have no meaningful presentation work.
+	# Underground atmospheric effects have no meaningful presentation work.
 	# Stop reserving slots or accumulating delta after the forced hide update.
 	# Old custom engine binaries retain their existing reduced-rate behavior.
 	if _ambient_lane_gates_supported and underground != _ambient_was_underground:

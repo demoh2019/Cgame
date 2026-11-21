@@ -352,7 +352,8 @@ func run(t) -> void:
 			t.eq(gated.last_frame_counts().x, 0, "disabled lanes consume no CPU slots")
 			t.eq(gated.get_reserved_estimated_cost_us(), 0, "disabled lanes reserve no estimated cost")
 		if native_gated != null:
-			t.eq(int(native_gated.call("last_frame_counts").x), gated.last_frame_counts().x,
+			var native_counts: Vector2i = native_gated.call("last_frame_counts")
+			t.eq(native_counts.x, gated.last_frame_counts().x,
 				"native/script granted lane count agrees")
 	gated.set_lane_enabled("dragonflies", false)
 	gated.reset()

@@ -74,9 +74,12 @@ bool FrameUpdateBudget::set_lane_enabled(const StringName &p_lane, bool p_enable
 		lane.enabled = p_enabled;
 		lane.elapsed = 0.0;
 		lane.overdue_frames = 0;
-		// A transition may occur after begin_frame; invalidate stale reservations.
-		reserved_lanes.clear();
-		reserved_estimated_cost_us = 0;
+		// Do not invalidate unrelated lanes when a gate changes mid-frame.
+		const int reservation = reserved_lanes.find(i);
+		if (reservation >= 0) {
+			reserved_lanes.remove_at(reservation);
+			reserved_estimated_cost_us = MAX(int64_t(0), reserved_estimated_cost_us - lane.estimated_cost_us);
+		}
 		return true;
 	}
 	return false;

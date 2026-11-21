@@ -215,8 +215,9 @@ func set_lane_enabled(lane: String, enabled: bool) -> bool:
 	_enabled[lane] = enabled
 	_elapsed.erase(lane)
 	_overdue.erase(lane)
-	_reserved.clear()
-	_reserved_estimate_us = 0
+	if _reserved.has(lane):
+		_reserved.erase(lane)
+		_reserved_estimate_us = maxi(0, _reserved_estimate_us - int(_estimates.get(lane, 0)))
 	return true
 
 

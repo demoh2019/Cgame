@@ -298,6 +298,7 @@ TEST_CASE("[FrameUpdateBudget] Paused lanes skip budget, preserve cost, and resu
 	b->reset();
 	CHECK_FALSE(b->is_lane_enabled("ambient")); // Reset retains configuration.
 	CHECK(b->set_lane_enabled("ambient", true));
+	CHECK(b->set_lane_enabled("other", false)); // Keep one eligible lane for the resume assertion.
 	b->begin_frame(0.01, 0);
 	CHECK(b->consume("ambient", 0.01) > 0.0); // Reset quality refresh.
 	b->begin_frame(0.01, 0);
