@@ -41,11 +41,13 @@
 #include "sound_concurrency.h"
 #include "audio_occlusion_probe_planner.h"
 #include "sound_propagation.h"
+#include "spatial_sound_event_policy.h"
 
 #include "core/object/class_db.h"
 
 #ifdef TESTS_ENABLED
 #include "tests/test_audio_mix_snapshot_controller.h"
+#include "tests/test_spatial_sound_event_policy.h"
 #include "tests/test_audio_occlusion_probe_planner.h"
 #endif
 
@@ -56,6 +58,7 @@ void initialize_gameplay_fx_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(SoundConcurrency);
 	GDREGISTER_CLASS(SoundConcurrencyManager);
 	GDREGISTER_CLASS(SoundPropagation);
+	GDREGISTER_CLASS(SpatialSoundEventPolicy);
 	GDREGISTER_CLASS(AudioOcclusionProbePlanner);
 	GDREGISTER_CLASS(RadialForceField3D);
 	GDREGISTER_CLASS(GameplayEffectTimeline);
