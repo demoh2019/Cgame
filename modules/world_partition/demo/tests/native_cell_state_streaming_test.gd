@@ -237,6 +237,8 @@ func _run() -> void:
 
     # Native route prefetch, independent of observation and ordinary leases.
     var target_cell := Vector2i(1, 0)
+    world.call("set_route_connection_link", CELL, target_cell, "PatrolBridgeLink")
+    assert(str(world.call("get_route_connection_link", CELL, target_cell)) == "PatrolBridgeLink")
     world.call("set_cell_scene", target_cell, SCENE_PATH)
     var corridor: Array = world.call("get_cell_route", CELL, target_cell)
     assert(corridor.size() == 2)
@@ -273,6 +275,33 @@ func _run() -> void:
     assert(int(world.call("release_cell_route", route_tokens)) == 2)
     assert(int(world.call("release_cell_route", route_tokens)) == 0)
     assert(int(world.call("get_cell_lease_count_total")) == 0)
+
+    # A precise link gate blocks the edge but leaves both cell regions
+    # available. The bridge state survives cell unload/reload.
+    world.call("set_cell_navigation_link_enabled", CELL, "PatrolBridgeLink", false)
+    assert(not bool(world.call("is_cell_navigation_link_enabled", CELL, "PatrolBridgeLink")))
+    assert(world.call("acquire_cell_route", CELL, target_cell).is_empty())
+    assert(int(world.call("get_cell_lease_count_total")) == 0)
+    var saved_links: Dictionary = world.call("get_navigation_link_states")
+    assert(saved_links[CELL]["PatrolBridgeLink"] == false)
+    world.call("set_navigation_link_states", {})
+    assert(bool(world.call("is_cell_navigation_link_enabled", CELL, "PatrolBridgeLink")))
+    var restored_tokens: Array = world.call("acquire_cell_route", CELL, target_cell)
+    assert(restored_tokens.size() == 2)
+    assert(int(world.call("release_cell_route", restored_tokens)) == 2)
+    world.call("set_navigation_link_states", saved_links)
+    assert(world.call("acquire_cell_route", CELL, target_cell).is_empty())
+    # Hub is no longer observed; use a separate lease to inspect it.
+    var hub_token: int = int(world.call("acquire_cell_lease", CELL))
+    assert(hub_token > 0)
+    assert(await _wait_for_cell(world, true, CELL))
+    var hub_root := world.call("get_cell_instance", CELL) as Node3D
+    var hub_bridge := hub_root.get_node("PatrolBridgeLink") as NavigationLink3D
+    assert(not hub_bridge.enabled)
+    assert((hub_root.get_node("WalkableRegion") as NavigationRegion3D).enabled)
+    world.call("set_cell_navigation_link_enabled", CELL, "PatrolBridgeLink", true)
+    assert(hub_bridge.enabled)
+    assert(bool(world.call("release_cell_lease", hub_token)))
 
     world.set("streaming_enabled", false)
     assert(activated_cells.size() >= 2)

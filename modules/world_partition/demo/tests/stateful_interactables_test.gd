@@ -68,8 +68,15 @@ func _run() -> void:
     champion.free()
 
     # A new route gate is open by default so the AI can initially patrol.
+    var hub_bridge := _open(Vector2i(0, 0))
+    var offmesh := hub_bridge.get_node("PatrolBridgeLink") as NavigationLink3D
+    assert(offmesh != null and offmesh.enabled)
+    assert(offmesh.bidirectional and offmesh.navigation_layers == 2)
+    assert((hub_bridge.get_node("PatrolTrack") as NavigationRegion3D).navigation_layers == 2)
+    hub_bridge.free()
     var pass_cell := _open(Vector2i(1, 0))
     var gate := pass_cell.get_node("PatrolGate") as Node3D
+    assert((pass_cell.get_node("PatrolTrack") as NavigationRegion3D).navigation_layers == 2)
     assert(gate != null)
     assert(gate.is_in_group("streaming_stateful"))
     assert(gate.call("capture_streaming_object_state") == {"active": true, "uses": 0})

@@ -34,14 +34,19 @@ func _run() -> void:
     await physics_frame
     await physics_frame
     await physics_frame
-    var left_nav := left.get_node("WalkableRegion") as NavigationRegion3D
+    var left_nav := left.get_node("PatrolTrack") as NavigationRegion3D
+    var right_nav := right.get_node("PatrolTrack") as NavigationRegion3D
+    var bridge := left.get_node("PatrolBridgeLink") as NavigationLink3D
+    assert(left_nav.navigation_layers == 2 and right_nav.navigation_layers == 2)
+    assert(bridge.navigation_layers == 2 and bridge.bidirectional)
+    assert(bridge.enabled)
+    var origin := Vector3(110, 0, 64)
+    var destination := Vector3(146, 0, 64)
     var path: PackedVector3Array = NavigationServer3D.map_get_path(
-        left_nav.get_navigation_map(),
-        Vector3(110, 0, 64),
-        Vector3(146, 0, 64),
-        true
+        left_nav.get_navigation_map(), origin, destination, true, 2
     )
     assert(path.size() >= 2)
+    assert(path[path.size() - 1].distance_to(destination) < 2.0)
 
     var crossed_boundary := false
     for i in 420:
@@ -95,6 +100,34 @@ func _run() -> void:
     await physics_frame
     assert(int(streamer.call("get_cell_lease_count_total")) == 2)
     assert(int(npc.call("get_patrol_status")["route_tokens"]) == 2)
+
+    # Close only the precise off-mesh bridge, not an entire navigation
+    # region. The ordinary walkable world and both patrol islands remain.
+    assert(bridge.enabled)
+    streamer.call("set_cell_navigation_link_enabled", Vector2i(0, 0), "PatrolBridgeLink", false)
+    bridge.enabled = false
+    assert(not bridge.enabled)
+    assert(left_nav.enabled and right_nav.enabled)
+    assert(int(streamer.call("get_cell_lease_count_total")) == 0)
+    assert(int(npc.call("get_patrol_status")["route_tokens"]) == 0)
+    var paused := npc.global_position
+    for i in 4:
+        await physics_frame
+    assert(npc.global_position.distance_to(paused) < 0.01)
+    var blocked_path: PackedVector3Array = NavigationServer3D.map_get_path(
+        left_nav.get_navigation_map(), origin, destination, true, 2
+    )
+    assert(blocked_path.is_empty() or blocked_path[blocked_path.size() - 1].distance_to(destination) > 2.0)
+    streamer.call("set_cell_navigation_link_enabled", Vector2i(0, 0), "PatrolBridgeLink", true)
+    bridge.enabled = true
+    await physics_frame
+    await physics_frame
+    assert(int(streamer.call("get_cell_lease_count_total")) == 2)
+    var reopened: PackedVector3Array = NavigationServer3D.map_get_path(
+        left_nav.get_navigation_map(), origin, destination, true, 2
+    )
+    assert(reopened.size() >= 2)
+    assert(reopened[reopened.size() - 1].distance_to(destination) < 2.0)
 
     npc.free()
     assert(int(streamer.call("get_cell_lease_count_total")) == 0)
