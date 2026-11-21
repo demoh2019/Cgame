@@ -33,3 +33,32 @@ Source contracts: `python3 -m unittest tests/scene/test_cull_distance_cached_con
 Dedicated GitHub Actions workflow: `.github/workflows/native-cull-distance-policy.yml`.
 
 Building Cgame and running both native/game tests is required before considering the change runtime-verified.
+
+## Bounded bulk draw-distance selection (quality-switch hot path)
+
+`get_cached_cull_distances(positions, sizes, authored_distances)` computes
+up to **4,096** independent draw distances per native call using the
+already-configured profile. The three packed arrays describe each
+`AABB(position, size)` and its authored max draw distance; every index is
+preserved. A malformed input anywhere (including the last row), an
+unconfigured profile, mismatched array sizes, or more than 4096 objects
+returns an **empty** result, so no partial output is applied. The operation
+does not touch `SceneTree`, GPU buffers, game entities or network state.
+
+`SceneryLod.apply_many` now uses this when **Albion After graphics quality is
+changed**: it gathers eligible streamed decorative `MultiMeshInstance3D`
+batches, groups them by the chosen quality preset in bounded chunks and
+updates visibility margins and LOD bias while preserving the previous
+scalar result. A quality switch with thousands of decorative batches no
+longer requires one GDScript-to-C++ call for each. The normal
+`SceneryLod.apply` path still handles individually streamed/new batches,
+and stock Godot/older custom engines use a deterministic pure-script
+fallback. Invalid/unset custom AABBs keep their previously authored end
+distance, while landmark and gameplay geometry retain the prior behavior.
+
+The API keeps the existing nearest-longest-dimension, no-interpolation
+selection and authored cap semantics, inspired by
+[Unreal Cull Distance Volumes](https://dev.epicgames.com/documentation/unreal-engine/cull-distance-volumes-in-unreal-engine?lang=en-US).
+This reduces expected cross-language dispatch overhead; it is **not a
+measured frame-time or FPS gain**. Run the native doctests and the
+`game/tests/run_cull_distance_policy.gd` headless regression first.

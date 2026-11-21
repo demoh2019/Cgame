@@ -412,9 +412,11 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# cosmetic detail has one separate, small camera-priority frame slice.
 	ChunkView.configure_decor_budget(int(p["decor_budget_usec"]))
 	if viewport != null:
-		for batch in viewport.get_tree().get_nodes_in_group(ChunkView.SCENERY_GROUP):
-			if batch is MultiMeshInstance3D:
-				ChunkView.apply_scenery_detail(batch)
+		# Unreal Cull Distance Volume-inspired bulk update: preserve the
+		# existing per-object policy but send grouped decor bounds through
+		# one native call per bounded 4096-instance batch.
+		SceneryLod.apply_many(
+			viewport.get_tree().get_nodes_in_group(ChunkView.SCENERY_GROUP), _level)
 
 	# The graphics profiles also control water detail and how many terrain chunks are streamed.
 	if water != null and water.material_override is ShaderMaterial:
