@@ -84,3 +84,14 @@ markers; an 8m retention bonus reduces flickering as sites exchange order.
 All marker urgency values are zero to preserve nearest-site semantics.
 The game keeps the original entered-site and 650m exclusions and includes
 stock Godot fallback parity tests. No measured performance claim is made.
+
+
+## Albion After infected HUD integration
+
+The on-screen infected health-bar overlay also uses the shared native
+`select_world_priority_stable` selector, with the same stock-Godot fallback
+as POI markers. Eligible enemies are filtered by squared distance and
+projected screen bounds before native priority ranking. At most 32 bars
+are drawn; no combat, enemy simulation or networking is affected.
+Headless game regression tests cover two-viewer ranking, retention and
+invalid input. No performance gains are claimed without runtime profiling.

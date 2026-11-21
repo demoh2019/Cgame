@@ -37,7 +37,7 @@ func run(t) -> void:
 	var source_code: String = (Overlay as Script).source_code
 	t.check(source_code.contains("camera.is_position_behind(top)"),
 		"behind-camera infected never consume a HUD slot")
-	t.check(source_code.contains("var chosen: PackedInt32Array = select_zombie_bar_indices_stable(distances,"),
+	t.check(source_code.contains("var chosen: PackedInt32Array = select_zombie_bar_world_stable(positions,"),
 		"real _draw_zombie_bars uses significance-planned indices")
 	t.check(source_code.contains("const ZOMBIE_BAR_BUDGET := 32"),
 		"HUD draw work is capped at 32 infected")
@@ -154,3 +154,45 @@ func run(t) -> void:
 			t.eq(native_world.call("select_world_priority_stable", poi_positions,
 				poi_viewers, poi_priority, poi_ids, poi_retained, 2, 10.0, 3.0),
 				expected_poi, "native multi-viewer selection matches GDScript")
+
+	t.current = "multi-viewer stable world-significance matches single-viewer legacy ranking"
+	var actors := PackedVector3Array([
+		Vector3(7, 0, 0), Vector3(6, 0, 0), Vector3(5, 0, 0),
+		Vector3(13, 0, 0), Vector3(8, 0, 0)])
+	var eye := PackedVector3Array([Vector3.ZERO])
+	t.eq(Overlay.select_zombie_bar_world_stable(actors, eye, crowd_priorities,
+		crowd_ids, prior_visible, 3, 10.0, 2.0, false), expected_stable,
+		"stock Godot keeps retained peers without overriding boss urgency")
+	t.eq(Overlay.select_zombie_bar_world_stable(actors, eye, crowd_priorities,
+		crowd_ids, prior_visible, 3, 10.0, 2.0), expected_stable,
+		"engine selection, when available, agrees with the fallback")
+	var cameras := PackedVector3Array([Vector3.ZERO, Vector3(100, 0, 0)])
+	var across := PackedVector3Array([
+		Vector3(1, 0, 0), Vector3(99, 0, 0), Vector3(50, 0, 0)])
+	var cross_priority := PackedByteArray([0, 0, 3])
+	var cross_ids := PackedInt64Array([31, 30, 32])
+	var expected_cross := PackedInt32Array([1, 0])
+	t.eq(Overlay.select_zombie_bar_world_stable(across, cameras, cross_priority,
+		cross_ids, PackedInt64Array(), 2, 10.0, 0.0, false), expected_cross,
+		"each observer protects nearby actors; stable ID breaks nearest-distance ties")
+	t.eq(Overlay.select_zombie_bar_world_stable(across, cameras, cross_priority,
+		cross_ids, PackedInt64Array(), 2, 10.0, 0.0), expected_cross,
+		"native multi-observer ranking matches stock Godot when available")
+	t.check(Overlay.select_zombie_bar_world_stable(across,
+		PackedVector3Array(), cross_priority, cross_ids, PackedInt64Array(),
+		2, 10.0).is_empty(), "no viewer fails closed")
+	t.check(Overlay.select_zombie_bar_world_stable(
+		PackedVector3Array([Vector3(NAN, 0, 0)]), eye, PackedByteArray([3]),
+		PackedInt64Array([9]), PackedInt64Array()).is_empty(),
+		"nonfinite actor coordinates fail closed")
+	t.check(Overlay.select_zombie_bar_world_stable(across, cameras,
+		cross_priority, PackedInt64Array([31, 31, 32]), PackedInt64Array(),
+		2, 10.0, 0.0, false).is_empty(), "duplicate IDs fail closed")
+	t.check(source_code.contains("var distance_squared: float = top.distance_squared_to(here)"),
+		"actual HUD uses squared-distance prefilter instead of per-enemy square roots")
+	if ClassDB.class_exists("SignificanceBudgetPlanner"):
+		var world_native: Object = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if world_native != null and world_native.has_method("select_world_priority_stable"):
+			t.eq(world_native.call("select_world_priority_stable", across, cameras,
+				cross_priority, cross_ids, PackedInt64Array(), 2, 10.0, 0.0),
+				expected_cross, "new native method is callable by game scripts")

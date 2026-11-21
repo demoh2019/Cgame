@@ -151,6 +151,17 @@ static func select_world_marker_indices(positions: PackedVector3Array,
 		budget, max_distance, hysteresis, false)
 
 
+## Shared native world-significance planning for infected health bars.
+## Reuse the exact multi-viewer selector already used for POI markers.
+static func select_zombie_bar_world_stable(positions: PackedVector3Array,
+		viewers: PackedVector3Array, priorities: PackedByteArray,
+		ids: PackedInt64Array, retained_ids: PackedInt64Array,
+		budget: int = ZOMBIE_BAR_BUDGET, max_distance: float = 45.0,
+		hysteresis: float = 1.5, allow_native: bool = true) -> PackedInt32Array:
+	return select_world_marker_indices(positions, viewers, priorities, ids,
+		retained_ids, budget, max_distance, hysteresis, allow_native)
+
+
 var client
 var camera: Camera3D
 var _font: Font
@@ -257,7 +268,7 @@ func _draw_zombie_bars(view: Vector2) -> void:
 	var here: Vector3 = client.display_position()
 	var eligible: Array[Dictionary] = []
 	var screen_points := PackedVector2Array()
-	var distances := PackedFloat64Array()
+	var positions := PackedVector3Array()
 	var priorities := PackedByteArray()
 	var ids := PackedInt64Array()
 	# The existing proximity and projected-screen checks run before budgeting:
@@ -267,23 +278,23 @@ func _draw_zombie_bars(view: Vector2) -> void:
 		var top := Vector3(float(zombie["x"]), float(zombie["y"]) + 2.7, float(zombie["z"]))
 		if bool(zombie.get("raid_boss", false)):
 			top.y += 2.2
-		var distance: float = top.distance_to(here)
-		if not is_finite(distance) or distance > 45.0 or camera.is_position_behind(top):
+		var distance_squared: float = top.distance_squared_to(here)
+		if not is_finite(distance_squared) or distance_squared > 45.0 * 45.0 or camera.is_position_behind(top):
 			continue
 		var spot: Vector2 = camera.unproject_position(top)
 		if spot.x < -40.0 or spot.y < -40.0 or spot.x > view.x + 40.0 or spot.y > view.y + 40.0:
 			continue
 		eligible.append(zombie)
 		screen_points.append(spot)
-		distances.append(distance)
+		positions.append(top)
 		ids.append(int(zombie_id))
 		# Boss > elite > actual attacker > ordinary enemy. Critical combat
 		# telegraphs still use their own independent animation budget.
 		priorities.append(3 if bool(zombie.get("raid_boss", false)) else
 			(2 if bool(zombie.get("elite", false)) else
 			(1 if int(zombie.get("state", 0)) >= 3 else 0)))
-	var chosen: PackedInt32Array = select_zombie_bar_indices_stable(distances,
-		priorities, ids, _zombie_bar_retained_ids)
+	var chosen: PackedInt32Array = select_zombie_bar_world_stable(positions,
+		PackedVector3Array([here]), priorities, ids, _zombie_bar_retained_ids)
 	var current_ids := PackedInt64Array()
 	for selected in chosen:
 		current_ids.append(ids[selected])
