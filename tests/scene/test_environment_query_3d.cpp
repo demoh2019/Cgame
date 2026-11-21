@@ -1186,6 +1186,9 @@ TEST_CASE("[EnvironmentQueryTickBudget] Invalid admission, pending update and ze
 	CHECK(budget->record_step(0));
 	CHECK(!budget->try_admit_step());
 	CHECK(budget->begin_tick(1, 0, 1));
+	ERR_PRINT_OFF
+	CHECK(!budget->begin_tick(0, 100, 100)); // Stale tick cannot replenish depleted work.
+	ERR_PRINT_ON
 	CHECK(!budget->try_admit_step());
 	REQUIRE(budget->try_admit_step(true));
 	CHECK(budget->record_step(1));
