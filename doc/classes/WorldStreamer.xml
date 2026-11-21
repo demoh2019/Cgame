@@ -374,6 +374,9 @@
 		<member name="unload_radius" type="float" setter="set_unload_radius" getter="get_unload_radius" default="192.0">
 			Loaded cells farther than this distance from the focus are freed. Values below [member load_radius] are treated as equal to it.
 		</member>
+		<member name="view_cone_half_angle_degrees" type="float" setter="set_view_cone_half_angle_degrees" getter="get_view_cone_half_angle_degrees" default="180.0">
+			Optional camera-space horizontal half field of view for scheduling. The default 180 degrees preserves the existing heading-only priority. With positive [member view_priority] and a nonzero [member view_direction], values from 1 to 179.99 degrees smoothly reduce the view bonus near the cone edge and remove it outside the cone; they do not cull chunks, change cell residency, or consume extra requests. Use a conservative margin for the camera and treat orthographic or unknown cameras as 180 degrees. Invalid or non-finite settings are rejected or clamped to 1–180 degrees.
+		</member>
 		<member name="view_direction" type="Vector3" setter="set_view_direction" getter="get_view_direction" default="Vector3(0, 0, 0)">
 			Optional normalized camera heading. When [member view_priority] is positive, both procedural chunk generation and completed threaded scene activation prefer nearby cells within the camera's view direction. A zero or non-finite direction disables view weighting, returning to movement-only priority. This is independent of residency and does not add extra cells to memory.
 		</member>
