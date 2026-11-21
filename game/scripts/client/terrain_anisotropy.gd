@@ -17,7 +17,7 @@ const WET_COAT_DEFINE := "\n#define AA_TERRAIN_WET_CLEARCOAT"
 const PARAMETERS := [
 	"albedo_layers", "normal_layers", "height_layers", "biome_map", "road_mask",
 	"chunk_origin", "chunk_size", "biome_texels",
-	"tile_meters", "normal_strength", "layer_tint",
+	"tile_meters", "albedo_texels", "normal_texels", "normal_strength", "layer_tint",
 	"layer_average", "site_patches",
 ]
 

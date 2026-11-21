@@ -477,10 +477,66 @@ static func ground_material() -> ShaderMaterial:
 
 
 ## The textured ground material (Poly Haven layers in two texture arrays), or null when the textures are missing.
+## Prebuilt VRAM-compressed layer arrays (tools/build_terrain_arrays.sh): 2k albedo at a 2 m tile is
+## ~1024 texels per metre, the first-person target; built at import time instead of at startup.
+const TERRAIN_ARRAY_DIR := "res://assets/textures/terrain_arrays/"
+
+
+static func _prebuilt_material() -> ShaderMaterial:
+	var albedo_path := TERRAIN_ARRAY_DIR + "terrain_albedo_array.jpg"
+	var normal_path := TERRAIN_ARRAY_DIR + "terrain_normal_array.jpg"
+	var height_path := TERRAIN_ARRAY_DIR + "terrain_height_array.jpg"
+	if not (ResourceLoader.exists(albedo_path) and ResourceLoader.exists(normal_path) and ResourceLoader.exists(height_path)):
+		return null
+	var albedo_array := load(albedo_path) as Texture2DArray
+	var normal_array := load(normal_path) as Texture2DArray
+	var height_array := load(height_path) as Texture2DArray
+	if albedo_array == null or normal_array == null or height_array == null or albedo_array.get_layers() < TERRAIN_LAYERS.size():
+		return null
+	var tints := PackedVector3Array()
+	var averages := PackedVector3Array()
+	for index in TERRAIN_LAYERS.size():
+		var small: Image = albedo_array.get_layer_data(index)
+		if small.is_compressed():
+			small.decompress()
+		small.clear_mipmaps()
+		small.convert(Image.FORMAT_RGB8)
+		small.resize(16, 16, Image.INTERPOLATE_BILINEAR)
+		var sum := Vector3.ZERO
+		for y in 16:
+			for x in 16:
+				var pixel: Color = small.get_pixel(x, y)
+				sum += Vector3(pixel.r, pixel.g, pixel.b)
+		var average: Vector3 = sum / 256.0
+		var target: Color = TERRAIN_TARGETS[index]
+		var full_tint := Vector3(target.r / maxf(average.x, 0.02), target.g / maxf(average.y, 0.02), target.b / maxf(average.z, 0.02))
+		var tint: Vector3 = Vector3.ONE.lerp(full_tint, TERRAIN_TINT_STRENGTH)
+		tints.append(tint)
+		averages.append(average * tint)
+	var shader: Shader = TerrainAnisotropy.shader_for_quality(terrain_filter_quality)
+	if shader == null:
+		return null
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	material.set_shader_parameter("albedo_layers", albedo_array)
+	material.set_shader_parameter("normal_layers", normal_array)
+	material.set_shader_parameter("height_layers", height_array)
+	material.set_shader_parameter("tile_meters", 2.0)
+	material.set_shader_parameter("albedo_texels", 2048.0)
+	material.set_shader_parameter("normal_texels", 1024.0)
+	material.set_shader_parameter("biome_texels", float(BIOME_TEXELS))
+	material.set_shader_parameter("layer_tint", tints)
+	material.set_shader_parameter("layer_average", averages)
+	return material
+
+
 static func textured_material() -> ShaderMaterial:
 	if _textured_checked:
 		return _textured_material
 	_textured_checked = true
+	_textured_material = _prebuilt_material()
+	if _textured_material != null:
+		return _textured_material
 	var albedo: Array[Image] = []
 	var normals: Array[Image] = []
 	var heights: Array[Image] = []

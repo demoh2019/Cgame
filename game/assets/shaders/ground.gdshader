@@ -50,6 +50,8 @@ uniform vec2 chunk_origin = vec2(0.0);
 uniform float chunk_size = 64.0;
 uniform float biome_texels = 17.0;
 uniform float tile_meters = 4.5;
+uniform float albedo_texels = 1024.0; // Per-layer texture width, for the magnification test.
+uniform float normal_texels = 1024.0;
 // Poly Haven displacement per layer (0.5 = flat for layers without one), for close-range parallax.
 uniform sampler2DArray height_layers : filter_linear_mipmap, repeat_enable;
 uniform float normal_strength = 1.3;
@@ -127,12 +129,13 @@ const float AA_PARALLAX_DEPTH = 0.06; // Metres of apparent relief at full displ
 const mat2 AA_MICRO_ROT = mat2(vec2(0.8776, 0.4794), vec2(-0.4794, 0.8776));
 
 float aa_micro_weight(vec2 lod_dx, vec2 lod_dy) {
-	float texels_per_pixel = max(length(lod_dx), length(lod_dy)) * 1024.0;
+	float texels_per_pixel = max(length(lod_dx), length(lod_dy)) * albedo_texels;
 	return 1.0 - smoothstep(0.35, 1.3, texels_per_pixel);
 }
 
 vec3 top_albedo(float layer, vec2 p, float mixer, float detail_fade, vec2 lod_dx, vec2 lod_dy) {
-	vec3 far_tile = textureGrad(albedo_layers, vec3(p / (tile_meters * 3.3) + 0.37, layer), lod_dx / 3.3, lod_dy / 3.3).rgb;
+	float far_scale = max(3.3, 20.0 / tile_meters);
+	vec3 far_tile = textureGrad(albedo_layers, vec3(p / (tile_meters * far_scale) + 0.37, layer), lod_dx / far_scale, lod_dy / far_scale).rgb;
 	// Near the camera the sharp near tile dominates; the noise mixer only breaks tiling further away.
 	float near_weight = detail_fade * (1.0 - mixer * mix(0.35, 1.0, 1.0 - detail_fade));
 	if (near_weight > 0.001) {
@@ -159,7 +162,7 @@ vec4 top_normal(float layer, vec2 p, float detail_fade, vec2 lod_dx, vec2 lod_dy
 		vec4 mapped = textureGrad(normal_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy);
 		normal = mix(normal, vec4(mapped.rgb * 2.0 - 1.0, mapped.a), detail_fade);
 		// Matching fine-scale bumps where the near normal map is magnified (normals are 512 px).
-		float micro_w = (1.0 - smoothstep(0.2, 0.7, max(length(lod_dx), length(lod_dy)) * 512.0)) * detail_fade;
+		float micro_w = (1.0 - smoothstep(0.2, 0.7, max(length(lod_dx), length(lod_dy)) * normal_texels)) * detail_fade;
 		if (micro_w > 0.01) {
 			vec2 mp = AA_MICRO_ROT * (p / (tile_meters * AA_MICRO_SCALE)) + 0.21;
 			vec3 micro = textureGrad(normal_layers, vec3(mp, layer), AA_MICRO_ROT * lod_dx / AA_MICRO_SCALE,
