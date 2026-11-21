@@ -1,0 +1,107 @@
+name: Native AI encounter pressure and Albion After authoritative parity
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_encounter_budget.*'
+      - 'modules/behavior_tree/tests/test_ai_encounter_budget.h'
+      - 'modules/behavior_tree/doc_classes/AIEncounterBudget.xml'
+      - 'modules/behavior_tree/register_types.cpp'
+      - 'modules/behavior_tree/config.py'
+      - 'modules/behavior_tree/README.md'
+      - 'game/scripts/shared/world_encounter_director.gd'
+      - 'game/tests/test_world_encounter_director.gd'
+      - 'game/tests/run_native_encounter_budget.gd'
+      - 'tests/scene/test_native_encounter_budget_contract.py'
+      - '.github/workflows/native-ai-encounter-budget.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_encounter_budget.*'
+      - 'modules/behavior_tree/tests/test_ai_encounter_budget.h'
+      - 'modules/behavior_tree/doc_classes/AIEncounterBudget.xml'
+      - 'modules/behavior_tree/register_types.cpp'
+      - 'modules/behavior_tree/config.py'
+      - 'game/scripts/shared/world_encounter_director.gd'
+      - 'game/tests/test_world_encounter_director.gd'
+      - 'game/tests/run_native_encounter_budget.gd'
+      - 'tests/scene/test_native_encounter_budget_contract.py'
+      - '.github/workflows/native-ai-encounter-budget.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  encounter-source-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source registration, safety and numeric model
+        run: python3 -m unittest tests/scene/test_native_encounter_budget_contract.py -v
+
+  native-and-game:
+    needs: encounter-source-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-ai-encounter-budget
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-ai-encounter-budget
+        continue-on-error: true
+      - name: Native C++ pressure budget tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[AIEncounterBudget]*" 2>&1 | tee native-encounter.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' native-encounter.log; then exit 1; fi
+      - name: Parse Albion After project
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee encounter-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' encounter-import.log; then exit 1; fi
+      - name: Focused server-authoritative incident parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_native_encounter_budget.gd 2>&1 | tee encounter-game.log
+          grep -Eq '^ENCOUNTER BUDGET TOTAL: [0-9]+ checks, 0 failures$' encounter-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' encounter-game.log; then exit 1; fi
+      - name: Full Albion After headless regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 600s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee encounter-all-game.log
+          grep -Fq 'test_world_encounter_director.gd' encounter-all-game.log
+          grep -Fq '0 failures' encounter-all-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' encounter-all-game.log; then exit 1; fi
+      - name: Upload native and game diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-ai-encounter-budget-tests
+          if-no-files-found: ignore
+          path: |
+            native-encounter.log
+            encounter-import.log
+            encounter-game.log
+            encounter-all-game.log
