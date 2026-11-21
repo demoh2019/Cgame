@@ -78,7 +78,7 @@ func run(t) -> void:
 	scene.mark_combat()
 	t.eq(scene._script_mix_snapshots.size(), 1,
 		"additional combat events only refresh the existing profile")
-	scene._update_environment_mix_snapshots(false, "plains", 0.0, 8.85)
+	scene._update_environment_mix_snapshots(false, "plains", 0.0, 9.0)
 	t.near(scene._snapshot_bus_db("Ambience"), -3.0, 0.00001,
 		"the combat focus lasts exactly the configured combat hold")
 	scene._update_environment_mix_snapshots(false, "plains", 0.0, 1.5)
