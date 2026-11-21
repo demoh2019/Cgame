@@ -151,6 +151,14 @@ func set_viewer_position(at: Vector3) -> void:
 	_viewer_valid = at.is_finite()
 	if _viewer_valid:
 		_viewer_position = at
+	else:
+		# An invalid/missing viewer must restore legacy full simulation.
+		# Otherwise a body frozen on the last valid frame could never wake.
+		for body in _bodies:
+			if int(body.get_meta("sim_lod", 0)) == 1:
+				body.freeze = false
+				body.sleeping = false
+				body.set_meta("sim_lod", 0)
 
 
 func _within_relevance(at: Vector3, padding: float = 0.0) -> bool:

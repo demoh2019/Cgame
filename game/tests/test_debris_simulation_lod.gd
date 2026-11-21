@@ -77,6 +77,12 @@ func run(t) -> void:
 	debris._physics_process(1.0 / 60.0)
 	t.check(not body.freeze, "near viewer reactivates the real rigid body")
 	t.eq(body.get_meta("sim_lod"), 0, "reactivated body updates pool metadata")
+	debris.set_viewer_position(Vector3.ZERO)
+	debris._physics_process(1.0 / 60.0)
+	t.check(body.freeze, "viewer moving away can freeze again")
+	debris.set_viewer_position(Vector3.INF)
+	t.check(not body.freeze and body.get_meta("sim_lod") == 0,
+		"invalid viewer restores full physical simulation immediately")
 	debris.set_viewer_position(Vector3(-40, 0, 0))
 	debris._physics_process(1.0 / 60.0)
 	t.eq(debris.active_count(), 0, "far debris leaves the live physics pool")
