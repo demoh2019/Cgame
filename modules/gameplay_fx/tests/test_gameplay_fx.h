@@ -273,7 +273,13 @@ TEST_CASE("[GameplayFX] timeline scoped snapshot preserves local timers and roll
 	Dictionary duplicate;
 	duplicate[String("Runtime.Status.Resolve")] = resolve;
 	duplicate[StringName("Runtime.Status.Resolve")] = resolve;
-	CHECK_FALSE(timeline->replace_effect_branch("Runtime", duplicate));
+	// Some Godot builds normalize String and StringName dictionary keys at insertion.
+	// If they remain distinct, the native API must reject that ambiguous alias.
+	if (duplicate.size() == 2) {
+		CHECK_FALSE(timeline->replace_effect_branch("Runtime", duplicate));
+	} else {
+		CHECK(timeline->replace_effect_branch("Runtime", duplicate));
+	}
 	CHECK(timeline->get_stacks("Runtime.Status.Resolve") == 3);
 	CHECK(timeline->replace_effect_branch("Runtime", snapshot));
 	CHECK(timeline->tick(0.1).is_empty());
