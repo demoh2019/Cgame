@@ -7,10 +7,13 @@
 
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
+#include "core/templates/vector.h"
 
 void PCGWeightedVariantSelector::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("choose_variants", "stable_ids", "weights", "seed"),
 			&PCGWeightedVariantSelector::choose_variants, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("partition_indices", "variants", "variant_count"),
+			&PCGWeightedVariantSelector::partition_indices);
 }
 
 PackedInt32Array PCGWeightedVariantSelector::choose_variants(
@@ -63,6 +66,39 @@ PackedInt32Array PCGWeightedVariantSelector::choose_variants(
 			}
 		}
 		result.set(i, selected);
+	}
+	return result;
+}
+
+
+Array PCGWeightedVariantSelector::partition_indices(
+		const PackedInt32Array &p_variants, int p_variant_count) const {
+	Array result;
+	const int count = p_variants.size();
+	if (p_variant_count < 1 || p_variant_count > MAX_VARIANTS ||
+			count > MAX_POINTS) {
+		return result;
+	}
+	// Validate every ID first: a bad trailing variant must not produce a
+	// partly populated scene or silently drop a visual instance.
+	for (int i = 0; i < count; ++i) {
+		if (p_variants[i] < 0 || p_variants[i] >= p_variant_count) {
+			return result;
+		}
+	}
+	Vector<Vector<int>> groups;
+	groups.resize(p_variant_count);
+	for (int i = 0; i < count; ++i) {
+		groups.write[p_variants[i]].push_back(i);
+	}
+	for (int variant = 0; variant < p_variant_count; ++variant) {
+		const Vector<int> &group = groups[variant];
+		PackedInt32Array indices;
+		indices.resize(group.size());
+		for (int j = 0; j < group.size(); ++j) {
+			indices.set(j, group[j]);
+		}
+		result.push_back(indices);
 	}
 	return result;
 }
