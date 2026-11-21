@@ -138,6 +138,9 @@ func toggle_dynamic_barricade(at_world: Vector3) -> bool:
     if barricade_active:
         barricade_active = false
         if is_instance_valid(barricade_body):
+            # Remove from the scene tree immediately; deferred free alone
+            # could leave an obsolete collision body until end of frame.
+            remove_child(barricade_body)
             barricade_body.queue_free()
             barricade_body = null
     else:
