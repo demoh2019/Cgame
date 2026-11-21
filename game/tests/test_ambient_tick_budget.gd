@@ -120,3 +120,49 @@ func run(t) -> void:
 		smallest = mini(smallest, updates)
 		largest = maxi(largest, updates)
 	t.check(largest - smallest <= 2, "Fairness does not depend on registration or call order")
+
+	t.current = "soft CPU time budget and native compatibility"
+	var measured := AmbientTickBudget.new()
+	t.eq(measured.get_frame_time_budget_us(), 2500, "default microsecond budget")
+	t.check(measured.set_frame_time_budget_us(250), "can tune CPU cap")
+	t.check(not measured.set_frame_time_budget_us(-1), "negative cap rejected")
+	t.check(not measured.record_cost("invalid", 200), "unregistered work rejected")
+	measured.begin_frame(0.01, 3)
+	for lane in AmbientTickBudget.LANES:
+		measured.consume(lane, 0.01)
+	t.check(measured.record_cost("dust_devils", 350), "records measured work")
+	measured.begin_frame(0.1, 3)
+	t.eq(measured.last_frame_cost_us(), 350, "previous frame telemetry")
+	t.eq(measured.current_frame_cost_us(), 0, "current frame reset")
+	t.check(measured.consume("dust_devils", 0.1) > 0.0, "first lane due")
+	measured.record_cost("dust_devils", 300)
+	t.eq(measured.consume("dragonflies", 0.1), 0.0, "later work deferred after budget")
+	t.check(measured.consume("dragonflies", 0.1, true) > 0.0, "forced work bypasses cap")
+	t.check(measured.set_frame_time_budget_us(0), "zero disables CPU cap")
+	measured.begin_frame(0.1, 3)
+	measured.record_cost("dust_devils", 10000)
+	t.check(measured.consume("dragonflies", 0.1) > 0.0, "unlimited profile runs")
+	measured.reset()
+	t.eq(measured.last_frame_cost_us(), 0, "reset clears cost")
+
+	if ClassDB.class_exists("FrameUpdateBudget"):
+		var native_cpu: Object = ClassDB.instantiate("FrameUpdateBudget")
+		if native_cpu != null and native_cpu.has_method("record_cost"):
+			for lane in AmbientTickBudget.LANES:
+				t.check(bool(native_cpu.call("register_lane", StringName(lane))),
+					"native budget registers %s" % lane)
+			t.check(bool(native_cpu.call("set_frame_time_budget_us", 250)),
+				"native CPU cap configurable")
+			native_cpu.call("begin_frame", 0.01, 3)
+			for lane in AmbientTickBudget.LANES:
+				native_cpu.call("consume", StringName(lane), 0.01)
+			native_cpu.call("record_cost", &"dust_devils", 350)
+			native_cpu.call("begin_frame", 0.1, 3)
+			t.eq(int(native_cpu.call("last_frame_cost_us")), 350, "native telemetry")
+			t.check(float(native_cpu.call("consume", &"dust_devils", 0.1)) > 0.0,
+				"native lane due")
+			native_cpu.call("record_cost", &"dust_devils", 300)
+			t.eq(float(native_cpu.call("consume", &"dragonflies", 0.1)), 0.0,
+				"native CPU budget prevents extra work")
+			t.check(float(native_cpu.call("consume", &"dragonflies", 0.1, true)) > 0.0,
+				"native forced work bypasses soft limit")
