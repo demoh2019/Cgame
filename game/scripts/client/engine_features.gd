@@ -264,8 +264,8 @@ static func runtime_attribute_snapshot(kind: String, state: Dictionary) -> Dicti
 static func runtime_attribute_value(node: Node, name: String, fallback: float = 0.0) -> float:
 	if node != null:
 		var attribute_set: Object = node.get_meta("attributes", null) as Object
-		if attribute_set != null and attribute_set.has_method("has_attribute") and
-				bool(attribute_set.call("has_attribute", StringName(name))):
+		if attribute_set != null and attribute_set.has_method("has_attribute") \
+				and bool(attribute_set.call("has_attribute", StringName(name))):
 			return float(attribute_set.call("get_value", StringName(name)))
 	return fallback if is_finite(fallback) else 0.0
 

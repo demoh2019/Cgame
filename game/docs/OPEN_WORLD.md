@@ -46,7 +46,7 @@ How the game world is built: `WorldGen.height_at` (shared, deterministic, server
 | Terrain Erosion / Hydraulic / Thermal | **PRESENT (batch 1)** | `WorldGen._base_height`: analytic erosion — ridged-noise gullies and ravines on high ground (hydraulic-style) and slumping peaks (thermal-style). An approximation; `height_at` must stay a pure function, so no iterative simulation |
 | Landscape Layers / Edit Layers | PARTIAL / MISSING | material layers only |
 | Landscape Streaming | PRESENT | `WorldStreamer` + `ChunkedTerrain3D` |
-| Distant Landscape Rendering | PARTIAL | terrain LOD + fog; no far-field mesh |
+| Distant Landscape Rendering | **PRESENT (batch 2)** | `far_field.gd`: a 1.7 km far-terrain ring sampled from `WorldGen.ground_at`, coloured by biome (snow caps on peaks), sunk under the real chunks; rebuilt a few rows per frame and swapped in when the player moves 96 m |
 | Terrain Occlusion | PARTIAL | horizon AO; no occluders |
 | Terrain Material Streaming | PARTIAL | texture mip streaming; layer arrays loaded up front |
 | World Building Tools | PARTIAL | editor brushes, asset bake scripts |
@@ -85,13 +85,12 @@ How the game world is built: `WorldGen.height_at` (shared, deterministic, server
 | Vegetation Wind Simulation | PRESENT | `vegetation_wind.gd` |
 | Vegetation Physics | MISSING | — |
 | Foliage LOD | PRESENT | `scenery_lod.gd`, grass tiers |
-| Foliage HLOD / Impostors | MISSING | — |
+| Foliage Impostors | **PRESENT (batch 2)** | `far_field.gd`: impostor pictures baked at start-up from the game's own tree models (off-screen ortho viewport, edge-bled, mipmapped `Texture2DArray`), drawn as cylindrical billboards |
+| Foliage HLOD | **PRESENT (batch 2)** | distant woods as one MultiMesh of impostors beyond the real-tree radius (150 m). Density and species follow the biome; positions are a seeded scatter, not the exact far trees |
 | Foliage Collision Streaming | MISSING | server-side collision circles only |
 
 ## Next batches (by player-visible value)
 
-1. Foliage impostors + HLOD for distant forests (biggest frame-time win in the wild).
-2. Distant landscape: a low-res far-field terrain ring beyond the streaming radius.
-3. Ocean simulation (Gerstner waves with mesh LOD) and a view of the surface from below.
-4. Vegetation physics (trees that sway/fall when hit), buoyancy for dropped loot and boats.
-5. Data Layers (seasonal/event content toggles) and a streaming profiler panel.
+1. Ocean simulation (Gerstner waves with mesh LOD) and a view of the surface from below.
+2. Vegetation physics (trees that sway/fall when hit), buoyancy for dropped loot and boats.
+3. Data Layers (seasonal/event content toggles) and a streaming profiler panel.

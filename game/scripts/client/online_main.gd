@@ -5,6 +5,7 @@ extends Node3D
 const Defs = preload("res://scripts/shared/defs.gd")
 const WoundFx = preload("res://scripts/client/wound_fx.gd")
 const BrawlMeter = preload("res://scripts/client/brawl_meter.gd")
+const FarField = preload("res://scripts/client/far_field.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
@@ -214,6 +215,7 @@ var _own_attack_time := -10.0 # Engine ticks (s) of your last attack, for zombie
 var _third_person_near := 0.05
 var _fp_body_refresh := 0.0
 var _brawl_meter: Control
+var _far_field: Node3D
 var _last_charge: Dictionary = {} # peer -> charge of their latest swing (for power-hit gore).
 var _underwater_tint: ColorRect # Blue murk while the camera is below the surface.
 var _breath_label: Label # Air left while diving.
@@ -1385,6 +1387,11 @@ func _on_welcomed() -> void:
 	client.event_received.connect(_on_skill_event)
 	client.event_received.connect(_first_person_hit_marker) # Crosshair hit flash and held-item swing in first person.
 	_setup_chat()
+	# Distant landscape beyond the streamed chunks: far terrain ring + impostor forests.
+	_far_field = FarField.new()
+	_far_field.name = "FarField"
+	add_child(_far_field)
+	_far_field.setup(client.world)
 	# Streaming: chunks are built from the seed as the player walks.
 	streamer = WorldStreamer.new()
 	streamer.cell_size = Defs.CHUNK_SIZE
@@ -1794,6 +1801,8 @@ func _process(delta: float) -> void:
 			combat_vfx.update_player(position, client.world.height_at(position.x, position.z), avatar_model.speed, delta, _visual_biome)
 	if streamer != null:
 		streamer.focus_position = position
+		if _far_field != null:
+			_far_field.update(position)
 		# Cheap, local movement hint for native chunk queue ordering. Server
 		# correction and teleports never prefetch in an unrelated direction.
 		var moved: Vector3 = position - _stream_previous_position
