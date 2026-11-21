@@ -91,7 +91,7 @@ TEST_CASE("[SceneTree][MultiMesh] Native static scenery transforms and visible b
 	CHECK(bounds.has_point(first.origin));
 	CHECK(bounds.has_point(second.origin));
 	// Returning only raw points would incorrectly clip rotated or tall trees.
-	CHECK(bounds.size.x > 0 && bounds.size.y > 3 && bounds.size.z > 0);
+	CHECK((bounds.size.x > 0 && bounds.size.y > 3 && bounds.size.z > 0));
 
 	// Untinted meshes (rocks and buildings) pack only transform channels.
 	instance_batch->set_instance_count(0);
