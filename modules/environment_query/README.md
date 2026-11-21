@@ -443,3 +443,46 @@ retain the old behavior. No intermediate candidate is ever allowed to
 reserve a server Smart Object slot.
 
 Reference: https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/AIModule/FEnvQueryInstance
+
+## Measured microsecond budgets for resumable EQS
+
+`step_incremental_top_positions_timed(time_budget_us, max_candidates)`
+adds real **monotonic-microsecond** time checks between candidate evaluations
+to the existing incremental top-K scorer. The same scoring snapshot, ordered
+source identities, completed-only output and safety filters are preserved.
+
+```gdscript
+query.begin_incremental_top_positions(8)
+# Work grant in an authoritative physics tick:
+var cap: int = query.suggest_incremental_step_size(120, 8)
+var finished: bool = query.step_incremental_top_positions_timed(120, cap)
+var scored: int = query.get_incremental_last_step_candidates()
+var native_us: int = query.get_incremental_last_step_us()
+if finished:
+    var original_indices := query.get_incremental_top_indices()
+```
+
+The first step samples at most three candidates, then an **observed
+microseconds-per-candidate** average suggests larger or smaller batches
+with a 20% safety margin. The time cap is 1..1,000,000 microseconds;
+candidate cap is 1..4096. The timer is checked *between* candidates,
+so a step always makes progress and a single expensive candidate may
+overrun its budget. The measured time excludes GDScript overhead and
+other scene work. Results, including seeded Random Best selection, stay
+independent of device speed and unchanged for complete queries.
+There is no background execution or hard real-time guarantee.
+
+In Albion After, 64+ infected activate a **120 microsecond advisory
+budget per admitted flank work slot** with up to eight source candidates.
+The existing server planner admits at most eight regular requests per
+tick (urgent lost leases can bypass this count). Only completed
+snapshots may claim Smart Object slots. Server-only `get_eqs_replan_stats`
+additionally reports `cpu_us`, `scored_candidates` and `timed_steps`
+for the most recent full infected tick. Older engine builds use
+the earlier candidate-count path unchanged; gameplay physics and attacks
+are never postponed.
+
+Comparison: Unreal EQS manager supports MaxAllowedTestingTime per update:
+https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/AIModule/FEnvQueryManagerConfig
+Godot native monotonic timer:
+https://docs.godotengine.org/en/4.6/engine_details/architecture/common_engine_methods_and_macros.html

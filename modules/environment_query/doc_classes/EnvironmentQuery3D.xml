@@ -45,6 +45,26 @@
 			<param index="0" name="candidate_budget" type="int" />
 			<description>Scores at most [param candidate_budget] unvisited snapshot candidates (1–4096), preserving the exact stable score/index ordering of [method query_top_indices]. Returns true only when the entire query is complete; false indicates more work is needed or an invalid call. May be invoked in different physics frames by the game. This is a candidate-count budget rather than a millisecond timer.</description>
 		</method>
+		<method name="step_incremental_top_positions_timed">
+			<return type="bool" />
+			<param index="0" name="time_budget_us" type="int" />
+			<param index="1" name="max_candidates" type="int" />
+			<description>Evaluate a resumable EQS query using the monotonic engine timer. Process at least one and at most [param max_candidates] candidate items, stopping between items when the elapsed time reaches [param time_budget_us]. The time budget is a [b]soft limit[/b]; one expensive item can exceed it. Time limit must be 1–1000000 microseconds and candidate cap 1–4096. Return true when the query completes; results stay hidden until then. Uses the same scorer, filters and stable source indices as [method step_incremental_top_positions], with no background threads.</description>
+		</method>
+		<method name="get_incremental_last_step_candidates" qualifiers="const">
+			<return type="int" />
+			<description>Number of candidate items processed by the most recent valid incremental step. Resets on a new query, cancellation or subsequent valid step.</description>
+		</method>
+		<method name="get_incremental_last_step_us" qualifiers="const">
+			<return type="int" />
+			<description>Measured microseconds spent inside the most recent incremental scoring step, using the engine monotonic timer. The value includes scoring and time-check overhead, but not gameplay scripting outside the native call. Resets on cancellation and restart.</description>
+		</method>
+		<method name="suggest_incremental_step_size" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="time_budget_us" type="int" />
+			<param index="1" name="max_candidates" type="int" />
+			<description>Recommend a next-step candidate cap from the observed cumulative microseconds per candidate, reserving 20 percent of the time budget. Before timings are available, begin with at most three candidates. Returns between 1 and [param max_candidates] for valid bounds (1–1000000 us, 1–4096 candidates) or 0 on invalid input. The recommendation is advisory: [method step_incremental_top_positions_timed] still checks the actual clock. Device performance affects the suggested batch count, never the eventual ranked result.</description>
+		</method>
 		<method name="is_incremental_top_complete" qualifiers="const">
 			<return type="bool" />
 			<description>True when the current incremental EQS query has evaluated every source candidate. No incomplete results are exposed.</description>

@@ -268,6 +268,9 @@ func is_alive() -> bool:
 ## server-owned sensory channels revealing noisy or wounded survivors.
 ## Returns {"hit": peer_id, "damage": float} when the zombie lands a blow, else {}.
 func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator) -> Dictionary:
+	flank_last_step_us = 0
+	flank_last_step_candidates = 0
+	flank_last_timed_steps = 0
 	if state == State.DEAD:
 		return {}
 	if _ai_trace != null:
@@ -689,7 +692,9 @@ const FLANK_FROM := 3.5 # Closer than this, an infected goes straight for its ta
 const FLANK_RANGE := 14.0
 const FLANK_RING := 2.4
 const FLANK_REPLAN_SECONDS := 0.30
-const FLANK_INCREMENTAL_STEP := 3 # Hard bound on candidate tests per admitted AI tick.
+const FLANK_INCREMENTAL_STEP := 3 # Bootstrap cap for older native engines.
+const FLANK_EQS_TIME_BUDGET_US := 120 # Soft per-granted-query CPU time budget.
+const FLANK_EQS_MAX_CANDIDATES := 8 # Hard source-item safety cap for each step.
 var _flank_query: Resource
 var _flank_goal_cached := Vector2.ZERO
 var _flank_here_cached := Vector2.INF
@@ -700,6 +705,9 @@ var _flank_slot_id_cached: int = 0 # Validate cached goal against current server
 var flank_reservations: Variant = null # Shared server-owned smart-object lease pool.
 var flank_replan_allowed: bool = true # Only optional EQS geometry; combat remains unthrottled.
 var flank_incremental_enabled: bool = false # GameServer opts in for 64+ active infected.
+var flank_last_step_us: int = 0 # Measured native score work in this AI tick.
+var flank_last_step_candidates: int = 0
+var flank_last_timed_steps: int = 0
 var _flank_incremental_running: bool = false
 var _flank_incremental_target_id: int = -1
 var _flank_incremental_here := Vector2.INF
@@ -711,6 +719,11 @@ var _flank_incremental_target := Vector2.INF
 ## each one takes a different point among the best by its id, so the pack spreads to the sides. Bosses and brutes
 ## charge straight in, and so does everyone in the last few metres.
 func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
+	# These per-step counters are set only by a completed native timed call.
+	# Direct test calls and unchanged movement never report phantom CPU work.
+	flank_last_step_us = 0
+	flank_last_step_candidates = 0
+	flank_last_timed_steps = 0
 	var distance := here.distance_to(target)
 	if raid_boss or type == "brute" or distance < FLANK_FROM or distance > FLANK_RANGE \
 			or not ClassDB.class_exists("EnvironmentQuery3D"):
@@ -798,7 +811,25 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 			_flank_incremental_target_id = target_id
 			_flank_incremental_here = here
 			_flank_incremental_target = target
-		if not bool(_flank_query.call("step_incremental_top_positions", FLANK_INCREMENTAL_STEP)):
+		var done: bool = false
+		if _flank_query.has_method("step_incremental_top_positions_timed") and \
+				_flank_query.has_method("suggest_incremental_step_size"):
+			# Native measured-cost forecasting starts with a conservative
+			# 3-item batch and adapts up/down from observed microseconds.
+			# Actual wall clock is still checked between every candidate.
+			var budget: int = int(_flank_query.call("suggest_incremental_step_size",
+				FLANK_EQS_TIME_BUDGET_US, FLANK_EQS_MAX_CANDIDATES))
+			budget = clampi(budget, 1, FLANK_EQS_MAX_CANDIDATES)
+			done = bool(_flank_query.call("step_incremental_top_positions_timed",
+				FLANK_EQS_TIME_BUDGET_US, budget))
+			flank_last_step_us = int(_flank_query.call("get_incremental_last_step_us"))
+			flank_last_step_candidates = int(_flank_query.call("get_incremental_last_step_candidates"))
+			flank_last_timed_steps = 1
+		else:
+			# Older Cgame builds retain the original strict 3-item
+			# deterministic count budget with identical final results.
+			done = bool(_flank_query.call("step_incremental_top_positions", FLANK_INCREMENTAL_STEP))
+		if not done:
 			return target
 		ranked_indices = _flank_query.call("get_incremental_top_indices")
 		preferred = _flank_query.call("get_incremental_random_best_positions", 25, id)

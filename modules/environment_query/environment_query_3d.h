@@ -78,6 +78,12 @@ class EnvironmentQuery3D : public Resource {
 	int incremental_cursor = 0;
 	int incremental_limit = 0;
 	bool incremental_done = false;
+	int incremental_last_step_candidates = 0;
+	int64_t incremental_last_step_us = 0;
+	int incremental_total_step_candidates = 0;
+	int64_t incremental_total_step_us = 0;
+
+	bool _step_incremental_top_positions_internal(int p_budget, int64_t p_time_budget_us);
 
 protected:
 	static void _bind_methods();
@@ -147,6 +153,14 @@ public:
 	// Only the final result is readable; incomplete scores cannot drive AI.
 	bool begin_incremental_top_positions(int p_count);
 	bool step_incremental_top_positions(int p_budget);
+	// Bounded wall-clock work for the snapshot, measured with monotonic
+	// microseconds. At least one candidate is processed per valid active step.
+	// One expensive candidate can overrun the soft time limit.
+	bool step_incremental_top_positions_timed(int p_time_budget_us, int p_max_candidates);
+	int get_incremental_last_step_candidates() const { return incremental_last_step_candidates; }
+	int64_t get_incremental_last_step_us() const { return incremental_last_step_us; }
+	// Adaptive next-step cap from observed average cost with a 20% reserve.
+	int suggest_incremental_step_size(int p_time_budget_us, int p_max_candidates) const;
 	bool is_incremental_top_complete() const { return incremental_snapshot.is_valid() && incremental_done; }
 	int get_incremental_processed_count() const { return incremental_cursor; }
 	PackedInt32Array get_incremental_top_indices() const;

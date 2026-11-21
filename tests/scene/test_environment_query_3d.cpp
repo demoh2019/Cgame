@@ -1062,6 +1062,68 @@ TEST_CASE("[EnvironmentQuery3D] Incremental query handles empty and filtered sce
 	CHECK(q->get_incremental_top_indices().is_empty());
 }
 
+TEST_CASE("[EnvironmentQuery3D] Timed incremental EQS preserves ranked results and measured work") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(8, 0, 0), Vector3(1, 0, 0), Vector3(2, 0, 0), Vector3(5, 0, 0),
+		Vector3(3, 0, 0), Vector3(4, 0, 0), Vector3(7, 0, 0), Vector3(-1, 0, 0)
+	});
+	const PackedInt32Array expected = q->query_top_indices(8);
+	const PackedVector3Array expected_positions = q->query_top_positions(8);
+	REQUIRE(q->begin_incremental_top_positions(8));
+	CHECK(q->suggest_incremental_step_size(120, 8) == 3);
+	CHECK(!q->step_incremental_top_positions_timed(100000, 3));
+	CHECK(q->get_incremental_last_step_candidates() == 3);
+	CHECK(q->get_incremental_processed_count() == 3);
+	CHECK(q->get_incremental_last_step_us() >= 0);
+	CHECK(q->get_incremental_top_indices().is_empty());
+	int steps = 1;
+	while (!q->is_incremental_top_complete() && steps < 8) {
+		const int budget = q->suggest_incremental_step_size(120, 8);
+		CHECK(budget >= 1);
+		CHECK(budget <= 8);
+		const int previous = q->get_incremental_processed_count();
+		q->step_incremental_top_positions_timed(120, budget);
+		CHECK(q->get_incremental_processed_count() > previous);
+		CHECK(q->get_incremental_processed_count() - previous <= budget);
+		CHECK(q->get_incremental_last_step_candidates() == q->get_incremental_processed_count() - previous);
+		CHECK(q->get_incremental_last_step_us() >= 0);
+		steps++;
+	}
+	REQUIRE(q->is_incremental_top_complete());
+	CHECK(q->get_incremental_processed_count() == 8);
+	CHECK(q->get_incremental_top_indices() == expected);
+	CHECK(q->get_incremental_top_positions() == expected_positions);
+	CHECK(q->step_incremental_top_positions_timed(120, 2));
+	CHECK(q->get_incremental_last_step_candidates() == 0);
+	q->cancel_incremental_top_positions();
+	CHECK(q->get_incremental_last_step_candidates() == 0);
+	CHECK(q->get_incremental_last_step_us() == 0);
+	CHECK(q->suggest_incremental_step_size(120, 8) == 3);
+}
+
+TEST_CASE("[EnvironmentQuery3D] Timed EQS rejects invalid budgets and always progresses") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(1, 0, 0), Vector3(2, 0, 0), Vector3(3, 0, 0), Vector3(4, 0, 0)
+	});
+	REQUIRE(q->begin_incremental_top_positions(4));
+	ERR_PRINT_OFF
+	CHECK(!q->step_incremental_top_positions_timed(0, 3));
+	CHECK(!q->step_incremental_top_positions_timed(1000001, 3));
+	CHECK(!q->step_incremental_top_positions_timed(100, 0));
+	CHECK(!q->step_incremental_top_positions_timed(100, 4097));
+	CHECK(q->suggest_incremental_step_size(0, 3) == 0);
+	CHECK(q->suggest_incremental_step_size(100, 0) == 0);
+	ERR_PRINT_ON
+	CHECK(q->get_incremental_processed_count() == 0);
+	const int previous = q->get_incremental_processed_count();
+	q->step_incremental_top_positions_timed(1, 4);
+	CHECK(q->get_incremental_processed_count() > previous);
+	CHECK(q->get_incremental_processed_count() <= 4);
+	CHECK(q->get_incremental_last_step_candidates() >= 1);
+	CHECK(q->get_incremental_last_step_candidates() <= 4);
+	CHECK(q->get_incremental_top_indices().is_empty() == !q->is_incremental_top_complete());
+}
+
 TEST_CASE("[EnvironmentQuery3D] Evaluation does not mutate input candidates") {
 	PackedVector3Array points = { Vector3(7, 0, 0), Vector3(1, 0, 0) };
 	Ref<EnvironmentQuery3D> q = make_query(points);
