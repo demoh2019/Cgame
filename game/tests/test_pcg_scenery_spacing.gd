@@ -62,3 +62,57 @@ func run(t) -> void:
 	else:
 		t.eq(SceneryBatches.thin_cosmetic_transforms(transforms, 2.0),
 			spaced, "stock Godot uses identical cosmetic spacing fallback")
+
+	t.current = "3D PCG: cliffs, determinism, and fallback/native parity"
+	var points_3d := PackedVector3Array([
+		Vector3(0, 0, 0), Vector3(0.25, 0, 0), Vector3(0.25, 3, 0),
+		Vector3(2, 0, 0), Vector3(0, 0, 2), Vector3(-2, 0, 0),
+		Vector3(0.25, 3, 0), Vector3(2, 0, 2)])
+	var expected_3d := PackedInt32Array([0, 2, 3, 4, 5, 7])
+	t.eq(SceneryBatches.pcg_filter_indices_3d(points_3d, 2.0, 4096, false),
+		expected_3d, "3D fallback preserves stacked elevations")
+	var transforms_3d: Array[Transform3D] = []
+	for point in points_3d:
+		transforms_3d.append(Transform3D(Basis.IDENTITY, point))
+	var before_3d := transforms_3d.duplicate()
+	var thin_3d: Array[Transform3D] = SceneryBatches.thin_cosmetic_transforms_3d(
+		transforms_3d, 2.0, false)
+	t.eq(thin_3d.size(), expected_3d.size(), "3D spacing output count")
+	for i in expected_3d.size():
+		t.eq(thin_3d[i], transforms_3d[expected_3d[i]], "stable 3D index %d" % i)
+	t.eq(transforms_3d, before_3d, "3D source transforms unchanged")
+	t.eq(SceneryBatches.thin_cosmetic_transforms_3d(transforms_3d, 0.0, false),
+		before_3d, "zero 3D spacing preserves all candidates")
+	t.eq(SceneryBatches.pcg_filter_indices_3d(points_3d, 2.0, 2, false),
+		PackedInt32Array([0, 2]), "3D output cap preserves order")
+	var bad_3d: PackedVector3Array = points_3d.duplicate()
+	bad_3d.append(Vector3(0, NAN, 0))
+	t.eq(SceneryBatches.pcg_filter_indices_3d(bad_3d, 2.0, 4096, false).size(),
+		0, "invalid late 3D point rejects entire batch")
+	var borders_3d := PackedVector3Array([
+		Vector3(0.95, 0.95, 0.95), Vector3(1.05, 1.05, 1.05),
+		Vector3(-0.1, -0.1, -0.1), Vector3(-0.25, -0.2, -0.2), Vector3(3, 3, 3)])
+	t.eq(SceneryBatches.pcg_filter_indices_3d(borders_3d, 1.0, 4096, false),
+		PackedInt32Array([0, 2, 4]), "3D cells handle negative positions and boundaries")
+	if ClassDB.class_exists("PCGSpatialFilter3D"):
+		var native_3d: Object = ClassDB.instantiate("PCGSpatialFilter3D")
+		t.check(native_3d != null and native_3d.has_method("filter_indices"),
+			"3D engine class is registered")
+		if native_3d != null and native_3d.has_method("filter_indices"):
+			t.eq(native_3d.call("filter_indices", points_3d, 2.0), expected_3d,
+				"native spatial thinning retains different elevation layers")
+			t.eq(SceneryBatches.thin_cosmetic_transforms_3d(transforms_3d, 2.0),
+				thin_3d, "Albion uses native 3D filter")
+			var rng_3d := RandomNumberGenerator.new()
+			rng_3d.seed = 925311
+			for sample in 24:
+				var random_points_3d := PackedVector3Array()
+				for i in 180:
+					random_points_3d.append(Vector3(rng_3d.randf_range(-50.0, 50.0),
+						rng_3d.randf_range(-20.0, 20.0), rng_3d.randf_range(-50.0, 50.0)))
+				t.eq(native_3d.call("filter_indices", random_points_3d, 2.5),
+					SceneryBatches.pcg_filter_indices_3d(random_points_3d, 2.5, 4096, false),
+					"3D engine/script parity sample %d" % sample)
+	else:
+		t.eq(SceneryBatches.thin_cosmetic_transforms_3d(transforms_3d, 2.0),
+			thin_3d, "stock Godot uses deterministic script fallback")
