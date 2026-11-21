@@ -5,6 +5,23 @@ behavior tree system for gameplay AI. It is not a visual graph editor yet.
 When enabled, all resources are available in the scene inspector and in
 GDScript. The module has no third-party runtime dependencies.
 
+## Unreal-style AI decision replay and CPU hotspots
+
+The native `AIBehaviorTrace` now supports a separate optional ring buffer for **multi-tick execution history**, inspired by Unreal Engine's Behavior Tree execution history and Visual Logger. Set `history_capacity` to 1–32 explicitly (default **0**, so normal AI incurs no retained-frame overhead). Each stored frame is an independently readable task timeline. `get_history_frames(true)` returns only frames where the visited task paths, classes, statuses or truncation changed, intentionally ignoring ordinary CPU timing jitter.
+
+```gdscript
+var runner: BehaviorTreeRunner = $BehaviorTreeRunner
+runner.trace_enabled = true
+runner.set_trace_history_capacity(16)
+# Run normal AI ticks...
+var frames: Array = runner.get_trace_history_frames(true) # Decision changes only
+var hotspots: Array = runner.get_slowest_trace_nodes(5)
+# hotspots entries contain self_usec (exclusive approximation) and duration_usec (inclusive).
+runner.trace_enabled = false # Also clears history; the limit remains configured.
+```
+
+The bounded `get_slowest_trace_nodes()` query reports expensive tasks by estimated **exclusive CPU time**, excluding direct child execution where available. It keeps full inclusive times for context and breaks ties by stable task path. The playable reactive AI sandbox provides **Prev / Next / Live** controls, a changed-only checkbox and a hotspot readout; the canonical Albion After zombie server exposes a separate eight-tick recorder only when `enable_ai_trace(true)` was requested for an individual NPC. No gameplay target logic or network payloads are changed.
+
 ## Visual BehaviorTree Inspector: editor dock and runtime tree
 
 The native `BehaviorTreeRunner.get_tree_snapshot()` now returns the **full task hierarchy** even for branches that were not run on the last tick. It merges on-demand `AIBehaviorTrace` statuses into stable Resource paths, distinguishes `NOT RUN` from `SUCCESS`, `FAILURE` and `RUNNING`, and includes inclusive CPU time per visited node. Maximum 256 task nodes, with a graph-truncation flag; no per-frame tree walk when unused.
