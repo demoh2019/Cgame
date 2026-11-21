@@ -15,3 +15,13 @@ A native, pure-data **significance budget selector** inspired by Unreal Engine S
 Native doctests live under `tests/`, and `game/tests/test_world_overlay_significance.gd` checks native/fallback parity and budget limits. Real FPS savings require runtime profiling; no benchmark improvement is claimed.
 
 Based on Unreal's significance concepts: https://dev.epicgames.com/documentation/en-us/unreal-engine/significance-manager-in-unreal-engine
+
+## Stable significance for persistent visual budgets
+
+`select_top_stable(distances, ids, retained_ids, budget, max_distance, hysteresis)`
+selects a bounded top-K in native C++ with a temporal retention bonus. This
+reduces flicker from a moving camera near a slot threshold without retaining
+out-of-range objects. IDs are stable across changing candidate order; invalid
+or duplicate IDs fail closed. Albion After uses this to select dungeon torches
+from the global light pool, while preserving a same-order GDScript fallback
+for stock Godot. Shadow-casting budgets remain independent and capped.
