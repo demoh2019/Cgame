@@ -29,6 +29,29 @@ each frame. The module is safe to call from the main thread: it creates
 no Nodes, does not touch the SceneTree, never advances skeletons, and
 does not access physics or networking.
 
+## Visibility-aware animation budgeting
+
+`plan_visible_tiers(distances, priority_flags, visible_flags, full_budget,
+priority_budget)` applies the same stable bounded top-K selection as the
+legacy API but reserves **expensive tier-0 procedural foot IK** and
+**tier-1 combat-priority** slots for visible actors. A non-visible actor
+runs at **tier 2 or slower**, retaining tier 3/4 at larger distances; no
+animation is frozen and no game-authoritative simulation is touched.
+
+In Albion After, `CharacterAnim.apply_crowd` derives visibility from
+`Camera3D.is_position_in_frustum` and `model.is_visible_in_tree`.
+Actors closer than 8 metres are conservatively considered visible
+whenever their model is visible, avoiding false negatives near screen
+edges. Visible combat telegraphs keep their own independently bounded
+priority pool. The next camera update immediately reassigns available
+animation slots.
+
+Backward compatibility: existing `plan_tiers` results and signatures
+are unchanged. Newer Cgame builds use native top-K for visibility masks;
+older builds and stock Godot use a matching deterministic GDScript
+fallback. The planner never makes its own frustum tests. It is not a
+full time-measured Animation Budget Allocator or a GPU visibility test.
+
 ## Safety and portability
 
 - At most 16,384 actors; priority flags must match distances 1:1.
