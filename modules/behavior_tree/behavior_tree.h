@@ -30,6 +30,8 @@
 
 #pragma once
 
+#include "ai_execution_profiler.h"
+
 #include "core/io/resource.h"
 #include "core/object/gdvirtual.gen.h"
 #include "core/variant/dictionary.h"
@@ -240,6 +242,7 @@ class BehaviorTreeRunner : public Node {
 	BehaviorTreeTask::Status last_status = BehaviorTreeTask::RUNNING;
 	bool auto_tick = false;
 	bool finished = false;
+	Ref<AIExecutionProfiler> execution_profiler;
 
 protected:
 	static void _bind_methods();
@@ -258,6 +261,10 @@ public:
 	BehaviorTreeTask::Status get_last_status() const { return last_status; }
 	// On-demand diagnostic view; nested containers are copied, Objects stay shared.
 	Dictionary get_debug_snapshot() const;
+	void set_profiling_enabled(bool p_enabled);
+	bool is_profiling_enabled() const;
+	Dictionary get_profile_snapshot() const;
+	void reset_profile();
 
 	BehaviorTreeRunner();
 };
