@@ -33,6 +33,11 @@
 			<return type="float" />
 			<description>Returns the remaining seconds of target memory, refreshed while visible.</description>
 		</method>
+		<method name="advance_time">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>Call when no fresh target observation is available. Marks the target as not currently visible and decrements stored sight memory by [param delta] seconds. An ordinary [method observe] call already decrements memory when the target is not visible; do not call both for the same elapsed time.</description>
+		</method>
 		<method name="reset">
 			<return type="void" />
 			<description>Forgets the current target, last known position and memory countdown.</description>
