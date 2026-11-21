@@ -35,6 +35,7 @@
 
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
+#include "core/string/string_name.h"
 #include "core/variant/dictionary.h"
 
 // Streams the parts ("chunks") of a big world in and out around a focus point, so an open world
@@ -182,6 +183,13 @@ private:
 	int64_t last_cached_expiration_work_usec = 0;
 	HashMap<Vector3i, bool> simulation_active_cells;
 	int simulation_inactive_count = 0;
+	// Opt-in, bounded runtime simulation layers. Loading, collision, visual
+	// residency, networking, and authoritative gameplay never depend on them.
+	HashMap<Vector3i, StringName> cell_simulation_layers;
+	HashMap<StringName, bool> simulation_layer_states;
+	int disabled_simulation_layer_count = 0;
+	static constexpr int MAX_SIMULATION_LAYERS = 16;
+	bool _simulation_layer_allows(const Vector3i &p_cell) const;
 	// Only chunk roots actually implementing the callback are tracked.
 	// A zero/absent entry means full tick frequency.
 	HashMap<Vector3i, real_t> applied_tick_intervals;
@@ -202,6 +210,11 @@ private:
 	int max_auto_retries = 0;
 	real_t retry_initial_delay = 1.0;
 	real_t retry_max_delay = 16.0;
+	// Zero preserves the historical simultaneous-release retry policy.
+	real_t retry_delay_spread = 0.0;
+	int max_retry_releases_per_update = 0;
+	int last_retry_release_count = 0;
+	int last_retry_deferred_count = 0;
 	double time_since_update = 1e9;
 	bool truncated_warned = false;
 
@@ -316,6 +329,12 @@ public:
 	int get_max_simulation_transitions_per_update() const { return max_simulation_transitions_per_update; }
 	bool is_cell_simulation_active(const Vector3i &p_cell) const;
 	int get_simulation_active_count() const;
+	// Chunk roots may implement get_streaming_simulation_layer() -> StringName.
+	// Unknown/unconfigured layers are enabled by default; no load/unload.
+	bool set_simulation_layer_enabled(const StringName &p_layer, bool p_enabled);
+	bool is_simulation_layer_enabled(const StringName &p_layer) const;
+	StringName get_cell_simulation_layer(const Vector3i &p_cell) const;
+	int get_simulation_layer_count() const { return simulation_layer_states.size(); }
 	// For opted-in script roots, set_streaming_tick_interval(seconds) is called
 	// at initial adoption and for later bounded near/far transitions.
 	// -1 disables; hysteresis only affects far-tier entry, not near recovery.
@@ -359,6 +378,14 @@ public:
 	real_t get_retry_initial_delay() const { return retry_initial_delay; }
 	void set_retry_max_delay(real_t p_seconds);
 	real_t get_retry_max_delay() const { return retry_max_delay; }
+	void set_retry_delay_spread(real_t p_fraction);
+	real_t get_retry_delay_spread() const { return retry_delay_spread; }
+	void set_max_retry_releases_per_update(int p_count);
+	int get_max_retry_releases_per_update() const { return max_retry_releases_per_update; }
+	int get_last_retry_release_count() const { return last_retry_release_count; }
+	int get_last_retry_deferred_count() const { return last_retry_deferred_count; }
+	static double calculate_retry_delay_seconds(const Vector3i &p_cell, int p_attempt,
+			double p_initial_seconds, double p_max_seconds, double p_spread);
 	int get_retry_pending_count() const;
 	void set_update_interval(double p_seconds);
 	double get_update_interval() const { return update_interval; }

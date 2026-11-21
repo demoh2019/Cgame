@@ -826,6 +826,10 @@ static func _build_items() -> void:
 	_add_recipe("bike_dynamo_lamp", "bike_dynamo_lamp", 1,
 		{"bar_2": 1, "scrap": 3, "cloth_2": 1}, "workbench", 7.0)
 	# Crafted travel vehicle; ownership and cooldowns are checked by the server.
+	# Boat: carried in the pack; in deep water you paddle it instead of swimming.
+	_add_item("raft", {"name": "Driftwood Raft", "kind": "boat", "tier": 1, "weight": 9.0, "value": 70,
+		"desc": "In deep water you paddle across the surface at speed instead of swimming. Cannot dive."})
+	_add_recipe("raft", "raft", 1, {"plank_1": 10, "fiber_1": 8}, "workbench", 6.0)
 	_add_item("salvage_bike", {"name": "Salvaged Trail Bike", "kind": "mount",
 		"tier": 2, "weight": 12.0, "value": 180})
 	_add_recipe("salvage_bike", "salvage_bike", 1,

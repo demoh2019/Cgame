@@ -63,6 +63,7 @@ public:
 	void clear();
 	bool has_tag(const StringName &p_tag, bool p_exact = false) const;
 	bool has_any(const PackedStringArray &p_tags, bool p_exact = false) const;
+	int count_matching_queries(const PackedStringArray &p_queries, bool p_exact = false) const;
 	bool has_all(const PackedStringArray &p_tags, bool p_exact = false) const;
 	int get_tag_count() const { return tags.size(); }
 	bool is_empty() const { return tags.is_empty(); }
@@ -84,6 +85,7 @@ class GameplayTagQuery : public Resource {
 	PackedStringArray any_tags;
 	PackedStringArray none_tags;
 	bool exact = false;
+	int min_any_matches = 1; // Distinct qualifying conditions for matches(), not matches_stacks().
 	int min_stack_count = 1; // Applies only to matches_stacks(), not matches().
 
 protected:
@@ -100,6 +102,8 @@ public:
 	bool is_exact() const { return exact; }
 	void set_min_stack_count(int p_count);
 	int get_min_stack_count() const { return min_stack_count; }
+	void set_min_any_matches(int p_count);
+	int get_min_any_matches() const { return min_any_matches; }
 
 	bool matches(const Ref<GameplayTagContainer> &p_container) const;
 	// Uses the same all/any/none and hierarchy rules, requiring the configured

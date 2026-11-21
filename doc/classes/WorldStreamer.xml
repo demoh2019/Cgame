@@ -305,6 +305,27 @@
 				Marks optional staged cosmetic work complete for a previously loaded chunk. Does nothing for unknown or already-completed cells. Emits [signal chunk_visual_details_ready] once, without affecting gameplay state, chunk residency, load/unload radius or the procedural generation budget. Call this after cosmetic MultiMesh categories are finished.
 			</description>
 		</method>
+		<method name="calculate_retry_delay_seconds" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="cell" type="Vector3i" />
+			<param index="1" name="attempt" type="int" />
+			<param index="2" name="initial_seconds" type="float" />
+			<param index="3" name="max_seconds" type="float" />
+			<param index="4" name="spread" type="float" />
+			<description>Pure retry delay helper. Computes the capped exponential delay for attempt indices 0–8. With spread 0, it is exactly min(max_seconds, initial_seconds * 2^attempt), as before. With a finite spread in 0–0.5, a stable hash of cell coordinates and attempt spreads retries into [base * (1 - spread), base] without introducing mutable random streams. Finite positive delays at most 60 seconds are accepted; invalid values return 0 without changing scene state. Intended for deterministic testing and offline scheduling.</description>
+		</method>
+		<method name="get_last_retry_release_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of expired retry leases released to the normal chunk queue during the last streaming update. Releases do not instantiate or load resources directly; regular frame and concurrency budgets remain authoritative.</description>
+		</method>
+		<method name="get_last_retry_deferred_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of already-expired retry leases kept pending because [member max_retry_releases_per_update] was reached on the last streaming update. Retries are admitted by earliest deadline, with coordinates as a stable tie-break; they are never discarded by this limit.</description>
+		</method>
+		<method name="get_retry_pending_count" qualifiers="const">
+			<return type="int" />
+			<description>Count of failed cells with a scheduled next attempt; exhausted failures and intentionally empty cells are excluded. Includes expired retries deferred by the optional release limit.</description>
+		</method>
 		<method name="refresh">
 			<return type="void" />
 			<param index="0" name="retry" type="bool" default="false" />
@@ -353,6 +374,26 @@
 			<description>
 				Returns the cell that contains [param position] on the streamed [member axes].
 			</description>
+		</method>
+		<method name="set_simulation_layer_enabled">
+			<return type="bool" />
+			<param index="0" name="layer" type="StringName" />
+			<param index="1" name="enabled" type="bool" />
+			<description>Enables/disables a named cosmetic simulation layer. Scene roots can opt in through [code]get_streaming_simulation_layer()[/code] returning a String or StringName. Unknown layers are enabled by default. At most 16 layer names (up to 64 characters each) can be configured; malformed or excess names return false without changing state. No residency, collision, physics, navigation or authoritative gameplay is changed. The engine applies at most [member max_simulation_transitions_per_update] transitions on its next normal streaming update.</description>
+		</method>
+		<method name="is_simulation_layer_enabled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="layer" type="StringName" />
+			<description>Returns whether a runtime cosmetic simulation layer is enabled (true for unknown names).</description>
+		</method>
+		<method name="get_cell_simulation_layer" qualifiers="const">
+			<return type="StringName" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>Returns a loaded chunk's opted-in simulation layer, or an empty name for unloaded or untagged chunks. Metadata is discarded on unload.</description>
+		</method>
+		<method name="get_simulation_layer_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of configured runtime cosmetic layers (at most 16).</description>
 		</method>
 		<method name="get_tick_throttled_count" qualifiers="const">
 			<return type="int" />
@@ -487,6 +528,12 @@
 		</member>
 		<member name="velocity_hint" type="Vector3" setter="set_velocity_hint" getter="get_velocity_hint" default="Vector3(0, 0, 0)">
 			Estimated velocity of the player or camera, in metres per second, used only to prioritize chunks within [member load_radius]. The ignored grid axis is discarded. Non-finite hints are rejected, while zero velocity preserves nearest-first loading. Update this when the character moves; reset it after a teleport or network correction.
+		</member>
+		<member name="retry_delay_spread" type="float" setter="set_retry_delay_spread" getter="get_retry_delay_spread" default="0.0">
+			Opt-in deterministic per-cell backoff spread, from 0 (disabled) to 0.5. Instead of retrying an entire region of failed scene resources on identical timestamps, spreads each existing exponential retry delay by as much as this fraction below the base capped delay. The timer still uses monotonic engine time, existing maximum attempt count and maximum retry delay. This is a recovery/load-scheduling optimization, not a claim that transient errors will succeed.
+		</member>
+		<member name="max_retry_releases_per_update" type="int" setter="set_max_retry_releases_per_update" getter="get_max_retry_releases_per_update" default="0">
+			Maximum expired failed cells (1–32, or 0 for legacy unlimited) to release to the ordinary streaming queue each update. When set, releases are sorted by oldest ready deadline and then cell coordinates so repeated failures cannot starve later eligible cells. Cells still obey all original load priority, worker concurrency and frame/CPU budgets. An exhausted or intentionally empty procedural cell is never forcibly retried.
 		</member>
 		<member name="update_interval" type="float" setter="set_update_interval" getter="get_update_interval" default="0.1">
 			Time in seconds between two evaluations of which cells to load and unload. Checking a few times per second is enough; [code]0[/code] checks every frame.

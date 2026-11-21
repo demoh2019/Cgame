@@ -60,7 +60,7 @@ TEST_CASE("[SceneNodePool] Prewarm, reuse, overload and eviction") {
 	CHECK(a != b);
 	CHECK(pool.get_active_count() == 2);
 	CHECK(pool.acquire(root) == nullptr);
-	CHECK(pool.get_stats()["rejected_total"] == 1);
+	CHECK(pool.get_stats()["rejected_total"] == Variant(1));
 
 	Node *foreign = memnew(Node);
 	CHECK_FALSE(pool.release(foreign));
@@ -68,13 +68,13 @@ TEST_CASE("[SceneNodePool] Prewarm, reuse, overload and eviction") {
 	CHECK(pool.release(a));
 	CHECK_FALSE(pool.release(a));
 	CHECK(pool.acquire(root) == a);
-	CHECK(pool.get_stats()["created_total"] == 2);
-	CHECK(pool.get_stats()["reused_total"] == 3);
+	CHECK(pool.get_stats()["created_total"] == Variant(2));
+	CHECK(pool.get_stats()["reused_total"] == Variant(3));
 
 	CHECK(pool.release(a));
 	CHECK(pool.release(b));
 	CHECK(pool.get_idle_count() == 2);
-	CHECK(pool.get_stats()["peak_active"] == 2);
+	CHECK(pool.get_stats()["peak_active"] == Variant(2));
 
 	// External code may still hold the returned pointer and free it:
 	// the idle cache must never dereference or resurrect a dangling pointer.
@@ -97,7 +97,7 @@ TEST_CASE("[SceneNodePool] Prewarm, reuse, overload and eviction") {
 	REQUIRE(external_free != nullptr);
 	memdelete(external_free);
 	CHECK(pool.get_active_count() == 0);
-	CHECK(pool.get_stats()["disposed_total"] == 3);
+	CHECK(pool.get_stats()["disposed_total"] == Variant(3));
 
 	memdelete(root);
 }

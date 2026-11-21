@@ -9,6 +9,7 @@ const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildSiegeLedger = preload("res://scripts/shared/guild_siege_ledger.gd")
 const SiegeOutbox = preload("res://scripts/server/siege_outbox.gd")
 const SoloCharacterStore = preload("res://scripts/server/solo_character_store.gd")
+const TradeJournal = preload("res://scripts/server/trade_journal.gd")
 
 signal welcomed
 signal join_refused(reason: String)
@@ -43,6 +44,7 @@ var siege_outbox # SiegeOutbox, configured by the dedicated server at startup.
 var _siege_ledger_running: bool = false
 var _siege_ledger_retry_clock: float = 0.0
 var _guild_score_loading: Dictionary = {}
+var trade_journal # TradeJournal: crash-safe redo log of two-account deals, configured by the dedicated server.
 const SIEGE_LEDGER_RETRY_SECONDS := 15.0
 
 
@@ -51,6 +53,8 @@ func _process(delta: float) -> void:
 	if _count_clock >= 1.0:
 		_count_clock = 0.0
 		_command_counts.clear()
+		if role == "server" and sim != null:
+			_measure_round_trips()
 	if role == "server" and not shutting_down and gateway != null and gateway.enabled:
 		# Two-account deals settle in one backend transaction (see GameServer.pair_commits).
 		sim.pair_persistence = true
@@ -99,6 +103,58 @@ func _refresh_verified_guilds() -> void:
 
 ## Load the durable outbox before accepting clients. A malformed or wrong-seed
 ## journal fails closed so a restart never silently discards a committed win.
+## ENet smooths each peer's round trip; the server rewinds PvP targets by it (lag compensation).
+func _measure_round_trips() -> void:
+	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if enet == null:
+		return
+	for id in sim.players:
+		var packet_peer: ENetPacketPeer = enet.get_peer(int(id))
+		if packet_peer != null:
+			sim.peer_round_trip[int(id)] = packet_peer.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME) / 1000.0
+	for id in sim.peer_round_trip.keys():
+		if not sim.players.has(id):
+			sim.peer_round_trip.erase(id)
+
+
+## Opens the deal journal and replays every deal the backend never confirmed before a crash.
+func configure_trade_journal(journal_path: String) -> bool:
+	if role != "server" or sim == null or gateway == null or not gateway.enabled or trade_journal != null:
+		return false
+	var journal = TradeJournal.new()
+	if not journal.open_file(journal_path):
+		return false
+	trade_journal = journal
+	if not journal.entries.is_empty():
+		# Block those accounts from loading an older backend copy until replay finishes.
+		for user in journal.accounts():
+			_departing_accounts[user] = true
+		call_deferred("_replay_trade_journal")
+	return true
+
+
+func _replay_trade_journal() -> void:
+	var blocked: PackedStringArray = trade_journal.accounts()
+	for tx in trade_journal.entries.keys():
+		var entry: Dictionary = trade_journal.entries[tx]
+		var ok := true
+		match TradeJournal.replay_kind(entry):
+			"pair":
+				var result: Dictionary = await gateway.save_character_pair(str(entry["a"]["user"]), entry["a"]["data"],
+					str(entry["b"]["user"]), entry["b"]["data"], str(tx))
+				ok = bool(result.get("ok", false))
+			"single":
+				var side: Dictionary = entry["a"] if not bool(entry["a"]["superseded"]) else entry["b"]
+				ok = await gateway.save_character(str(side["user"]), side["data"])
+		if ok:
+			trade_journal.settle(str(tx))
+		else:
+			push_warning("Deal %s is still unsettled after restart; kept in the journal." % tx)
+	for user in blocked:
+		_departing_accounts.erase(user)
+	print("SERVER trade journal: %d unsettled deals remain" % trade_journal.entries.size())
+
+
 func configure_siege_outbox(journal_path: String) -> bool:
 	if role != "server" or sim == null or gateway == null or not gateway.enabled:
 		return false
@@ -339,11 +395,16 @@ func _commit_pair(entry: Dictionary) -> void:
 	# Snapshot after the deal; a later autosave of either account waits for this commit.
 	var data_a: Dictionary = sim.character_data(first)
 	var data_b: Dictionary = sim.character_data(second)
+	# Write-ahead: the deal is on disk before the backend sees it, so a crash can replay it.
+	if trade_journal != null and not trade_journal.record(tx, user_a, data_a, user_b, data_b):
+		push_warning("Deal %s could not be journaled; settling without crash protection." % tx)
 	var committed := false
 	for attempt in PAIR_COMMIT_ATTEMPTS:
 		var result: Dictionary = await gateway.save_character_pair(user_a, data_a, user_b, data_b, tx)
 		if bool(result.get("ok", false)):
 			committed = true
+			if trade_journal != null:
+				trade_journal.settle(tx)
 			break
 		await get_tree().create_timer(0.5 * float(attempt + 1)).timeout
 	_saving.erase(user_a)
@@ -362,6 +423,9 @@ func _save_serial(user_id: String, data: Dictionary) -> bool:
 	_saving[user_id] = true
 	var ok: bool = await gateway.save_character(user_id, data)
 	_saving.erase(user_id)
+	if ok and trade_journal != null:
+		# This newer state already contains any journaled deal; never replay the older snapshot.
+		trade_journal.supersede(user_id)
 	return ok
 
 

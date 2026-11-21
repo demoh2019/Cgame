@@ -264,8 +264,8 @@ static func runtime_attribute_snapshot(kind: String, state: Dictionary) -> Dicti
 static func runtime_attribute_value(node: Node, name: String, fallback: float = 0.0) -> float:
 	if node != null:
 		var attribute_set: Object = node.get_meta("attributes", null) as Object
-		if attribute_set != null and attribute_set.has_method("has_attribute") and
-				bool(attribute_set.call("has_attribute", StringName(name))):
+		if attribute_set != null and attribute_set.has_method("has_attribute") \
+				and bool(attribute_set.call("has_attribute", StringName(name))):
 			return float(attribute_set.call("get_value", StringName(name)))
 	return fallback if is_finite(fallback) else 0.0
 
@@ -276,6 +276,19 @@ static func runtime_stack_count(node: Node, tag: String, fallback: int = 0) -> i
 		if stack_container != null and stack_container.has_method("get_stack_count"):
 			return maxi(0, int(stack_container.call("get_stack_count", StringName(tag), true)))
 	return maxi(0, fallback)
+
+
+## Independently active crowd controls from server snapshots. A native
+## distinct-query match is used when available; stock Godot reads timers.
+static func zombie_control_count(node: Node, snapshot: Dictionary) -> int:
+	if node != null and node.has_meta("tags"):
+		var container: Object = node.get_meta("tags") as Object
+		if container != null and container.has_method("count_matching_queries"):
+			return int(container.call("count_matching_queries", PackedStringArray([
+				"Runtime.Status.Staggered", "Runtime.Status.Snared", "Runtime.Status.Sundered"]), true))
+	return int(float(snapshot.get("stagger_seconds", 0.0)) > 0.0) \
+		+ int(float(snapshot.get("snared_seconds", 0.0)) > 0.0) \
+		+ int(float(snapshot.get("sunder_seconds", 0.0)) > 0.0)
 
 
 static func runtime_has(node: Node, tag: String, fallback: bool = false) -> bool:

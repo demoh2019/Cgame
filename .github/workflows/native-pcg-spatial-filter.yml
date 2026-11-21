@@ -64,6 +64,11 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 240s "$BIN" --headless --test --test-case="*PCGSurfaceFilter3D*" --no-colors 2>&1 | tee pcg-surface-native.log
+      - name: Native PCG polygon mask density and contour tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*PCGPolygonMask3D*" --no-colors 2>&1 | tee pcg-polygon-native.log
       - name: Native PCG path falloff tests
         run: |
           set -euo pipefail
@@ -165,6 +170,7 @@ jobs:
             pcg-polyline-native.log
             pcg-weighted-game.log
             pcg-path-falloff-native.log
+            pcg-polygon-native.log
             pcg-surface-native.log
             pcg-import.log
             pcg-game.log

@@ -8,6 +8,7 @@
 
 #include "core/object/ref_counted.h"
 #include "core/variant/variant.h"
+#include "core/variant/binder_common.h"
 
 // Stateless and deterministic Gameplay Effect stacking decisions.
 // Explicit durations and prior stack counts are supplied by authoritative
@@ -61,3 +62,6 @@ public:
 	int get_overflow_policy() const { return overflow_policy; }
 	int get_reapply_policy() const { return reapply_policy; }
 };
+
+VARIANT_ENUM_CAST(GameplayEffectStackPolicy::OverflowPolicy);
+VARIANT_ENUM_CAST(GameplayEffectStackPolicy::ReapplyPolicy);

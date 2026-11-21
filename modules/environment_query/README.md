@@ -167,6 +167,24 @@ detection, line of sight, or navigation validation. Albion After's authoritative
 raid reinforcements supply living infected positions and preserve deterministic
 stock-Godot fallback when more than 128 contexts are present.
 
+## Per-candidate tactical score bonuses
+
+`candidate_bonuses` is an optional `PackedFloat32Array` aligned by source
+index with `candidates`. Each finite element must be between -1 and +1;
+negative values penalize a point, positive values prioritize it. The engine
+adds the offset to the existing distance/threat score **after** applying
+exclusions and clearance constraints. An empty array means no bonus, so old
+queries remain unchanged. A candidate list with a different length clears
+existing offsets; malformed updates leave the previous values intact.
+`query()`, `query_top_positions()`, and `query_spread_positions()` share
+identical ranking and deterministic tie breaking.
+
+Albion After feeds small, server-calculated cover-proximity bonuses into its
+raid reinforcement EQS to favor positions near physical obstacles while still
+rejecting obstructed terrain, safe zones, player clearance violations and
+occupied sites. This is a proximity heuristic, not verified line of sight:
+obstacle visibility/navmesh reachability remain gameplay responsibilities.
+Stock Godot and older Cgame builds use the matching GDScript fallback.
 ## Stable top-K candidate identities (Unreal EQS-style item handles)
 
 `EnvironmentQuery3D.query_top_indices(count)` returns a
@@ -486,3 +504,53 @@ Comparison: Unreal EQS manager supports MaxAllowedTestingTime per update:
 https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/AIModule/FEnvQueryManagerConfig
 Godot native monotonic timer:
 https://docs.godotengine.org/en/4.6/engine_details/architecture/common_engine_methods_and_macros.html
+
+## Shared per-tick EQS CPU ledger (Unreal EQS manager-style)
+
+`EnvironmentQueryTickBudget` is a reusable native `RefCounted` which
+coordinates **all** AI controllers on the same authoritative main-thread
+tick, beyond the previous isolated `EnvironmentQuery3D` 120us step.
+Its independent regular and urgent pools use actual measured native
+scorer microseconds, so one worker's spending reduces the remaining
+allowance for the next worker:
+
+```gdscript
+var budget := EnvironmentQueryTickBudget.new()
+budget.begin_tick(server_tick, 600, 240)
+if budget.try_admit_step(false):
+    var allowance := mini(120, budget.get_remaining_us(false))
+    var cap := query.suggest_incremental_step_size(allowance, 8)
+    var complete := query.step_incremental_top_positions_timed(allowance, cap)
+    budget.record_step(query.get_incremental_last_step_us())
+```
+
+Quota validation accepts 0..1,000,000us per pool; tick must be
+nonnegative. Repeat `begin_tick` with identical arguments in the same
+tick is intentionally **idempotent** and cannot refill spent CPU time.
+The ledger tracks one pending synchronous step at a time; another
+admission is rejected until `record_step(actual_us)` (or
+`cancel_pending_step()`). Sub-microsecond measured steps charge at
+least one microsecond. An individual source candidate can still
+overshoot an allowance: this is a **soft**, not hard real-time cap.
+The urgent pool is reserved for contested/expired Smart Object flank
+leases and has a separate cap, preventing unlimited bypass.
+The ledger has no clock dependency: the native EQS scorer supplies
+monotonic elapsed microseconds. No network replication or saves.
+
+Albion After enables this budget for 64..4096 infected with the new
+native class. The server instantiates one shared ledger and calls
+`begin_tick(tick_count, 600, 240)` before any eligible infected work.
+It then preserves the existing rotating up-to-eight regular query-step
+admissions; each worker additionally checks the shared ledger directly
+before scoring and charges it immediately after. A stale slot is
+marked urgent, but is restricted to 240us per tick. The per-step
+120us cap remains in force and is tightened to the pool's remaining
+allowance. Until complete, an agent pursues directly, never claims
+a partial/invalid flank slot. Combat, target selection and simulation
+timers are never gated. Older engine builds keep the original per-query
+logic. `get_eqs_replan_stats()` reports `global_regular_used_us`,
+`global_urgent_used_us`, `global_denied`,
+`global_regular_steps`, `global_urgent_steps`, and quotas.
+
+Unreal reference:
+https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/AIModule/FEnvQueryManagerConfig

@@ -7,6 +7,8 @@ const ReverbZones = preload("res://scripts/client/reverb_zones.gd")
 const AudioMix = preload("res://scripts/client/audio_mix.gd")
 const AudioSurfaces = preload("res://scripts/client/audio_surfaces.gd")
 const AudioVoices = preload("res://scripts/client/audio_voices.gd")
+const AudioOcclusionProbes = preload("res://scripts/client/audio_occlusion_probes.gd")
+const AudioVirtualVoices = preload("res://scripts/client/audio_virtual_voices.gd")
 const AudioSpatial = preload("res://scripts/client/audio_spatial.gd")
 const AudioEmission = preload("res://scripts/client/audio_spatial_emission.gd")
 const AudioDucking = preload("res://scripts/client/audio_ducking.gd")
@@ -27,12 +29,14 @@ var _native_spatial_emission: Object = null
 var _last_spatial_emissions: Dictionary = {} # Only the three fixed sound names.
 var _listener_ready: bool = false
 var _spatial_emission_rejections: int = 0
+var _native_occlusion_probes: Object = null # Pure native ray budget selector.
 var _voice_hold_rejections: int = 0
 var _sfx_bus := -1
 var _sfx_lowpass := -1
 var _rain: AudioStreamPlayer
 var _wind: AudioStreamPlayer
 var _voices: Array = [] # Active 3D sources, including bounded obstacle probes.
+var _virtual_voices := AudioVirtualVoices.new() # Refused long sounds, still advancing in time.
 # Unreal-style sound obstruction checks: only static geometry on layer 1,
 # no per-frame physics casts for every active sound.
 const OBSTRUCTION_RAYS_PER_TICK := 3
@@ -82,6 +86,7 @@ func _ready() -> void:
 	_native_mix_snapshots = EngineFeatures.make("AudioMixSnapshotController")
 	_native_voice_admission = EngineFeatures.make("AudioVoiceAdmissionPlanner")
 	_native_spatial_emission = EngineFeatures.make("SpatialSoundEventPolicy")
+	_native_occlusion_probes = EngineFeatures.make("AudioOcclusionProbePlanner")
 	_ambience = AudioStreamPlayer.new()
 	_ambience.bus = "Ambience"
 	_ambience.stream = Assets.sound("ambience")
@@ -278,11 +283,12 @@ func _record_spatial_emission(name: String, at: Vector3, now: float) -> void:
 		_last_spatial_emissions[name] = {"at": at, "time": now}
 
 
-func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> void:
+func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0, from_position: float = 0.0) -> void:
 	if not enabled:
 		return
 	var now: float = Time.get_ticks_msec() / 1000.0
-	if not _should_emit_spatial(sound_name, position, now):
+	# A virtual-voice promotion resumes an already admitted sound.
+	if from_position <= 0.0 and not _should_emit_spatial(sound_name, position, now):
 		_spatial_emission_rejections += 1
 		return
 	var stream := Assets.sound(sound_name)
@@ -303,6 +309,8 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 		# This comparison is evaluated only on rejection, not the hot play path.
 		if AudioVoices.prioritized_victim(snapshot, sound_name, loudness, priority) >= 0:
 			_voice_hold_rejections += 1
+			# Long sounds go virtual: time keeps running and they resume when a voice frees.
+			_virtual_voices.add(sound_name, position, volume_db, now - from_position, stream.get_length())
 		return
 	var player := AudioStreamPlayer3D.new()
 	player.stream = stream
@@ -355,9 +363,31 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	_voices.append(record)
 	player.finished.connect(func() -> void:
 		_voices.erase(record)
-		player.queue_free())
-	player.play()
-	_record_spatial_emission(sound_name, position, now)
+		player.queue_free()
+		_promote_virtual_voice.call_deferred())
+	player.play(maxf(0.0, from_position))
+	if from_position <= 0.0:
+		_record_spatial_emission(sound_name, position, now)
+
+
+## A real voice just freed: bring back the loudest virtual voice at its current offset.
+func _promote_virtual_voice() -> void:
+	if _virtual_voices.voices.is_empty():
+		return
+	var entry: Dictionary = _virtual_voices.promote(Time.get_ticks_msec() / 1000.0, _listener)
+	if not entry.is_empty():
+		play_at(str(entry["name"]), entry["position"], float(entry["volume_db"]), float(entry["offset"]))
+
+
+## Native C++ admission of at most three due obstruction rays; stock Godot
+## uses an identical GDScript policy. Physics queries never run here.
+func _select_occlusion_probes(next_due: PackedFloat64Array, priorities: PackedByteArray,
+		audibility: PackedFloat64Array, ids: PackedInt64Array, now: float,
+		limit: int) -> PackedInt32Array:
+	if _native_occlusion_probes != null and _native_occlusion_probes.has_method("select_due"):
+		return _native_occlusion_probes.call("select_due",
+			next_due, priorities, audibility, ids, now, limit)
+	return AudioOcclusionProbes.select_due(next_due, priorities, audibility, ids, now, limit)
 
 
 ## Scene physics is read only during physics ticks. This detects wooden
@@ -372,39 +402,89 @@ func _physics_process(delta: float) -> void:
 	var viewport: Viewport = get_viewport()
 	var world: World3D = viewport.world_3d if viewport != null else null
 	var state: PhysicsDirectSpaceState3D = world.direct_space_state if world != null else null
+
+	# Gather at most three independent wall probes, then submit them through
+	# one Cgame physics-space call. Queries retain their individual collision
+	# masks and flags. Ordinary Godot uses identical serial ray queries.
+	var probe_indices: Array[int] = []
+	var probe_queries: Array[PhysicsRayQueryParameters3D] = []
+	var probe_sources: Array[Vector3] = []
+	var probe_listeners: Array[Vector3] = []
 	var rays: int = 0
+	if state != null:
+		# Ray admission is based on overdue age, voice priority and audibility,
+		# rather than source insertion order. Non-selected voices still smooth.
+		var due_times := PackedFloat64Array()
+		var priorities := PackedByteArray()
+		var audibilities := PackedFloat64Array()
+		var stable_ids := PackedInt64Array()
+		var original_indices := PackedInt32Array()
+		for voice_index in _voices.size():
+			var candidate: Dictionary = _voices[voice_index]
+			var source: AudioStreamPlayer3D = candidate.get("player") as AudioStreamPlayer3D
+			if not is_instance_valid(source) or not source.is_playing():
+				continue
+			var next_due: float = float(candidate.get("next_obstruction_check", 0.0))
+			if not is_finite(next_due):
+				next_due = 0.0
+			next_due = maxf(0.0, next_due)
+			if next_due > _obstruction_clock:
+				continue
+			var loudness: float = float(candidate.get("audibility", -120.0))
+			if not is_finite(loudness):
+				loudness = -120.0
+			due_times.append(next_due)
+			priorities.append(clampi(int(candidate.get("priority", 0)), 0, 3))
+			audibilities.append(loudness)
+			stable_ids.append(source.get_instance_id())
+			original_indices.append(voice_index)
+		var chosen: PackedInt32Array = _select_occlusion_probes(
+			due_times, priorities, audibilities, stable_ids, _obstruction_clock,
+			OBSTRUCTION_RAYS_PER_TICK)
+		for chosen_index in chosen:
+			if rays >= OBSTRUCTION_RAYS_PER_TICK:
+				break
+			var index: int = int(original_indices[chosen_index])
+			var record: Dictionary = _voices[index]
+			var player: AudioStreamPlayer3D = record.get("player") as AudioStreamPlayer3D
+			var listener_eye: Vector3 = _listener + Vector3(0.0, 1.6, 0.0)
+			var source_eye: Vector3 = player.global_position + Vector3(0.0, 0.5, 0.0)
+			var ray: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
+				listener_eye, source_eye, OBSTRUCTION_GEOMETRY_MASK)
+			ray.collide_with_areas = false
+			probe_indices.append(index)
+			probe_queries.append(ray)
+			probe_sources.append(source_eye)
+			probe_listeners.append(listener_eye)
+			rays += 1
+
+		if rays > 0:
+			var hits: Array = AudioSpatial.trace_rays(state, probe_queries)
+			for i in mini(hits.size(), probe_indices.size()):
+				var index: int = probe_indices[i]
+				var record: Dictionary = _voices[index]
+				var source_eye: Vector3 = probe_sources[i]
+				var listener_eye: Vector3 = probe_listeners[i]
+				var hit: Dictionary = hits[i]
+				# Geometry and heightfield terrain share the old three-ray budget.
+				# A hit within 75 cm of the source is likely its own support prop.
+				var blocked: bool = not hit.is_empty() and \
+					(hit.get("position", source_eye) as Vector3).distance_to(source_eye) > 0.75
+				var terrain_blocked: bool = _ground.is_valid() and AudioSpatial.terrain_blocked(
+					listener_eye, source_eye, _ground)
+				record["terrain_blocked"] = terrain_blocked
+				record["target_obstruction"] = 1.0 if blocked or terrain_blocked else 0.0
+				record["next_obstruction_check"] = _obstruction_clock + OBSTRUCTION_RECHECK_SECONDS
+				_voices[index] = record
+
+	# Smooth every active voice even when its ray was not checked this tick.
+	# Existing native audio gain/filter or stock Godot fallback is unchanged.
 	for index in _voices.size():
 		var record: Dictionary = _voices[index]
 		var player: AudioStreamPlayer3D = record.get("player") as AudioStreamPlayer3D
 		if not is_instance_valid(player) or not player.is_playing():
 			continue
 		var target: float = float(record.get("target_obstruction", 0.0))
-		if state != null and rays < OBSTRUCTION_RAYS_PER_TICK \
-				and _obstruction_clock >= float(record.get("next_obstruction_check", 0.0)):
-			var listener_eye: Vector3 = _listener + Vector3(0.0, 1.6, 0.0)
-			var source_eye: Vector3 = player.global_position + Vector3(0.0, 0.5, 0.0)
-			# Include world obstacles and barriers, not Area3D triggers.
-			# Impacts very near the source are the source's own floor/prop.
-			var ray: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
-				listener_eye, source_eye, OBSTRUCTION_GEOMETRY_MASK)
-			ray.collide_with_areas = false
-			var hit: Dictionary = state.intersect_ray(ray)
-			var blocked: bool = not hit.is_empty() and \
-				(hit.get("position", source_eye) as Vector3).distance_to(source_eye) > 0.75
-			# Live occlusion rays keep terrain masking current as the listener
-			# moves around ridges. Reuse the SAME three-ray scheduler: no
-			# uncapped per-frame sound-source heightfield scans.
-			var terrain_blocked: bool = _ground.is_valid() and AudioSpatial.terrain_blocked(
-				listener_eye, source_eye, _ground)
-			record["terrain_blocked"] = terrain_blocked
-			target = 1.0 if blocked or terrain_blocked else 0.0
-			record["target_obstruction"] = target
-			record["next_obstruction_check"] = _obstruction_clock + OBSTRUCTION_RECHECK_SECONDS
-			rays += 1
-		# Unreal-style occlusion attack/release: fall behind a wall quickly,
-		# recover smoothly when the player steps into the open. Cgame handles
-		# interpolation in the native 3D source; stock Godot uses the same
-		# frame-rate-independent exponential curve in GDScript.
 		var old_amount: float = float(record.get("obstruction", 0.0))
 		var native_smoothing: bool = player.has_method("advance_obstruction_amount")
 		var amount: float

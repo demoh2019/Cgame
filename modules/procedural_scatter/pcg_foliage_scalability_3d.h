@@ -52,6 +52,14 @@ public:
 	Array partition_variant_lods(const PackedInt32Array &p_variants,
 			const PackedInt32Array &p_lod_tiers, int p_variant_count) const;
 
+	// Mark only mesh+LOD groups whose membership changes. A valid output
+	// contains 2 * variant_count bytes in [0,1]; an empty result signals
+	// invalid data. No points, meshes or global engine state are mutated.
+	PackedByteArray plan_dirty_variant_lod_groups(
+			const PackedInt32Array &p_variants,
+			const PackedInt32Array &p_previous_tiers,
+			const PackedInt32Array &p_next_tiers, int p_variant_count) const;
+
 	// Screen-space foliage density: approximate per-instance pixel diameter
 	// from camera depth and nominal world mesh size. Groups are selected in one
 	// native call, independent of viewport resolution, zoom, and scene traversal.

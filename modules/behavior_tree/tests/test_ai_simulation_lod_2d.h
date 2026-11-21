@@ -47,23 +47,23 @@ TEST_CASE("[AISimulationLOD2D] Three simulation tiers and inclusive thresholds")
 	CHECK(lod->get_interval(30.1, 30.0, 60.0) == real_t(0.5));
 	CHECK(lod->get_interval(60.0, 30.0, 60.0) == real_t(0.5));
 	CHECK(lod->get_interval(60.1, 30.0, 60.0) == real_t(1.0));
-	CHECK(lod->get_interval(INF, 30.0, 60.0) == real_t(1.0));
+	CHECK(lod->get_interval(Math::INF, 30.0, 60.0) == real_t(1.0));
 }
 
 TEST_CASE("[AISimulationLOD2D] Urgent work is never deferred by LOD") {
 	Ref<AISimulationLOD2D> lod;
 	lod.instantiate();
 	CHECK(lod->get_interval(10000.0, 30.0, 60.0, true) == real_t(0.25));
-	CHECK(lod->get_staggered_interval(42, INF, 30.0, 60.0, true) == real_t(0.25));
+	CHECK(lod->get_staggered_interval(42, Math::INF, 30.0, 60.0, true) == real_t(0.25));
 	CHECK(lod->get_staggered_interval(42, 10.0, 30.0, 60.0) == real_t(0.25));
 }
 
 TEST_CASE("[AISimulationLOD2D] Stable spread staggers passive agents without randomness") {
 	Ref<AISimulationLOD2D> lod;
 	lod.instantiate();
-	CHECK(lod->get_staggered_interval(0, INF, 30.0, 60.0) == real_t(0.0625));
-	CHECK(lod->get_staggered_interval(15, INF, 30.0, 60.0) == real_t(1.0));
-	CHECK(lod->get_staggered_interval(16, INF, 30.0, 60.0) == real_t(0.0625));
+	CHECK(lod->get_staggered_interval(0, Math::INF, 30.0, 60.0) == real_t(0.0625));
+	CHECK(lod->get_staggered_interval(15, Math::INF, 30.0, 60.0) == real_t(1.0));
+	CHECK(lod->get_staggered_interval(16, Math::INF, 30.0, 60.0) == real_t(0.0625));
 	CHECK(lod->get_staggered_interval(1, 40.0, 30.0, 60.0) == real_t(0.0625));
 	CHECK(lod->get_staggered_interval(1, 40.0, 30.0, 60.0) == lod->get_staggered_interval(17, 40.0, 30.0, 60.0));
 }
@@ -72,10 +72,10 @@ TEST_CASE("[AISimulationLOD2D] Invalid spatial input fails conservatively fast")
 	Ref<AISimulationLOD2D> lod;
 	lod.instantiate();
 	CHECK(lod->get_interval(-1.0, 30.0, 60.0) == real_t(0.25));
-	CHECK(lod->get_interval(-INF, 30.0, 60.0) == real_t(0.25));
-	CHECK(lod->get_interval(NaN, 30.0, 60.0) == real_t(0.25));
+	CHECK(lod->get_interval(-Math::INF, 30.0, 60.0) == real_t(0.25));
+	CHECK(lod->get_interval(Math::NaN, 30.0, 60.0) == real_t(0.25));
 	CHECK(lod->get_interval(70.0, 30.0, 30.0) == real_t(0.25));
-	CHECK(lod->get_interval(70.0, NaN, 60.0) == real_t(0.25));
+	CHECK(lod->get_interval(70.0, Math::NaN, 60.0) == real_t(0.25));
 	CHECK(lod->get_staggered_interval(-1, 70.0, 30.0, 60.0) == real_t(0.25));
 }
 
@@ -89,7 +89,7 @@ TEST_CASE("[AISimulationLOD2D] Atomic interval configuration and rollback") {
 	CHECK_FALSE(lod->configure_intervals(0.3, 0.2, 0.8));
 	CHECK_FALSE(lod->configure_intervals(0.1, 1.0, 0.8));
 	CHECK_FALSE(lod->configure_intervals(0.1, 0.2, 2.01));
-	CHECK_FALSE(lod->configure_intervals(NaN, 0.2, 0.8));
+	CHECK_FALSE(lod->configure_intervals(Math::NaN, 0.2, 0.8));
 	ERR_PRINT_ON;
 	CHECK(lod->get_near_interval() == real_t(0.1));
 	CHECK(lod->get_medium_interval() == real_t(0.2));
@@ -112,7 +112,7 @@ TEST_CASE("[AISimulationLOD2D] Hysteresis holds medium/far bands but restores ne
 	CHECK(lod->get_hysteretic_interval(30.0, 30.0, 60.0, 1.0, 4.0) == real_t(0.25));
 	CHECK(lod->get_hysteretic_interval(20.0, 30.0, 60.0, 0.5, 4.0) == real_t(0.25));
 	CHECK(lod->get_hysteretic_interval(1000.0, 30.0, 60.0, 1.0, 4.0, true) == real_t(0.25));
-	CHECK(lod->get_hysteretic_interval(INF, 30.0, 60.0, 0.5, 4.0) == real_t(1.0));
+	CHECK(lod->get_hysteretic_interval(Math::INF, 30.0, 60.0, 0.5, 4.0) == real_t(1.0));
 }
 
 TEST_CASE("[AISimulationLOD2D] Hysteresis fails safe on invalid input and after reconfiguration") {
@@ -120,13 +120,13 @@ TEST_CASE("[AISimulationLOD2D] Hysteresis fails safe on invalid input and after 
 	lod.instantiate();
 	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.5, 0.0) == real_t(1.0));
 	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.123, 4.0) == real_t(1.0));
-	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, NaN, 4.0) == real_t(1.0));
-	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.5, NaN) == real_t(1.0));
+	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, Math::NaN, 4.0) == real_t(1.0));
+	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.5, Math::NaN) == real_t(1.0));
 	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.5, -1.0) == real_t(1.0));
 	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.5, 16.0) == real_t(1.0));
 	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 30.0, 0.5, 4.0) == real_t(0.25));
-	CHECK(lod->get_hysteretic_interval(-INF, 30.0, 60.0, 0.5, 4.0) == real_t(0.25));
-	CHECK(lod->get_hysteretic_interval(NaN, 30.0, 60.0, 0.5, 4.0) == real_t(0.25));
+	CHECK(lod->get_hysteretic_interval(-Math::INF, 30.0, 60.0, 0.5, 4.0) == real_t(0.25));
+	CHECK(lod->get_hysteretic_interval(Math::NaN, 30.0, 60.0, 0.5, 4.0) == real_t(0.25));
 	CHECK(lod->configure_intervals(0.1, 0.3, 0.8));
 	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.3, 4.0) == real_t(0.3));
 	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.5, 4.0) == real_t(0.8));

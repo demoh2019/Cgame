@@ -46,8 +46,8 @@ void WorldStreamer::_record_failure(const Vector3i &p_cell, const String &p_reas
 		RetryState &state = retry_states[p_cell];
 		if (state.attempts < max_auto_retries) {
 			// Bounded exponential backoff; exactly max_auto_retries more requests.
-			const real_t multiplier = real_t(1 << state.attempts);
-			const real_t seconds = MIN(retry_max_delay, retry_initial_delay * multiplier);
+			const double seconds = calculate_retry_delay_seconds(p_cell, state.attempts,
+					retry_initial_delay, retry_max_delay, retry_delay_spread);
 			state.next_retry_usec = OS::get_singleton()->get_ticks_usec() + uint64_t(seconds * 1000000.0);
 			state.attempts++;
 		} else {
@@ -57,13 +57,61 @@ void WorldStreamer::_record_failure(const Vector3i &p_cell, const String &p_reas
 	emit_signal(SNAME("chunk_load_failed"), p_cell, p_reason);
 }
 
+double WorldStreamer::calculate_retry_delay_seconds(const Vector3i &p_cell, int p_attempt,
+		double p_initial_seconds, double p_max_seconds, double p_spread) {
+	if (p_attempt < 0 || p_attempt > 8 ||
+			!Math::is_finite(p_initial_seconds) || p_initial_seconds <= 0.0 || p_initial_seconds > 60.0 ||
+			!Math::is_finite(p_max_seconds) || p_max_seconds <= 0.0 || p_max_seconds > 60.0 ||
+			!Math::is_finite(p_spread) || p_spread < 0.0 || p_spread > 0.5) {
+		return 0.0;
+	}
+	const double base = MIN(p_max_seconds, p_initial_seconds * double(1 << p_attempt));
+	if (p_spread == 0.0) {
+		return base; // Exact legacy exponential schedule, no hash cost.
+	}
+	// Deterministic bounded jitter: spreading neighboring failed cells
+	// avoids re-requesting an entire broken resource batch at one instant.
+	// Stable across runs; never depends on an RNG or modifies game seeds.
+	uint32_t hash = uint32_t(p_cell.x) * 73856093u ^
+			uint32_t(p_cell.y) * 19349663u ^
+			uint32_t(p_cell.z) * 83492791u ^
+			uint32_t(p_attempt + 1) * 2654435761u;
+	hash ^= hash >> 16;
+	hash *= 0x7feb352du;
+	hash ^= hash >> 15;
+	hash *= 0x846ca68bu;
+	hash ^= hash >> 16;
+	const double ratio = double(hash & 0xffffu) / 65535.0;
+	return base * (1.0 - p_spread * ratio);
+}
+
 void WorldStreamer::_update_retries(const Vector3 &p_focus, real_t p_keep_radius) {
+	last_retry_release_count = 0;
+	last_retry_deferred_count = 0;
 	if (retry_states.is_empty()) {
 		return;
 	}
 	const uint64_t now = OS::get_singleton()->get_ticks_usec();
 	LocalVector<Vector3i> forget;
-	LocalVector<Vector3i> ready;
+	struct ReadyRetry {
+		Vector3i cell;
+		uint64_t due_usec = 0;
+	};
+	struct ReadyLess {
+		bool operator()(const ReadyRetry &p_left, const ReadyRetry &p_right) const {
+			if (p_left.due_usec != p_right.due_usec) {
+				return p_left.due_usec < p_right.due_usec;
+			}
+			if (p_left.cell.x != p_right.cell.x) {
+				return p_left.cell.x < p_right.cell.x;
+			}
+			if (p_left.cell.y != p_right.cell.y) {
+				return p_left.cell.y < p_right.cell.y;
+			}
+			return p_left.cell.z < p_right.cell.z;
+		}
+	};
+	LocalVector<ReadyRetry> ready;
 	for (const KeyValue<Vector3i, RetryState> &entry : retry_states) {
 		const bool beyond_focus = WorldStreamingGrid::distance_to_cell(p_focus, entry.key, cell_size, _grid_axes()) > p_keep_radius;
 		const bool auxiliary_keeps = _auxiliary_is_near_focus(p_focus) &&
@@ -71,18 +119,31 @@ void WorldStreamer::_update_retries(const Vector3 &p_focus, real_t p_keep_radius
 		if (beyond_focus && !auxiliary_keeps) {
 			forget.push_back(entry.key);
 		} else if (entry.value.next_retry_usec != 0 && now >= entry.value.next_retry_usec) {
-			ready.push_back(entry.key);
+			ReadyRetry entry_ready;
+			entry_ready.cell = entry.key;
+			entry_ready.due_usec = entry.value.next_retry_usec;
+			ready.push_back(entry_ready);
 		}
 	}
 	for (const Vector3i &cell : forget) {
 		retry_states.erase(cell);
 		failed.erase(cell);
 	}
-	for (const Vector3i &cell : ready) {
-		// The attempt is picked up by the usual bounded generation/load queue.
+	// Capped release is ordered by oldest deadline, then coordinates.
+	// HashMap traversal order can never cause permanent starvation.
+	if (max_retry_releases_per_update > 0 && ready.size() > 1) {
+		ready.sort_custom<ReadyLess>();
+	}
+	const int allowed = max_retry_releases_per_update > 0 ?
+			MIN(int(ready.size()), max_retry_releases_per_update) : int(ready.size());
+	last_retry_deferred_count = int(ready.size()) - allowed;
+	for (int i = 0; i < allowed; i++) {
+		const Vector3i cell = ready[i].cell;
+		// Recovered cells still enter the same bounded load/generator queue.
 		failed.erase(cell);
 		retry_states[cell].next_retry_usec = 0;
 	}
+	last_retry_release_count = allowed;
 }
 
 int WorldStreamer::get_retry_pending_count() const {
@@ -110,6 +171,16 @@ void WorldStreamer::set_retry_initial_delay(real_t p_seconds) {
 void WorldStreamer::set_retry_max_delay(real_t p_seconds) {
 	ERR_FAIL_COND(!Math::is_finite(p_seconds));
 	retry_max_delay = CLAMP(p_seconds, real_t(0.01), real_t(60.0));
+}
+
+void WorldStreamer::set_retry_delay_spread(real_t p_fraction) {
+	ERR_FAIL_COND(!Math::is_finite(p_fraction) || p_fraction < real_t(0.0) || p_fraction > real_t(0.5));
+	retry_delay_spread = p_fraction;
+}
+
+void WorldStreamer::set_max_retry_releases_per_update(int p_count) {
+	ERR_FAIL_COND(p_count < 0 || p_count > 32);
+	max_retry_releases_per_update = p_count;
 }
 
 real_t WorldStreamer::_auxiliary_effective_radius() const {
@@ -578,6 +649,7 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell, bool p_allow_cache) {
 		--simulation_inactive_count;
 	}
 	simulation_active_cells.erase(p_cell);
+	cell_simulation_layers.erase(p_cell);
 	if (applied_tick_intervals.has(p_cell)) {
 		applied_tick_intervals.erase(p_cell);
 		--tick_throttled_count;
@@ -624,6 +696,51 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell, bool p_allow_cache) {
 	emit_signal(SNAME("chunk_unloaded"), p_cell);
 }
 
+bool WorldStreamer::set_simulation_layer_enabled(const StringName &p_layer, bool p_enabled) {
+	const String label = p_layer;
+	if (label.is_empty() || label.length() > 64 || label.begins_with(".") ||
+			label.ends_with(".") || label.contains("..")) {
+		return false;
+	}
+	const bool *old_state = simulation_layer_states.getptr(p_layer);
+	if (old_state != nullptr && *old_state == p_enabled) {
+		return true;
+	}
+	if (old_state == nullptr && simulation_layer_states.size() >= MAX_SIMULATION_LAYERS) {
+		return false;
+	}
+	const bool was_disabled = old_state != nullptr && !*old_state;
+	if (old_state == nullptr) {
+		simulation_layer_states.insert(p_layer, p_enabled);
+	} else {
+		simulation_layer_states[p_layer] = p_enabled;
+	}
+	if (was_disabled && p_enabled) {
+		--disabled_simulation_layer_count;
+	} else if (!was_disabled && !p_enabled) {
+		++disabled_simulation_layer_count;
+	}
+	// Enqueue a normal, bounded simulation refresh; never synchronously
+	// walk the entire world from an arbitrary setter callback.
+	time_since_update = 1e9;
+	return true;
+}
+
+bool WorldStreamer::is_simulation_layer_enabled(const StringName &p_layer) const {
+	const bool *state = simulation_layer_states.getptr(p_layer);
+	return state == nullptr || *state;
+}
+
+bool WorldStreamer::_simulation_layer_allows(const Vector3i &p_cell) const {
+	const StringName *layer = cell_simulation_layers.getptr(p_cell);
+	return layer == nullptr || is_simulation_layer_enabled(*layer);
+}
+
+StringName WorldStreamer::get_cell_simulation_layer(const Vector3i &p_cell) const {
+	const StringName *layer = cell_simulation_layers.getptr(p_cell);
+	return layer != nullptr && loaded.has(p_cell) ? *layer : StringName();
+}
+
 void WorldStreamer::_set_chunk_simulation_active(const Vector3i &p_cell, bool p_active) {
 	Node *chunk = get_chunk(p_cell);
 	if (chunk == nullptr) {
@@ -644,7 +761,8 @@ void WorldStreamer::_set_chunk_simulation_active(const Vector3i &p_cell, bool p_
 }
 
 void WorldStreamer::_update_simulation(const Vector3 &p_focus) {
-	if (simulation_radius < real_t(0.0) && simulation_inactive_count == 0) {
+	if (simulation_radius < real_t(0.0) && simulation_inactive_count == 0 &&
+			disabled_simulation_layer_count == 0) {
 		return; // No per-cell scan or callbacks for legacy worlds.
 	}
 	int remaining = max_simulation_transitions_per_update;
@@ -661,8 +779,9 @@ void WorldStreamer::_update_simulation(const Vector3 &p_focus) {
 				const bool *active_ptr = simulation_active_cells.getptr(entry.key);
 				const bool active = active_ptr == nullptr || *active_ptr;
 				const real_t distance = WorldStreamingGrid::distance_to_cell(p_focus, entry.key, cell_size, _grid_axes());
-				const bool desired = simulation_radius < real_t(0.0) ||
-						distance <= simulation_radius + (active ? simulation_hysteresis : real_t(0.0));
+				const bool desired = _simulation_layer_allows(entry.key) &&
+						(simulation_radius < real_t(0.0) ||
+							distance <= simulation_radius + (active ? simulation_hysteresis : real_t(0.0)));
 				if (active == desired || desired != activating) {
 					continue;
 				}
@@ -768,13 +887,29 @@ bool WorldStreamer::_adopt_chunk(const Vector3i &p_cell, Node *p_chunk) {
 			chunk_2d->set_position(Vector2(origin.x, origin.y));
 		}
 	}
+	// Optional script-owned simulation layer: a visual chunk can opt into
+	// a named data layer without touching its terrain, collision or residency.
+	if (p_chunk->has_method(SNAME("get_streaming_simulation_layer"))) {
+		const Variant raw_layer = p_chunk->call(SNAME("get_streaming_simulation_layer"));
+		if (raw_layer.get_type() == Variant::STRING || raw_layer.get_type() == Variant::STRING_NAME) {
+			const StringName layer = raw_layer;
+			const String label = layer;
+			if (!label.is_empty() && label.length() <= 64 && !label.begins_with(".") &&
+					!label.ends_with(".") && !label.contains("..")) {
+				cell_simulation_layers.insert(p_cell, layer);
+			}
+		}
+	}
 	// Set the initial tier before _ready() without consuming a transition:
 	// the chunk instantiation itself is already covered by the work budget.
 	Vector3 simulation_focus;
-	const bool simulation_active = simulation_radius < real_t(0.0) ||
+	const bool radius_allows = simulation_radius < real_t(0.0) ||
 			!_get_focus_position(simulation_focus) ||
 			WorldStreamingGrid::distance_to_cell(simulation_focus, p_cell, cell_size, _grid_axes()) <= simulation_radius;
-	if (simulation_radius >= real_t(0.0) && p_chunk->has_method(SNAME("set_streaming_simulation_active"))) {
+	const bool layer_allows = _simulation_layer_allows(p_cell);
+	const bool simulation_active = radius_allows && layer_allows;
+	if ((simulation_radius >= real_t(0.0) || !layer_allows) &&
+			p_chunk->has_method(SNAME("set_streaming_simulation_active"))) {
 		p_chunk->call(SNAME("set_streaming_simulation_active"), simulation_active);
 	}
 	// Initial cosmetic rate is selected before entering the scene tree.
@@ -797,7 +932,7 @@ bool WorldStreamer::_adopt_chunk(const Vector3i &p_cell, Node *p_chunk) {
 		applied_tick_intervals[p_cell] = initial_tick_interval;
 		++tick_throttled_count;
 	}
-	if (simulation_radius >= real_t(0.0)) {
+	if (simulation_radius >= real_t(0.0) || !layer_allows) {
 		simulation_active_cells[p_cell] = simulation_active;
 		if (!simulation_active) {
 			++simulation_inactive_count;
@@ -1120,6 +1255,8 @@ void WorldStreamer::_update_streaming() {
 	last_unload_work_usec = 0;
 	last_unload_count = 0;
 	last_deferred_unload_count = 0;
+	last_retry_release_count = 0;
+	last_retry_deferred_count = 0;
 	_forget_dead_chunks();
 
 	Vector3 position;
@@ -1360,9 +1497,12 @@ void WorldStreamer::_reset_state() {
 	missing.clear();
 	failed.clear();
 	retry_states.clear();
+	last_retry_release_count = 0;
+	last_retry_deferred_count = 0;
 	generate_queue.clear();
 	pending_visual_details.clear();
 	simulation_active_cells.clear();
+	cell_simulation_layers.clear();
 	applied_tick_intervals.clear();
 	tick_throttled_count = 0;
 	cache_ineligible_nodes.clear();
@@ -1404,6 +1544,7 @@ void WorldStreamer::_notification(int p_what) {
 				last_deferred_unload_count = 0;
 				cache_ineligible_nodes.clear();
 				simulation_active_cells.clear();
+				cell_simulation_layers.clear();
 				applied_tick_intervals.clear();
 				tick_throttled_count = 0;
 				simulation_inactive_count = 0;
@@ -1950,6 +2091,10 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_simulation_transitions_per_update"), &WorldStreamer::get_max_simulation_transitions_per_update);
 	ClassDB::bind_method(D_METHOD("is_cell_simulation_active", "cell"), &WorldStreamer::is_cell_simulation_active);
 	ClassDB::bind_method(D_METHOD("get_simulation_active_count"), &WorldStreamer::get_simulation_active_count);
+	ClassDB::bind_method(D_METHOD("set_simulation_layer_enabled", "layer", "enabled"), &WorldStreamer::set_simulation_layer_enabled);
+	ClassDB::bind_method(D_METHOD("is_simulation_layer_enabled", "layer"), &WorldStreamer::is_simulation_layer_enabled);
+	ClassDB::bind_method(D_METHOD("get_cell_simulation_layer", "cell"), &WorldStreamer::get_cell_simulation_layer);
+	ClassDB::bind_method(D_METHOD("get_simulation_layer_count"), &WorldStreamer::get_simulation_layer_count);
 	ClassDB::bind_method(D_METHOD("set_tick_throttle_radius", "radius"), &WorldStreamer::set_tick_throttle_radius);
 	ClassDB::bind_method(D_METHOD("get_tick_throttle_radius"), &WorldStreamer::get_tick_throttle_radius);
 	ClassDB::bind_method(D_METHOD("set_tick_throttle_interval", "seconds"), &WorldStreamer::set_tick_throttle_interval);
@@ -1987,6 +2132,13 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_retry_max_delay", "seconds"), &WorldStreamer::set_retry_max_delay);
 	ClassDB::bind_method(D_METHOD("get_retry_max_delay"), &WorldStreamer::get_retry_max_delay);
 	ClassDB::bind_method(D_METHOD("get_retry_pending_count"), &WorldStreamer::get_retry_pending_count);
+	ClassDB::bind_method(D_METHOD("set_retry_delay_spread", "fraction"), &WorldStreamer::set_retry_delay_spread);
+	ClassDB::bind_method(D_METHOD("get_retry_delay_spread"), &WorldStreamer::get_retry_delay_spread);
+	ClassDB::bind_method(D_METHOD("set_max_retry_releases_per_update", "count"), &WorldStreamer::set_max_retry_releases_per_update);
+	ClassDB::bind_method(D_METHOD("get_max_retry_releases_per_update"), &WorldStreamer::get_max_retry_releases_per_update);
+	ClassDB::bind_method(D_METHOD("get_last_retry_release_count"), &WorldStreamer::get_last_retry_release_count);
+	ClassDB::bind_method(D_METHOD("get_last_retry_deferred_count"), &WorldStreamer::get_last_retry_deferred_count);
+	ClassDB::bind_static_method("WorldStreamer", D_METHOD("calculate_retry_delay_seconds", "cell", "attempt", "initial_seconds", "max_seconds", "spread"), &WorldStreamer::calculate_retry_delay_seconds);
 	ClassDB::bind_method(D_METHOD("set_update_interval", "seconds"), &WorldStreamer::set_update_interval);
 	ClassDB::bind_method(D_METHOD("get_update_interval"), &WorldStreamer::get_update_interval);
 	ClassDB::bind_method(D_METHOD("set_chunk_path_template", "template"), &WorldStreamer::set_chunk_path_template);
@@ -2078,6 +2230,8 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_auto_retries", PROPERTY_HINT_RANGE, "0,8,1"), "set_max_auto_retries", "get_max_auto_retries");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "retry_initial_delay", PROPERTY_HINT_RANGE, "0.01,60,0.01,suffix:s"), "set_retry_initial_delay", "get_retry_initial_delay");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "retry_max_delay", PROPERTY_HINT_RANGE, "0.01,60,0.01,suffix:s"), "set_retry_max_delay", "get_retry_max_delay");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "retry_delay_spread", PROPERTY_HINT_RANGE, "0,0.5,0.01"), "set_retry_delay_spread", "get_retry_delay_spread");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_retry_releases_per_update", PROPERTY_HINT_RANGE, "0,32,1"), "set_max_retry_releases_per_update", "get_max_retry_releases_per_update");
 
 	ADD_SIGNAL(MethodInfo("chunk_loaded", PropertyInfo(Variant::VECTOR3I, "cell"), PropertyInfo(Variant::OBJECT, "chunk", PROPERTY_HINT_RESOURCE_TYPE, "Node")));
 	ADD_SIGNAL(MethodInfo("chunk_visual_details_ready", PropertyInfo(Variant::VECTOR3I, "cell")));

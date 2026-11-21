@@ -536,4 +536,117 @@ TEST_CASE("[AIProximityGrid2D] Cylinder counts reject invalid and oversized inpu
 	CHECK(grid->query_cylinder_counts_batch(PackedVector3Array(), targets, 1.0, 2.0, 5).is_empty());
 }
 
+
+TEST_CASE("[AIProximityGrid2D] Variable-radius cross cohort preserves per-agent ranges and order") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array agents;
+	agents.push_back(Vector2(0, 0));
+	agents.push_back(Vector2(-10, -10));
+	agents.push_back(Vector2(0, 0));
+	agents.push_back(Vector2(300, 300));
+	PackedFloat32Array radii;
+	radii.push_back(5.0f);
+	radii.push_back(0.0f);
+	radii.push_back(1.0f);
+	radii.push_back(3.0f);
+	PackedVector2Array targets;
+	targets.push_back(Vector2(3, 4));
+	targets.push_back(Vector2(0, 0));
+	targets.push_back(Vector2(6, 0));
+	targets.push_back(Vector2(-10, -10));
+	targets.push_back(Vector2(0, 0)); // Duplicate player coordinates.
+	const Array found = grid->query_cross_variable_radius_batch(agents, radii, targets);
+	REQUIRE(found.size() == 4);
+	const PackedInt32Array first = found[0];
+	REQUIRE(first.size() == 3);
+	CHECK(first[0] == 0);
+	CHECK(first[1] == 1);
+	CHECK(first[2] == 4);
+	const PackedInt32Array zero = found[1];
+	REQUIRE(zero.size() == 1);
+	CHECK(zero[0] == 3);
+	const PackedInt32Array third = found[2];
+	REQUIRE(third.size() == 2);
+	CHECK(third[0] == 1);
+	CHECK(third[1] == 4);
+	const PackedInt32Array distant = found[3];
+	CHECK(distant.is_empty());
+	CHECK(grid->query_cross_variable_radius_batch(agents, radii, targets) == found);
+}
+
+TEST_CASE("[AIProximityGrid2D] Variable-radius batch permits empty player cohort") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array sources;
+	sources.push_back(Vector2(2, 3));
+	sources.push_back(Vector2(-100, -200));
+	PackedFloat32Array radii;
+	radii.push_back(0.0f);
+	radii.push_back(256.0f);
+	const Array no_targets = grid->query_cross_variable_radius_batch(sources, radii, PackedVector2Array());
+	REQUIRE(no_targets.size() == 2);
+	const PackedInt32Array first = no_targets[0];
+	const PackedInt32Array second = no_targets[1];
+	CHECK(first.is_empty());
+	CHECK(second.is_empty());
+}
+
+TEST_CASE("[AIProximityGrid2D] Variable-radius rejects invalid inputs atomically") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array sources;
+	sources.push_back(Vector2(0, 0));
+	PackedFloat32Array radii;
+	radii.push_back(1.0f);
+	PackedVector2Array targets;
+	targets.push_back(Vector2(0, 0));
+	CHECK(grid->query_cross_variable_radius_batch(sources, radii, targets).size() == 1);
+	CHECK(grid->query_cross_variable_radius_batch(sources, PackedFloat32Array(), targets).is_empty());
+	CHECK(grid->query_cross_variable_radius_batch(PackedVector2Array(), radii, targets).is_empty());
+	PackedFloat32Array bad = radii;
+	bad.set(0, -1.0f);
+	CHECK(grid->query_cross_variable_radius_batch(sources, bad, targets).is_empty());
+	bad.set(0, 257.0f);
+	CHECK(grid->query_cross_variable_radius_batch(sources, bad, targets).is_empty());
+	bad.set(0, float(Math::INF));
+	CHECK(grid->query_cross_variable_radius_batch(sources, bad, targets).is_empty());
+	PackedVector2Array invalid = targets;
+	invalid.push_back(Vector2(Math::INF, 0));
+	CHECK(grid->query_cross_variable_radius_batch(sources, radii, invalid).is_empty());
+	invalid = sources;
+	invalid.push_back(Vector2(Math::NaN, 0));
+	bad = radii;
+	bad.push_back(1.0f);
+	CHECK(grid->query_cross_variable_radius_batch(invalid, bad, targets).is_empty());
+	PackedVector2Array too_many_sources;
+	too_many_sources.resize(4097);
+	CHECK(grid->query_cross_variable_radius_batch(too_many_sources, radii, targets).is_empty());
+	PackedVector2Array too_many_targets;
+	too_many_targets.resize(8193);
+	CHECK(grid->query_cross_variable_radius_batch(sources, radii, too_many_targets).is_empty());
+	PackedVector2Array dense;
+	dense.resize(4096);
+	PackedFloat32Array dense_radii;
+	dense_radii.resize(4096);
+	for (int i = 0; i < dense_radii.size(); i++) {
+		dense_radii.set(i, 1.0f);
+	}
+	PackedVector2Array many_targets;
+	many_targets.resize(9); // 36,864 hits exceed the 32,768-pair cap.
+	CHECK(grid->query_cross_variable_radius_batch(dense, dense_radii, many_targets).is_empty());
+	// Empty result sets may still be pathological when every target shares
+	// a grid cell; the 262,144 distance-test budget must reject them too.
+	for (int i = 0; i < dense_radii.size(); i++) {
+		dense_radii.set(i, 0.0f);
+	}
+	PackedVector2Array dense_near_misses;
+	dense_near_misses.resize(65);
+	for (int i = 0; i < dense_near_misses.size(); i++) {
+		dense_near_misses.set(i, Vector2(0.5, 0.5));
+	}
+	CHECK(grid->query_cross_variable_radius_batch(dense, dense_radii, dense_near_misses).is_empty());
+	CHECK(grid->query_cross_variable_radius_batch(sources, radii, targets).size() == 1);
+}
+
 } // namespace TestAIProximityGrid2D

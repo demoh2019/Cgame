@@ -167,6 +167,66 @@ func run(t) -> void:
 			t.check(float(native_cpu.call("consume", &"dragonflies", 0.1, true)) > 0.0,
 				"native forced work bypasses soft limit")
 
+	t.current = "outdoor cosmetic lanes pause in caves and resume without stale backlog"
+	var suspended := AmbientTickBudget.new()
+	suspended.begin_frame(0.01, 3)
+	for lane in AmbientTickBudget.LANES:
+		suspended.consume(lane, 0.01)
+	for lane in AmbientTickBudget.LANES:
+		t.check(suspended.set_lane_enabled(lane, false), "suspend %s" % lane)
+	t.eq(suspended.get_enabled_lane_count(), 0, "no outdoor lanes run underground")
+	suspended.begin_frame(0.1, 3)
+	t.eq(suspended.current_budget(), 0, "underground lanes reserve no CPU slots")
+	for lane in AmbientTickBudget.LANES:
+		t.eq(suspended.consume(lane, 0.1), 0.0, "suppressed %s stays stopped" % lane)
+	t.check(suspended.consume("dust_devils", 0.1, true) > 0.0,
+		"cave transition can still clear existing dust effects")
+	suspended.begin_frame(0.1, 3)
+	t.eq(suspended.consume("dust_devils", 0.1), 0.0, "no repeat update while disabled")
+	t.check(not suspended.set_lane_enabled("missing", false), "unknown lanes rejected")
+	t.check(suspended.set_lane_enabled("dragonflies", true), "outside scene reenables dragonflies")
+	t.check(suspended.set_lane_enabled("dragonflies", true), "idempotent enable keeps pending refresh")
+	t.eq(suspended.get_enabled_lane_count(), 1, "only one outdoor lane is active")
+	suspended.begin_frame(0.001, 3)
+	t.eq(suspended.current_budget(), 1, "available slots follow enabled lanes")
+	var resumed_delta: float = suspended.consume("dragonflies", 0.001)
+	t.near(resumed_delta, 0.001, 0.0000001, "returning to daylight refreshes immediately")
+	t.eq(suspended.consume("dragonflies", 0.001), 0.0,
+		"single-use resume does not grant another update")
+	suspended.reset()
+	t.check(not suspended.is_lane_enabled("dusk_bats"), "reset preserves cave suspension")
+
+	if ClassDB.class_exists("FrameUpdateBudget"):
+		var resumed_native: Object = ClassDB.instantiate("FrameUpdateBudget")
+		if resumed_native != null and resumed_native.has_method("set_lane_enabled"):
+			for lane in AmbientTickBudget.LANES:
+				resumed_native.call("register_lane", StringName(lane))
+			resumed_native.call("begin_frame", 0.01, 3)
+			for lane in AmbientTickBudget.LANES:
+				resumed_native.call("consume", StringName(lane), 0.01)
+			for lane in AmbientTickBudget.LANES:
+				t.check(bool(resumed_native.call("set_lane_enabled", StringName(lane), false)),
+					"native suspension for %s" % lane)
+			resumed_native.call("begin_frame", 0.1, 3)
+			t.eq(int(resumed_native.call("current_budget")), 0, "native no-slot cave parity")
+			for lane in AmbientTickBudget.LANES:
+				t.eq(float(resumed_native.call("consume", StringName(lane), 0.1)), 0.0,
+					"native %s remains suspended" % lane)
+			t.check(float(resumed_native.call("consume", &"dust_devils", 0.1, true)) > 0.0,
+				"native forced cave cleanup")
+			resumed_native.call("begin_frame", 0.1, 3)
+			t.eq(float(resumed_native.call("consume", &"dust_devils", 0.1)), 0.0,
+				"native suspended dust stays stopped")
+			resumed_native.call("set_lane_enabled", &"dragonflies", true)
+			resumed_native.call("set_lane_enabled", &"dragonflies", true)
+			t.eq(int(resumed_native.call("get_enabled_lane_count")), 1,
+				"native active lane count matches GDScript")
+			resumed_native.call("begin_frame", 0.001, 3)
+			t.near(float(resumed_native.call("consume", &"dragonflies", 0.001)),
+				resumed_delta, 0.0000001, "native and script resume parity")
+			t.eq(float(resumed_native.call("consume", &"dragonflies", 0.001)), 0.0,
+				"native immediate resume is single-use")
+
 	t.current = "scene-aware importance with learned CPU costs"
 	var daylight_weights: Dictionary = AmbientTickBudget.suggested_importance(0.8, false, false)
 	var night_weights: Dictionary = AmbientTickBudget.suggested_importance(0.1, false, false)

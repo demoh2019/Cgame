@@ -206,6 +206,7 @@ void fragment() {
 }
 """
 
+static var rivers = null # world.rivers (world_rivers.gd), set by the client: nothing grows in rivers or lakes.
 static var _meshes: Dictionary = {} # Blade count -> shared ArrayMesh; all tiles reuse three GPU meshes.
 static var _material: ShaderMaterial
 
@@ -615,6 +616,8 @@ static func sample(source: Source, lx: float, lz: float) -> Dictionary:
 	var h: float = lerpf(lerpf(h00, h10, fx), lerpf(h01, h11, fx), fz)
 	if h < Defs.WATER_LEVEL + 0.35 or h > 86.0 or absf(h10 - h00) > 1.6 or absf(h01 - h00) > 1.6:
 		return {"ok": false}
+	if _in_river(wx, wz, h):
+		return {"ok": false}
 	if under_object(wx, wz, source.clear):
 		return {"ok": false}
 	var texels: int = source.texels
@@ -688,7 +691,7 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 			var h01: float = heights[(iz + 1) * samples + ix]
 			var h11: float = heights[(iz + 1) * samples + ix + 1]
 			var h: float = lerpf(lerpf(h00, h10, fx), lerpf(h01, h11, fx), fz)
-			if h < Defs.WATER_LEVEL + 0.35 or h > 86.0:
+			if h < Defs.WATER_LEVEL + 0.35 or h > 86.0 or _in_river(wx, wz, h):
 				continue
 			# Steep ground (cliffs) stays bare rock.
 			if absf(h10 - h00) > 1.6 or absf(h01 - h00) > 1.6:
@@ -786,3 +789,13 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 	instance.visibility_range_end = FADE_END + 22.0
 	instance.custom_aabb = AABB(Vector3(tile_x, low - 0.2, tile_z), Vector3(TILE, high - low + 1.4, TILE))
 	return instance
+
+
+## Wet river or lake bed here (cheap: chunks without rivers skip the test).
+static func _in_river(wx: float, wz: float, h: float) -> bool:
+	if rivers == null:
+		return false
+	var cell := Vector2i(floori(wx / 64.0), floori(wz / 64.0))
+	if rivers.segments_in_cell(cell).is_empty() and rivers.lakes_in_cell(cell).is_empty():
+		return false
+	return rivers.surface_at(wx, wz) > h - 0.3

@@ -160,7 +160,7 @@ bool GameplayEffectApplicationGate::replace_snapshot(const Dictionary &p_snapsho
 		return false;
 	}
 	Vector<Rule> validated;
-	for (const Variant &raw_tag : p_snapshot) {
+	for (const Variant &raw_tag : p_snapshot.keys()) {
 		if (raw_tag.get_type() != Variant::STRING && raw_tag.get_type() != Variant::STRING_NAME) {
 			return false;
 		}

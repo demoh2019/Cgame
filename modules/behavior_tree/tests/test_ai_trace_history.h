@@ -92,10 +92,10 @@ TEST_CASE("[AITraceHistory] Equivalent execution ignores CPU duration changes") 
 	const Array frames = trace->get_history_frames();
 	REQUIRE(frames.size() == 4);
 	const Dictionary a = frames[0], b = frames[1], c = frames[2], d = frames[3];
-	CHECK(a["changed"] == true);
-	CHECK(b["changed"] == false);
-	CHECK(c["changed"] == true);
-	CHECK(d["changed"] == false);
+	CHECK(a["changed"] == Variant(true));
+	CHECK(b["changed"] == Variant(false));
+	CHECK(c["changed"] == Variant(true));
+	CHECK(d["changed"] == Variant(false));
 	const Array changes = trace->get_history_frames(true);
 	REQUIRE(changes.size() == 2);
 	const Dictionary first_change = changes[0], next_change = changes[1];
@@ -141,7 +141,7 @@ TEST_CASE("[AITraceHistory] History copies are detached from retained records") 
 	const Array original_steps = original["steps"];
 	REQUIRE(original_steps.size() == 1);
 	const Dictionary original_event = original_steps[0];
-	CHECK(original_event["path"] == "root/0");
+	CHECK(original_event["path"] == Variant("root/0"));
 }
 
 TEST_CASE("[AITraceHistory] Slow task report sorts by inclusive duration and path") {
@@ -201,7 +201,7 @@ TEST_CASE("[AITraceHistory] Unfinished tasks are ignored by slow task report") {
 	const Array hot = trace->get_slowest_nodes();
 	REQUIRE(hot.size() == 1);
 	const Dictionary only = hot[0];
-	CHECK(only["path"] == "root/finished");
+	CHECK(only["path"] == Variant("root/finished"));
 	CHECK(trace->end_step(unfinished, BehaviorTreeTask::RUNNING));
 	CHECK(trace->get_slowest_nodes().size() == 2);
 }
@@ -219,7 +219,7 @@ TEST_CASE("[AITraceHistory] Shrink and zero capacity release retained memory") {
 	trace->set_history_capacity(0);
 	CHECK(trace->get_history_frames().is_empty());
 	CHECK(trace->get_history_capacity() == 0);
-	CHECK(trace->get_snapshot()["tick_index"] == int64_t(5)); // Main trace unaffected.
+	CHECK(trace->get_snapshot()["tick_index"] == Variant(int64_t(5))); // Main trace unaffected.
 	trace->reset();
 	CHECK(trace->get_history_frames().is_empty());
 	CHECK(trace->get_history_capacity() == 0);

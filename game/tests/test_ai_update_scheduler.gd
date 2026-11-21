@@ -7,7 +7,76 @@ const Zombie = preload("res://scripts/shared/zombie.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 
 
+## The actual server tick receives either a conservative spatial shortlist
+## or the full original player info. World, RNG and all actor IDs are equal.
+static func _run_passive_interest_fixture(force_fallback: bool) -> Dictionary:
+    var world := WorldGen.new(827)
+    var server := GameServer.new(world, 827)
+    server.tick_count = 2 # Do not trigger population maintenance or cue scans.
+    if force_fallback:
+        server._pack_spatial_grid = RefCounted.new()
+    for j in range(8):
+        var px: float = 1150.0 + float(j) * 400.0
+        var pz := 850.0
+        var peer = server.add_player(2100 + j, "Perception %d" % j)
+        peer.position = Vector3(px, world.height_at(px, pz), pz)
+    for index in range(64):
+        var zx: float = 1150.0 + float(index) * 50.0
+        var zz := 850.0
+        var infected := Zombie.new(87500 + index, "walker",
+            Vector3(zx, world.height_at(zx, zz), zz))
+        infected.state = Zombie.State.IDLE
+        infected.think_timer = 0.0
+        infected._ai_has_selected_once = true
+        if index == 5:
+            # One survivor is two metres beyond far LOD, but still
+            # inside the 4m hysteresis band of a previous medium scan.
+            var hysteretic_x: float = 1150.0 + float(infected.data["lose"]) + 26.0
+            infected.position = Vector3(hysteretic_x,
+                world.height_at(hysteretic_x, zz), zz)
+            infected._ai_lod_previous_interval = 0.5
+            infected._ai_lod_staggered = true
+        if index == 3:
+            # Already pursuing targets must continue to see ALL player data.
+            infected.state = Zombie.State.CHASE
+            infected.target_id = 2100
+        if index == 4:
+            infected.raid_boss = true
+        server.zombies[infected.id] = infected
+    server._tick_zombies(0.05)
+    var states: Array = []
+    for index in range(64):
+        var agent = server.zombies[87500 + index]
+        states.append({"state": int(agent.state), "target": int(agent.target_id),
+            "position": agent.position, "think_timer": agent.think_timer,
+            "last_known": agent.last_known_target})
+    return {"states": states, "stats": server.get_perception_interest_stats()}
+
+
 func run(t) -> void:
+    t.current = "Mass-style native per-agent perception broadphase keeps server targeting"
+    var control: Dictionary = _run_passive_interest_fixture(true)
+    var accelerated: Dictionary = _run_passive_interest_fixture(false)
+    var variable_available: bool = ClassDB.class_exists("AIProximityGrid2D") \
+        and ClassDB.class_has_method("AIProximityGrid2D", "query_cross_variable_radius_batch")
+    t.eq(bool(control["stats"].get("native", false)), false,
+        "forcing older-engine behavior keeps authoritative full player scans")
+    t.eq(bool(accelerated["stats"].get("native", false)), variable_available,
+        "real 64-NPC server tick activates dynamic-radius sensing only with new C++ API")
+    t.eq(accelerated["states"], control["states"],
+        "native spatial culling cannot change target, movement or LOD timing")
+    if variable_available:
+        t.eq(int(accelerated["stats"]["sources"]), 62,
+            "active chasing infected and raid boss are not passively culled")
+        t.eq(int(accelerated["stats"]["players"]), 8,
+            "native query uses eight real server-owned living survivors")
+        t.check(int(accelerated["stats"]["pairs"]) < 62 * 8,
+            "far-away player checks are removed before passive AI target selection")
+    else:
+        t.eq(int(accelerated["stats"]["pairs"]), 0,
+            "stock and older engine binaries do not report native work")
+
+
     t.current = "Native time slots are stable, exhaustive and optional"
     var native_available := ClassDB.class_exists("AIUpdateScheduler")
     var scheduler: Variant = ClassDB.instantiate("AIUpdateScheduler") if native_available else null
@@ -102,6 +171,57 @@ func run(t) -> void:
     step_server._budget_eqs_replans([], 0.05)
     t.check(not step_server.get_eqs_replan_stats()["enabled"],
         "empty cohort disables the time-sliced work flag")
+
+    t.current = "Native shared time budget is initialized once and reused for all infected"
+    var ledger_supported: bool = ClassDB.class_exists("EnvironmentQueryTickBudget")
+    var shared_world := WorldGen.new(915)
+    var shared_server := GameServer.new(shared_world, 915)
+    for index in range(64):
+        var ledger_mob := Zombie.new(101000 + index, "walker",
+            Vector3(float(index), WorldGen.HUB_HEIGHT, 10.0))
+        shared_server.zombies[ledger_mob.id] = ledger_mob
+    shared_server.tick_count = 8
+    shared_server._budget_eqs_replans(shared_server.zombies.values(), 0.05)
+    var first_ledger: Variant = shared_server._eqs_tick_budget
+    if ledger_supported and budget_available and stepper_supported:
+        t.check(shared_server._eqs_tick_budget_active,
+            "large-crowd game server starts a shared native EQS ledger")
+        t.check(first_ledger != null, "native ledger is allocated once")
+        t.eq(int(first_ledger.get_remaining_us()), GameServer.AI_EQS_GLOBAL_QUOTA_US,
+            "regular work begins with the configured global CPU allowance")
+        t.eq(int(first_ledger.get_remaining_us(true)), GameServer.AI_EQS_GLOBAL_URGENT_US,
+            "urgent Smart Object recovery gets its own bounded CPU allowance")
+        for mob in shared_server.zombies.values():
+            t.check(mob.flank_tick_budget == first_ledger,
+                "all infected share one exact native ledger instance")
+        t.check(first_ledger.try_admit_step(),
+            "one ordinary EQS worker opens a grant")
+        t.check(first_ledger.record_step(GameServer.AI_EQS_GLOBAL_QUOTA_US),
+            "recorded native work charges the shared regular pool")
+        t.eq(int(first_ledger.get_remaining_us()), 0,
+            "ordinary EQS admission is exhausted across the whole group")
+        t.check(not first_ledger.try_admit_step(),
+            "second worker cannot bypass another worker's CPU debit")
+        t.check(first_ledger.try_admit_step(true),
+            "urgent recovery still admitted after ordinary pool exhaustion")
+        t.check(first_ledger.record_step(GameServer.AI_EQS_GLOBAL_URGENT_US),
+            "urgent charge closes only its own pool")
+        shared_server._budget_eqs_replans(shared_server.zombies.values(), 0.05)
+        t.eq(int(first_ledger.get_remaining_us()), 0,
+            "repeated scheduling in the SAME tick never refills a CPU pool")
+        shared_server.tick_count = 9
+        shared_server._budget_eqs_replans(shared_server.zombies.values(), 0.05)
+        t.check(shared_server._eqs_tick_budget == first_ledger,
+            "next tick reuses the native ledger without allocating a new one")
+        t.eq(int(first_ledger.get_remaining_us()), GameServer.AI_EQS_GLOBAL_QUOTA_US,
+            "new authoritative tick refreshes work quotas")
+    else:
+        t.check(not shared_server._eqs_tick_budget_active,
+            "old Cgame/stock Godot retains original unshared work admission")
+    shared_server.zombies.clear()
+    shared_server._budget_eqs_replans([], 0.05)
+    t.check(not shared_server._eqs_tick_budget_active,
+        "depopulation turns off shared EQS budgeting immediately")
 
     t.current = "EQS throttling never defers pursuit or overwrites an old lease"
     var gated := Zombie.new(867, "walker", Vector3.ZERO)

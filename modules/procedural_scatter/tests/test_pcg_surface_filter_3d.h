@@ -49,8 +49,8 @@ TEST_CASE("[PCGSurfaceFilter3D] invalid inputs fail atomically") {
 	positions.push_back(Vector3(0, 0, 0));
 	positions.push_back(Vector3(1, 1, 1));
 	PackedVector3Array normals;
-	normals.push_back(Vector3.UP);
-	normals.push_back(Vector3.UP);
+	normals.push_back(Vector3(0, 1, 0));
+	normals.push_back(Vector3(0, 1, 0));
 	CHECK(filter->filter_indices(positions, PackedVector3Array()).is_empty());
 	CHECK(filter->filter_indices(positions, normals, -1.0).is_empty());
 	CHECK(filter->filter_indices(positions, normals, 0.0, 91.0).is_empty());
@@ -66,7 +66,7 @@ TEST_CASE("[PCGSurfaceFilter3D] invalid inputs fail atomically") {
 	CHECK(filter->filter_indices(positions, normals).is_empty());
 	normals.set(1, Vector3(0, Math::NaN, 0));
 	CHECK(filter->filter_indices(positions, normals).is_empty());
-	normals.set(1, Vector3.UP);
+	normals.set(1, Vector3(0, 1, 0));
 	positions.set(1, Vector3(Math::INF, 1, 1));
 	CHECK(filter->filter_indices(positions, normals).is_empty());
 	positions.set(1, Vector3(10000001, 1, 1));
@@ -117,11 +117,11 @@ TEST_CASE("[PCGSurfaceFilter3D] surface alignment respects authored yaw scale an
 	const Transform3D second = aligned[1];
 	CHECK(first == flat);
 	CHECK(second.origin == inclined.origin);
-	CHECK(Math::is_equal_approx(second.basis.x.length(), 2.0));
-	CHECK(Math::is_equal_approx(second.basis.y.length(), 2.0));
-	CHECK(Math::is_equal_approx(second.basis.z.length(), 2.0));
-	CHECK(Math::is_equal_approx(double(second.basis.y.normalized().y), Math::cos(Math::deg_to_rad(30.0))));
-	CHECK(second.basis.y.normalized().z > 0.0);
+	CHECK(Math::is_equal_approx(second.basis.get_column(0).length(), real_t(2.0)));
+	CHECK(Math::is_equal_approx(second.basis.get_column(1).length(), real_t(2.0)));
+	CHECK(Math::is_equal_approx(second.basis.get_column(2).length(), real_t(2.0)));
+	CHECK(Math::is_equal_approx(double(second.basis.get_column(1).normalized().y), Math::cos(Math::deg_to_rad(30.0))));
+	CHECK(second.basis.get_column(1).normalized().z > 0.0);
 	// Left-multiplying the tilt keeps the original authored orientation of
 	// the local X and Z axes relative to the selected new up-axis.
 	const Transform3D original_again = transforms[1];
@@ -140,8 +140,8 @@ TEST_CASE("[PCGSurfaceFilter3D] surface alignment clamps vertical terrain safely
 	const Array aligned = filter->align_transforms(transforms, normals, 20.0);
 	REQUIRE(aligned.size() == 1);
 	const Transform3D result = aligned[0];
-	CHECK(Math::is_equal_approx(double(result.basis.y.normalized().y), Math::cos(Math::deg_to_rad(20.0))));
-	CHECK(result.basis.y.x > 0);
+	CHECK(Math::is_equal_approx(double(result.basis.get_column(1).normalized().y), Math::cos(Math::deg_to_rad(20.0))));
+	CHECK(result.basis.get_column(1).x > 0);
 	CHECK(result.origin == Vector3());
 	CHECK(filter->align_transforms(Array(), PackedVector3Array()).is_empty());
 }

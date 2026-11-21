@@ -7,6 +7,7 @@ const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
+const RaftVisual = preload("res://scripts/client/raft_visual.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const LootLabel = preload("res://scripts/shared/loot_label.gd")
@@ -25,6 +26,8 @@ const LootBeam = preload("res://scripts/client/loot_beam.gd")
 const CorpseBurn = preload("res://scripts/client/corpse_burn.gd")
 const BlobShadow = preload("res://scripts/client/blob_shadow.gd")
 const FarmPlotVisual = preload("res://scripts/client/farm_plot_visual.gd")
+const MotionWarp = preload("res://scripts/client/motion_warp.gd")
+const Combat = preload("res://scripts/shared/combat.gd")
 var _anim_lod: Node = null # Native AnimationLODController when the engine has it, else the GDScript AnimLod.
 var _priority_quality: int = -1
 var _world = null
@@ -61,6 +64,7 @@ var _render_time := -1.0
 # Native jitter telemetry and delay adaptation on Cgame, with 1:1 script
 # policy on official Godot. Positions/teleports stay server-authoritative.
 var _snapshot_buffer = ClassDB.instantiate("AdaptiveNetworkJitterBuffer") if ClassDB.class_exists("AdaptiveNetworkJitterBuffer") else NetworkJitterBuffer.new()
+var _rotation_smoother: Object = EngineFeatures.make("SnapshotRotationSmoothing3D")
 const INTERPOLATION_DELAY := 0.12 # Baseline for 10 server snapshots per second.
 const TELEPORT_DISTANCE := 8.0
 
@@ -354,6 +358,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			tint = base.lerp(Color(1.0, 0.84, 0.25), 0.65)
 		if staggered:
 			tint = base.lerp(Color(0.38, 0.8, 1.0), 0.7)
+		# Layered control cues preserve the existing status tint priorities.
+		if EngineFeatures.zombie_control_count(_nodes[key], entity) >= 2:
+			tint = tint.lerp(Color(0.97, 0.28, 0.88), 0.22)
 		model.set_tint(tint)
 		model.set_zombie_state(int(entity["state"]))
 	# Snapshot-driven priority is purely visual: never changes server AI or damage.
@@ -365,6 +372,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		bike.set_panniers(bool(entity.get("bike_panniers", false)))
 		bike.set_lamp(bool(entity.get("bike_lamp_lit", false)))
 		bike.set_riding(bool(entity.get("mounted", false)) and bool(entity.get("alive", false)))
+		_nodes[key].get_node("Raft").set_rafting(bool(entity.get("rafting", false)) and bool(entity.get("alive", false)))
 		var player_model: Node3D = _nodes[key].get_node("Model")
 		if player_model.pack_mode:
 			# Sneaking and riding are real poses; the weapon they carry is in their hand.
@@ -632,6 +640,11 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		var hue := float(abs(int(entity["id"]) * 2654435761 % 1000)) / 1000.0
 		var character: String = Assets.CHARACTER_NAMES[int(abs(int(entity["id"]))) % Assets.CHARACTER_NAMES.size()]
 		model.setup(Color.WHITE if Assets.has_characters() else Color.from_hsv(hue, 0.45, 1.0), 2.0, 1.0, character, false, int(abs(int(entity["id"]))) / Assets.CHARACTER_NAMES.size())
+	# Boss and elite visual IK gets its own weighted CPU share when
+	# ordinary infected crowd the camera. This does not affect AI or hits.
+	if kind == "zombie" and (bool(entity.get("elite", false)) or
+			bool(entity.get("raid_boss", false))):
+		model.animation_budget_group = 2
 	model.set_wetness_step(_wetness_step)
 	root.add_child(model)
 	if _world != null and GraphicsQuality.level() >= 2: # High and Ultra; no-op without the native class.
@@ -645,6 +658,10 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		var bike := TrailBikeVisual.new()
 		bike.name = "TrailBike"
 		root.add_child(bike)
+		var raft := RaftVisual.new()
+		raft.name = "Raft"
+		raft.position.y = 0.05
+		root.add_child(raft)
 		var flare := HandFlareVisual.new()
 		flare.name = "HandFlare"
 		root.add_child(flare)
@@ -818,6 +835,7 @@ func _process(delta: float) -> void:
 			target["yaw"] = sampled[1]
 		if key.begins_with("bag"):
 			LootDropBounce.apply(node, delta, GraphicsQuality.level())
+			_float_on_water(node)
 		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("plot") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("fish_trap") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("ember") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			var model: Node3D = node.get_node("Model")
@@ -879,15 +897,38 @@ func _sample(key: String) -> Array:
 			var host: Node3D = _nodes.get(key) as Node3D
 			var position: Vector3 = SnapshotSmoothing.sample_position(
 				previous, older, newer, following, k, host)
-			return [position, lerp_angle(float(older[2]), float(newer[2]), k)]
+			# UE-style simulated-proxy angular smoothing shares the trusted
+			# server snapshot history, without extrapolation or facing overshoot.
+			var yaw: float = SnapshotSmoothing.sample_yaw(
+				previous, older, newer, following, k, _rotation_smoother)
+			return [position, yaw]
 	return [history[-1][1], history[-1][2]]
 
 
 ## A swing or a shot by another player.
-func play_attack(peer_id: int, weapon_id: String, ranged: bool) -> void:
+func play_attack(peer_id: int, weapon_id: String, ranged: bool, direction: Vector2 = Vector2.ZERO) -> void:
 	var key := "player:%d" % peer_id
 	if _nodes.has(key):
-		_nodes[key].get_node("Model").play_action(attack_animation(weapon_id, ranged))
+		var model: Node3D = _nodes[key].get_node("Model")
+		model.play_action(attack_animation(weapon_id, ranged))
+		if not ranged and direction != Vector2.ZERO:
+			warp_model(model, (_nodes[key] as Node3D).global_position, weapon_id, direction, key)
+
+
+## Motion warping: the swinging model glides toward the enemy in front of it.
+func warp_model(model: Node3D, origin: Vector3, weapon_id: String, direction: Vector2, key: String = "") -> void:
+	if model == null:
+		return
+	var targets: Array = []
+	for other_key in _nodes:
+		if other_key == key or not (str(other_key).begins_with("zombie:") or str(other_key).begins_with("player:")):
+			continue
+		var other := _nodes[other_key] as Node3D
+		if other != null and other.visible:
+			targets.append(other.global_position)
+	var warp: Dictionary = MotionWarp.solve(origin, direction, Combat.weapon_reach(weapon_id), targets)
+	if not warp.is_empty():
+		MotionWarp.play(model, warp["offset"])
 
 
 ## Which animation a weapon uses.
@@ -1033,3 +1074,17 @@ func telegraph(id: int, seconds: float, charge: bool) -> void:
 	tween.tween_property(mark, "scale", Vector3.ONE * 1.4, maxf(seconds, 0.1) * 0.5).set_trans(Tween.TRANS_BACK)
 	tween.tween_property(mark, "modulate:a", 0.0, maxf(seconds, 0.1) * 0.5)
 	tween.tween_callback(mark.queue_free)
+
+
+## Buoyancy: loot dropped into the sea, a river or a lake floats and bobs on the surface.
+func _float_on_water(node: Node3D) -> void:
+	if _world == null:
+		return
+	var p: Vector3 = node.position
+	var surface: float = _world.water_level_at(p.x, p.z)
+	if _world.ground_at(p.x, p.z) >= surface:
+		return
+	var t: float = Time.get_ticks_msec() * 0.001 + p.x * 0.13
+	node.position.y = surface + 0.08 + sin(t * 1.7) * 0.07
+	node.rotation.x = sin(t * 1.3) * 0.12
+	node.rotation.z = cos(t * 1.1) * 0.12

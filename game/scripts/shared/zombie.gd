@@ -17,6 +17,7 @@ const InfectedSight = preload("res://scripts/shared/infected_sight.gd")
 const InfectedMeleeCover = preload("res://scripts/shared/infected_melee_cover.gd")
 const NativeSenses = preload("res://scripts/shared/native_infected_senses.gd")
 const EffectRules = preload("res://scripts/shared/effect_application_rules.gd")
+const InfectedTargetUtility = preload("res://scripts/shared/infected_target_utility.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
@@ -38,6 +39,9 @@ var home: Vector2
 var wander_target: Vector2
 var last_known_target: Vector2
 var investigate_time: float = 0.0
+# Prevent oscillating between two expired/barely audible world positions.
+# This is transient server-only search memory, not a networked actor target.
+var _investigated_sound_sites: Array[Vector2] = []
 const INVESTIGATE_SECONDS := 4.0
 var think_timer: float = 0.0
 var ai_selection_allowed: bool = true # Server-only scheduling hint, no effect on attacks/movement.
@@ -383,13 +387,38 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 				else:
 					_move_toward(world, here, wander_target, float(data["speed"]) * 0.4, delta)
 		State.INVESTIGATE:
-			# Do not magically follow a survivor beyond our pursuit leash.
-			# Examine the place where they were last tracked, then return home.
+			# Continue an already authorized search only while time remains.
+			# At most two distinct locations: no unbounded patrol/search loops.
 			investigate_time = maxf(0.0, investigate_time - delta)
-			if investigate_time <= 0.0 or here.distance_to(last_known_target) < 0.8:
+			if investigate_time <= 0.0:
 				state = State.WANDER
 				wander_target = home
 				stuck_time = 0.0
+			elif here.distance_to(last_known_target) < 0.8:
+				var next_sound := Vector2.INF
+				if _native_senses != null and _investigated_sound_sites.is_empty():
+					_investigated_sound_sites.append(last_known_target)
+					for event in _native_senses.get_ranked_confirmed_stimuli(1, 8):
+						var candidate: Variant = event.get("position", Vector2.INF)
+						if not (candidate is Vector2) or not candidate.is_finite() or \
+								here.distance_to(candidate) > float(data["lose"]) or \
+								world.is_safe(candidate.x, candidate.y) or \
+								world.is_water(candidate.x, candidate.y):
+							continue
+						var visited := false
+						for earlier in _investigated_sound_sites:
+							if earlier.distance_to(candidate) < 2.0:
+								visited = true
+								break
+						if not visited:
+							next_sound = candidate as Vector2
+							break
+				if next_sound.is_finite():
+					last_known_target = next_sound
+				else:
+					state = State.WANDER
+					wander_target = home
+					stuck_time = 0.0
 			else:
 				_move_toward(world, here, last_known_target, float(data["speed"]) * 0.7, delta)
 		State.CHASE, State.ATTACK:
@@ -409,6 +438,7 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 				var lost_target_id: int = target_id
 				target_id = -1
 				state = State.INVESTIGATE
+				_investigated_sound_sites.clear()
 				# Per-actor, already-approved sound memory has precedence over
 				# louder sounds from another survivor. Never use the escaped
 				# player's unobserved CURRENT position or bypass the pursuit leash.
@@ -519,6 +549,7 @@ func consume_howl() -> bool:
 
 func _note_target_acquired() -> void:
 	unseen_seconds = 0.0
+	_investigated_sound_sites.clear()
 	if data.has("howl_radius") and target_id != -1 and target_id != _howled_at:
 		_howled_at = target_id
 		_howl_pending = true
@@ -568,6 +599,7 @@ func _select_target(world, players: Dictionary, here: Vector2) -> float:
 		return 0.0
 	var best := -1
 	var best_distance := INF
+	var best_score := 0.0
 	var nearest_eligible_distance := INF
 	for peer_id in players:
 		var info: Dictionary = players[peer_id]
@@ -630,9 +662,13 @@ func _select_target(world, players: Dictionary, here: Vector2) -> float:
 				_native_senses.record_confirmed_sound(here, Vector2(p.x, p.z), hearing, int(peer_id))
 		var nonvisual: bool = heard or distance <= scent
 		var potentially_visible: bool = distance <= maxf(notice, firelight)
-		if distance < best_distance and (peer_id == target_id or nonvisual or
+		# Utility AI prey choice: proximity dominates; wounds, current focus and noise tip it.
+		var utility: float = InfectedTargetUtility.score(distance, float(data["lose"]),
+			float(info.get("health_fraction", 1.0)), peer_id == target_id, float(info.get("noise", 0.0)) > 0.0)
+		if utility > best_score and (peer_id == target_id or nonvisual or
 				(potentially_visible and InfectedSight.clear_path(world, position, p))):
 			best = peer_id
+			best_score = utility
 			best_distance = distance
 	if best != -1:
 		target_id = best
@@ -705,6 +741,8 @@ var _flank_slot_id_cached: int = 0 # Validate cached goal against current server
 var flank_reservations: Variant = null # Shared server-owned smart-object lease pool.
 var flank_replan_allowed: bool = true # Only optional EQS geometry; combat remains unthrottled.
 var flank_incremental_enabled: bool = false # GameServer opts in for 64+ active infected.
+var flank_tick_budget: Variant = null # Optional shared, native per-tick EQS ledger.
+var flank_step_urgent: bool = false # Lease recovery uses a separate capped pool.
 var flank_last_step_us: int = 0 # Measured native score work in this AI tick.
 var flank_last_step_candidates: int = 0
 var flank_last_timed_steps: int = 0
@@ -805,8 +843,21 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 		_flank_query.has_method("get_incremental_top_indices")
 	var preferred := PackedVector3Array()
 	if incremental:
+		var global_admission: bool = flank_tick_budget != null and \
+			_flank_query.has_method("step_incremental_top_positions_timed") and \
+			flank_tick_budget.has_method("try_admit_step")
+		# Denied tactical work never blocks movement/attack or consumes a
+		# partial result; ordinary and urgent budgets are independent.
+		if global_admission and not bool(flank_tick_budget.try_admit_step(flank_step_urgent)):
+			return target
+		var step_time_us: int = FLANK_EQS_TIME_BUDGET_US
+		if global_admission:
+			step_time_us = mini(step_time_us, int(
+				flank_tick_budget.get_remaining_us(flank_step_urgent)))
 		if not _flank_incremental_running:
 			if not bool(_flank_query.call("begin_incremental_top_positions", top_count)):
+				if global_admission:
+					flank_tick_budget.cancel_pending_step()
 				return target
 			_flank_incremental_running = true
 			_flank_incremental_target_id = target_id
@@ -819,13 +870,16 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 			# 3-item batch and adapts up/down from observed microseconds.
 			# Actual wall clock is still checked between every candidate.
 			var budget: int = int(_flank_query.call("suggest_incremental_step_size",
-				FLANK_EQS_TIME_BUDGET_US, FLANK_EQS_MAX_CANDIDATES))
+				step_time_us, FLANK_EQS_MAX_CANDIDATES))
 			budget = clampi(budget, 1, FLANK_EQS_MAX_CANDIDATES)
 			done = bool(_flank_query.call("step_incremental_top_positions_timed",
-				FLANK_EQS_TIME_BUDGET_US, budget))
+				step_time_us, budget))
 			flank_last_step_us = int(_flank_query.call("get_incremental_last_step_us"))
 			flank_last_step_candidates = int(_flank_query.call("get_incremental_last_step_candidates"))
 			flank_last_timed_steps = 1
+			if global_admission:
+				# Debit the shared tick ledger before any next infected can start.
+				flank_tick_budget.record_step(flank_last_step_us)
 		else:
 			# Older Cgame builds retain the original strict 3-item
 			# deterministic count budget with identical final results.

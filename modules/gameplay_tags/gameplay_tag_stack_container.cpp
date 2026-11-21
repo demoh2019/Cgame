@@ -75,7 +75,7 @@ int64_t GameplayTagStackContainer::get_stack_count(const StringName &p_tag, bool
 		return stacks.get(p_tag, 0);
 	}
 	int64_t result = 0;
-	for (const Variant &key : stacks) {
+	for (const Variant &key : stacks.keys()) {
 		const StringName tag = key;
 		if (GameplayTagContainer::tag_matches(tag, p_tag)) {
 			result += int64_t(stacks[key]);
@@ -97,7 +97,7 @@ void GameplayTagStackContainer::clear() {
 
 bool GameplayTagStackContainer::replace_stacks(const Dictionary &p_stacks) {
 	Dictionary validated;
-	for (const Variant &key : p_stacks) {
+	for (const Variant &key : p_stacks.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
@@ -116,7 +116,7 @@ bool GameplayTagStackContainer::replace_stacks(const Dictionary &p_stacks) {
 	// network snapshots do not emit a changed signal or invalidate the inspector.
 	bool modified = stacks.size() != validated.size();
 	if (!modified) {
-		for (const Variant &key : validated) {
+		for (const Variant &key : validated.keys()) {
 			if (!stacks.has(key) || stacks[key] != validated[key]) {
 				modified = true;
 				break;
@@ -139,7 +139,7 @@ bool GameplayTagStackContainer::replace_stack_branch(const StringName &p_query, 
 	// Normalize String keys to StringName so mixed-key aliases cannot silently
 	// overwrite one another (important for snapshots received over the network).
 	Dictionary validated;
-	for (const Variant &key : p_replacements) {
+	for (const Variant &key : p_replacements.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
@@ -155,19 +155,19 @@ bool GameplayTagStackContainer::replace_stack_branch(const StringName &p_query, 
 	}
 
 	Dictionary next;
-	for (const Variant &key : stacks) {
+	for (const Variant &key : stacks.keys()) {
 		const StringName tag = key;
 		if (!GameplayTagContainer::tag_matches(tag, p_query)) {
 			next[tag] = stacks[key];
 		}
 	}
-	for (const Variant &key : validated) {
+	for (const Variant &key : validated.keys()) {
 		next[key] = validated[key];
 	}
 
 	bool modified = stacks.size() != next.size();
 	if (!modified) {
-		for (const Variant &key : next) {
+		for (const Variant &key : next.keys()) {
 			if (!stacks.has(key) || stacks[key] != next[key]) {
 				modified = true;
 				break;

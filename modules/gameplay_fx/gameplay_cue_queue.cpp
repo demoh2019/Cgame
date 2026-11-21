@@ -174,12 +174,42 @@ bool GameplayCueQueue::set_active(const StringName &p_tag, int p_stacks, int p_p
 	return replace_active(snapshot, p_priority);
 }
 
-bool GameplayCueQueue::replace_active(const Dictionary &p_snapshot, int p_priority) {
+bool GameplayCueQueue::_enqueue_lifecycle(Vector<PendingCue> &r_queue, const StringName &p_tag,
+		EventType p_type, int p_stacks, int p_priority, bool p_admit, int &r_evictions) {
+	if (_enqueue(r_queue, p_tag, p_type, p_stacks, 1.0, p_priority)) {
+		return true;
+	}
+	if (!p_admit) {
+		return false;
+	}
+	// Full queue: evict only a strictly less-important expendable pulse.
+	// Persistent stop/start/update cues must never be discarded, because
+	// they are required to clean up already-visible local effects.
+	int victim = -1;
+	for (int i = 0; i < r_queue.size(); ++i) {
+		const PendingCue &candidate = r_queue[i];
+		if (candidate.type == EVENT_EXECUTED && candidate.priority < p_priority &&
+				(victim < 0 || candidate.priority < r_queue[victim].priority)) {
+			victim = i;
+		}
+	}
+	if (victim < 0) {
+		return false;
+	}
+	r_queue.remove_at(victim);
+	if (!_enqueue(r_queue, p_tag, p_type, p_stacks, 1.0, p_priority)) {
+		return false;
+	}
+	++r_evictions;
+	return true;
+}
+
+bool GameplayCueQueue::_replace_active_internal(const Dictionary &p_snapshot, int p_priority, bool p_admit) {
 	if (!_valid_priority(p_priority) || p_snapshot.size() > MAX_ACTIVE) {
 		return false;
 	}
 	Vector<ActiveCue> validated;
-	for (const Variant &key : p_snapshot) {
+	for (const Variant &key : p_snapshot.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
@@ -203,9 +233,10 @@ bool GameplayCueQueue::replace_active(const Dictionary &p_snapshot, int p_priori
 		}
 	}
 	Vector<PendingCue> next_pending = pending;
+	int preemptions = 0;
 	for (const ActiveCue &previous : active) {
 		if (_find_active(validated, previous.tag) < 0) {
-			if (!_enqueue(next_pending, previous.tag, EVENT_STOPPED, 0, 0.0, p_priority)) {
+			if (!_enqueue_lifecycle(next_pending, previous.tag, EVENT_STOPPED, 0, p_priority, p_admit, preemptions)) {
 				return false;
 			}
 		}
@@ -213,11 +244,11 @@ bool GameplayCueQueue::replace_active(const Dictionary &p_snapshot, int p_priori
 	for (const ActiveCue &current : validated) {
 		const int old_index = _find_active(active, current.tag);
 		if (old_index < 0) {
-			if (!_enqueue(next_pending, current.tag, EVENT_STARTED, current.stacks, 1.0, p_priority)) {
+			if (!_enqueue_lifecycle(next_pending, current.tag, EVENT_STARTED, current.stacks, p_priority, p_admit, preemptions)) {
 				return false;
 			}
 		} else if (active[old_index].stacks != current.stacks) {
-			if (!_enqueue(next_pending, current.tag, EVENT_UPDATED, current.stacks, 1.0, p_priority)) {
+			if (!_enqueue_lifecycle(next_pending, current.tag, EVENT_UPDATED, current.stacks, p_priority, p_admit, preemptions)) {
 				return false;
 			}
 		}
@@ -225,7 +256,18 @@ bool GameplayCueQueue::replace_active(const Dictionary &p_snapshot, int p_priori
 	// Commit only after full validation AND pending-capacity preflight.
 	active = validated;
 	pending = next_pending;
+	// A failed snapshot never mutates either the queue or its diagnostics.
+	evicted_transient_count = preemptions > 2147483647 - evicted_transient_count ?
+			2147483647 : evicted_transient_count + preemptions;
 	return true;
+}
+
+bool GameplayCueQueue::replace_active(const Dictionary &p_snapshot, int p_priority) {
+	return _replace_active_internal(p_snapshot, p_priority, false);
+}
+
+bool GameplayCueQueue::replace_active_resilient(const Dictionary &p_snapshot, int p_priority) {
+	return _replace_active_internal(p_snapshot, p_priority, true);
 }
 
 bool GameplayCueQueue::replace_active_branch(const StringName &p_branch, const Dictionary &p_snapshot, int p_priority) {
@@ -243,7 +285,7 @@ bool GameplayCueQueue::replace_active_branch(const StringName &p_branch, const D
 	Vector<StringName> seen;
 	int wanted = 0;
 	bool unchanged = true;
-	for (const Variant &key : p_snapshot) {
+	for (const Variant &key : p_snapshot.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
@@ -285,7 +327,7 @@ bool GameplayCueQueue::replace_active_branch(const StringName &p_branch, const D
 			combined.erase(cue.tag);
 		}
 	}
-	for (const Variant &key : p_snapshot) {
+	for (const Variant &key : p_snapshot.keys()) {
 		const int64_t stacks = int64_t(p_snapshot[key]);
 		if (stacks > 0) {
 			combined[StringName(key)] = stacks;
@@ -293,7 +335,7 @@ bool GameplayCueQueue::replace_active_branch(const StringName &p_branch, const D
 	}
 	// Existing all-or-nothing snapshot preflight handles active limits,
 	// coalesced started/updated/stopped queue capacity, and rollback.
-	return replace_active(combined, p_priority);
+	return replace_active_resilient(combined, p_priority);
 }
 
 Dictionary GameplayCueQueue::get_active_snapshot() const {
@@ -348,6 +390,7 @@ void GameplayCueQueue::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("emit_cues_batch", "events"), &GameplayCueQueue::emit_cues_batch);
 	ClassDB::bind_method(D_METHOD("set_active", "tag", "stacks", "priority"), &GameplayCueQueue::set_active, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("replace_active", "snapshot", "priority"), &GameplayCueQueue::replace_active, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("replace_active_resilient", "snapshot", "priority"), &GameplayCueQueue::replace_active_resilient, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("replace_active_branch", "branch", "snapshot", "priority"), &GameplayCueQueue::replace_active_branch, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_active_snapshot"), &GameplayCueQueue::get_active_snapshot);
 	ClassDB::bind_method(D_METHOD("get_active_stacks", "tag"), &GameplayCueQueue::get_active_stacks);

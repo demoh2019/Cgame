@@ -24,6 +24,9 @@ void PCGFoliageScalability3D::_bind_methods() {
 			&PCGFoliageScalability3D::plan_instance_lods, DEFVAL(24.0), DEFVAL(3.0));
 	ClassDB::bind_method(D_METHOD("partition_variant_lods", "variants", "lod_tiers", "variant_count"),
 			&PCGFoliageScalability3D::partition_variant_lods);
+	ClassDB::bind_method(D_METHOD("plan_dirty_variant_lod_groups", "variants", "previous_tiers",
+					"next_tiers", "variant_count"),
+			&PCGFoliageScalability3D::plan_dirty_variant_lod_groups);
 	ClassDB::bind_method(D_METHOD("plan_projected_visible_counts", "counts", "centers",
 					"mesh_diameters", "camera_position", "camera_forward",
 					"focal_pixels", "orthographic", "quality", "near_pixels", "far_pixels"),
@@ -87,7 +90,7 @@ PackedInt32Array PCGFoliageScalability3D::plan_visible_counts(
 			result.set(i, count);
 			continue;
 		}
-		const double t = Math::clamp((double(p_distances[i]) - p_near_distance) /
+		const double t = CLAMP((double(p_distances[i]) - p_near_distance) /
 				(p_far_distance - p_near_distance), 0.0, 1.0);
 		const double smooth = t * t * (3.0 - 2.0 * t);
 		const double fraction = NEAR_DENSITY[p_quality] +
@@ -283,12 +286,46 @@ PackedInt32Array PCGFoliageScalability3D::plan_projected_visible_counts(
 		}
 		const double pixels = double(p_mesh_diameters[i]) * p_focal_pixels /
 				(p_orthographic ? 1.0 : MAX(depth, 0.1));
-		const double t = Math::clamp((p_near_pixels - pixels) /
+		const double t = CLAMP((p_near_pixels - pixels) /
 				(p_near_pixels - p_far_pixels), 0.0, 1.0);
 		const double smooth = t * t * (3.0 - 2.0 * t);
 		const double fraction = NEAR_DENSITY[p_quality] +
 				(FAR_DENSITY[p_quality] - NEAR_DENSITY[p_quality]) * smooth;
 		result.set(i, MAX(1, MIN(count, int(Math::round(double(count) * fraction)))));
+	}
+	return result;
+}
+
+
+PackedByteArray PCGFoliageScalability3D::plan_dirty_variant_lod_groups(
+		const PackedInt32Array &p_variants, const PackedInt32Array &p_previous_tiers,
+		const PackedInt32Array &p_next_tiers, int p_variant_count) const {
+	PackedByteArray result;
+	const int count = p_variants.size();
+	if (count != p_previous_tiers.size() || count != p_next_tiers.size() ||
+			count > MAX_LOD_INSTANCES || p_variant_count < 1 ||
+			p_variant_count > MAX_MESH_VARIANTS) {
+		return result;
+	}
+	// Validate all rows before allocating the output flags. In particular,
+	// a corrupt last tier must not cause only half of a scene to refresh.
+	for (int i = 0; i < count; ++i) {
+		if (p_variants[i] < 0 || p_variants[i] >= p_variant_count ||
+				p_previous_tiers[i] < 0 || p_previous_tiers[i] > 1 ||
+				p_next_tiers[i] < 0 || p_next_tiers[i] > 1) {
+			return result;
+		}
+	}
+	result.resize(p_variant_count * 2);
+	result.fill(0);
+	for (int i = 0; i < count; ++i) {
+		const int before = p_previous_tiers[i];
+		const int after = p_next_tiers[i];
+		if (before != after) {
+			const int base = p_variants[i] * 2;
+			result.set(base + before, 1);
+			result.set(base + after, 1);
+		}
 	}
 	return result;
 }

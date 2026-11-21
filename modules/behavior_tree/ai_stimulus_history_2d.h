@@ -35,6 +35,7 @@
 #include "core/templates/vector.h"
 #include "core/variant/array.h"
 #include "core/variant/dictionary.h"
+#include "core/variant/binder_common.h"
 
 /**
  * Bounded, source-aware event memory for already-authorized AI perceptions.
@@ -94,6 +95,9 @@ public:
 			const Vector2 &p_center, real_t p_radius) const;
 	// Newest events first. A detached Array of plain-data Dictionaries.
 	Array get_recent(int p_limit = 8) const;
+	// Highest decayed confidence first; stable source-id/position ties.
+	// Results are detached snapshots, not mutable views into agent memory.
+	Array get_ranked(int p_sense, int p_limit = 8) const;
 	// Forget one known source, optionally limited to one sense; returns the
 	// number of deleted events without touching other source lifetimes.
 	// -1 for p_sense means all senses. Anonymous source -1 cannot be forgotten.

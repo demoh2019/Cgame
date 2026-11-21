@@ -104,7 +104,7 @@ bool GameplayCooldownTracker::replace_snapshot(const Dictionary &p_snapshot) {
 		return false;
 	}
 	Vector<Cooldown> validated;
-	for (const Variant &key : p_snapshot) {
+	for (const Variant &key : p_snapshot.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
@@ -148,7 +148,7 @@ bool GameplayCooldownTracker::replace_cooldown_branch(const StringName &p_branch
 	// Both String and StringName keys are accepted, but may not alias.
 	Vector<StringName> seen;
 	Vector<Cooldown> replacement;
-	for (const Variant &key : p_snapshot) {
+	for (const Variant &key : p_snapshot.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}

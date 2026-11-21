@@ -52,9 +52,13 @@ static func sync(node: Node, kind: String, state: Dictionary) -> void:
 	if cues != null and cues.has_method("replace_active"):
 		var server_status: Dictionary = active_snapshot(kind, state)
 		# Only server-owned Status.* may be replaced from replication.
-		# Persistent Local.* / FX.* cues have independent lifetimes.
+		# Persistent Local.* / FX.* cues have independent lifetimes. Native
+		# builds admit status lifecycle changes resiliently under VFX overload so
+		# busy ambient pulses cannot swallow authoritative start/stop visuals.
 		if cues.has_method("replace_active_branch"):
 			cues.call("replace_active_branch", &"GameplayCue.Status", server_status, 2)
+		elif cues.has_method("replace_active_resilient"):
+			cues.call("replace_active_resilient", server_status, 2)
 		else:
 			# Older Cgame binaries retain the original whole-snapshot path.
 			cues.call("replace_active", server_status, 2)

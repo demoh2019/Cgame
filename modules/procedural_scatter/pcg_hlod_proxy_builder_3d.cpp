@@ -45,12 +45,12 @@ Ref<ArrayMesh> PCGHLODProxyBuilder3D::build_octahedral_proxy(
 				double(half.x) > MAX_HALF_EXTENT ||
 				double(half.y) > MAX_HALF_EXTENT ||
 				double(half.z) > MAX_HALF_EXTENT ||
-				transform.basis.x.length() < 0.0001 ||
-				transform.basis.y.length() < 0.0001 ||
-				transform.basis.z.length() < 0.0001 ||
-				transform.basis.x.length() > MAX_BASIS_AXIS ||
-				transform.basis.y.length() > MAX_BASIS_AXIS ||
-				transform.basis.z.length() > MAX_BASIS_AXIS) {
+				transform.basis.get_column(0).length() < 0.0001 ||
+				transform.basis.get_column(1).length() < 0.0001 ||
+				transform.basis.get_column(2).length() < 0.0001 ||
+				transform.basis.get_column(0).length() > MAX_BASIS_AXIS ||
+				transform.basis.get_column(1).length() > MAX_BASIS_AXIS ||
+				transform.basis.get_column(2).length() > MAX_BASIS_AXIS) {
 			return invalid;
 		}
 	}
@@ -71,12 +71,12 @@ Ref<ArrayMesh> PCGHLODProxyBuilder3D::build_octahedral_proxy(
 		const Vector3 center = p_local_centers[source];
 		const Vector3 half = p_local_half_extents[source];
 		const Vector3 points[6] = {
-			transform * (center + Vector3(0, half.y, 0)),
-			transform * (center + Vector3(half.x, 0, 0)),
-			transform * (center + Vector3(0, 0, -half.z)),
-			transform * (center + Vector3(-half.x, 0, 0)),
-			transform * (center + Vector3(0, 0, half.z)),
-			transform * (center + Vector3(0, -half.y, 0))
+			transform.xform(center + Vector3(0, half.y, 0)),
+			transform.xform(center + Vector3(half.x, 0, 0)),
+			transform.xform(center + Vector3(0, 0, -half.z)),
+			transform.xform(center + Vector3(-half.x, 0, 0)),
+			transform.xform(center + Vector3(0, 0, half.z)),
+			transform.xform(center + Vector3(0, -half.y, 0))
 		};
 		for (int t = 0; t < 8; ++t) {
 			const Vector3 a = points[triangles[t][0]];

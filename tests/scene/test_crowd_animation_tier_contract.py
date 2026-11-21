@@ -100,6 +100,57 @@ def cap_full_pose_cost(tiers, distances, retained_full, costs, budget_us,
     return result
 
 
+def cap_grouped(tiers, distances, retained, costs, groups, weights,
+                budget_us, hysteresis=1.5):
+    """Independent, pure-Python group-share oracle for IK tier-0 work."""
+    if (len(tiers) != len(distances) or len(tiers) != len(retained)
+            or len(tiers) != len(costs) or len(tiers) != len(groups)
+            or len(tiers) > 16384 or len(weights) != 4
+            or not 0 <= budget_us <= 1000000 or
+            not math.isfinite(hysteresis) or not 0 <= hysteresis <= 8
+            or any(not math.isfinite(w) or not 0.25 <= w <= 8
+                   for w in weights)
+            or any(t not in (0, 1, 2, 3, 4) for t in tiers)
+            or any(not math.isfinite(d) or d < 0 for d in distances)
+            or any(c < 0 or c > 100000 for c in costs)
+            or any(g < 0 or g > 3 for g in groups)
+            or sum(x == 0 for x in tiers) > 256):
+        return []
+    original = list(tiers)
+    winners = [i for i, t in enumerate(tiers) if t == 0]
+    if budget_us == 0 or not winners:
+        return original
+    active = {groups[i] for i in winners}
+    weight_sum = sum(weights[g] for g in active)
+    quotas = [int(budget_us * weights[g] / weight_sum)
+              if g in active else 0 for g in range(4)]
+    spent = [0] * 4
+    winners.sort(key=lambda i:
+                 (max(0.0, distances[i] -
+                      (hysteresis if retained[i] else 0.0)) /
+                  weights[groups[i]], i))
+    accepted = set()
+    total = 0
+    for i in winners:
+        work = costs[i] or 100
+        group = groups[i]
+        if spent[group] + work <= quotas[group]:
+            accepted.add(i)
+            spent[group] += work
+            total += work
+    for i in winners:
+        if i in accepted:
+            continue
+        work = costs[i] or 100
+        if total + work <= budget_us:
+            accepted.add(i)
+            total += work
+    for i in winners:
+        if i not in accepted:
+            original[i] = 1
+    return original
+
+
 class TestCrowdPlanner(unittest.TestCase):
     def test_native_source_api(self):
         header = (MODULE / "crowd_animation_tier_planner.h").read_text()
@@ -128,7 +179,9 @@ class TestCrowdPlanner(unittest.TestCase):
         self.assertIn('ClassDB.class_exists("CrowdAnimationTierPlanner")', game)
         self.assertIn('ClassDB.instantiate("CrowdAnimationTierPlanner")', game)
         self.assertIn("priority_mask.append(1 if critical else 0)", game)
-        self.assertIn("plan_crowd_tiers(distances, priority_mask,", game)
+        self.assertIn("plan_crowd_tiers_stable(distances, priority_mask,", game)
+        self.assertIn("previous_tiers.append(int(model.get(\"_lod_tier\")))", game)
+        self.assertIn("plan_tiers_stable", cpp)
         self.assertIn("model.set_anim_lod(tiers[i])", game)
         self.assertIn("model.set_look_point(", game)
         self.assertIn("test_crowd_animation_tier_planner.gd", runner)
@@ -323,7 +376,7 @@ class TestCrowdPlanner(unittest.TestCase):
         self.assertIn("reserved_us + predicted_us <= p_full_pose_budget_us", cpp)
         self.assertIn("output.set(idx, 1)", cpp)
         self.assertIn("static func cap_full_pose_cost(", game)
-        self.assertIn("tiers = cap_full_pose_cost(tiers, distances", game)
+        self.assertIn("tiers = cap_full_pose_cost_grouped(tiers, distances", game)
         self.assertIn("retained_combat_mask, 1.5", game)
         self.assertIn("full_pose_cost_us.append(", game)
         self.assertIn("Time.get_ticks_usec()", modifier)
@@ -356,7 +409,7 @@ class TestCrowdPlanner(unittest.TestCase):
         self.assertIn('set("active", _lod_tier == 0 and not _dead)', model)
         self.assertIn('full_pose_cost_us.append(model.estimated_full_pose_cost_us())', game)
         self.assertIn("native FootPlacement IK cost joins scripted", game_tests)
-        self.assertIn("tiers = cap_full_pose_cost(tiers, distances", game)
+        self.assertIn("tiers = cap_full_pose_cost_grouped(tiers, distances", game)
 
     def test_native_foot_ik_sample_ema_reference(self):
         def smooth(previous, sample):
@@ -537,6 +590,84 @@ class TestCrowdPlanner(unittest.TestCase):
                 self.assertLessEqual(value, profile)
                 self.assertGreaterEqual(state["frames"], 0)
                 self.assertLessEqual(state["window"], 11)
+
+    def test_grouped_ik_quotas_and_work_spill(self):
+        tiers = [0, 0, 0, 0, 1, 2]
+        d = [1, 2, 5, 8, 50, 90]
+        retained = [0] * 6
+        costs = [100] * 6
+        groups = [1, 1, 0, 0, 2, 3]
+        equal = [1.0] * 4
+        self.assertEqual(cap_grouped(tiers, d, retained, costs,
+                                     groups, equal, 200), [0, 1, 0, 1, 1, 2])
+        self.assertEqual(cap_grouped(tiers, d, retained, costs,
+                                     groups, equal, 0), tiers)
+        self.assertEqual(tiers, [0, 0, 0, 0, 1, 2])
+        self.assertEqual(cap_grouped(tiers, [2, 3, 4, 5, 50, 90],
+                                     retained, [100, 100, 200, 100, 0, 0],
+                                     [1, 1, 0, 2, 1, 3],
+                                     [3., 1., 2., 1.], 400),
+                         [0, 1, 0, 0, 1, 2])
+        one_group = [1] * 6
+        self.assertEqual(cap_grouped(tiers, d, retained, costs, one_group,
+                                     [3., 1., 2., 1.], 200),
+                         cap_full_pose_cost(tiers, d, retained, costs, 200))
+        self.assertEqual(cap_grouped(tiers, d, retained, costs,
+                                     [0, 4, 0, 0, 0, 0], equal, 200), [])
+        self.assertEqual(cap_grouped(tiers, d, retained, costs,
+                                     groups, [0.0, 1., 1., 1.], 200), [])
+        self.assertEqual(cap_grouped(tiers, d, retained, costs,
+                                     groups, [float("nan"), 1., 1., 1.],
+                                     200), [])
+
+    def test_grouped_ik_random_budget_and_preservation_invariants(self):
+        for seed in range(18):
+            rng = random.Random(88000 + seed)
+            n = 180
+            tiers = [0 if i % 7 == 0 else rng.randrange(1, 5)
+                     for i in range(n)]
+            distances = [rng.randrange(0, 1000) / 10 for _ in tiers]
+            retained = [rng.randrange(0, 2) for _ in tiers]
+            costs = [rng.randrange(0, 800) for _ in tiers]
+            groups = [rng.randrange(0, 4) for _ in tiers]
+            weights = [3.0, 1.0, 2.0, 2.0]
+            for budget in (0, 100, 400, 750, 1500, 2750):
+                result = cap_grouped(tiers, distances, retained,
+                                     costs, groups, weights, budget)
+                self.assertEqual(len(result), n)
+                self.assertTrue(all(a == b or (a == 0 and b == 1)
+                                    for a, b in zip(tiers, result)))
+                self.assertLessEqual(result.count(0), tiers.count(0))
+                if budget:
+                    total_cost = sum(costs[i] or 100 for i, x
+                                     in enumerate(result) if x == 0)
+                    self.assertLessEqual(total_cost, budget)
+
+    def test_grouped_native_game_contract(self):
+        header = (MODULE / "crowd_animation_tier_planner.h").read_text()
+        cpp = CPP.read_text()
+        xml = ET.parse(MODULE / "doc_classes/CrowdAnimationTierPlanner.xml").getroot()
+        game = GAME.read_text()
+        model = (ROOT / "game/scripts/client/character_model.gd").read_text()
+        view = (ROOT / "game/scripts/client/entity_view.gd").read_text()
+        game_tests = GAME_TEST.read_text()
+        self.assertIn("PackedInt32Array cap_full_pose_cost_grouped(", header)
+        self.assertIn('D_METHOD("cap_full_pose_cost_grouped"', cpp)
+        self.assertIn("double active_weight = 0.0", cpp)
+        self.assertIn("quota_us[group] =", cpp)
+        self.assertIn("reserved_group_us[group] + work_us <= quota_us[group]", cpp)
+        self.assertIn("total_reserved_us + work_us <= p_full_pose_budget_us", cpp)
+        self.assertIn("output.set(candidate.index, 1)", cpp)
+        self.assertTrue(any(method.get("name") == "cap_full_pose_cost_grouped"
+                            for method in xml.find("methods")))
+        self.assertIn("static func cap_full_pose_cost_grouped(", game)
+        self.assertIn("tiers = cap_full_pose_cost_grouped(tiers, distances", game)
+        self.assertIn("full_pose_group_ids.append(", game)
+        self.assertIn("FULL_POSE_GROUP_WEIGHTS", game)
+        self.assertIn("animation_budget_group = 1 if zombie else 0", model)
+        self.assertIn("model.animation_budget_group = 2", view)
+        self.assertIn("native/group-fair GDScript parity", game_tests)
+        self.assertIn("CombatAnimationPriority.slots(quality)", game)
 
     def test_reject_corrupt_inputs(self):
         self.assertEqual(plan([1, 2], [1], 1, 1), [])

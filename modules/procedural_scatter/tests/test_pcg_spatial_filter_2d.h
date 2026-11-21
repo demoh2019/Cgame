@@ -134,7 +134,7 @@ TEST_CASE("[PCGSpatialFilter2D] scale-aware priority with original-index output"
 	PackedFloat32Array ones;
 	ones.resize(5);
 	for (int i = 0; i < 5; ++i) {
-		ones[i] = 1.0f;
+		ones.set(i, 1.0f);
 	}
 	CHECK(filter->filter_indices_scaled(points, ones, 1.0) == filter->filter_indices(points, 1.0));
 	CHECK(filter->filter_indices_scaled(points, scales, 0.0, 2).size() == 2);
@@ -183,16 +183,16 @@ TEST_CASE("[PCGSpatialFilter2D] scaled input validates atomically and caps resul
 	CHECK(filter->filter_indices_scaled(points, scales, 1.0, -1).is_empty());
 	CHECK(filter->filter_indices_scaled(points, scales, 1.0, 4097).is_empty());
 	CHECK(filter->filter_indices_scaled(points, scales, 1.0, 0).is_empty());
-	scales[1] = Math::NaN;
+	scales.set(1, Math::NaN);
 	CHECK(filter->filter_indices_scaled(points, scales, 1.0).is_empty());
-	scales[1] = 0.49f;
+	scales.set(1, 0.49f);
 	CHECK(filter->filter_indices_scaled(points, scales, 1.0).is_empty());
-	scales[1] = 2.01f;
+	scales.set(1, 2.01f);
 	CHECK(filter->filter_indices_scaled(points, scales, 1.0).is_empty());
-	scales[1] = 1.0f;
-	points[1] = Vector2(Math::INF, 0);
+	scales.set(1, 1.0f);
+	points.set(1, Vector2(Math::INF, 0));
 	CHECK(filter->filter_indices_scaled(points, scales, 1.0).is_empty());
-	points[1] = Vector2(10, 0);
+	points.set(1, Vector2(10, 0));
 	CHECK(filter->filter_indices_scaled(points, scales, 1.0, 1).size() == 1);
 	points.resize(16385);
 	scales.resize(16385);

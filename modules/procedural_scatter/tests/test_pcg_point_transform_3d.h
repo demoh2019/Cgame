@@ -73,7 +73,7 @@ TEST_CASE("[PCGPointTransform3D] independent stable ranges and seeded variation"
 		CHECK(scale.x <= 1.3);
 		CHECK(scale.y >= 0.6);
 		CHECK(scale.y <= 1.4);
-		if (!Math::is_equal_approx(scale.x, 1.0)) {
+		if (!Math::is_equal_approx(scale.x, real_t(1.0))) {
 			varied_size = true;
 		}
 		if (Math::abs(transform.basis.get_column(0).z) > 0.2) {

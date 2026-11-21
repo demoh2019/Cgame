@@ -193,7 +193,7 @@ bool GameplayAttributeSet::_parse_snapshot(const Dictionary &p_snapshot, Vector<
 		return false;
 	}
 	Vector<Attribute> parsed_attrs;
-	for (const Variant &key : attr_dict) {
+	for (const Variant &key : attr_dict.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}

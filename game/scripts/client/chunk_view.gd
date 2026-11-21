@@ -21,6 +21,7 @@ const TerrainHorizonAO = preload("res://scripts/client/terrain_horizon_ao.gd")
 const TerrainAnisotropy = preload("res://scripts/client/terrain_anisotropy.gd")
 const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
+const ImpostorField = preload("res://scripts/client/impostor_field.gd")
 const ResourceMultiMeshUpdates = preload("res://scripts/client/multimesh_resource_updates.gd")
 const ResourceInstanceInitializer = preload("res://scripts/client/resource_instance_initializer.gd")
 const DecorStreamingPolicy = preload("res://scripts/client/decor_streaming_policy.gd")
@@ -734,6 +735,7 @@ func build(p_world, p_cell: Vector2i) -> void:
 	_use_village = Assets.has_village()
 	_world = p_world
 	cell = p_cell
+	GrassField.rivers = _world.rivers
 	# Stagger 0.5-second shadow checks across neighboring chunks to avoid update spikes.
 	_shadow_timer = float(posmod(cell.x * 37 + cell.y * 19, 50)) * 0.01
 	var origin := WorldGen.cell_origin(cell)
@@ -742,9 +744,12 @@ func build(p_world, p_cell: Vector2i) -> void:
 		_build_objects(_world.chunk(cell)) # The chests.
 		return
 	_build_terrain(origin)
+	_build_rivers_and_bridges(origin)
 	var data: Dictionary = _world.chunk(cell)
 	_build_objects(data)
 	_add_outdoor_reflection_anchors(origin, data)
+	_layer_sites = data.get("pois", [])
+	set_data_layers(active_layers)
 
 
 ## Only the containing chunk creates a cheap site marker, never a GPU probe.
@@ -875,7 +880,7 @@ func _refresh_terrain_horizon() -> void:
 		return
 	var origin: Vector2 = WorldGen.cell_origin(cell)
 	var spacing: float = Defs.CHUNK_SIZE / float(SAMPLES - 1)
-	var height_sampler := Callable(_world, "height_at")
+	var height_sampler := Callable(_world, "ground_at")
 	if _base_curvature_colors.is_empty():
 		_base_curvature_colors = TerrainCurvature.build(
 			_raw_heights, origin, SAMPLES, spacing, height_sampler)
@@ -901,7 +906,7 @@ func _build_terrain(origin: Vector2) -> void:
 	var step := Defs.CHUNK_SIZE / float(SAMPLES - 1)
 	for j in SAMPLES:
 		for i in SAMPLES:
-			var h: float = _world.height_at(origin.x + i * step, origin.y + j * step)
+			var h: float = _world.ground_at(origin.x + i * step, origin.y + j * step)
 			heights[j * SAMPLES + i] = clampf((h - HEIGHT_MIN) / HEIGHT_RANGE, 0.0, 1.0)
 			_raw_heights.append(h)
 	_terrain = ChunkedTerrain3D.new()
@@ -934,7 +939,7 @@ func _build_terrain(origin: Vector2) -> void:
 	# the current chunk. Their shared world-space derivative removes bright
 	# vertical lighting seams without an extra shader pass or texture.
 	_terrain.set_normal_data(TerrainSeamNormals.build(_raw_heights, origin,
-		SAMPLES, step, HEIGHT_MIN, HEIGHT_RANGE, Callable(_world, "height_at")))
+		SAMPLES, step, HEIGHT_MIN, HEIGHT_RANGE, Callable(_world, "ground_at")))
 	_refresh_terrain_horizon()
 	add_child(_terrain)
 	_terrain.add_to_group(TERRAIN_LOD_GROUP)
@@ -1208,7 +1213,7 @@ func _build_objects(data: Dictionary) -> void:
 			# The nearest tree in a MultiMesh group matters more than the chunk centre.
 			_shadow_casters.append({"node": instance, "role": "tree" if kind.begins_with("tree:") else "structure",
 				"bounds": SceneryBatches.bounds_for(multimesh.mesh, transforms)})
-		_groups[batch_id] = {"multimesh": multimesh, "index": index, "transforms": transforms}
+		_groups[batch_id] = {"multimesh": multimesh, "index": index, "transforms": transforms, "tree": kind.begins_with("tree:")}
 	_build_decor(origin, rng, data)
 	_build_windmills(windmills, origin)
 	_build_signposts(origin)
@@ -1378,6 +1383,13 @@ func on_streaming_cache_restored() -> void:
 	set_process(_streaming_simulation_active)
 
 
+## Surface-only decorative processing; the engine may suspend this named
+## layer when the observer enters a dungeon. Meshes, terrain collisions and
+## real server entities remain resident and unaffected.
+func get_streaming_simulation_layer() -> StringName:
+	return &"SurfaceCosmetics"
+
+
 func set_streaming_simulation_active(active: bool) -> void:
 	if _streaming_simulation_active == active:
 		return
@@ -1391,6 +1403,8 @@ func set_streaming_simulation_active(active: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	if not _shaking.is_empty() or not _falling.is_empty() or _state_seen_pending != _state_seen:
+		_animate_vegetation(delta)
 	# A cheap accumulator skips expensive per-chunk grass/decor/shadow work.
 	# Accumulated elapsed time keeps windmill rotation speed correct.
 	# The near tier (interval = 0) remains exactly the original code path.
@@ -1993,6 +2007,9 @@ func _build_nature_decor_entry(entry: Dictionary) -> void:
 			_shadow_casters.append({"node": decor_batch, "role": "bush", "bounds": decor_batch.custom_aabb})
 		if file.begins_with("Pebble"):
 			_hlod_stone_sources.append(decor_batch)
+	if file.begins_with("Bush"):
+		# Billboard LOD: past the real mesh range, bushes continue as baked impostors.
+		ImpostorField.add(self, mesh, transforms, float(entry["range"]))
 	# Store only the decorative geometry actually emitted (after spacing/
 	# terrain alignment). Two rock categories can share one far proxy draw.
 	if file.begins_with("Pebble") and not _hlod_stone_overflow:
@@ -2071,6 +2088,7 @@ func _refresh_ground_contact() -> void:
 ## Hides depleted nodes and opened crates. `hidden_ids` is the set of ids the server says are gone.
 func apply_state(hidden_ids: Dictionary) -> void:
 	var changed := false
+	_state_seen_pending = true
 	for kind in _groups:
 		var group: Dictionary = _groups[kind]
 		var slots := PackedInt32Array()
@@ -2085,6 +2103,9 @@ func apply_state(hidden_ids: Dictionary) -> void:
 			slots.append(slot)
 			transforms.append(Transform3D(Basis().scaled(Vector3.ONE * 0.001), original.origin)
 				if should_hide else original)
+			# A tree felled while you watch topples instead of vanishing (not on the first sync).
+			if should_hide and _state_seen and bool(group.get("tree", false)):
+				_fell_tree(group["multimesh"].mesh, original)
 			changed_ids[id] = should_hide
 		if slots.is_empty():
 			continue
@@ -2103,3 +2124,294 @@ func apply_state(hidden_ids: Dictionary) -> void:
 		changed = true
 	if changed and _terrain != null:
 		_refresh_ground_contact()
+
+
+# --- Rivers, lakes and bridges (world_rivers.gd / world_roads.gd) -----------------------------------------
+
+static var _river_material: ShaderMaterial
+static var _bridge_wood: StandardMaterial3D
+
+
+static func _river_material_get() -> ShaderMaterial:
+	if _river_material == null:
+		_river_material = ShaderMaterial.new()
+		_river_material.shader = load("res://assets/shaders/water.gdshader")
+	return _river_material
+
+
+## River surfaces as spline ribbons (clipped to this chunk by their segments), lakes as discs,
+## and timber bridges where roads cross. Water uses the same shader as the sea.
+func _build_rivers_and_bridges(origin: Vector2) -> void:
+	if _world.rivers == null:
+		return
+	var segments: Array = _world.rivers.segments_in_cell(cell)
+	if not segments.is_empty():
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		for seg in segments:
+			var a: Vector2 = seg["a"]
+			var b: Vector2 = seg["b"]
+			var dir: Vector2 = (b - a).normalized()
+			var side := Vector2(-dir.y, dir.x)
+			var wa: float = float(seg["w0"]) + 0.6
+			var wb: float = float(seg["w1"]) + 0.6
+			# Extend a little along the flow so consecutive pieces overlap without gaps.
+			var a2: Vector2 = a - dir * 0.8
+			var b2: Vector2 = b + dir * 0.8
+			var corners := [
+				Vector3(a2.x + side.x * wa - origin.x, float(seg["s0"]) - 0.05, a2.y + side.y * wa - origin.y),
+				Vector3(a2.x - side.x * wa - origin.x, float(seg["s0"]) - 0.05, a2.y - side.y * wa - origin.y),
+				Vector3(b2.x + side.x * wb - origin.x, float(seg["s1"]) - 0.05, b2.y + side.y * wb - origin.y),
+				Vector3(b2.x - side.x * wb - origin.x, float(seg["s1"]) - 0.05, b2.y - side.y * wb - origin.y),
+			]
+			for index in [0, 1, 2, 1, 3, 2]:
+				st.set_normal(Vector3.UP)
+				st.set_uv(Vector2(corners[index].x, corners[index].z) * 0.1)
+				st.add_vertex(corners[index])
+		var river := MeshInstance3D.new()
+		river.name = "River"
+		river.mesh = st.commit()
+		river.material_override = _river_material_get()
+		river.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(river)
+	for lake in _world.rivers.lakes_in_cell(cell):
+		# Each lake is drawn once, by the chunk holding its centre.
+		if WorldGen.cell_of(float(lake["x"]), float(lake["z"])) != cell:
+			continue
+		var disc := MeshInstance3D.new()
+		disc.name = "Lake"
+		var shape := CylinderMesh.new()
+		shape.top_radius = float(lake["radius"]) + 1.0
+		shape.bottom_radius = shape.top_radius
+		shape.height = 0.02
+		shape.radial_segments = 48
+		shape.rings = 1
+		disc.mesh = shape
+		disc.material_override = _river_material_get()
+		disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		disc.position = Vector3(float(lake["x"]) - origin.x, float(lake["surface"]) - 0.06, float(lake["z"]) - origin.y)
+		add_child(disc)
+	for bridge in _world.roads.bridges_in_cell(cell):
+		var a: Vector2 = bridge["a"]
+		if WorldGen.cell_of(a.x, a.y) != cell:
+			continue # Built once, by the chunk at its first end.
+		_build_bridge(bridge, origin)
+
+
+## A timber bridge: planks across an arched deck, side beams and posts down into the water.
+func _build_bridge(bridge: Dictionary, origin: Vector2) -> void:
+	if _bridge_wood == null:
+		_bridge_wood = StandardMaterial3D.new()
+		_bridge_wood.albedo_color = Color(0.42, 0.3, 0.19)
+		_bridge_wood.roughness = 0.9
+	var a: Vector2 = bridge["a"]
+	var b: Vector2 = bridge["b"]
+	var length: float = a.distance_to(b)
+	var dir: Vector2 = (b - a) / maxf(length, 0.01)
+	var side := Vector2(-dir.y, dir.x)
+	var yaw: float = atan2(dir.x, dir.y)
+	var root := Node3D.new()
+	root.name = "Bridge"
+	add_child(root)
+	var plank_mesh := BoxMesh.new()
+	plank_mesh.size = Vector3(WorldRoads.BRIDGE_HALF_WIDTH * 2.0, 0.12, 0.42)
+	var planks := MultiMeshInstance3D.new()
+	var multimesh := MultiMesh.new()
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.mesh = plank_mesh
+	var count: int = maxi(int(length / 0.46), 2)
+	multimesh.instance_count = count
+	for k in count:
+		var t: float = (float(k) + 0.5) / float(count)
+		var p: Vector2 = a.lerp(b, t)
+		var y: float = WorldRoads.deck_height(bridge, t) - 0.06
+		var slope: float = (WorldRoads.deck_height(bridge, minf(t + 0.01, 1.0)) - WorldRoads.deck_height(bridge, maxf(t - 0.01, 0.0))) / maxf(length * 0.02, 0.001)
+		var basis := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -atan(slope))
+		multimesh.set_instance_transform(k, Transform3D(basis.scaled(Vector3(1.0 + 0.04 * sin(k * 2.3), 1.0, 1.0)), Vector3(p.x - origin.x, y, p.y - origin.y)))
+	planks.multimesh = multimesh
+	planks.material_override = _bridge_wood
+	root.add_child(planks)
+	# Side beams (railing) and posts down to the riverbed.
+	var segments := 10
+	for s in [-1.0, 1.0]:
+		for k in segments:
+			var t0: float = float(k) / float(segments)
+			var t1: float = float(k + 1) / float(segments)
+			var p0: Vector2 = a.lerp(b, t0) + side * (WorldRoads.BRIDGE_HALF_WIDTH - 0.1) * s
+			var p1: Vector2 = a.lerp(b, t1) + side * (WorldRoads.BRIDGE_HALF_WIDTH - 0.1) * s
+			var q0 := Vector3(p0.x - origin.x, WorldRoads.deck_height(bridge, t0) + 0.85, p0.y - origin.y)
+			var q1 := Vector3(p1.x - origin.x, WorldRoads.deck_height(bridge, t1) + 0.85, p1.y - origin.y)
+			var rail := MeshInstance3D.new()
+			var beam := BoxMesh.new()
+			beam.size = Vector3(0.12, 0.12, q0.distance_to(q1) + 0.05)
+			rail.mesh = beam
+			rail.material_override = _bridge_wood
+			rail.transform = Transform3D(Basis.looking_at(q1 - q0, Vector3.UP), (q0 + q1) * 0.5)
+			root.add_child(rail)
+			if k % 2 == 0:
+				var post := MeshInstance3D.new()
+				var post_mesh := BoxMesh.new()
+				var bottom: float = _world.ground_at(p0.x, p0.y) - 0.3
+				post_mesh.size = Vector3(0.16, maxf(q0.y - bottom, 0.5), 0.16)
+				post.mesh = post_mesh
+				post.material_override = _bridge_wood
+				post.position = Vector3(q0.x, (q0.y + bottom) * 0.5, q0.z)
+				root.add_child(post)
+
+
+# --- Vegetation physics: trees shake when struck and topple when felled ---------------------------------
+
+var _state_seen := false
+var _state_seen_pending := false
+var _shaking: Dictionary = {} # node id -> {"group", "slot", "t"}
+var _falling: Array = [] # [{"node": MeshInstance3D, "base": Transform3D, "axis": Vector3, "t": float}]
+const SHAKE_SECONDS := 0.45
+const FALL_SECONDS := 1.9
+const SINK_SECONDS := 2.5
+
+
+## An axe (or a fist) landed on this tree: it shudders around its base.
+func shake(node_id: int) -> void:
+	for kind in _groups:
+		var group: Dictionary = _groups[kind]
+		if bool(group.get("tree", false)) and group["index"].has(node_id) and not _hidden.has(node_id):
+			_shaking[node_id] = {"group": group, "slot": int(group["index"][node_id]), "t": 0.0}
+			return
+
+
+func _fell_tree(mesh: Mesh, original: Transform3D) -> void:
+	if mesh == null or _falling.size() >= 6:
+		return
+	var log := MeshInstance3D.new()
+	log.mesh = mesh
+	add_child(log)
+	log.transform = original
+	var angle: float = float(WorldGen.mix(int(original.origin.x * 10.0), int(original.origin.z * 10.0), 41) % 628) / 100.0
+	var axis := Vector3(cos(angle), 0.0, sin(angle))
+	_falling.append({"node": log, "base": original, "axis": axis, "t": 0.0})
+
+
+func _animate_vegetation(delta: float) -> void:
+	if _state_seen_pending:
+		_state_seen = true
+	for id in _shaking.keys():
+		var entry: Dictionary = _shaking[id]
+		entry["t"] = float(entry["t"]) + delta
+		var group: Dictionary = entry["group"]
+		var original: Transform3D = group["transforms"][int(entry["slot"])]
+		var k: float = float(entry["t"]) / SHAKE_SECONDS
+		if k >= 1.0 or _hidden.has(id):
+			group["multimesh"].set_instance_transform(int(entry["slot"]), original)
+			_shaking.erase(id)
+			continue
+		var sway: float = sin(k * TAU * 2.5) * (1.0 - k) * 0.06
+		var basis: Basis = Basis(Vector3(1, 0, 0.3).normalized(), sway) * original.basis
+		group["multimesh"].set_instance_transform(int(entry["slot"]), Transform3D(basis, original.origin))
+	for i in range(_falling.size() - 1, -1, -1):
+		var fall: Dictionary = _falling[i]
+		fall["t"] = float(fall["t"]) + delta
+		var t: float = fall["t"]
+		var node: MeshInstance3D = fall["node"]
+		var base: Transform3D = fall["base"]
+		# Gravity-like ease-in to horizontal, a small bounce when it hits, then it sinks away.
+		var k: float = clampf(t / FALL_SECONDS, 0.0, 1.0)
+		var tilt: float = (PI * 0.5 - 0.06) * k * k
+		if k >= 1.0:
+			tilt += sin(clampf((t - FALL_SECONDS) / 0.35, 0.0, 1.0) * PI) * 0.06
+		var sink: float = maxf(t - FALL_SECONDS - 0.6, 0.0) / SINK_SECONDS
+		node.transform = Transform3D(Basis(fall["axis"], tilt) * base.basis, base.origin - Vector3(0.0, sink * 1.6, 0.0))
+		if sink >= 1.0:
+			node.queue_free()
+			_falling.remove_at(i)
+
+
+# --- Data Layers (data_layers.gd): content switched on and off for the whole server ---------------------
+
+static var active_layers: Array = [] # Set by the client from the server's list; new chunks read it.
+var _layer_sites: Array = []
+var _layer_nodes: Dictionary = {} # layer -> Node3D
+
+
+func set_data_layers(layers: Array) -> void:
+	for layer in _layer_nodes.keys():
+		if not layers.has(layer):
+			_layer_nodes[layer].queue_free()
+			_layer_nodes.erase(layer)
+	if layers.has("festival") and not _layer_nodes.has("festival"):
+		var node := _build_festival()
+		if node != null:
+			_layer_nodes["festival"] = node
+
+
+## Harvest festival: strings of lanterns on posts around each settlement or camp centre in this
+## chunk, and piles of pumpkins. A couple of real lights per site, the rest glow by emission.
+func _build_festival() -> Node3D:
+	var origin := WorldGen.cell_origin(cell)
+	var root := Node3D.new()
+	root.name = "LayerFestival"
+	var glow := StandardMaterial3D.new()
+	glow.albedo_color = Color(1.0, 0.62, 0.22)
+	glow.emission_enabled = true
+	glow.emission = Color(1.0, 0.55, 0.18)
+	glow.emission_energy_multiplier = 2.2
+	var wood := StandardMaterial3D.new()
+	wood.albedo_color = Color(0.32, 0.22, 0.14)
+	var pumpkin_mat := StandardMaterial3D.new()
+	pumpkin_mat.albedo_color = Color(0.92, 0.45, 0.08)
+	pumpkin_mat.roughness = 0.6
+	var placed := 0
+	for site in _layer_sites:
+		if not ["village", "camp", "farm", "city", "outpost", "dock"].has(str(site.get("kind", ""))):
+			continue
+		var centre := Vector2(float(site["x"]), float(site["z"]))
+		if WorldGen.cell_of(centre.x, centre.y) != cell:
+			continue # Each site is decorated once, by the chunk holding its centre.
+		var radius: float = clampf(float(site.get("radius", 20.0)) * 0.45, 7.0, 18.0)
+		var posts := 8
+		for k in posts:
+			var angle: float = TAU * float(k) / float(posts)
+			var at: Vector2 = centre + Vector2.from_angle(angle) * radius
+			var ground: float = _world.height_at(at.x, at.y)
+			var post := MeshInstance3D.new()
+			var pole := CylinderMesh.new()
+			pole.top_radius = 0.05
+			pole.bottom_radius = 0.06
+			pole.height = 2.4
+			post.mesh = pole
+			post.material_override = wood
+			post.position = Vector3(at.x - origin.x, ground + 1.2, at.y - origin.y)
+			root.add_child(post)
+			var lantern := MeshInstance3D.new()
+			var box := BoxMesh.new()
+			box.size = Vector3(0.22, 0.3, 0.22)
+			lantern.mesh = box
+			lantern.material_override = glow
+			lantern.position = post.position + Vector3(0, 1.3, 0)
+			root.add_child(lantern)
+			if k % 4 == 0:
+				var light := OmniLight3D.new()
+				light.light_color = Color(1.0, 0.6, 0.25)
+				light.light_energy = 1.4
+				light.omni_range = 9.0
+				light.shadow_enabled = false
+				light.position = lantern.position
+				root.add_child(light)
+			# Pumpkins at the foot of every other post.
+			if k % 2 == 1:
+				for p in 3:
+					var pumpkin := MeshInstance3D.new()
+					var sphere := SphereMesh.new()
+					var size: float = 0.22 + 0.08 * float(p)
+					sphere.radius = size
+					sphere.height = size * 1.4
+					pumpkin.mesh = sphere
+					pumpkin.material_override = pumpkin_mat
+					var offset := Vector2.from_angle(angle + 0.6 * float(p)) * 0.55
+					pumpkin.position = Vector3(at.x + offset.x - origin.x, _world.height_at(at.x + offset.x, at.y + offset.y) + size * 0.55, at.y + offset.y - origin.y)
+					root.add_child(pumpkin)
+		placed += 1
+	if placed == 0:
+		root.free()
+		return null
+	add_child(root)
+	return root

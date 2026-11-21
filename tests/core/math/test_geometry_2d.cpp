@@ -90,7 +90,7 @@ TEST_CASE("[CoreBind] Geometry2D padded terrain curvature color baking") {
 	CHECK(api->bake_heightfield_curvature_colors(samples, Vector2i(3, 3), -1.0).is_empty());
 	CHECK(api->bake_heightfield_curvature_colors(samples, Vector2i(3, 3), 1.0, 0.5, 0.5).is_empty());
 	Vector<float> invalid = samples;
-	invalid.set(0, Math_INF);
+	invalid.set(0, Math::INF);
 	CHECK(api->bake_heightfield_curvature_colors(invalid, Vector2i(3, 3), 1.0).is_empty());
 	ERR_PRINT_ON;
 }
@@ -142,7 +142,7 @@ TEST_CASE("[CoreBind] Geometry2D heightfield gradients match central differences
 	CHECK(api->heightfield_gradients(heights, Vector2i(4, 3), 0.0).is_empty());
 	CHECK(api->heightfield_gradients(heights, Vector2i(4, 3), -1.0).is_empty());
 	Vector<float> invalid = heights;
-	invalid.set(2, Math_INF);
+	invalid.set(2, Math::INF);
 	CHECK(api->heightfield_gradients(invalid, Vector2i(4, 3), 1.0).is_empty());
 	ERR_PRINT_ON;
 }
@@ -197,10 +197,10 @@ TEST_CASE("[CoreBind] Geometry2D wrapped scalar grid batch sampling") {
 	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(0, 2), uvs).is_empty());
 	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(2049, 1), uvs).is_empty());
 	Vector<float> bad_grid = grid;
-	bad_grid.set(2, Math_INF);
+	bad_grid.set(2, Math::INF);
 	CHECK(api->sample_scalar_grid_wrapped(bad_grid, Vector2i(2, 2), uvs).is_empty());
 	Vector<Vector2> bad_uv = uvs;
-	bad_uv.push_back(Vector2(Math_NAN, 0.0));
+	bad_uv.push_back(Vector2(Math::NaN, 0.0));
 	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(2, 2), bad_uv).is_empty());
 	Vector<Vector2> oversized;
 	oversized.resize(65537);
@@ -279,7 +279,7 @@ TEST_CASE("[CoreBind] Geometry2D binary 8-connected distance transform") {
 	REQUIRE(distances.size() == 25);
 	for (int y = 0; y < 5; y++) {
 		for (int x = 0; x < 5; x++) {
-			CHECK(distances[y * 5 + x] == MAX(ABS(x - 2), ABS(y - 2)));
+			CHECK(distances[y * 5 + x] == MAX(Math::abs(x - 2), Math::abs(y - 2)));
 		}
 	}
 	CHECK(mask[12] == 255); // Input is never modified.
@@ -371,7 +371,7 @@ TEST_CASE("[CoreBind] Geometry2D deterministic point self-pruning") {
 	CHECK(api->prune_points_min_distance(oversized, 1.0).is_empty());
 	PackedVector2Array invalid;
 	invalid.push_back(Vector2(0, 0));
-	invalid.push_back(Vector2(Math_INF, 0));
+	invalid.push_back(Vector2(Math::INF, 0));
 	CHECK(api->prune_points_min_distance(invalid, 1.0).is_empty());
 	ERR_PRINT_ON;
 }

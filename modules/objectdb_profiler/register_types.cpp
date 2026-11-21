@@ -31,6 +31,13 @@
 #include "register_types.h"
 
 #include "snapshot_collector.h"
+#include "runtime_object_profiler.h"
+
+#include "core/object/class_db.h"
+
+#ifdef TESTS_ENABLED
+#include "tests/test_runtime_object_profiler.h"
+#endif
 
 #ifdef TOOLS_ENABLED
 #include "editor/objectdb_profiler_plugin.h"
@@ -39,6 +46,7 @@
 void initialize_objectdb_profiler_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
 		SnapshotCollector::initialize();
+		GDREGISTER_CLASS(ObjectDBRuntimeProfiler);
 	}
 #ifdef TOOLS_ENABLED
 	else if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {

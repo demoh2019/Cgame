@@ -11,6 +11,8 @@ const MAX_STEP := 0.16
 var _elapsed: Dictionary = {}
 var _importance: Dictionary = {}
 var _rate_scale: Dictionary = {} # Frequency, not scheduling importance.
+var _disabled: Dictionary = {}
+var _refresh_pending: Dictionary = {}
 var _max_deferred_frames: Dictionary = {} # Opt-in soft deadlines.
 var _estimates: Dictionary = {}
 var _overdue: Dictionary = {}
@@ -33,6 +35,34 @@ var _last_updated: int = 0
 var _last_skipped: int = 0
 
 
+## Temporarily pause irrelevant lanes without discarding learned CPU costs.
+## Re-enabling requests one immediate refresh on the next consume().
+func set_lane_enabled(lane: String, enabled: bool) -> bool:
+	if not LANES.has(lane):
+		return false
+	if is_lane_enabled(lane) == enabled:
+		return true
+	if enabled:
+		_disabled.erase(lane)
+		_refresh_pending[lane] = true
+	else:
+		_disabled[lane] = true
+		_refresh_pending.erase(lane)
+	_elapsed[lane] = 0.0
+	_overdue[lane] = 0
+	_reserved.clear()
+	_reserved_estimate_us = 0
+	return true
+
+
+func is_lane_enabled(lane: String) -> bool:
+	return LANES.has(lane) and not _disabled.has(lane)
+
+
+func get_enabled_lane_count() -> int:
+	return LANES.size() - _disabled.size()
+
+
 func begin_frame(delta: float, quality: int) -> void:
 	var safe_quality: int = clampi(quality, 0, 3)
 	_quality_changed = _quality != safe_quality
@@ -53,7 +83,8 @@ func begin_frame(delta: float, quality: int) -> void:
 		elif delta < 0.020:
 			_pressure = maxf(0.0, _pressure - 0.05)
 	var reduction: int = 2 if _pressure >= 0.8 else (1 if _pressure >= 0.4 else 0)
-	_budget = maxi(1, mini(LANES.size(), safe_quality + 1 - reduction))
+	var enabled_count: int = get_enabled_lane_count()
+	_budget = 0 if enabled_count == 0 else maxi(1, mini(enabled_count, safe_quality + 1 - reduction))
 
 	# Pick due lanes before they call consume(). Previous fixed-order grants
 	# could starve dusk bats whenever dust devils used the only low-tier slot.
@@ -74,7 +105,7 @@ func begin_frame(delta: float, quality: int) -> void:
 				break
 			for offset in range(LANES.size()):
 				var lane: String = LANES[(_tie_start + offset) % LANES.size()]
-				if _reserved.has(lane):
+				if _reserved.has(lane) or not is_lane_enabled(lane) or _refresh_pending.has(lane):
 					continue
 				var due: float = minf(float(_elapsed.get(lane, 0.0)) + delta, MAX_STEP)
 				var interval: float = 1.0 / (HZ_BY_QUALITY[_quality] * float(_rate_scale.get(lane, 1.0)))
@@ -102,6 +133,8 @@ func begin_frame(delta: float, quality: int) -> void:
 		_reserved_estimate_us = mini(1000000000,
 			_reserved_estimate_us + int(_estimates.get(pick, 0)))
 	for lane in LANES:
+		if not is_lane_enabled(lane) or _refresh_pending.has(lane):
+			continue
 		var due: float = minf(float(_elapsed.get(lane, 0.0)) + delta, MAX_STEP)
 		var interval: float = 1.0 / (HZ_BY_QUALITY[_quality] * float(_rate_scale.get(lane, 1.0)))
 		if due + 0.000001 >= interval and not _reserved.has(lane):
@@ -114,8 +147,12 @@ func begin_frame(delta: float, quality: int) -> void:
 func consume(lane: String, delta: float, force: bool = false) -> float:
 	if not LANES.has(lane) or not is_finite(delta) or delta <= 0.0:
 		return 0.0
+	if not is_lane_enabled(lane) and not force:
+		return 0.0
 	var elapsed: float = minf(float(_elapsed.get(lane, 0.0)) + delta, MAX_STEP)
-	if force or _quality_changed:
+	if force or _quality_changed or _refresh_pending.has(lane):
+		_refresh_pending.erase(lane)
+		_reserved.erase(lane)
 		_elapsed[lane] = 0.0
 		_overdue[lane] = 0
 		_record_update()
@@ -138,6 +175,7 @@ func consume(lane: String, delta: float, force: bool = false) -> float:
 func reset() -> void:
 	_elapsed.clear()
 	_overdue.clear()
+	_refresh_pending.clear()
 	_reserved_estimate_us = 0
 	_reserved.clear()
 	_tie_start = 0

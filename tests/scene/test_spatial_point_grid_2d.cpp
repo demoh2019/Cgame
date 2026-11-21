@@ -56,8 +56,8 @@ TEST_CASE("[SpatialPointGrid2D] Empty, strict and inclusive radius boundaries") 
 	CHECK_FALSE(grid->any_within(Vector2(), -1.0));
 	CHECK(grid->any_within(Vector2(66.0, -1.0), 130.0));
 	CHECK_FALSE(grid->any_within(Vector2(66.0, -1.0), 130.0, false));
-	CHECK(grid->snapshot()["queries"] == 7);
-	CHECK(grid->snapshot()["bucket_lookups"] == 0);
+	CHECK(grid->snapshot()["queries"] == Variant(7));
+	CHECK(grid->snapshot()["bucket_lookups"] == Variant(0));
 }
 
 TEST_CASE("[SpatialPointGrid2D] Hashed queries exactly match direct brute force") {
@@ -97,7 +97,7 @@ TEST_CASE("[SpatialPointGrid2D] Hashed queries exactly match direct brute force"
 	CHECK(int(grid->snapshot()["bucket_lookups"]) == buckets_before);
 	grid->clear();
 	CHECK(grid->get_point_count() == 0);
-	CHECK(grid->snapshot()["queries"] == 0);
+	CHECK(grid->snapshot()["queries"] == Variant(0));
 }
 
 TEST_CASE("[SpatialPointGrid2D] Rebuild and configured grid preserve exactness") {
@@ -122,7 +122,7 @@ TEST_CASE("[SpatialPointGrid2D] Rebuild and configured grid preserve exactness")
 	CHECK_FALSE(grid->any_within(Vector2(-32.0, -32.0), 20.0));
 	CHECK(grid->any_within(Vector2(800.0, 800.0), 0.0));
 	CHECK(grid->get_point_count() == 1);
-	CHECK(grid->snapshot()["queries"] == 2);
+	CHECK(grid->snapshot()["queries"] == Variant(2));
 }
 
 
@@ -152,27 +152,27 @@ TEST_CASE("[SpatialPointGrid2D] Batch proximity equals scalar with ordered resul
 	CHECK(exact[3] == 0);
 	CHECK(exact[4] == 0);
 	CHECK(exact[5] == 0); // Invalid probes fail closed.
-	CHECK(grid->snapshot()["batch_calls"] == 1);
-	CHECK(grid->snapshot()["queries"] == 5); // Invalid probe doesn't count.
+	CHECK(grid->snapshot()["batch_calls"] == Variant(1));
+	CHECK(grid->snapshot()["queries"] == Variant(5)); // Invalid probe doesn't count.
 
 	const PackedByteArray inclusive = grid->any_within_batch(probes, real_t(12.0), true);
 	CHECK(inclusive[1] == 1);
 	CHECK(inclusive[3] == 1);
-	CHECK(grid->snapshot()["batch_calls"] == 2);
-	CHECK(grid->snapshot()["queries"] == 10);
+	CHECK(grid->snapshot()["batch_calls"] == Variant(2));
+	CHECK(grid->snapshot()["queries"] == Variant(10));
 
 	PackedVector2Array empty;
 	const PackedByteArray none = grid->any_within_batch(empty, real_t(130.0));
 	CHECK(none.is_empty());
-	CHECK(grid->snapshot()["batch_calls"] == 3);
-	CHECK(grid->snapshot()["queries"] == 10);
+	CHECK(grid->snapshot()["batch_calls"] == Variant(3));
+	CHECK(grid->snapshot()["queries"] == Variant(10));
 
 	const PackedByteArray huge = grid->any_within_batch(probes, real_t(1000000.0));
 	CHECK(huge[0] == 1);
 	CHECK(huge[5] == 0);
 	grid->rebuild(positions);
-	CHECK(grid->snapshot()["batch_calls"] == 0);
-	CHECK(grid->snapshot()["queries"] == 0);
+	CHECK(grid->snapshot()["batch_calls"] == Variant(0));
+	CHECK(grid->snapshot()["queries"] == Variant(0));
 }
 
 } // namespace TestSpatialPointGrid2D

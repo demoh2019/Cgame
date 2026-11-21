@@ -34,7 +34,7 @@ bool AudioMixSnapshotController::activate_mix(const StringName &p_source,
 	}
 
 	Vector<BusStage> stages;
-	for (const Variant &key : p_bus_offsets_db) {
+	for (const Variant &key : p_bus_offsets_db.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
