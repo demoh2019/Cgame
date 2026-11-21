@@ -41,7 +41,7 @@ func any_within(point: Vector2, radius: float, inclusive: bool = true) -> bool:
 		for player_position in _positions:
 			candidate_checks += 1
 			var d: float = point.distance_squared_to(player_position)
-			if (d <= radius_squared) if inclusive else (d < radius_squared):
+			if (inclusive and d <= radius_squared) or (not inclusive and d < radius_squared):
 				return true
 		return false
 	var lower: Vector2i = cell_of(point - Vector2.ONE * radius)
@@ -53,7 +53,7 @@ func any_within(point: Vector2, radius: float, inclusive: bool = true) -> bool:
 			for player_position in nearby:
 				candidate_checks += 1
 				var distance_squared: float = point.distance_squared_to(player_position)
-				if (distance_squared <= radius_squared) if inclusive else (distance_squared < radius_squared):
+				if (inclusive and distance_squared <= radius_squared) or (not inclusive and distance_squared < radius_squared):
 					return true
 	return false
 
