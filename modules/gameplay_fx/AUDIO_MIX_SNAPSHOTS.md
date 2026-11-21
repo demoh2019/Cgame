@@ -25,3 +25,46 @@ The real multiplayer sound node `game/scripts/client/audio.gd` runs this control
 - AudioServer updates only when audible gain changes by at least 0.01dB. Server physics, AI, gameplay outcomes, game saves and network authority are untouched.
 
 Native C++ doctests: `tests/test_audio_mix_snapshot_controller.h` included by the module register file. GDScript tests: `game/tests/test_audio_mix_snapshots.gd`.
+
+## Timed Control Bus Mixes and automatic release
+
+Unreal Engine Control Bus Mixes include attack/release stage times, a
+duration option and re-triggering. Cgame now exposes
+`AudioMixSnapshotController.activate_timed_mix(source, offsets, attack=0.2,
+hold=3.0, release=1.0)`. A timed mix holds from its activation time (the
+attack is included in the duration) and then automatically fades out; it
+does not require a matching deactivation event.
+
+- A repeated activation by name **refreshes the whole timer** but retains the
+  existing mix's current weight. This avoids audible dips on rapid events.
+- The engine applies attack/release time **piecewise** when a frame crosses the
+  hold expiry, so a 1.0-second frame with 0.3 seconds left holds for 0.3
+  and releases for 0.7, not for the full second.
+- A manual `activate_mix` or `deactivate_mix` of the same source cancels the
+  timer; unrelated profiles retain independent attack/release schedules.
+- Both attack and release are finite [0, 15] seconds. Hold is finite
+  [0, 120] seconds. Invalid inputs are rejected **before changing any mix**.
+  Profile stage and capacity limits remain unchanged: at most 16 profiles,
+  eight buses per profile and [-30, 0] dB per stage.
+- `get_mix_remaining_seconds(source)` returns an active hold countdown
+  or -1 for absent, untimed and already releasing mixes. The controller
+  is still data-only; the game remains responsible for combining the
+  resulting bus levels with user sliders, audio ducking and AudioServer.
+
+**Albion After** applies `Combat.Focus` for 9 seconds after the most recent
+combat cue, dimming **Ambience by -3 dB and Music by -1 dB** with a 0.15-second
+attack and 1.5-second automatic release. Rapid blows extend the hold without
+restarting the attack. The `SFX` bus, physics, damage, loot and authoritative
+server state do not change. Existing storm and acoustic-zone snapshots
+continue independently. Older Cgame builds, or stock Godot, use the matching
+`audio_mix_snapshots.gd` time model; on old engines with the untimed native
+controller, native zone mixes and scripted timed combat mix are **summed
+together**, then bounded as before.
+
+Implementation tests: `tests/test_audio_mix_snapshot_controller.h`,
+`game/tests/test_audio_timed_mix.gd` and
+`tests/scene/test_timed_audio_mix_contract.py`. GitHub workflow:
+`.github/workflows/native-timed-audio-mixes.yml`.
+
+Reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/audio-modulation-reference-guide-in-unreal-engine
+
