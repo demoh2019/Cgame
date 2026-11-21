@@ -68,6 +68,8 @@ func _use(slot: String) -> void:
 	var dir: Vector2 = aim.call() if aim.is_valid() else Vector2.ZERO
 	if dir == Vector2.ZERO:
 		dir = Vector2(sin(client.yaw), cos(client.yaw))
+	# Client-only press pulse: never pretend the server accepted the action.
+	AbilityCooldowns.record_activation_feedback(_cooldown_tracker, slot)
 	match slot:
 		"weapon":
 			client.skill(dir)
@@ -85,17 +87,19 @@ func _process(delta: float) -> void:
 	if _refresh_left > 0.0 or client == null or client.inventory == null:
 		return
 	_refresh_left = 0.1
-	if _cooldown_tracker != null and _cooldown_tracker.has_method("replace_snapshot"):
+	if _cooldown_tracker != null:
 		# Only reconcile on a NEW authoritative packet; stale packets should
 		# not repeatedly reset the native countdown on every UI refresh.
 		if _last_snapshot_received != int(client.snapshots_received):
-			if bool(_cooldown_tracker.call("replace_snapshot", AbilityCooldowns.snapshot(client.you))):
+			if AbilityCooldowns.reconcile_native(_cooldown_tracker, client.you):
 				_last_snapshot_received = int(client.snapshots_received)
 	for i in SLOT_DEFS.size():
 		var entry: Dictionary = SLOT_DEFS[i]
 		var slot: String = str(entry["slot"])
 		var remaining: float = AbilityCooldowns.display_remaining(slot, client.you, _cooldown_tracker)
 		var label: String = slot_label(slot, client.inventory, client.you, remaining)
+		if AbilityCooldowns.activation_feedback_active(_cooldown_tracker, slot):
+			label += " •"
 		_buttons[i].text = "%s\n%s" % [entry["key"], label]
 		# Cosmetic/UI only; _use still sends to server-owned gameplay validation.
 		_buttons[i].disabled = remaining > 0.05

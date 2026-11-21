@@ -48,3 +48,37 @@ func run(t) -> void:
 			"stock Godot reads authoritative weapon cooldown")
 		t.eq(Cooldowns.display_remaining("head", you), 1.25,
 			"stock Godot retains gear cooldown UI")
+
+	t.current = "scoped authoritative updates preserve independent UI effects"
+	if tracker != null and tracker.has_method("replace_cooldown_branch"):
+		var fresh := {
+			"skill_cd": 2.0, "ultimate_cd": 0.0,
+			"gear_cd": {"armor": 0.5}, "ability_global_cd": 0.0
+		}
+		t.check(Cooldowns.record_activation_feedback(tracker, "weapon"),
+			"native visual press feedback starts independently")
+		t.check(Cooldowns.activation_feedback_active(tracker, "weapon"),
+			"UI press feedback is visible")
+		t.check(Cooldowns.reconcile_native(tracker, fresh),
+			"authoritative cooldown branch reconciles")
+		t.near(float(tracker.call("get_remaining", &"Ability.Weapon")), 2.0, 0.0001,
+			"new server ability cooldown replaces old value")
+		t.near(float(tracker.call("get_remaining", &"Local.UI.Activation.weapon")), 0.22, 0.0001,
+			"server snapshot leaves local visual pulse untouched")
+		tracker.call("tick", 0.12)
+		t.check(Cooldowns.reconcile_native(tracker, fresh),
+			"later server packet is independent of cosmetic clock")
+		t.near(float(tracker.call("get_remaining", &"Local.UI.Activation.weapon")), 0.10, 0.0001,
+			"local feedback keeps its elapsed phase")
+		tracker.call("tick", 0.11)
+		t.check(not Cooldowns.activation_feedback_active(tracker, "weapon"),
+			"local visual pulse expires on the native tick")
+		t.check(not Cooldowns.record_activation_feedback(tracker, "unknown"),
+			"invalid slot never creates an effect")
+		t.check(Cooldowns.reconcile_native(tracker, {}),
+			"empty authoritative snapshot clears only ability tags")
+		t.eq(float(tracker.call("get_remaining", &"Ability.Weapon")), 0.0,
+			"missing server cooldown is removed")
+	else:
+		t.check(not Cooldowns.record_activation_feedback(tracker, "weapon"),
+			"older builds retain prior cooldown-only UI behavior")

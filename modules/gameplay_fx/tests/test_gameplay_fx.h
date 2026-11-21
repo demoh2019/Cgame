@@ -658,4 +658,72 @@ TEST_CASE("[GameplayFX] CueQueue atomic rollback and bounded event buffering") {
 	CHECK(cue->get_pending_count() == 0);
 }
 
+
+TEST_CASE("[GameplayFX] CooldownTracker scoped server snapshot preserves cosmetic timers") {
+	Ref<GameplayCooldownTracker> tracker;
+	tracker.instantiate();
+	CHECK(tracker->set_remaining("Local.UI.Activation.Weapon", 0.22));
+	CHECK(tracker->set_remaining("AbilityExtra.Weapon", 7.0));
+	CHECK(tracker->set_remaining("Ability.Old", 9.0));
+	CHECK(tracker->set_remaining("Ability.Global", 0.4));
+	Dictionary incoming;
+	incoming[StringName("Ability.Weapon")] = 3.5;
+	incoming[StringName("Ability.Head")] = 1.25;
+	incoming[StringName("Ability.Global")] = 0.0;
+	CHECK(tracker->replace_cooldown_branch("Ability", incoming));
+	CHECK(tracker->get_cooldown_count() == 4);
+	CHECK(tracker->get_remaining("Ability.Old") == 0.0);
+	CHECK(tracker->get_remaining("Ability.Global") == 0.0);
+	CHECK(tracker->get_remaining("Ability.Weapon") == doctest::Approx(3.5));
+	CHECK(tracker->get_remaining("Ability.Head") == doctest::Approx(1.25));
+	CHECK(tracker->get_remaining("AbilityExtra.Weapon") == doctest::Approx(7.0));
+	CHECK(tracker->get_remaining("Local.UI.Activation.Weapon") == doctest::Approx(0.22));
+	CHECK(tracker->tick(0.12).is_empty());
+	CHECK(tracker->get_remaining("Local.UI.Activation.Weapon") == doctest::Approx(0.10));
+	CHECK(tracker->replace_cooldown_branch("Ability", incoming));
+	CHECK(tracker->get_remaining("Local.UI.Activation.Weapon") == doctest::Approx(0.10));
+	CHECK(tracker->tick(0.11).size() == 1);
+	CHECK(tracker->get_remaining("Local.UI.Activation.Weapon") == 0.0);
+	CHECK(tracker->get_remaining("Ability.Weapon") > 3.0);
+	CHECK(tracker->replace_cooldown_branch("Ability", Dictionary()));
+	CHECK(tracker->get_remaining("Ability.Weapon") == 0.0);
+	CHECK(tracker->get_remaining("AbilityExtra.Weapon") > 0.0);
+}
+
+TEST_CASE("[GameplayFX] CooldownTracker scoped snapshot rolls back on invalid input and capacity") {
+	Ref<GameplayCooldownTracker> tracker;
+	tracker.instantiate();
+	CHECK(tracker->set_remaining("Local.UI.Activation.Weapon", 0.22));
+	CHECK(tracker->set_remaining("Ability.Weapon", 4.0));
+	const Dictionary before = tracker->get_snapshot();
+	Dictionary invalid;
+	invalid["Ability.Weapon"] = 2.0;
+	invalid["Local.UI.Activation.Weapon"] = 99.0;
+	CHECK_FALSE(tracker->replace_cooldown_branch("Ability", invalid));
+	CHECK(tracker->get_snapshot() == before);
+	invalid.erase("Local.UI.Activation.Weapon");
+	invalid["Ability.Wrong"] = Math::INF;
+	CHECK_FALSE(tracker->replace_cooldown_branch("Ability", invalid));
+	CHECK(tracker->get_snapshot() == before);
+	invalid.erase("Ability.Wrong");
+	invalid["AbilityExtra.Weapon"] = 1.0;
+	CHECK_FALSE(tracker->replace_cooldown_branch("Ability", invalid));
+	CHECK(tracker->get_snapshot() == before);
+	CHECK_FALSE(tracker->replace_cooldown_branch("Ability..Bad", Dictionary()));
+	CHECK(tracker->get_snapshot() == before);
+
+	Ref<GameplayCooldownTracker> full;
+	full.instantiate();
+	for (int i = 0; i < GameplayCooldownTracker::MAX_COOLDOWNS - 1; i++) {
+		CHECK(full->set_remaining(StringName(String("Local.Cooldown.") + itos(i)), 3.0));
+	}
+	Dictionary too_many;
+	too_many[StringName("Ability.Weapon")] = 5.0;
+	too_many[StringName("Ability.Head")] = 6.0;
+	CHECK_FALSE(full->replace_cooldown_branch("Ability", too_many));
+	CHECK(full->get_cooldown_count() == GameplayCooldownTracker::MAX_COOLDOWNS - 1);
+	CHECK(full->get_remaining("Ability.Weapon") == 0.0);
+	CHECK(full->get_remaining("Local.Cooldown.0") == doctest::Approx(3.0));
+}
+
 } // namespace TestGameplayFX

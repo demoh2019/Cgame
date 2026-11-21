@@ -47,6 +47,9 @@ public:
 	// Snapshot maps exact tag keys to nonnegative remaining seconds.
 	// Validation commits transactionally; duplicates after normalization fail.
 	bool replace_snapshot(const Dictionary &p_snapshot);
+	// Replace only a dotted tag branch (e.g. Ability), preserving local UI
+	// timers and unrelated groups. Invalid snapshots leave all tags unchanged.
+	bool replace_cooldown_branch(const StringName &p_branch, const Dictionary &p_snapshot);
 	Dictionary get_snapshot() const;
 	// Deterministic in caller-provided delta. Returns expired exact tags.
 	PackedStringArray tick(double p_delta);
