@@ -87,6 +87,60 @@ func run(t) -> void:
 						FxPolicy.select_visible_indices(vd, vp, vg, vv, quality),
 						"frustum native parity quality %d sample %d" % [quality, sample])
 
+
+	t.current = "Niagara category ranges cull distant dust and keep milestones"
+	var rd := PackedFloat64Array([40.0, 40.01, 80.0, 80.01, 120.0, 120.01, 140.0, 140.01])
+	var rp := PackedByteArray([0, 0, 1, 1, 2, 2, 3, 3])
+	var rg := PackedByteArray([0, 0, 1, 1, 2, 2, 3, 3])
+	var rv := PackedByteArray([1, 1, 1, 1, 1, 1, 1, 1])
+	t.eq(FxPolicy.select_visible_ranged_indices(rd, rp, rg, rv, 3),
+		PackedInt32Array([6, 4, 2, 0]), "inclusive Ultra distance thresholds")
+	t.eq(FxPolicy.select_visible_ranged_indices(rd, rp, rg, rv, 0),
+		PackedInt32Array([6]), "Performance cuts tiny distant effects, not milestones")
+	t.eq(FxPolicy.ranges_for(-1), FxPolicy.ranges_for(0), "low quality range clamps")
+	t.eq(FxPolicy.ranges_for(99), FxPolicy.ranges_for(3), "high quality range clamps")
+	t.eq(FxPolicy.select_visible_ranged_indices(PackedFloat64Array([1.0]),
+		PackedByteArray([1]), PackedByteArray([0]), PackedByteArray([2]), 3).size(),
+		0, "bad visibility rejected atomically")
+	t.eq(FxPolicy.select_visible_ranged_indices(PackedFloat64Array([NAN]),
+		PackedByteArray([1]), PackedByteArray([0]), PackedByteArray([1]), 3).size(),
+		0, "invalid distance rejected atomically")
+	t.eq(FxPolicy.select_visible_ranged_indices(PackedFloat64Array([1.0, 2.0]),
+		PackedByteArray([1]), PackedByteArray([0]), PackedByteArray([1]), 3).size(),
+		0, "mismatched arrays rejected atomically")
+	t.eq(FxPolicy.select_visible_ranged_indices(PackedFloat64Array([10.0, 12.0]),
+		PackedByteArray([0, 3]), PackedByteArray([0, 3]),
+		PackedByteArray([1, 0]), 3), PackedInt32Array([1, 0]),
+		"critical off-screen effect outranks visible dust")
+	for quality in 4:
+		var limits: PackedFloat64Array = FxPolicy.ranges_for(quality)
+		t.check(limits.size() == 4 and limits[0] < limits[1] and limits[1] < limits[2]
+			and limits[2] <= limits[3] and limits[3] <= FxPolicy.MAX_DISTANCE,
+			"bounded tiered cosmetic ranges")
+
+	t.current = "per-category range admission native and fallback parity"
+	if ClassDB.class_exists("SignificanceBudgetPlanner"):
+		var ranged_native = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if ranged_native != null and ranged_native.has_method("select_effects_visible_ranged"):
+			t.eq(FxPolicy.select_visible_ranged_indices(rd, rp, rg, rv, 3, ranged_native),
+				PackedInt32Array([6, 4, 2, 0]), "native range boundaries agree")
+			var rng_ranged := RandomNumberGenerator.new()
+			rng_ranged.seed = 945102
+			for quality in 4:
+				for sample in 20:
+					var sd := PackedFloat64Array()
+					var sp := PackedByteArray()
+					var sg := PackedByteArray()
+					var sv := PackedByteArray()
+					for i in 96:
+						sd.append(rng_ranged.randf_range(0.0, 160.0))
+						sp.append(rng_ranged.randi_range(0, 3))
+						sg.append(rng_ranged.randi_range(0, 3))
+						sv.append(rng_ranged.randi_range(0, 1))
+					t.eq(FxPolicy.select_visible_ranged_indices(sd, sp, sg, sv, quality, ranged_native),
+						FxPolicy.select_visible_ranged_indices(sd, sp, sg, sv, quality),
+						"native ranged parity quality %d sample %d" % [quality, sample])
+
 	t.current = "game graphics tier scales total resident pool, not active effects"
 	for quality in 4:
 		t.check(FxPolicy.pool_resident_target(quality) > 0,
