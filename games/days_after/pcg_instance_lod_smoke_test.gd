@@ -73,6 +73,58 @@ func _initialize() -> void:
                 failures.append("LOD groups dropped or duplicated original point")
                 break
 
+    # HISM-style CPU incremental updates: each tier transition dirties
+    # exactly two groups belonging to the affected mesh variant.
+    var mask_variants := PackedInt32Array([0, 0, 1, 1, 2, 2])
+    var previous := PackedInt32Array([0, 1, 0, 1, 0, 1])
+    var changed := PackedInt32Array([1, 1, 0, 1, 0, 1])
+    var expected_dirty := PackedByteArray([1, 1, 0, 0, 0, 0])
+    var native_dirty: PackedByteArray = LODPlan.plan_dirty_variant_lod_groups(
+        mask_variants, previous, changed, 3)
+    var script_dirty: PackedByteArray = LODPlan.plan_dirty_variant_lod_groups(
+        mask_variants, previous, changed, 3, false)
+    _check(native_dirty == expected_dirty and native_dirty == script_dirty,
+        "native PCG dirty mesh groups over-rebuilt unrelated variants", failures)
+    _check(LODPlan.plan_dirty_variant_lod_groups(
+        mask_variants, previous, previous, 3) ==
+        PackedByteArray([0, 0, 0, 0, 0, 0]),
+        "unchanged LOD assignments should cause zero GPU updates", failures)
+    _check(LODPlan.plan_dirty_variant_lod_groups(
+        PackedInt32Array(), PackedInt32Array(), PackedInt32Array(), 3).size() == 6,
+        "valid empty LOD scene must return six clear dirty flags", failures)
+    _check(LODPlan.plan_dirty_variant_lod_groups(
+        mask_variants, previous, PackedInt32Array([1]), 3).is_empty(),
+        "dirty planner accepted mismatched tier arrays", failures)
+    _check(LODPlan.plan_dirty_variant_lod_groups(
+        PackedInt32Array([0, 3]), PackedInt32Array([0, 1]),
+        PackedInt32Array([1, 0]), 3).is_empty(),
+        "dirty planner accepted late invalid variant", failures)
+    _check(LODPlan.plan_dirty_variant_lod_groups(
+        PackedInt32Array([0, 1]), PackedInt32Array([0, 2]),
+        PackedInt32Array([1, 0]), 3).is_empty(),
+        "dirty planner accepted invalid previous tier", failures)
+    _check(LODPlan.plan_dirty_variant_lod_groups(
+        PackedInt32Array([0, 1]), PackedInt32Array([0, 1]),
+        PackedInt32Array([1, -1]), 3).is_empty(),
+        "dirty planner accepted invalid next tier", failures)
+    var max_dirty_ids := PackedInt32Array()
+    var max_dirty_old := PackedInt32Array()
+    var max_dirty_new := PackedInt32Array()
+    max_dirty_ids.resize(16384)
+    max_dirty_old.resize(16384)
+    max_dirty_new.resize(16384)
+    max_dirty_new[16383] = 1
+    _check(LODPlan.plan_dirty_variant_lod_groups(
+        max_dirty_ids, max_dirty_old, max_dirty_new, 3) ==
+        expected_dirty,
+        "boundary 16384-point dirty planner lost a changed final row", failures)
+    max_dirty_ids.resize(16385)
+    max_dirty_old.resize(16385)
+    max_dirty_new.resize(16385)
+    _check(LODPlan.plan_dirty_variant_lod_groups(
+        max_dirty_ids, max_dirty_old, max_dirty_new, 3).is_empty(),
+        "dirty planner did not enforce 16K-point cap", failures)
+
     _check(LODPlan.partition_variant_lods(PackedInt32Array(),
         PackedInt32Array(), 3).size() == 6,
         "empty source must yield six empty valid LOD groups", failures)
