@@ -39,6 +39,32 @@ func _run_checks() -> void:
         _fail("A* route did not go around the blocking wall")
         return
 
+    # Moving a target to another A* cell should not trigger an immediate
+    # expensive repath unless the NPC's deterministic update slot is due.
+    if demo.update_scheduler.get_slots_per_cycle() != 4:
+        _fail("Native scheduler must have four configured update phases")
+        return
+    demo.current_action = "chase"
+    var due_tick: int = demo.update_scheduler.get_agent_slot(93)
+    demo.ai_tick_index = (due_tick + 1) % 4
+    demo.call("_navigation_motion", Vector2(160, 350), 8.0)
+    var cached_cell: Vector2i = demo.navigation_goal_cell
+    var changed_goal := Vector2(110, 350)
+    demo.call("_navigation_motion", changed_goal, 8.0)
+    if demo.navigation_goal_cell != cached_cell:
+        _fail("Nonurgent route changes should wait for the assigned AI slot")
+        return
+    demo.ai_tick_index = due_tick
+    demo.call("_navigation_motion", changed_goal, 8.0)
+    if demo.navigation_goal_cell == cached_cell:
+        _fail("Next assigned slot must refresh the cached A* destination")
+        return
+    var profile_data: Dictionary = demo.navigation_profiler.get_snapshot()
+    var path_rows: Dictionary = profile_data.get("categories", {})
+    if int(path_rows.get("navigation_repath", {}).get("count", 0)) != 2:
+        _fail("Native profiler must record only actual A* recalculations")
+        return
+
     # The player starts behind the wall. A loud event is still audible after
     # the wall attenuation, even though there is no visual line of sight.
     if demo.call("_has_line_of_sight"):

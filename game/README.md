@@ -3,6 +3,8 @@
 **This is the canonical game project at `game/`.** All new gameplay
 features belong here; demos under `demo/` and `games/` are prototypes.
 
+**New engine/game feature — deterministic AI update scheduling:** the native `AIUpdateScheduler` spreads nonurgent target scans across stable server ticks when 128+ infected are active, while initial selection, combat threats and attacks remain responsive. The same scheduler throttles A* repaths in the playable AI sandbox. See [AI Update Scheduling](docs/AI_UPDATE_SCHEDULING.md).
+
 **New engine/game feature — server encounter director:** world incidents now
 respect nearby living infected, actual survivor health and global spawn headroom.
 The authoritative `GameServer` reduces or delays additional waves when an
