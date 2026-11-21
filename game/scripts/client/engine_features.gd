@@ -85,21 +85,14 @@ static func runtime_tags(kind: String, state: Dictionary) -> PackedStringArray:
 			tags.append("Runtime.Status.Enraged")
 		if bool(state.get("melee_blocked", false)):
 			tags.append("Runtime.Status.Blocked")
-		for condition in ["stagger", "snared", "sunder", "resolve"]:
-			var key: String = {
-				"stagger": "stagger_seconds",
-				"snared": "snared_seconds",
-				"sunder": "sunder_seconds",
-				"resolve": "resolve_seconds"
-			}[condition]
-			if float(state.get(key, 0.0)) > 0.0:
-				var tag: String = {
-					"stagger": "Runtime.Status.Staggered",
-					"snared": "Runtime.Status.Snared",
-					"sunder": "Runtime.Status.Sundered",
-					"resolve": "Runtime.Status.Resolve"
-				}[condition]
-				tags.append(tag)
+		if float(state.get("stagger_seconds", 0.0)) > 0.0:
+			tags.append("Runtime.Status.Staggered")
+		if float(state.get("snared_seconds", 0.0)) > 0.0:
+			tags.append("Runtime.Status.Snared")
+		if float(state.get("sunder_seconds", 0.0)) > 0.0:
+			tags.append("Runtime.Status.Sundered")
+		if int(state.get("resolve_stacks", 0)) >= 2 and float(state.get("resolve_seconds", 0.0)) > 0.0:
+			tags.append("Runtime.Status.Resolve")
 	return tags
 
 
@@ -116,6 +109,6 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 static func runtime_has(node: Node, tag: String, fallback: bool = false) -> bool:
 	if node != null and node.has_meta("tags"):
 		var container: Object = node.get_meta("tags") as Object
-		if container != null and container.has_method("has_tag"):
+		if container != null and container.has_method("replace_tag_branch") and container.has_method("has_tag"):
 			return bool(container.call("has_tag", StringName(tag), true))
 	return fallback
