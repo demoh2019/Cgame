@@ -104,4 +104,96 @@ TEST_CASE("[PCGPathFalloff3D] atomic validation and bounded resource use") {
 	CHECK(mask->sample_factors({}, path, 1.0, 3.0).is_empty());
 }
 
+TEST_CASE("[PCGPathFalloff3D] independent road segments preserve strict clearance and source IDs") {
+	Ref<PCGPathFalloff3D> filter;
+	filter.instantiate();
+	// Two independent (not necessarily connected) XZ road segments.
+	const PackedVector3Array roads = {
+		Vector3(0, 0, 0), Vector3(10, 0, 0),
+		Vector3(10, 0, 0), Vector3(10, 0, 10)
+	};
+	const PackedVector3Array points = {
+		Vector3(5, 0, 0),      // Inside first road.
+		Vector3(5, 5, 2),      // Exactly on clearance; Y ignored.
+		Vector3(5, 0, 1.99),   // Inside.
+		Vector3(10, 0, 5),     // Inside second road.
+		Vector3(12, 0, 5),     // Exactly on boundary.
+		Vector3(12.01, 0, 5),  // Outside.
+		Vector3(0, 0, -2),     // Exactly on endpoint boundary.
+		Vector3(0, 0, -1),     // Inside endpoint clearance.
+		Vector3(50, 0, 50),    // Outside everything.
+	};
+	const PackedInt32Array expected = { 1, 4, 5, 6, 8 };
+	const PackedInt32Array kept = filter->filter_indices_outside_segments(points, roads, 2.0);
+	CHECK(kept == expected);
+	CHECK(filter->filter_indices_outside_segments(points, roads, 2.0) == kept);
+	const PackedInt32Array two = { 1, 4 };
+	CHECK(filter->filter_indices_outside_segments(points, roads, 2.0, 2) == two);
+	CHECK(filter->filter_indices_outside_segments(points, roads, 2.0, 0).is_empty());
+	CHECK(filter->filter_indices_outside_segments(points, roads, 0.0).size() == points.size());
+	CHECK(filter->filter_indices_outside_segments(points, {}, 2.0).size() == points.size());
+	CHECK(points[0] == Vector3(5, 0, 0)); // Source is never modified.
+}
+
+TEST_CASE("[PCGPathFalloff3D] degenerate road segments use the original scalar epsilon") {
+	Ref<PCGPathFalloff3D> filter;
+	filter.instantiate();
+	const PackedVector3Array roads = {
+		Vector3(0, -10, 0), Vector3(0, 10, 0), // XZ-degenerate line.
+		Vector3(100, 0, 100), Vector3(100, 0, 100)
+	};
+	const PackedVector3Array points = {
+		Vector3(0, 0, 0), Vector3(1, 0, 0),
+		Vector3(1.01, 0, 0), Vector3(100, 0, 100),
+		Vector3(102, 0, 100)
+	};
+	const PackedInt32Array expected = { 1, 2, 4 };
+	CHECK(filter->filter_indices_outside_segments(points, roads, 1.0) == expected);
+	const PackedInt32Array at_radius_two = { 4 };
+	CHECK(filter->filter_indices_outside_segments(
+			{ Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(102, 0, 100) },
+			roads, 2.0) == at_radius_two);
+}
+
+TEST_CASE("[PCGPathFalloff3D] road corridor validation is atomic and bounded") {
+	Ref<PCGPathFalloff3D> filter;
+	filter.instantiate();
+	const PackedVector3Array points = { Vector3(0, 0, 0), Vector3(10, 0, 0) };
+	const PackedVector3Array road = { Vector3(0, 0, 0), Vector3(10, 0, 0) };
+	CHECK(filter->filter_indices_outside_segments(points, { Vector3() }, 2.0).is_empty());
+	CHECK(filter->filter_indices_outside_segments(points, road, -1.0).is_empty());
+	CHECK(filter->filter_indices_outside_segments(points, road, 10001.0).is_empty());
+	CHECK(filter->filter_indices_outside_segments(points, road, Math::NaN).is_empty());
+	CHECK(filter->filter_indices_outside_segments(points, road, Math::INF).is_empty());
+	CHECK(filter->filter_indices_outside_segments(points, road, 2.0, -1).is_empty());
+	CHECK(filter->filter_indices_outside_segments(points, road, 2.0, 16385).is_empty());
+	CHECK(filter->filter_indices_outside_segments(
+			{ Vector3(0, 0, 0), Vector3(0, Math::NaN, 0) },
+			road, 2.0).is_empty());
+	CHECK(filter->filter_indices_outside_segments(
+			{ Vector3(0, 0, 0), Vector3(10000001, 0, 0) },
+			road, 2.0).is_empty());
+	CHECK(filter->filter_indices_outside_segments(points,
+			{ Vector3(), Vector3(Math::INF, 0, 0) }, 2.0).is_empty());
+	CHECK(filter->filter_indices_outside_segments(points,
+			{ Vector3(), Vector3(0, 0, 10000001) }, 2.0).is_empty());
+	PackedVector3Array excessive_roads;
+	for (int i = 0; i < 257; ++i) {
+		excessive_roads.push_back(Vector3(i, 0, 0));
+		excessive_roads.push_back(Vector3(i, 0, 1));
+	}
+	CHECK(filter->filter_indices_outside_segments(points, excessive_roads, 2.0).is_empty());
+	PackedVector3Array too_many;
+	for (int i = 0; i < 16385; ++i) {
+		too_many.push_back(Vector3(i, 0, 0));
+	}
+	CHECK(filter->filter_indices_outside_segments(too_many, road, 2.0).is_empty());
+	too_many.resize(16384);
+	const PackedInt32Array capped = filter->filter_indices_outside_segments(too_many,
+			{}, 2.0);
+	REQUIRE(capped.size() == 16384);
+	CHECK(capped[0] == 0);
+	CHECK(capped[16383] == 16383);
+}
+
 } // namespace TestPCGPathFalloff3D
