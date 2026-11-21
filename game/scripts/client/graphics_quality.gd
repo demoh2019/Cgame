@@ -56,6 +56,17 @@ static func unload_budget_for_quality(value: int) -> int:
 	return [12, 20, 32, 48][clampi(value, 0, 3)]
 
 
+## Cosmetic streaming only: scripts far from the camera update at a
+## budgeted interval instead of running expensive visual work every frame.
+## This is separate from the even farther complete simulation-pause radius.
+static func streamed_tick_radius_for_quality(value: int) -> float:
+	return [32.0, 48.0, 64.0, 80.0][clampi(value, 0, 3)]
+
+
+static func streamed_tick_interval_for_quality(value: int) -> float:
+	return [0.20, 0.125, 0.075, 0.05][clampi(value, 0, 3)]
+
+
 static func get_name() -> String:
 	return NAMES[_level]
 
