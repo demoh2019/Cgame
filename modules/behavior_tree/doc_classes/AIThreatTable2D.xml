@@ -2,7 +2,7 @@
 <class name="AIThreatTable2D" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
 	<brief_description>Native bounded MMO combat threat accumulation and validated aggro target ranking.</brief_description>
 	<description>
-		AIThreatTable2D operates on caller-owned Dictionaries mapping positive peer IDs to scalar threat. The table is not stored in this object; record, decay and pick mutate the supplied dictionary in place. Use only server-validated actual combat damage or healing-derived threat, never raw client-supplied numbers.
+		AIThreatTable2D operates on caller-owned Dictionaries mapping positive peer IDs to scalar threat. The table is not stored in this object; record, scale, decay and pick mutate the supplied dictionary in place. Use only server-validated actual combat damage or healing-derived threat, never raw client-supplied numbers.
 		The table tracks at most five actors under ordinary use, caps threat at 10000, decays at 0.75 per second, and uses 1.25 switching hysteresis. Among equal scores, the lower peer ID wins, regardless of Dictionary insertion order. Invalid or unreachable targets are discarded while picking. It neither checks physics nor broadcasts secret targets to clients.
 	</description>
 	<tutorials>
@@ -14,6 +14,13 @@
 			<param index="1" name="peer_id" type="int" />
 			<param index="2" name="damage" type="float" />
 			<description>Record positive finite server-confirmed threat. Existing actors accumulate up to 10000; new actors evict only a weaker minimum-threat participant if the five-slot table is full. Equal-threat victims are chosen by lower ID.</description>
+		</method>
+		<method name="scale">
+			<return type="bool" />
+			<param index="0" name="entries" type="Dictionary" />
+			<param index="1" name="peer_id" type="int" />
+			<param index="2" name="factor" type="float" />
+			<description>Attenuate one existing peer's positive threat by a finite factor between 0 and 1. Zero forgets the target and one retains its threat. Invalid factors and missing peers return false without changes; malformed stored threat is removed and returns false. Never creates or amplifies aggro.</description>
 		</method>
 		<method name="decay">
 			<return type="void" />
