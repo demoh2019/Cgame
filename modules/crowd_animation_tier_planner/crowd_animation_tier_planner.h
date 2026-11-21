@@ -50,4 +50,13 @@ public:
 			const PackedByteArray &p_retained_priority_flags, int p_full_budget,
 			int p_priority_budget, double p_full_hysteresis,
 			double p_priority_hysteresis) const;
+	// Compose a measured-cost cap with ANY previously chosen full-IK tiers.
+	// Doesn't re-rank full or combat pools; non-IK tiers are immutable.
+	// Cost 0 = initial 100us estimate; time budget 0 disables this cap.
+	PackedInt32Array cap_full_pose_cost(const PackedInt32Array &p_tiers,
+			const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_retained_full_flags,
+			const PackedInt32Array &p_full_pose_cost_us,
+			int p_full_pose_budget_us, double p_hysteresis = 1.5) const;
+
 };
