@@ -297,10 +297,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_activate_player_ability("focus")
 			KEY_M:
 				if is_instance_valid(combat_director):
-					combat_director.strike()
+					combat_director.request_strike()
 			KEY_N:
 				if is_instance_valid(combat_director):
-					combat_director.shockwave()
+					combat_director.request_shockwave()
 			KEY_BACKSPACE:
 				_respawn_player()
 
