@@ -6,12 +6,20 @@ class_name WorldCombatDirector3D
 signal combat_message(message: String)
 signal attack_landed(target: Node3D, amount: float)
 
+const Visibility = preload("res://addons/visual_quality/combat_visibility.gd")
+
 @export_range(1.0, 8.0, 0.25) var melee_range: float = 4.0
 @export_range(2.0, 10.0, 0.5) var pulse_range: float = 5.5
 @export_range(0.0, 1.0, 0.05) var min_facing_dot: float = 0.25
 @export_range(1.0, 100.0, 1.0) var melee_damage: float = 36.0
 @export_range(1.0, 80.0, 1.0) var pulse_damage: float = 18.0
 @export_range(1, 12, 1) var max_pulse_targets: int = 8
+@export_range(1, 32, 1) var max_visibility_checks: int = 12
+@export_flags_3d_physics var cover_collision_mask: int = 1
+
+var _queued_strike: bool = false
+var _queued_shockwave: bool = false
+var visibility_checks_last: int = 0
 
 var streamer: WorldStreamer3D
 var player: Node3D
@@ -27,6 +35,31 @@ func _physics_process(delta: float) -> void:
 		return
 	strike_cooldown = maxf(strike_cooldown - delta, 0.0)
 	pulse_cooldown = maxf(pulse_cooldown - delta, 0.0)
+	# Input only queues actions. All direct-space-state queries run here, in
+	# _physics_process, where Godot supports safe physics-space access.
+	if _queued_strike:
+		_queued_strike = false
+		strike()
+	if _queued_shockwave:
+		_queued_shockwave = false
+		shockwave()
+
+
+func request_strike() -> void:
+	_queued_strike = true
+
+
+func request_shockwave() -> void:
+	_queued_shockwave = true
+
+
+func _is_target_visible(target: Dictionary) -> bool:
+	var actor: WorldHostileSentry3D = target.get("actor")
+	if not is_instance_valid(actor) or not is_instance_valid(camera):
+		return false
+	visibility_checks_last += 1
+	return Visibility.has_clear_path(camera.get_world_3d(), camera.global_position,
+		target["position"], player, actor, cover_collision_mask)
 
 
 func strike() -> bool:
@@ -34,10 +67,19 @@ func strike() -> bool:
 		combat_message.emit("Удар недоступен: выносливость или перезарядка")
 		return false
 	var candidates: Array[Dictionary] = _nearby_hostiles(melee_range)
-	var selected: Dictionary = choose_facing_target(candidates, camera.global_position,
-		-camera.global_basis.z, melee_range, min_facing_dot)
+	visibility_checks_last = 0
+	var selected: Dictionary = {}
+	for _attempt in range(mini(max_visibility_checks, candidates.size())):
+		var near: Dictionary = choose_facing_target(candidates, camera.global_position,
+			-camera.global_basis.z, melee_range, min_facing_dot)
+		if near.is_empty():
+			break
+		if _is_target_visible(near):
+			selected = near
+			break
+		candidates.erase(near)
 	if selected.is_empty():
-		combat_message.emit("Нет врага перед вами на расстоянии удара")
+		combat_message.emit("Нет видимого врага перед вами: преграда или дистанция")
 		return false
 	var enemy: WorldHostileSentry3D = selected["actor"]
 	if not is_instance_valid(enemy) or not enemy.combatant.can_receive_hit(player_combatant.team_id):
@@ -70,13 +112,20 @@ func shockwave() -> int:
 			return ad < bd
 		return str(a["uid"]) < str(b["uid"])
 	)
-	if eligible.is_empty():
-		combat_message.emit("Рядом нет врагов для импульса")
+	visibility_checks_last = 0
+	var visible: Array[Dictionary] = []
+	for candidate in eligible:
+		if visibility_checks_last >= max_visibility_checks or visible.size() >= max_pulse_targets:
+			break
+		if _is_target_visible(candidate):
+			visible.append(candidate)
+	if visible.is_empty():
+		combat_message.emit("Импульс заблокирован укрытием или рядом нет врагов")
 		return 0
 	if not player_attributes.try_spend_stamina(35.0):
 		return 0
 	var hits: int = 0
-	for candidate in eligible:
+	for candidate in visible:
 		if hits >= max_pulse_targets:
 			break
 		var enemy: WorldHostileSentry3D = candidate["actor"]
