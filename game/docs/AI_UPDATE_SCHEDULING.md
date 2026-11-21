@@ -276,8 +276,8 @@ already-authorized **alive, outside-safe-zone** player positions.
 For large worlds (64–4096 infected, 8–8192 players), it builds one
 native query for passive, non-boss, unengaged NPCs whose target scan
 is due this tick. Each NPC's conservative radius is its normal
-`lose` pursuit range plus **24m**, needed for existing passive AI
-LOD (plus a 0.125m outward rounding margin). Any source radius
+`lose` pursuit range plus **24m**, plus the **4m passive LOD
+hysteresis margin** (and a 0.125m outward rounding margin). Any source radius
 exceeding 256m causes a full fallback rather than losing valid targets.
 
 Only those *still passive and unengaged when their turn arrives*
@@ -291,7 +291,7 @@ Crucially, the native query is **only a broadphase**. The existing
 territorial rules, wind-weighted sound, environmental hearing
 occlusion, blood scent, camouflage, rain, firelight, line-of-sight
 obstruction and combat-threshold prioritization. Player targets beyond
-the far LOD cutoff cannot become detectable under the existing
+the far LOD cutoff and its hysteresis margin cannot become detectable under the existing
 `lose - 1m` cap and are in the same far LOD tier. This new API
 neither changes combat logic nor updates network replication.
 
