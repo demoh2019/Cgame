@@ -1384,11 +1384,25 @@ func _on_welcomed() -> void:
 	# retain their unchanged fixed streaming budgets.
 	if "adaptive_chunk_budget_enabled" in streamer:
 		streamer.adaptive_chunk_budget_enabled = true
+	# Stage the initial *cosmetic* world area from nearby terrain outward.
+	# No authority/physics/quest streaming is deferred by this client-only
+	# startup ramp. Older engine builds retain their immediate full radius.
+	if streamer.has_method("begin_loading_range_ramp"):
+		streamer.begin_loading_range_ramp(
+			GraphicsQuality.startup_streaming_area_for_quality(GraphicsQuality.level()),
+			0.4, GraphicsQuality.startup_streaming_ramp_duration(GraphicsQuality.level()))
 	streamer.set_chunk_generator(_generate_chunk)
 	add_child(streamer)
 	# The map can now show native streaming-source readiness without any
 	# gameplay RPC, scene creation, or extra work when the map is closed.
 	world_map.world_streamer = streamer
+	# Game-time, read-only startup ramp telemetry (100% once complete).
+	if streamer.has_method("get_loading_range_area_percent"):
+		var loading_area_monitor: StringName = &"Albion/StreamLoadAreaPct"
+		if not Performance.has_custom_monitor(loading_area_monitor):
+			Performance.add_custom_monitor(loading_area_monitor,
+				Callable(streamer, "get_loading_range_area_percent"))
+			_ambient_monitors.append(loading_area_monitor)
 	# Read-only, engine-sourced telemetry: stream backpressure, real main-
 	# thread chunk work and the currently effective CPU/count limits.
 	if streamer.has_method("get_last_frame_chunk_work_usec"):

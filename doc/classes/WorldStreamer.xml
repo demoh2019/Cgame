@@ -16,6 +16,7 @@
 		add_child(streamer)
 		[/codeblock]
 		Cells without a scene file are skipped silently, so the world may have holes (oceans, unfinished areas). Unload radius larger than the load radius gives hysteresis: a player pacing along a cell border does not make chunks flicker in and out.
+		To reduce initial streaming spikes for cosmetic world chunks, call [method begin_loading_range_ramp] before the initial scene load. This starts with a smaller fraction of the configured 2D loading area (or 3D volume), then grows the active load radius to its full value in game time. Only new chunk requests are gated: the configured unload radius, loaded scenes, cell geometry and auxiliary source are unaffected. This may temporarily show less distant world detail, so use it only where gameplay/collision is independently ready.
 		To reduce visible pop-in when the player runs or rides, optionally set [member velocity_hint] and [member lookahead_seconds]. The streamer orders already-eligible cells toward a bounded predicted position, but the actual focus and load/unload radii still determine residency. No extra cells are loaded, and [member max_instantiations_per_frame] still limits main-thread work.
 		Optional local route hints can improve scenery arrival along a personal waypoint path. [method set_route_cells] accepts a bounded four-connected corridor from gameplay pathfinding; it changes scheduling priority inside the same focus radius, without allocating any additional world cells. This is distinct from the bounded auxiliary streaming source, which can include a few cells near a valid nearby waypoint.
 		[b]Large worlds:[/b] when the chunks live under a [Node3D] set as [member chunk_parent] that is moved by [FloatingOrigin3D], the focus position is measured in that node's local space, so the grid stays in absolute world coordinates while the origin shifts.
@@ -23,6 +24,22 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="advance_loading_range_ramp">
+			<return type="void" />
+			<param index="0" name="delta_seconds" type="float" />
+			<description>Advances the opt-in loading area ramp using finite, positive game-time seconds. Called automatically once each engine internal process frame; manual calls are useful for deterministic simulations or tests. The full configured radius is reached after the optional delay and ramp duration.</description>
+		</method>
+		<method name="begin_loading_range_ramp">
+			<return type="void" />
+			<param index="0" name="initial_area_fraction" type="float" />
+			<param index="1" name="delay_seconds" type="float" />
+			<param index="2" name="duration_seconds" type="float" />
+			<description>Starts an opt-in startup loading area ramp without changing [member load_radius] or [member unload_radius]. Fractions are clamped to 0.05–1; delay to 0–60 seconds and duration to 0–120 seconds. For a 2D grid, 0.25 loads half the configured distance; for a 3D grid the distance is the cube root of the requested volume fraction. The initial player cell remains eligible. A zero delay and duration restores full range immediately. Runtime scene creation still uses the usual per-frame budgets; auxiliary source radius is not scaled.</description>
+		</method>
+		<method name="cancel_loading_range_ramp">
+			<return type="void" />
+			<description>Immediately restores the configured full loading radius and schedules a regular streaming queue refresh, without synchronously loading additional chunks.</description>
+		</method>
 		<method name="advance_chunk_pressure" qualifiers="static">
 			<return type="float" />
 			<param index="0" name="pressure" type="float" />
@@ -46,6 +63,18 @@
 			<param index="0" name="configured" type="int" />
 			<param index="1" name="pressure" type="float" />
 			<description>Returns an unload count (0–64): a positive configured limit falls to 75% at pressure 0.4 and 50% at pressure 0.8 (rounded up, minimum one). Zero remains unlimited; non-finite pressure is treated as zero.</description>
+		</method>
+		<method name="get_effective_load_radius" qualifiers="const">
+			<return type="float" />
+			<description>Actual player-centered load radius used by the current streaming scheduler and focus readiness snapshots. During a ramp, this is [member load_radius] multiplied by the square root of the loaded area fraction for XY/XZ, or the cube root for XYZ. When the ramp is disabled or finished it equals [member load_radius].</description>
+		</method>
+		<method name="get_loading_range_area_percent" qualifiers="const">
+			<return type="float" />
+			<description>Current requested main-focus loading area or volume, expressed as 5–100 percent during a ramp and 100 percent otherwise. Read-only, with no chunk creation.</description>
+		</method>
+		<method name="is_loading_range_ramping" qualifiers="const">
+			<return type="bool" />
+			<description>Whether the startup loading-range delay or expansion is still pending. Defaults to false and becomes false when full range is restored or canceled.</description>
 		</method>
 		<method name="get_effective_unloads_per_update" qualifiers="const">
 			<return type="int" />
