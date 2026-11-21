@@ -29,6 +29,7 @@
 /**************************************************************************/
 #pragma once
 
+#include "../audio_duck_mix.h"
 #include "../gameplay_attribute_set.h"
 #include "../gameplay_effect_timeline.h"
 #include "../radial_force_field_3d.h"
@@ -408,4 +409,58 @@ TEST_CASE("[GameplayFX] GameplayAttributeSet transaction validation and snapshot
 	CHECK(a->clear_source("Rank.Elite") == 1);
 	CHECK(a->get_value("Visual.HitResponse") == doctest::Approx(1.25));
 }
+
+TEST_CASE("[GameplayFX] AudioDuckMix overlapping source holds and bounded envelope") {
+	Ref<AudioDuckMix> mix;
+	mix.instantiate();
+	CHECK(mix->trigger("Death", -12.0, 1.2));
+	CHECK(mix->tick(0.1) == doctest::Approx(-4.0));
+	CHECK(mix->trigger("Skill", -6.0, 3.0));
+	CHECK(mix->get_source_count() == 2);
+	CHECK(mix->get_target_db() == doctest::Approx(-12.0));
+	CHECK(mix->tick(0.2) == doctest::Approx(-12.0));
+	CHECK(mix->trigger("Skill", -8.0, 3.0));
+	CHECK(mix->get_source_count() == 2);
+	CHECK(mix->get_remaining("Skill") == doctest::Approx(3.0));
+	CHECK(mix->tick(1.0) == doctest::Approx(-8.0));
+	CHECK_FALSE(mix->has_source("Death"));
+	CHECK(mix->has_source("Skill"));
+	CHECK(mix->get_target_db() == doctest::Approx(-8.0));
+	CHECK(mix->release_source("Skill"));
+	CHECK(mix->tick(0.5) == doctest::Approx(-6.0));
+	CHECK(mix->get_target_db() == 0.0);
+	mix->clear();
+	CHECK(mix->get_current_db() == 0.0);
+	CHECK(mix->get_source_count() == 0);
+}
+
+TEST_CASE("[GameplayFX] AudioDuckMix invalid input, source bounds and no partial mutations") {
+	Ref<AudioDuckMix> mix;
+	mix.instantiate();
+	CHECK(mix->trigger("Raid", -9.0));
+	CHECK_FALSE(mix->trigger("", -4.0));
+	CHECK_FALSE(mix->trigger("Bad", Math::NaN));
+	CHECK_FALSE(mix->trigger("Bad", Math::INF));
+	CHECK_FALSE(mix->trigger("Bad", -61.0));
+	CHECK_FALSE(mix->trigger("Bad", 0.0));
+	CHECK_FALSE(mix->trigger("Bad", -3.0, -1.0));
+	CHECK_FALSE(mix->trigger("Bad", -3.0, Math::NaN));
+	CHECK(mix->get_source_count() == 1);
+	CHECK(mix->get_remaining("Raid") == doctest::Approx(1.2));
+	CHECK(mix->tick(Math::NaN) == 0.0);
+	CHECK(mix->tick(-1.0) == 0.0);
+	CHECK(mix->get_remaining("Raid") == doctest::Approx(1.2));
+	CHECK_FALSE(mix->set_rates(-1.0, 5.0));
+	CHECK_FALSE(mix->set_rates(5.0, Math::INF));
+	CHECK(mix->set_rates(40.0, 4.0));
+	for (int i = 0; i < 31; ++i) {
+		CHECK(mix->trigger(StringName(String("Event") + itos(i)), -3.0, 10.0));
+	}
+	CHECK(mix->get_source_count() == 32);
+	CHECK_FALSE(mix->trigger("Overflow", -2.0));
+	CHECK(mix->trigger("Raid", -10.0)); // Re-trigger still succeeds at capacity.
+	CHECK(mix->get_source_count() == 32);
+	CHECK(mix->get_target_db() == -10.0);
+}
+
 } // namespace TestGameplayFX

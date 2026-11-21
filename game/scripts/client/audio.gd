@@ -29,9 +29,9 @@ var _obstruction_clock := 0.0
 var _listener := Vector3.ZERO
 var _ground := Callable()
 var _humidity := 0.0
-var _duck_target := 0.0
 var _duck := 0.0
-var _duck_hold := 0.0
+var _duck_sources: Dictionary = {} # Old binaries: independent event holds in GDScript.
+var _native_duck: Object = null # Native AudioDuckMix, a data-only mixer.
 var _surface := "grass"
 var _cutoff := AudioSpatial.OPEN_CUTOFF
 
@@ -61,6 +61,7 @@ func _ready() -> void:
 	_sfx_bus = ReverbZones.ensure_bus()
 	_sfx_lowpass = AudioMix.ensure_lowpass(ReverbZones.BUS)
 	AudioMix.load_all()
+	_native_duck = EngineFeatures.make("AudioDuckMix")
 	_ambience = AudioStreamPlayer.new()
 	_ambience.bus = "Ambience"
 	_ambience.stream = Assets.sound("ambience")
@@ -407,11 +408,12 @@ func update_environment(listener: Vector3, ground_height: Callable, underground:
 	_ambience.volume_db = lerpf(_ambience.volume_db, float(bed["db"]), 1.0 - exp(-1.5 * delta))
 	_rain.volume_db = lerpf(_rain.volume_db, AudioAmbient.rain_db(storm, covered), 1.0 - exp(-2.0 * delta))
 	_wind.volume_db = lerpf(_wind.volume_db, AudioAmbient.wind_db(wind, storm, underground), 1.0 - exp(-2.0 * delta))
-	# Sidechain-style ducking of music and ambience.
-	_duck_hold = maxf(_duck_hold - delta, 0.0)
-	if _duck_hold <= 0.0:
-		_duck_target = 0.0
-	_duck = AudioDucking.step(_duck, _duck_target, delta)
+	# Native Unreal-style duck bus mixer, with independent event holds.
+	# The fallback follows the same target and 40/4 dB/s envelope exactly.
+	if _native_duck != null:
+		_duck = float(_native_duck.call("tick", delta))
+	else:
+		_duck = AudioDucking.tick_sources(_duck_sources, _duck, delta)
 	var music_bus := AudioServer.get_bus_index("Music")
 	if music_bus != -1:
 		AudioServer.set_bus_volume_db(music_bus, AudioMix.linear_to_db(AudioMix.volumes["Music"]) + _duck if AudioMix.volumes["Music"] > 0.0001 else -80.0)
@@ -420,12 +422,13 @@ func update_environment(listener: Vector3, ground_height: Callable, underground:
 		AudioServer.set_bus_volume_db(amb_bus, AudioMix.linear_to_db(AudioMix.volumes["Ambience"]) + _duck * 0.4 if AudioMix.volumes["Ambience"] > 0.0001 else -80.0)
 
 
-## Dips music for a big event (kept for HOLD seconds, deepest dip wins).
-func duck(depth_db: float) -> void:
-	if depth_db < _duck_target:
-		_duck_target = depth_db
-	if depth_db < 0.0:
-		_duck_hold = AudioDucking.HOLD
+## Dip music for one named event. Retrigger resets only that source's hold.
+## Legacy call sites without a name keep the established shared "Generic" key.
+func duck(depth_db: float, source: String = "Generic") -> void:
+	if _native_duck != null:
+		_native_duck.call("trigger", StringName(source), depth_db, AudioDucking.HOLD)
+	else:
+		AudioDucking.trigger_source(_duck_sources, source, depth_db, AudioDucking.HOLD)
 
 
 var _slider := 0
@@ -458,7 +461,7 @@ func surface() -> String:
 func on_event(event: Dictionary, local_peer: int, ground_height: Callable) -> void:
 	_ground = ground_height
 	if event.get("peer", local_peer) == local_peer or event["type"] in ["zombie_died", "knockback"]:
-		duck(AudioDucking.depth_for(str(event["type"])))
+		duck(AudioDucking.depth_for(str(event["type"])), str(event["type"]))
 	var position := Vector3.ZERO
 	if event.has("x") and event.has("z"):
 		position = Vector3(event["x"], float(ground_height.call(event["x"], event["z"])) + 1.0, event["z"])
