@@ -6,6 +6,7 @@ on:
     paths:
       - 'modules/frame_update_budget/**'
       - 'game/scripts/client/ambient_tick_budget.gd'
+      - 'game/scripts/client/ambient_rate_profile.gd'
       - 'game/scripts/client/online_main.gd'
       - 'game/tests/test_ambient_tick_budget.gd'
       - 'game/tests/run_ambient_budget.gd'
@@ -15,6 +16,7 @@ on:
     paths:
       - 'modules/frame_update_budget/**'
       - 'game/scripts/client/ambient_tick_budget.gd'
+      - 'game/scripts/client/ambient_rate_profile.gd'
       - 'game/scripts/client/online_main.gd'
       - 'game/tests/test_ambient_tick_budget.gd'
       - 'game/tests/run_ambient_budget.gd'
@@ -35,6 +37,7 @@ jobs:
             modules/frame_update_budget
             game/scripts/client/online_main.gd
             game/scripts/client/ambient_tick_budget.gd
+            game/scripts/client/ambient_rate_profile.gd
             game/tests/test_ambient_tick_budget.gd
             game/tests/run_ambient_budget.gd
             game/tests/run_all.gd
