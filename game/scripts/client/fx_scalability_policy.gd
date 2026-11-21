@@ -174,3 +174,88 @@ static func select_visible_ranged_indices(distances: PackedFloat64Array,
 		used[group] += 1
 		output.append(index)
 	return output
+
+
+## Soft per-category reservations for busy combat frames: foot dust is
+## expendable, hit feedback and combat bursts keep a minimum share whenever
+## eligible. Priority-3 boss/death/level-up events always bypass these minima.
+const CATEGORY_MINIMUMS := [
+	[0, 1, 1, 0], # Performance
+	[0, 1, 2, 0], # Balanced
+	[0, 2, 2, 0], # High
+	[0, 2, 3, 0], # Ultra
+]
+
+
+static func minimums_for(quality: int) -> PackedInt32Array:
+	return PackedInt32Array(CATEGORY_MINIMUMS[clampi(quality, 0, 3)])
+
+
+## Three-stage Niagara-inspired VFX plan: first all priority-3 events,
+## then soft category minimums, then top-significance fill. This *does not*
+## exceed the frame total, caps or distance ranges. Stock Godot uses the same
+## deterministic selection and older Cgame engines remain compatible.
+static func select_visible_fair_indices(distances: PackedFloat64Array,
+		priorities: PackedByteArray, categories: PackedByteArray,
+		visible: PackedByteArray, quality: int,
+		native: Object = null) -> PackedInt32Array:
+	var empty := PackedInt32Array()
+	var count: int = distances.size()
+	if count != priorities.size() or count != categories.size() or \
+			count != visible.size() or count > 16384:
+		return empty
+	var caps: PackedInt32Array = caps_for(quality)
+	var ranges: PackedFloat64Array = ranges_for(quality)
+	var minimums: PackedInt32Array = minimums_for(quality)
+	var budget: int = budget_for(quality)
+	var total_minimums: int = 0
+	for group in 4:
+		if minimums[group] < 0 or minimums[group] > caps[group]:
+			return empty
+		total_minimums += minimums[group]
+	if total_minimums > budget:
+		return empty
+	for i in count:
+		if not is_finite(distances[i]) or distances[i] < 0.0 or \
+				priorities[i] > 3 or categories[i] > 3 or visible[i] > 1:
+			return empty
+	if native != null and native.has_method("select_effects_visible_fair"):
+		var planned: PackedInt32Array = native.call("select_effects_visible_fair",
+			distances, priorities, categories, visible, caps, ranges, minimums, budget)
+		if planned.size() > 0 or count == 0 or budget == 0:
+			return planned
+		# A zero-length valid plan is legal (all candidates are distant).
+		# The fallback repeats the exact planning policy in either case.
+	var eligible: Array[int] = []
+	for i in count:
+		if distances[i] <= ranges[categories[i]] and caps[categories[i]] > 0:
+			eligible.append(i)
+	eligible.sort_custom(func(a: int, b: int) -> bool:
+		if priorities[a] != priorities[b]:
+			return priorities[a] > priorities[b]
+		if visible[a] != visible[b]:
+			return visible[a] > visible[b]
+		if distances[a] != distances[b]:
+			return distances[a] < distances[b]
+		return a < b)
+	var used := PackedInt32Array([0, 0, 0, 0])
+	var claimed := PackedByteArray()
+	claimed.resize(count)
+	var result := PackedInt32Array()
+	for stage in 3:
+		for index in eligible:
+			if result.size() >= budget:
+				break
+			if claimed[index] != 0:
+				continue
+			var group: int = categories[index]
+			if used[group] >= caps[group]:
+				continue
+			if stage == 0 and priorities[index] != 3:
+				continue
+			if stage == 1 and used[group] >= minimums[group]:
+				continue
+			used[group] += 1
+			claimed[index] = 1
+			result.append(index)
+	return result
