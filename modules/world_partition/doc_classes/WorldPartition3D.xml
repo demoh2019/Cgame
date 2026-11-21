@@ -23,6 +23,43 @@
 		Streaming is disabled while editing a scene; the node processes automatically while the game runs. Call [method update_streaming] if an immediate update is required after moving the observer.
 	</description>
 	<methods>
+		<method name="set_max_cell_path_cache_entries">
+			<return type="void" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Sets the maximum number of cached named grid-route query results to retain, 0 to 128 (default 64). Zero disables caching. Changing the capacity discards stored paths but preserves cumulative hit/miss counters. This is an exact-key, per-WorldPartition3D LRU cache, not NavigationServer3D path caching.
+			</description>
+		</method>
+		<method name="get_max_cell_path_cache_entries" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of entries allowed in the bounded shortest-cell-route cache.
+			</description>
+		</method>
+		<method name="get_cell_path_cache_entry_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of currently stored route results, including empty/disconnected paths. Registered-topology changes evict all cached routes, while ordinary loaded-scene changes evict only loaded_only results.
+			</description>
+		</method>
+		<method name="get_cell_path_cache_hit_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the cumulative number of successful cached calls to find_cell_path. Returned arrays are always duplicated, so gameplay scripts cannot mutate cached routes. This counter saturates at the signed 32-bit maximum until reset.
+			</description>
+		</method>
+		<method name="get_cell_path_cache_miss_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the cumulative count of route searches not satisfied by the cache, including when the cache is disabled and invalid or disconnected routes. This counter saturates until reset.
+			</description>
+		</method>
+		<method name="clear_cell_path_cache">
+			<return type="void" />
+			<description>
+				Clears all cached cell routes, hit and miss counters, and the LRU clock. Does not change cell registrations, live scene roots or the NavigationServer3D mesh.
+			</description>
+		</method>
 		<method name="patch_navigation_tile" qualifiers="const">
 			<return type="NavigationMesh" />
 			<param index="0" name="previous" type="NavigationMesh" />
@@ -163,7 +200,7 @@
 			<param index="1" name="to" type="Vector2i" />
 			<param index="2" name="loaded_only" type="bool" default="false" />
 			<description>
-				Returns a deterministic shortest 4-connected route of [Vector2i] cell coordinates, including both endpoints, across registered scene cells. Invalid, empty or disconnected coordinates return an empty [Array]. With [code]loaded_only=true[/code], every route cell must be a currently live instantiated scene root; otherwise this plans through registered cells even when unloaded. At most 512 cells are visited per query; exceeding the cap fails closed with an empty route, preventing unbounded synchronous work. This is a topological streaming corridor, not a collision-free [NavigationMesh] path or route around trees. Equal-length alternatives use +X, +Z, -X, -Z neighbor order for reproducibility. Grid coordinates are checked against 32-bit overflow.
+				Returns a deterministic shortest 4-connected route of [Vector2i] cell coordinates, including both endpoints, across registered scene cells. Results (including empty routes) are stored in a bounded LRU cache when [member max_cell_path_cache_entries] is nonzero, keyed by exact signed coordinates and [code]loaded_only[/code]. Returned arrays are always duplicated so gameplay cannot mutate the cached result. Native scene registration changes invalidate all entries, while scene load/unload events invalidate only loaded-only routes; active NavMesh obstacle patches do not affect the registered-cell graph. Invalid, empty or disconnected coordinates return an empty [Array]. With [code]loaded_only=true[/code], every route cell must be a currently live instantiated scene root; otherwise this plans through registered cells even when unloaded. At most 512 cells are visited per query; exceeding the cap fails closed with an empty route, preventing unbounded synchronous work. This is a topological streaming corridor, not a collision-free [NavigationMesh] path or route around trees. Equal-length alternatives use +X, +Z, -X, -Z neighbor order for reproducibility. Grid coordinates are checked against 32-bit overflow.
 			</description>
 		</method>
 		<method name="set_max_navigation_updates_per_physics_frame">
@@ -752,6 +789,9 @@
 		</method>
 	</methods>
 	<members>
+		<member name="max_cell_path_cache_entries" type="int" setter="set_max_cell_path_cache_entries" getter="get_max_cell_path_cache_entries" default="64">
+			Maximum size of the exact-key least-recently-used cache for [method find_cell_path] results, including empty paths. Valid range is 0 to 128 (0 disables). The engine invalidates all routes on changes to registered scene topology, but invalidates only [code]loaded_only[/code] entries when scene roots load or unload. NavMesh obstacle edits do not change registered cell-grid topology and therefore do not evict these topological routes.
+		</member>
 		<member name="max_navigation_rebuilds_per_physics_frame" type="int" setter="set_max_navigation_rebuilds_per_physics_frame" getter="get_max_navigation_rebuilds_per_physics_frame" default="1">
 			Maximum number of opt-in [code]rebuild_streaming_navigation_mesh()[/code] callbacks attempted per engine physics frame, from 1 to 16. Duplicate invalidations of one cell are coalesced, nearest observer cells are serviced first, and a successful callback resets the cell's navigation readiness fence.
 		</member>
