@@ -97,4 +97,73 @@ TEST_CASE("[PCGInstanceCluster3D] invalid parameters or points fail atomically")
 	CHECK(planner->partition_indices(points, 32.0, 1).is_empty());
 }
 
+TEST_CASE("[PCGInstanceCluster3D] adaptive overflow coarsens instead of collapsing the scene") {
+	Ref<PCGInstanceCluster3D> planner;
+	planner.instantiate();
+	PackedVector3Array positions;
+	for (int i = 0; i < 80; ++i) {
+		positions.push_back(Vector3(i * 33.0, 0, 0));
+	}
+	// The existing strict API retains its original behavior.
+	CHECK(planner->partition_indices(positions, 32.0, 48, 3).size() == 1);
+	const Array groups = planner->partition_indices_adaptive(positions, 32.0, 48, 3);
+	REQUIRE(groups.size() == 3);
+	const PackedInt32Array first = groups[0];
+	const PackedInt32Array second = groups[1];
+	const PackedInt32Array third = groups[2];
+	REQUIRE(first.size() == 32);
+	REQUIRE(second.size() == 31);
+	REQUIRE(third.size() == 17);
+	for (int i = 0; i < 80; ++i) {
+		const PackedInt32Array group = groups[i < 32 ? 0 : (i < 63 ? 1 : 2)];
+		const int local_index = i < 32 ? i : (i < 63 ? i - 32 : i - 63);
+		CHECK(group[local_index] == i);
+	}
+	CHECK(planner->partition_indices_adaptive(positions, 32.0, 48, 3) == groups);
+	// Zero retries preserves the old safety fallback instead of exceeding budget.
+	const Array no_retry = planner->partition_indices_adaptive(positions, 32.0, 48, 3, 0);
+	REQUIRE(no_retry.size() == 1);
+	const PackedInt32Array unsplit = no_retry[0];
+	REQUIRE(unsplit.size() == positions.size());
+	CHECK(unsplit[79] == 79);
+}
+
+TEST_CASE("[PCGInstanceCluster3D] adaptive retains legacy results when under budget") {
+	Ref<PCGInstanceCluster3D> planner;
+	planner.instantiate();
+	PackedVector3Array positions;
+	for (int i = 0; i < 80; ++i) {
+		positions.push_back(Vector3(i % 2 == 0 ? -4 : 4, i % 2 == 0 ? 0 : 75, 4));
+	}
+	const Array fixed = planner->partition_indices(positions, 32.0, 48, 4);
+	CHECK(fixed.size() == 2);
+	CHECK(planner->partition_indices_adaptive(positions, 32.0, 48, 4) == fixed);
+	CHECK(planner->partition_indices_adaptive(positions, 32.0, 100, 4).size() == 1);
+}
+
+TEST_CASE("[PCGInstanceCluster3D] adaptive retries and invalid inputs are strictly bounded") {
+	Ref<PCGInstanceCluster3D> planner;
+	planner.instantiate();
+	PackedVector3Array positions;
+	for (int i = 0; i < 80; ++i) {
+		positions.push_back(Vector3(i * 33.0, 0, 0));
+	}
+	CHECK(planner->partition_indices_adaptive(positions, 32.0, 48, 3, -1).is_empty());
+	CHECK(planner->partition_indices_adaptive(positions, 32.0, 48, 3, 9).is_empty());
+	CHECK(planner->partition_indices_adaptive(positions, Math::NaN, 48, 3).is_empty());
+	CHECK(planner->partition_indices_adaptive(positions, 0.05, 48, 3).is_empty());
+	CHECK(planner->partition_indices_adaptive(positions, 32.0, 48, 0).is_empty());
+	CHECK(planner->partition_indices_adaptive(positions, 32.0, 48, 257).is_empty());
+	const Array few_retries = planner->partition_indices_adaptive(positions, 32.0, 48, 3, 1);
+	REQUIRE(few_retries.size() == 1);
+	CHECK(PackedInt32Array(few_retries[0]).size() == 80);
+	positions.push_back(Vector3(0, Math::NaN, 0));
+	CHECK(planner->partition_indices_adaptive(positions, 32.0, 48, 3).is_empty());
+	positions.remove_at(80);
+	positions.push_back(Vector3(10000001, 0, 0));
+	CHECK(planner->partition_indices_adaptive(positions, 32.0, 48, 3).is_empty());
+	positions.resize(0);
+	CHECK(planner->partition_indices_adaptive(positions).is_empty());
+}
+
 } // namespace TestPCGInstanceCluster3D
