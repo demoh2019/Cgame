@@ -94,6 +94,11 @@ private:
 	// Opt-in bounded per-refresh unloads. Zero preserves historical immediate
 	// release of every distant cell; positive counts defer the rest.
 	int max_unloads_per_update = 0;
+	// Optional soft wall-clock cap for scheduled unloads, measured in
+	// microseconds. Zero retains count-only scheduling; legacy unlimited
+	// unloads and explicit reset/teardown are never time-sliced.
+	int max_unload_work_usec = 0;
+	int64_t last_unload_work_usec = 0;
 	int last_unload_count = 0;
 	int last_deferred_unload_count = 0;
 	// Soft main-thread time slice for procedural generation or scene
@@ -252,6 +257,9 @@ public:
 	void set_max_instantiations_per_frame(int p_count);
 	void set_max_unloads_per_update(int p_count);
 	int get_max_unloads_per_update() const { return max_unloads_per_update; }
+	void set_max_unload_work_usec(int p_usec);
+	int get_max_unload_work_usec() const { return max_unload_work_usec; }
+	int64_t get_last_unload_work_usec() const { return last_unload_work_usec; }
 	int get_last_unload_count() const { return last_unload_count; }
 	int get_last_deferred_unload_count() const { return last_deferred_unload_count; }
 	int get_max_instantiations_per_frame() const { return max_instantiations_per_frame; }
