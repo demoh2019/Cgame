@@ -24,6 +24,30 @@ senses.record_confirmed_sound(listener, accepted_position, approved_hearing_rang
 var best_sound := senses.best_confirmed_stimulus(1)
 ```
 
+## Bounded spatial stimulus queries and hot-path refresh
+
+The fork's `AIStimulusHistory2D.get_best_in_radius(sense, center, radius)` ranks only
+**already server-validated** stimuli within an inclusive, finite 2D radius.
+It leaves source lifetimes and memory untouched, returns an empty dictionary
+for an invalid sense/center/radius, and preserves the deterministic tie-breaker
+of `get_best()`. This is a spatial filter over past observations, **not** a
+new line-of-sight or hearing check.
+
+During chase recovery the canonical infected now uses this query for the
+secondary remembered sound when the primary ranked hearing memory has expired.
+A sound from a valid but distant prior location can no longer redirect a lost
+NPC beyond its present pursuit leash. Old Cgame binaries use a bounded
+GDScript query over up to 64 recorded stimuli; stock Godot keeps its empty
+native-memory fallback. The primary ranked hearing and sight paths retain
+their existing behavior, and network replication/target selection are unchanged.
+
+The native history also updates the most-recent identified source in place,
+rather than removing and re-appending a `Vector` element on repeated 30 Hz AI
+perception ticks. Older-source updates still move to the newest slot so
+bounded event eviction semantics remain unchanged. Engine tests cover radius
+edges, tie ranking, invalid input, snapshot isolation, age/expiry and hot-path
+refresh. `test_native_infected_senses.gd` covers actual game adapter usage.
+
 ## Behavior trees
 
 `BehaviorTreeReactiveSelector` and `BehaviorTreeReactiveSequence` extend the existing `BehaviorTreeComposite` **Resource** classes in the current `develop` branch. They reevaluate priority and guards per runner tick and cancel the execution memory of an interrupted branch. The existing `BehaviorTreeRunner`, `BehaviorTreeBlackboardCheck`, `BehaviorTreeBlackboardSet`, `BehaviorTreeWait` remain intact. The canonical server simulation keeps its existing state machine because its combat, networking and AI authority requirements are richer than the example tree.
