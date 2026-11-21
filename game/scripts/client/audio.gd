@@ -7,6 +7,7 @@ const ReverbZones = preload("res://scripts/client/reverb_zones.gd")
 const AudioMix = preload("res://scripts/client/audio_mix.gd")
 const AudioSurfaces = preload("res://scripts/client/audio_surfaces.gd")
 const AudioVoices = preload("res://scripts/client/audio_voices.gd")
+const AudioOcclusionProbes = preload("res://scripts/client/audio_occlusion_probes.gd")
 const AudioVirtualVoices = preload("res://scripts/client/audio_virtual_voices.gd")
 const AudioSpatial = preload("res://scripts/client/audio_spatial.gd")
 const AudioDucking = preload("res://scripts/client/audio_ducking.gd")
@@ -18,6 +19,7 @@ const CONCURRENCY_GROUPS := {"enemy_hurt": 4, "coin": 3, "blaster": 4, "blaster_
 var _concurrency: Node = null
 var _concurrency_tried := false
 var _native_voice_admission: Object = null
+var _native_occlusion_probes: Object = null # Pure native ray budget selector.
 var _voice_hold_rejections: int = 0
 var _sfx_bus := -1
 var _sfx_lowpass := -1
@@ -73,6 +75,7 @@ func _ready() -> void:
 	_native_duck = EngineFeatures.make("AudioDuckMix")
 	_native_mix_snapshots = EngineFeatures.make("AudioMixSnapshotController")
 	_native_voice_admission = EngineFeatures.make("AudioVoiceAdmissionPlanner")
+	_native_occlusion_probes = EngineFeatures.make("AudioOcclusionProbePlanner")
 	_ambience = AudioStreamPlayer.new()
 	_ambience.bus = "Ambience"
 	_ambience.stream = Assets.sound("ambience")
@@ -330,6 +333,17 @@ func _promote_virtual_voice() -> void:
 		play_at(str(entry["name"]), entry["position"], float(entry["volume_db"]), float(entry["offset"]))
 
 
+## Native C++ admission of at most three due obstruction rays; stock Godot
+## uses an identical GDScript policy. Physics queries never run here.
+func _select_occlusion_probes(next_due: PackedFloat64Array, priorities: PackedByteArray,
+		audibility: PackedFloat64Array, ids: PackedInt64Array, now: float,
+		limit: int) -> PackedInt32Array:
+	if _native_occlusion_probes != null and _native_occlusion_probes.has_method("select_due"):
+		return _native_occlusion_probes.call("select_due",
+			next_due, priorities, audibility, ids, now, limit)
+	return AudioOcclusionProbes.select_due(next_due, priorities, audibility, ids, now, limit)
+
+
 ## Scene physics is read only during physics ticks. This detects wooden
 ## barricades, ruins and dungeon walls in addition to the existing terrain
 ## heightfield obstruction, without querying on every audio mixer update.
@@ -352,15 +366,41 @@ func _physics_process(delta: float) -> void:
 	var probe_listeners: Array[Vector3] = []
 	var rays: int = 0
 	if state != null:
-		for index in _voices.size():
+		# Ray admission is based on overdue age, voice priority and audibility,
+		# rather than source insertion order. Non-selected voices still smooth.
+		var due_times := PackedFloat64Array()
+		var priorities := PackedByteArray()
+		var audibilities := PackedFloat64Array()
+		var stable_ids := PackedInt64Array()
+		var original_indices := PackedInt32Array()
+		for voice_index in _voices.size():
+			var candidate: Dictionary = _voices[voice_index]
+			var source: AudioStreamPlayer3D = candidate.get("player") as AudioStreamPlayer3D
+			if not is_instance_valid(source) or not source.is_playing():
+				continue
+			var next_due: float = float(candidate.get("next_obstruction_check", 0.0))
+			if not is_finite(next_due):
+				next_due = 0.0
+			next_due = maxf(0.0, next_due)
+			if next_due > _obstruction_clock:
+				continue
+			var loudness: float = float(candidate.get("audibility", -120.0))
+			if not is_finite(loudness):
+				loudness = -120.0
+			due_times.append(next_due)
+			priorities.append(clampi(int(candidate.get("priority", 0)), 0, 3))
+			audibilities.append(loudness)
+			stable_ids.append(source.get_instance_id())
+			original_indices.append(voice_index)
+		var chosen: PackedInt32Array = _select_occlusion_probes(
+			due_times, priorities, audibilities, stable_ids, _obstruction_clock,
+			OBSTRUCTION_RAYS_PER_TICK)
+		for chosen_index in chosen:
 			if rays >= OBSTRUCTION_RAYS_PER_TICK:
 				break
+			var index: int = int(original_indices[chosen_index])
 			var record: Dictionary = _voices[index]
 			var player: AudioStreamPlayer3D = record.get("player") as AudioStreamPlayer3D
-			if not is_instance_valid(player) or not player.is_playing():
-				continue
-			if _obstruction_clock < float(record.get("next_obstruction_check", 0.0)):
-				continue
 			var listener_eye: Vector3 = _listener + Vector3(0.0, 1.6, 0.0)
 			var source_eye: Vector3 = player.global_position + Vector3(0.0, 0.5, 0.0)
 			var ray: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(

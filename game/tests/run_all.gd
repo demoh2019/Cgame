@@ -63,6 +63,7 @@ const SUITES := [
 	"res://tests/test_audio_geometry_occlusion.gd",
 	"res://tests/test_native_batch_rays.gd",
 	"res://tests/test_audio_occlusion_envelope.gd",
+	"res://tests/test_audio_occlusion_probe_planner.gd",
 	"res://tests/test_animation_parity.gd",
 	"res://tests/test_network_snapshot_smoothing.gd",
 	"res://tests/test_snapshot_rotation_smoothing.gd",
