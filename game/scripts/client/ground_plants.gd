@@ -45,11 +45,19 @@ const SPECIES := {
 	"flower_stinkkruid": {"biomes": ["plains", "beach"], "count": 18, "scale": [1.1, 2.0], "cluster": true},
 	"flower_heliophila": {"biomes": ["plains"], "count": 14, "scale": [0.9, 1.8], "cluster": true},
 	# Scanned stones, sticks, branches, bark and roots lying in the grass, every size.
+	"pebbles": {"files": ["rock_9.res", "stone_scatter.res", "rock_7.res"],
+		"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 70, "scale": [0.04, 0.22], "cluster": true,
+		"variants": 3, "distance": 32.0},
 	"stones": {"files": ["rock_7.res", "rock_9.res", "mossy_rock_1.res", "mossy_rock_3.res", "mossy_rock_5.res", "stone_scatter.res"],
-		"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 22, "scale": [0.12, 0.7], "big": 0.1, "cluster": false,
-		"variants": 3, "distance": 70.0},
-	"wood": {"files": ["stick_1.res", "stick_2.res", "branches.res", "bark_debris.res", "single_root.res"],
-		"biomes": ["forest", "swamp", "plains"], "count": 16, "scale": [0.3, 1.1], "cluster": false, "variants": 3, "distance": 45.0},
+		"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 34, "scale": [0.15, 0.7], "big": 0.12, "cluster": false,
+		"variants": 4, "distance": 80.0},
+	# Knee-high boulders (no collision, so they stay below a survivor's knees).
+	"boulders": {"files": ["boulder_01.res", "boulder_02.res", "boulder_04.res", "boulder_05.res", "mossy_rock_2.res",
+		"mossy_rock_4.res", "mossy_rock_6.res"], "biomes": ["plains", "forest", "mountain", "beach", "swamp"], "count": 4,
+		"scale": [0.18, 0.45], "cluster": false, "variants": 2, "distance": 140.0},
+	"wood": {"files": ["stick_1.res", "stick_2.res", "branches.res", "bark_debris.res", "single_root.res", "pine_roots.res"],
+		"biomes": ["forest", "swamp", "plains"], "count": 40, "scale": [0.3, 1.2], "big": 0.1, "cluster": false, "variants": 4,
+		"distance": 55.0},
 }
 
 static var _manifest: Dictionary = {}

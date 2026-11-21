@@ -117,12 +117,33 @@ void vertex() {
 
 // Distant terrain keeps the existing broad-scale tiling, but skips nearby microdetail samples.
 // The blending weight tends smoothly to zero, avoiding hard texture LOD boundaries.
+// Close to the camera a 1k texture over a 6 m tile is magnified several times and looks smeared.
+// Wherever the near tile is magnified (under ~1 texel per pixel) the same layer is also sampled at a
+// 4.5x finer, rotated scale and applied as luminance detail: crisp grit underfoot, no extra textures.
+const float AA_MICRO_SCALE = 0.22;
+const mat2 AA_MICRO_ROT = mat2(vec2(0.8776, 0.4794), vec2(-0.4794, 0.8776));
+
+float aa_micro_weight(vec2 lod_dx, vec2 lod_dy) {
+	float texels_per_pixel = max(length(lod_dx), length(lod_dy)) * 1024.0;
+	return 1.0 - smoothstep(0.35, 1.3, texels_per_pixel);
+}
+
 vec3 top_albedo(float layer, vec2 p, float mixer, float detail_fade, vec2 lod_dx, vec2 lod_dy) {
 	vec3 far_tile = textureGrad(albedo_layers, vec3(p / (tile_meters * 3.3) + 0.37, layer), lod_dx / 3.3, lod_dy / 3.3).rgb;
-	float near_weight = (1.0 - mixer) * detail_fade;
+	// Near the camera the sharp near tile dominates; the noise mixer only breaks tiling further away.
+	float near_weight = detail_fade * (1.0 - mixer * mix(0.35, 1.0, 1.0 - detail_fade));
 	if (near_weight > 0.001) {
 		vec3 near_tile = textureGrad(albedo_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy).rgb;
 		far_tile = mix(far_tile, near_tile, near_weight);
+		float micro_w = aa_micro_weight(lod_dx, lod_dy) * detail_fade;
+		if (micro_w > 0.01) {
+			vec2 mp = AA_MICRO_ROT * (p / (tile_meters * AA_MICRO_SCALE)) + 0.21;
+			vec3 micro = textureGrad(albedo_layers, vec3(mp, layer), AA_MICRO_ROT * lod_dx / AA_MICRO_SCALE,
+				AA_MICRO_ROT * lod_dy / AA_MICRO_SCALE).rgb;
+			float base_l = max(dot(near_tile, vec3(0.299, 0.587, 0.114)), 0.04);
+			float micro_l = dot(micro, vec3(0.299, 0.587, 0.114));
+			far_tile *= mix(1.0, clamp(micro_l / base_l, 0.55, 1.6), micro_w * 0.65);
+		}
 	}
 	return far_tile * layer_tint[int(layer)];
 }
@@ -134,6 +155,15 @@ vec4 top_normal(float layer, vec2 p, float detail_fade, vec2 lod_dx, vec2 lod_dy
 	if (detail_fade > 0.001) {
 		vec4 mapped = textureGrad(normal_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy);
 		normal = mix(normal, vec4(mapped.rgb * 2.0 - 1.0, mapped.a), detail_fade);
+		// Matching fine-scale bumps where the near normal map is magnified (normals are 512 px).
+		float micro_w = (1.0 - smoothstep(0.2, 0.7, max(length(lod_dx), length(lod_dy)) * 512.0)) * detail_fade;
+		if (micro_w > 0.01) {
+			vec2 mp = AA_MICRO_ROT * (p / (tile_meters * AA_MICRO_SCALE)) + 0.21;
+			vec3 micro = textureGrad(normal_layers, vec3(mp, layer), AA_MICRO_ROT * lod_dx / AA_MICRO_SCALE,
+				AA_MICRO_ROT * lod_dy / AA_MICRO_SCALE).rgb * 2.0 - 1.0;
+			normal.xy += micro.xy * micro_w * 0.6;
+			normal.xyz = normalize(normal.xyz);
+		}
 	}
 	return normal;
 }
