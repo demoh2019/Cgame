@@ -1482,16 +1482,33 @@ func _update_shadow_casters() -> void:
 	_shadow_last_eye = eye_xz
 	_shadow_last_revision = ShadowBudget.revision()
 	_shadow_last_count = _shadow_casters.size()
+	# Feed real transformed AABB footprints to one bounded native HLOD plan.
+	# GPU geometry stays instanced; only participating sun shadow casters change.
+	var bounds_min := PackedVector3Array()
+	var bounds_max := PackedVector3Array()
+	var roles := PackedByteArray()
+	var active_flags := PackedByteArray()
+	var valid_nodes: Array[MultiMeshInstance3D] = []
 	for entry in _shadow_casters:
 		var caster: MultiMeshInstance3D = entry["node"]
 		if not is_instance_valid(caster):
 			continue
-		var local_bounds: AABB = entry["bounds"]
-		var world_bounds: AABB = caster.global_transform * local_bounds
-		var distance: float = ShadowBudget.distance_to_bounds_xz(eye, world_bounds)
-		var active: bool = caster.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-		var desired: bool = ShadowBudget.should_cast(str(entry["role"]), distance, active)
-		if desired != active:
+		var world_bounds: AABB = caster.global_transform * (entry["bounds"] as AABB)
+		bounds_min.append(world_bounds.position)
+		bounds_max.append(world_bounds.end)
+		roles.append(ShadowBudget.role_index(str(entry["role"])))
+		active_flags.append(1 if caster.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON else 0)
+		valid_nodes.append(caster)
+	var selected: PackedInt32Array = ShadowBudget.select_shadow_casters(
+		bounds_min, bounds_max, roles, active_flags, eye,
+		ShadowBudget.cap_for_quality(scenery_quality))
+	var chosen: Dictionary = {}
+	for index in selected:
+		chosen[index] = true
+	for i in valid_nodes.size():
+		var caster: MultiMeshInstance3D = valid_nodes[i]
+		var desired: bool = chosen.has(i)
+		if desired != (active_flags[i] == 1):
 			caster.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if desired else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
