@@ -2737,4 +2737,4 @@ func _wound_on_zombie(event: Dictionary) -> void:
 		var aim: Vector3 = chest + Vector3(randf_range(-0.25, 0.25), randf_range(-0.6, 0.45), randf_range(-0.25, 0.25))
 		direction = (aim - origin).normalized()
 	_wound_fx.on_hit(model, origin, direction, float(event.get("damage", 0.0)),
-		bool(event.get("ranged", false)), bool(event.get("fatal", false)), true)
+		bool(event.get("ranged", false)), bool(event.get("fatal", false)), true, str(event.get("weapon", "")))

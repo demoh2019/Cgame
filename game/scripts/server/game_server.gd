@@ -5888,7 +5888,8 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 		# A real hit on a living enemy trains the weapon skill (more for heavier hits).
 		_award(attacker, "marksman" if source == "ranged" else "melee", 1.0 + damage / 6.0)
 		var hit_event: Dictionary = {"type": "hit", "kind": "zombie", "id": zombie.id, "damage": damage,
-			"x": zombie.position.x, "z": zombie.position.z, "by": attacker.id, "ranged": source == "ranged"}
+			"x": zombie.position.x, "z": zombie.position.z, "by": attacker.id, "ranged": source == "ranged",
+			"weapon": attacker.inventory.weapon}
 		events.append(hit_event)
 		if zombie.take_damage(damage, attacker.id):
 			hit_event["fatal"] = true

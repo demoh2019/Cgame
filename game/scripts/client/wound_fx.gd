@@ -1,6 +1,6 @@
 extends Node3D
 ## Location-based gore on enemies: the bone nearest the strike gets a cut or a bullet wound
-## (a decal riding on that bone), blood sprays from the spot, and a heavy killing blow on a
+## (the skin there is opened by a shader: a real hole or gaping cut that rides that bone), blood sprays from the spot, and a heavy killing blow on a
 ## limb or the neck severs it — the bone collapses on the body and a bloody piece flies off.
 ## Purely cosmetic and client-side; the server only says who hit whom, how hard, and if it killed.
 
@@ -10,9 +10,6 @@ const MAX_PIECES := 24
 const PIECE_LIFETIME := 25.0
 const SEVER_DAMAGE := 22.0
 
-static var _cut_texture: ImageTexture
-static var _hole_texture: ImageTexture
-var _wounds: Array[Node] = []
 var _pieces: Array[Dictionary] = [] # {"body": RigidBody3D, "age": float}
 var _severed: Array[Dictionary] = [] # {"skeleton": Skeleton3D, "bone": int}
 var _rng := RandomNumberGenerator.new()
@@ -23,7 +20,7 @@ func _init() -> void:
 
 
 ## model: the enemy's character model; origin/direction: the line of the strike in world space.
-func on_hit(model: Node3D, origin: Vector3, direction: Vector3, damage: float, ranged: bool, fatal: bool, ichor: bool) -> void:
+func on_hit(model: Node3D, origin: Vector3, direction: Vector3, damage: float, ranged: bool, fatal: bool, ichor: bool, weapon_id: String = "") -> void:
 	if model == null or not is_instance_valid(model) or direction.length_squared() < 0.0001:
 		return
 	var skeleton := _skeleton_of(model)
@@ -36,9 +33,9 @@ func on_hit(model: Node3D, origin: Vector3, direction: Vector3, damage: float, r
 	var bone_at: Vector3 = (skeleton.global_transform * skeleton.get_bone_global_pose(bone)).origin
 	# The wound sits on the body surface facing the attacker, a little off the bone axis.
 	var to_line: Vector3 = (origin + direction * (bone_at - origin).dot(direction)) - bone_at
-	var surface: Vector3 = bone_at + to_line.limit_length(0.06) - direction * 0.09
+	var surface: Vector3 = _surface_point(skeleton, bone_at + to_line.limit_length(0.06), direction)
 	var color := Color(0.32, 0.02, 0.02) if not ichor else Color(0.22, 0.06, 0.02)
-	_add_wound(skeleton, bone, surface, direction, damage, ranged, color)
+	_add_wound(skeleton, bone, surface, direction, wound_shape(weapon_id, ranged, damage))
 	_spray(surface, -direction, damage, color)
 	if fatal and not ranged and damage >= SEVER_DAMAGE:
 		var cut: int = _severable(skeleton, bone)
@@ -48,7 +45,15 @@ func on_hit(model: Node3D, origin: Vector3, direction: Vector3, damage: float, r
 		_sever(skeleton, bone, direction, color)
 
 
+## Where the strike line meets the skin: nearest skinned vertex to the line near the struck bone.
+func _surface_point(skeleton: Skeleton3D, near: Vector3, direction: Vector3) -> Vector3:
+	# The shader opens a channel along the strike line, so the point only has to sit on that line
+	# near the bone; it is moved slightly out toward the attacker so the blood sprays from the skin.
+	return near - direction * 0.06
+
+
 func _process(delta: float) -> void:
+	_update_bodies()
 	# Keep severed bones collapsed: animation tracks rewrite the pose every frame.
 	for i in range(_severed.size() - 1, -1, -1):
 		var entry: Dictionary = _severed[i]
@@ -64,9 +69,6 @@ func _process(delta: float) -> void:
 			if is_instance_valid(body):
 				(body as Node).queue_free()
 			_pieces.remove_at(i)
-	for i in range(_wounds.size() - 1, -1, -1):
-		if not is_instance_valid(_wounds[i]):
-			_wounds.remove_at(i)
 
 
 static func _skeleton_of(model: Node) -> Skeleton3D:
@@ -124,34 +126,128 @@ static func _severable(skeleton: Skeleton3D, bone: int) -> int:
 	return -1
 
 
-func _add_wound(skeleton: Skeleton3D, bone: int, at: Vector3, direction: Vector3, damage: float, ranged: bool, color: Color) -> void:
-	var on_body: int = 0
-	for child in skeleton.get_children():
-		if child is BoneAttachment3D and child.has_meta("wound"):
-			on_body += 1
-	if on_body >= MAX_WOUNDS_PER_BODY or _wounds.size() >= MAX_WOUNDS:
+const WOUND_SHADER := preload("res://shaders/wound_flesh.gdshader")
+const MAX_OPENINGS := 8 # Shader slots per body; the oldest wound closes when a ninth opens.
+var _bodies: Dictionary = {} # skeleton instance id -> {"skeleton", "surfaces": [{mesh, material, source}], "wounds": []}
+
+
+## Weapon families: stabbing makes a deep round hole, slashing a long gaping cut, blunt a small split.
+static func wound_shape(weapon_id: String, ranged: bool, damage: float) -> Dictionary:
+	if ranged:
+		return {"radius": 0.016, "elongation": 1.0, "depth": 0.025}
+	var w := weapon_id.to_lower()
+	if w.contains("knife") or w.contains("spear") or w.contains("dagger") or w.contains("bayonet") or w.contains("shiv"):
+		return {"radius": clampf(0.022 + damage * 0.0004, 0.022, 0.04), "elongation": 1.7, "depth": 0.035}
+	if w.contains("club") or w.contains("hammer") or w.contains("bat") or w.contains("mace") or w.contains("pipe"):
+		return {"radius": 0.016, "elongation": 2.0, "depth": 0.05}
+	return {"radius": clampf(0.02 + damage * 0.0003, 0.02, 0.035), "elongation": clampf(3.0 + damage * 0.05, 3.0, 6.0), "depth": 0.03}
+
+
+func _add_wound(skeleton: Skeleton3D, bone: int, at: Vector3, direction: Vector3, shape: Dictionary) -> void:
+	var body: Dictionary = _body_of(skeleton)
+	if body.is_empty():
 		return
-	var holder := BoneAttachment3D.new()
-	holder.set_meta("wound", true)
-	holder.bone_idx = bone
-	skeleton.add_child(holder)
-	var decal := Decal.new()
-	decal.texture_albedo = _hole_texture_get() if ranged else _cut_texture_get()
-	decal.modulate = color.lightened(0.15)
-	decal.albedo_mix = 1.0
-	var length: float = clampf(0.14 + damage * 0.006, 0.14, 0.42)
-	decal.size = Vector3(0.09 if ranged else length, 0.3, 0.09 if ranged else 0.12)
-	decal.upper_fade = 0.2
-	decal.lower_fade = 0.2
-	decal.cull_mask = 0xFFFFF
-	holder.add_child(decal)
-	# A decal projects along its local -Y: aim it down the strike, with a random slash angle.
-	var y_axis: Vector3 = -direction
-	var x_axis: Vector3 = y_axis.cross(Vector3.UP if absf(y_axis.y) < 0.95 else Vector3.RIGHT).normalized()
-	x_axis = x_axis.rotated(y_axis, _rng.randf_range(-0.9, 0.9))
-	var z_axis: Vector3 = x_axis.cross(y_axis).normalized()
-	decal.global_transform = Transform3D(Basis(x_axis, y_axis, z_axis), at)
-	_wounds.append(holder)
+	var bone_world: Transform3D = skeleton.global_transform * skeleton.get_bone_global_pose(bone)
+	var to_bone: Transform3D = bone_world.affine_inverse()
+	# A random cut angle across the strike, stored in the bone's frame so it rides the animation.
+	var across: Vector3 = direction.cross(Vector3.UP if absf(direction.y) < 0.95 else Vector3.RIGHT).normalized()
+	across = across.rotated(direction, _rng.randf_range(-0.9, 0.9))
+	var wounds: Array = body["wounds"]
+	if wounds.size() >= MAX_OPENINGS:
+		wounds.pop_front()
+	wounds.append({"bone": bone, "at": to_bone * at,
+		"axis": (to_bone.basis * across).normalized(), "dir": (to_bone.basis * direction).normalized(),
+		"radius": float(shape["radius"]), "elongation": float(shape["elongation"]), "depth": float(shape["depth"])})
+
+
+## Swap the body's opaque surfaces to the openable flesh shader (once per body).
+func _body_of(skeleton: Skeleton3D) -> Dictionary:
+	var key: int = skeleton.get_instance_id()
+	if _bodies.has(key):
+		return _bodies[key]
+	if _bodies.size() >= MAX_WOUNDS / MAX_OPENINGS:
+		return {}
+	var surfaces: Array = []
+	for node in skeleton.find_children("*", "MeshInstance3D", true, false):
+		var mesh := node as MeshInstance3D
+		if mesh.mesh == null:
+			continue
+		if mesh.material_override is BaseMaterial3D:
+			var swapped := _flesh_material(mesh.material_override as BaseMaterial3D)
+			if swapped != null:
+				surfaces.append({"mesh": mesh, "material": swapped, "source": mesh.material_override})
+				mesh.material_override = swapped
+			continue
+		for s in mesh.mesh.get_surface_count():
+			var source := mesh.get_active_material(s) as BaseMaterial3D
+			var swapped := _flesh_material(source)
+			if swapped != null:
+				surfaces.append({"mesh": mesh, "material": swapped, "source": source})
+				mesh.set_surface_override_material(s, swapped)
+	var body := {"skeleton": skeleton, "surfaces": surfaces, "wounds": []}
+	_bodies[key] = body
+	return body
+
+
+static func _flesh_material(source: BaseMaterial3D) -> ShaderMaterial:
+	if source == null or source.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED:
+		return null
+	var material := ShaderMaterial.new()
+	material.shader = WOUND_SHADER
+	material.set_shader_parameter("albedo_color", source.albedo_color)
+	if source.albedo_texture != null:
+		material.set_shader_parameter("albedo_tex", source.albedo_texture)
+		material.set_shader_parameter("has_albedo_tex", 1.0)
+	if source.normal_enabled and source.normal_texture != null:
+		material.set_shader_parameter("normal_tex", source.normal_texture)
+		material.set_shader_parameter("has_normal_tex", 1.0)
+	material.set_shader_parameter("uv_scale", source.uv1_scale)
+	material.set_shader_parameter("uv_offset", source.uv1_offset)
+	material.set_shader_parameter("base_roughness", source.roughness)
+	material.set_shader_parameter("base_metallic", source.metallic)
+	return material
+
+
+## Move every opening with its bone, into each mesh's local space, and mirror the hit flash.
+func _update_bodies() -> void:
+	for key in _bodies.keys():
+		var body: Dictionary = _bodies[key]
+		var skeleton = body["skeleton"]
+		if not is_instance_valid(skeleton):
+			_bodies.erase(key)
+			continue
+		var world_wounds: Array = []
+		for wound in body["wounds"]:
+			var bone_world: Transform3D = (skeleton as Skeleton3D).global_transform * (skeleton as Skeleton3D).get_bone_global_pose(int(wound["bone"]))
+			world_wounds.append([bone_world * (wound["at"] as Vector3), bone_world.basis * (wound["axis"] as Vector3), bone_world.basis * (wound["dir"] as Vector3), wound])
+		for surface in body["surfaces"]:
+			var mesh = surface["mesh"]
+			if not is_instance_valid(mesh):
+				continue
+			var to_local: Transform3D = (mesh as MeshInstance3D).global_transform.affine_inverse()
+			var centres := PackedVector4Array()
+			var axes := PackedVector4Array()
+			var dirs := PackedVector4Array()
+			for entry in world_wounds:
+				var wound: Dictionary = entry[3]
+				var c: Vector3 = to_local * (entry[0] as Vector3)
+				var a: Vector3 = (to_local.basis * (entry[1] as Vector3)).normalized()
+				var d: Vector3 = (to_local.basis * (entry[2] as Vector3)).normalized()
+				centres.append(Vector4(c.x, c.y, c.z, float(wound["radius"])))
+				axes.append(Vector4(a.x, a.y, a.z, float(wound["elongation"])))
+				dirs.append(Vector4(d.x, d.y, d.z, float(wound["depth"])))
+			while centres.size() < MAX_OPENINGS:
+				centres.append(Vector4.ZERO)
+				axes.append(Vector4(1, 0, 0, 1))
+				dirs.append(Vector4.ZERO)
+			var material: ShaderMaterial = surface["material"]
+			material.set_shader_parameter("wound_count", world_wounds.size())
+			material.set_shader_parameter("wounds", centres)
+			material.set_shader_parameter("wound_axes", axes)
+			material.set_shader_parameter("wound_dirs", dirs)
+			var source = surface["source"]
+			if source is BaseMaterial3D:
+				material.set_shader_parameter("flash_energy", (source as BaseMaterial3D).emission_energy_multiplier if (source as BaseMaterial3D).emission_enabled else 0.0)
 
 
 ## A short arterial spray at the wound, along the outgoing side.
@@ -250,42 +346,3 @@ func _sever(skeleton: Skeleton3D, bone: int, direction: Vector3, color: Color) -
 	body.apply_central_impulse((direction * 2.2 + Vector3.UP * 1.6) * body.mass)
 	body.apply_torque_impulse(Vector3(_rng.randf_range(-1, 1), _rng.randf_range(-1, 1), _rng.randf_range(-1, 1)) * 0.6)
 	_pieces.append({"body": body, "age": 0.0})
-
-
-static func _cut_texture_get() -> ImageTexture:
-	if _cut_texture == null:
-		_cut_texture = _make_texture(false)
-	return _cut_texture
-
-
-static func _hole_texture_get() -> ImageTexture:
-	if _hole_texture == null:
-		_hole_texture = _make_texture(true)
-	return _hole_texture
-
-
-## Procedural wound mask: a ragged slash (dark core, wet rim, bruise halo) or a round entry hole.
-static func _make_texture(hole: bool) -> ImageTexture:
-	var size := 64
-	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
-	var noise := FastNoiseLite.new()
-	noise.frequency = 0.15
-	for y in size:
-		for x in size:
-			var u: float = (float(x) / float(size - 1)) * 2.0 - 1.0
-			var v: float = (float(y) / float(size - 1)) * 2.0 - 1.0
-			var jag: float = noise.get_noise_2d(x, y) * 0.18
-			var d: float
-			if hole:
-				d = Vector2(u, v).length() + jag * 0.6
-			else:
-				var width: float = 0.22 * (1.0 - u * u) + 0.02
-				d = absf(v + jag * 0.5) / maxf(width, 0.01) * 0.5 + maxf(0.0, absf(u) - 0.85) * 4.0
-			var core: float = clampf(1.0 - d / 0.35, 0.0, 1.0)
-			var rim: float = clampf(1.0 - absf(d - 0.45) / 0.2, 0.0, 1.0)
-			var halo: float = clampf(1.0 - d, 0.0, 1.0) * 0.45
-			var shade: float = lerpf(0.55, 0.12, core) # Bright wet rim, near-black depth.
-			var alpha: float = clampf(maxf(core, maxf(rim * 0.9, halo)), 0.0, 1.0)
-			image.set_pixel(x, y, Color(shade + rim * 0.35, shade * 0.4, shade * 0.35, alpha))
-	image.generate_mipmaps()
-	return ImageTexture.create_from_image(image)
