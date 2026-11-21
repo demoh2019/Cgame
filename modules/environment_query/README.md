@@ -42,7 +42,7 @@ lattice and rejects accidentally excessive allocation. A ring accepts
 
 This is a **foundation**, not the full EQS implementation seen in Unreal.
 It does not yet implement obstacle raycasts, ground projection, navmesh
-reachability/path cost, smart objects, occupancy checks, area masks, async
+reachability/path cost, smart objects, dynamic area masks, async
 execution or a visual query editor. Those belong to separate incremental PRs.
 Sampling is deterministic and CPU-side; large candidates arrays may be
 expensive because all results are scored and sorted.
@@ -94,3 +94,29 @@ uses this native API on Cgame binaries. It only sends server-vetted positions
 after terrain, water, player distance and occupancy checks. Stock Godot and
 older Cgame binaries continue to use an equivalent stable GDScript algorithm.
 The native query does not replace the server's trust boundary.
+
+## Occupied-position exclusion for safe group goals
+
+The new `query_spread_positions_avoiding(count, min_separation, occupied_positions, clearance)`
+method excludes candidate points closer than `clearance` to any occupied
+position **before ranking and spacing**. The occupied array is capped at 128
+finite positions and the clearance must be finite and nonnegative. An exact
+clearance-boundary match is allowed; zero clearance disables exclusions.
+
+This is a pure mathematical, deterministic CPU filter, **not a physics or
+navigation occupancy test**. Set `horizontal_only = true` to check XZ-plane
+distances as needed for 3D actors on uneven terrain.
+
+Albion After's server-owned raid reinforcement planner now snapshots alive
+infected coordinates per wave and uses this native operation for collision-free
+spawn selections. Both ordinary Godot and older Cgame binaries use a
+deterministic GDScript fallback, including for more than 128 occupied positions.
+All terrain, player-safety, danger-zone and group-spacing constraints remain
+authoritative. Neither network messages nor saves are changed.
+
+Test coverage: C++ unit cases in `tests/scene/test_environment_query_3d.cpp`,
+game `game/tests/test_raid_reinforcements.gd`, and Python source-contract and
+numerical model checks in `tests/scene/test_environment_query_occupancy.py`.
+
+The native C++ build and headless Godot tests must pass before production
+performance claims; this source change alone is not a measured speedup.
