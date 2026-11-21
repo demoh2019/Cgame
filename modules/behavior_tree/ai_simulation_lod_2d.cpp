@@ -108,6 +108,23 @@ real_t AISimulationLOD2D::get_hysteretic_interval(real_t p_distance, real_t p_ne
 	return nominal;
 }
 
+Vector2 AISimulationLOD2D::plan_passive_scan(int64_t p_agent_id, real_t p_distance,
+		real_t p_near_distance, real_t p_far_distance, real_t p_previous_interval,
+		real_t p_hysteresis, bool p_already_staggered, bool p_urgent) const {
+	// Preserve the original one-shot schedule: store the *unphased* tier as
+	// previous interval even when this tick's delay is ID-staggered.
+	// Threat/urgent work must run at the near cadence without phase delay.
+	const real_t base = get_interval(p_distance, p_near_distance, p_far_distance, p_urgent);
+	if (!p_already_staggered && p_distance > p_near_distance && !p_urgent) {
+		const real_t phased = get_staggered_interval(p_agent_id,
+				p_distance, p_near_distance, p_far_distance, false);
+		return Vector2(base, phased);
+	}
+	const real_t nominal = get_hysteretic_interval(p_distance, p_near_distance,
+			p_far_distance, p_previous_interval, p_hysteresis, p_urgent);
+	return Vector2(nominal, nominal);
+}
+
 real_t AISimulationLOD2D::get_staggered_interval(int64_t p_agent_id, real_t p_distance, real_t p_near_distance, real_t p_far_distance, bool p_urgent) const {
 	const real_t interval = get_interval(p_distance, p_near_distance, p_far_distance, p_urgent);
 	// Never stagger urgent/near AI; invalid identifiers must not throttle AI.
@@ -127,4 +144,5 @@ void AISimulationLOD2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_interval", "distance", "near_distance", "far_distance", "urgent"), &AISimulationLOD2D::get_interval, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_hysteretic_interval", "distance", "near_distance", "far_distance", "previous_interval", "hysteresis", "urgent"), &AISimulationLOD2D::get_hysteretic_interval, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_staggered_interval", "agent_id", "distance", "near_distance", "far_distance", "urgent"), &AISimulationLOD2D::get_staggered_interval, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("plan_passive_scan", "agent_id", "distance", "near_distance", "far_distance", "previous_interval", "hysteresis", "already_staggered", "urgent"), &AISimulationLOD2D::plan_passive_scan, DEFVAL(false));
 }
