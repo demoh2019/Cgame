@@ -121,6 +121,8 @@ public:
 	Transform2D get_instance_transform_2d(int p_instance) const;
 
 	void set_instance_color(int p_instance, const Color &p_color);
+	// Validate every sparse instance color update before modifying the buffer.
+	bool set_instance_colors_batch(const PackedInt32Array &p_indices, const PackedColorArray &p_colors);
 	Color get_instance_color(int p_instance) const;
 
 	void set_instance_custom_data(int p_instance, const Color &p_custom_data);
