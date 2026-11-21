@@ -11,6 +11,7 @@ const MAX_STEP := 0.16
 var _elapsed: Dictionary = {}
 var _importance: Dictionary = {}
 var _rate_scale: Dictionary = {} # Frequency, not scheduling importance.
+var _enabled: Dictionary = {} # True by default; transitions discard delayed cosmetic work.
 var _estimates: Dictionary = {}
 var _overdue: Dictionary = {}
 var _reserved_estimate_us: int = 0
@@ -67,6 +68,8 @@ func begin_frame(delta: float, quality: int) -> void:
 				break
 			for offset in range(LANES.size()):
 				var lane: String = LANES[(_tie_start + offset) % LANES.size()]
+				if not bool(_enabled.get(lane, true)):
+					continue
 				if _reserved.has(lane):
 					continue
 				var due: float = minf(float(_elapsed.get(lane, 0.0)) + delta, MAX_STEP)
@@ -92,6 +95,8 @@ func begin_frame(delta: float, quality: int) -> void:
 		_reserved_estimate_us = mini(1000000000,
 			_reserved_estimate_us + int(_estimates.get(pick, 0)))
 	for lane in LANES:
+		if not bool(_enabled.get(lane, true)):
+			continue
 		var due: float = minf(float(_elapsed.get(lane, 0.0)) + delta, MAX_STEP)
 		var interval: float = 1.0 / (HZ_BY_QUALITY[_quality] * float(_rate_scale.get(lane, 1.0)))
 		if due + 0.000001 >= interval and not _reserved.has(lane):
@@ -103,6 +108,8 @@ func begin_frame(delta: float, quality: int) -> void:
 ## always takes effect immediately even if the per-frame budget is exhausted.
 func consume(lane: String, delta: float, force: bool = false) -> float:
 	if not LANES.has(lane) or not is_finite(delta) or delta <= 0.0:
+		return 0.0
+	if not bool(_enabled.get(lane, true)) and not force:
 		return 0.0
 	var elapsed: float = minf(float(_elapsed.get(lane, 0.0)) + delta, MAX_STEP)
 	if force or _quality_changed:
@@ -196,6 +203,26 @@ func set_lane_rate_scale(lane: String, scale: float) -> bool:
 		return false
 	_rate_scale[lane] = scale
 	return true
+
+
+## A paused lane neither reserves CPU slots nor accumulates time debt.
+## Forced visibility cleanup still runs even when a lane is paused.
+func set_lane_enabled(lane: String, enabled: bool) -> bool:
+	if not LANES.has(lane):
+		return false
+	if bool(_enabled.get(lane, true)) == enabled:
+		return true
+	_enabled[lane] = enabled
+	_elapsed.erase(lane)
+	_overdue.erase(lane)
+	if _reserved.has(lane):
+		_reserved.erase(lane)
+		_reserved_estimate_us = maxi(0, _reserved_estimate_us - int(_estimates.get(lane, 0)))
+	return true
+
+
+func is_lane_enabled(lane: String) -> bool:
+	return LANES.has(lane) and bool(_enabled.get(lane, true))
 
 
 func get_lane_rate_scale(lane: String) -> float:

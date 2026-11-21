@@ -272,4 +272,40 @@ TEST_CASE("[FrameUpdateBudget] Faster lanes tick more frequently with bounded CP
 	CHECK(hidden_updates >= 25); // Even de-prioritized lanes make progress.
 }
 
+TEST_CASE("[FrameUpdateBudget] Paused lanes skip budget, preserve cost, and resume without debt") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane("ambient"));
+	CHECK(b->register_lane("other"));
+	CHECK(b->is_lane_enabled("ambient"));
+	CHECK_FALSE(b->is_lane_enabled("missing"));
+	CHECK_FALSE(b->set_lane_enabled("missing", false));
+	CHECK(b->record_cost("ambient", 300));
+	CHECK(b->set_lane_enabled("ambient", false));
+	CHECK(b->set_lane_enabled("ambient", false)); // Idempotence.
+	CHECK_FALSE(b->is_lane_enabled("ambient"));
+	b->begin_frame(0.1, 0);
+	CHECK(b->consume("ambient", 0.1) == 0.0); // Even a quality refresh cannot run it.
+	CHECK(b->consume("other", 0.1) > 0.0);
+	CHECK(b->consume("ambient", 0.1, true) > 0.0); // Cleanup is allowed.
+	for (int frame = 0; frame < 120; frame++) {
+		b->begin_frame(0.1, 0);
+		CHECK(b->consume("ambient", 0.1) == 0.0);
+		CHECK(b->consume("other", 0.1) > 0.0);
+		CHECK(b->last_frame_counts().x == 1);
+	}
+	CHECK(b->get_lane_estimated_cost_us("ambient") == 300);
+	b->reset();
+	CHECK_FALSE(b->is_lane_enabled("ambient")); // Reset retains configuration.
+	CHECK(b->set_lane_enabled("ambient", true));
+	CHECK(b->set_lane_enabled("other", false)); // Keep one eligible lane for the resume assertion.
+	b->begin_frame(0.01, 0);
+	CHECK(b->consume("ambient", 0.01) > 0.0); // Reset quality refresh.
+	b->begin_frame(0.01, 0);
+	CHECK(b->consume("ambient", 0.01) == 0.0); // No 120-frame debt.
+	b->begin_frame(0.1, 0);
+	CHECK(b->consume("ambient", 0.1) > 0.0);
+	CHECK(b->get_lane_estimated_cost_us("ambient") == 300);
+}
+
 } // namespace TestFrameUpdateBudget

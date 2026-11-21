@@ -59,6 +59,11 @@ class TestFrameBudgetContract(unittest.TestCase):
         self.assertIn("1.0 / (rates[quality] * lane.rate_scale)", src)
         self.assertIn("1.0 / (rates[quality] * lanes[i].rate_scale)", src)
         self.assertIn("1.0 / (rates[MAX(quality, 0)] * lane.rate_scale)", src)
+        self.assertIn("bool enabled = true", header)
+        self.assertIn("set_lane_enabled", src)
+        self.assertIn("!lane.enabled && !p_force", src)
+        self.assertIn("!lanes[i].enabled", src)
+        self.assertIn("is_lane_enabled", header)
         self.assertNotIn("SceneTree", src)
         self.assertNotIn("Thread::", src)
 
@@ -96,6 +101,11 @@ class TestFrameBudgetContract(unittest.TestCase):
         self.assertIn("_ambient_budget.call(\"set_lane_rate_scale\"", main)
         self.assertIn("native/script significance and rate parity", tests)
         self.assertIn("soft CPU time budget and native compatibility", tests)
+        self.assertIn("func set_lane_enabled", fallback)
+        self.assertIn("func is_lane_enabled", fallback)
+        self.assertIn('_ambient_lane_gates_supported', main)
+        self.assertIn('not underground)', main)
+        self.assertIn("native/script pause parity", tests)
 
 
 if __name__ == "__main__":

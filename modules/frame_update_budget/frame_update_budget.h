@@ -20,6 +20,7 @@ class FrameUpdateBudget : public RefCounted {
 
 	struct Lane {
 		StringName name;
+		bool enabled = true; // Disabled lanes never reserve time or accrue delayed work.
 		double elapsed = 0.0;
 		double importance = 1.0;
 		double rate_scale = 1.0; // Frequency multiplier; 1.0 keeps the tier baseline.
@@ -58,6 +59,8 @@ protected:
 public:
 	bool register_lane(const StringName &p_lane);
 	bool unregister_lane(const StringName &p_lane);
+	bool set_lane_enabled(const StringName &p_lane, bool p_enabled);
+	bool is_lane_enabled(const StringName &p_lane) const;
 	int get_lane_count() const { return lanes.size(); }
 	bool configure(const PackedFloat64Array &p_rates, const PackedInt32Array &p_slots);
 	void begin_frame(double p_delta, int p_quality);

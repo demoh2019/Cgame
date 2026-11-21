@@ -311,3 +311,50 @@ func run(t) -> void:
 		"sunlit insects update more frequently than daytime bats")
 	for lane in AmbientTickBudget.LANES:
 		t.check(int(rate_counts[lane]) >= 20, "%s still gets regular updates" % lane)
+
+	# Actual client tunnel transition: each lane must hide once, then stop
+	# spending CPU slots until the character resurfaces.
+	t.current = "suspended underground ambient lanes with native/fallback parity"
+	var gated := AmbientTickBudget.new()
+	var native_gated: Object = null
+	if ClassDB.class_exists("FrameUpdateBudget"):
+		var candidate_gated: Object = ClassDB.instantiate("FrameUpdateBudget")
+		if candidate_gated != null and candidate_gated.has_method("set_lane_enabled"):
+			native_gated = candidate_gated
+			for lane in AmbientTickBudget.LANES:
+				t.check(bool(native_gated.call("register_lane", StringName(lane))),
+					"native gated lane %s" % lane)
+	t.check(not gated.set_lane_enabled("nonexistent", false), "unknown gate rejected")
+	t.check(not gated.is_lane_enabled("nonexistent"), "unknown gate is disabled")
+	for frame in range(144):
+		var underground_now: bool = (frame >= 8 and frame < 64) or (frame >= 90 and frame < 126)
+		var transition: bool = frame == 8 or frame == 64 or frame == 90 or frame == 126
+		if transition:
+			for lane in AmbientTickBudget.LANES:
+				t.check(gated.set_lane_enabled(lane, not underground_now),
+					"script underground gate changes %s" % lane)
+				if native_gated != null:
+					t.check(bool(native_gated.call("set_lane_enabled", StringName(lane), not underground_now)),
+						"native underground gate changes %s" % lane)
+		gated.begin_frame(1.0 / 60.0, 0)
+		if native_gated != null:
+			native_gated.call("begin_frame", 1.0 / 60.0, 0)
+		for lane in AmbientTickBudget.LANES:
+			var script_delta: float = gated.consume(lane, 1.0 / 60.0, transition)
+			if underground_now and not transition:
+				t.eq(script_delta, 0.0, "paused cosmetics skip frame %d lane %s" % [frame, lane])
+			if transition:
+				t.check(script_delta > 0.0, "transition cleans up or refreshes %s" % lane)
+			if native_gated != null:
+				t.near(float(native_gated.call("consume", StringName(lane), 1.0 / 60.0, transition)),
+					script_delta, 0.0000001, "native/script pause parity frame %d lane %s" % [frame, lane])
+		if underground_now and not transition:
+			t.eq(gated.last_frame_counts().x, 0, "disabled lanes consume no CPU slots")
+			t.eq(gated.get_reserved_estimated_cost_us(), 0, "disabled lanes reserve no estimated cost")
+		if native_gated != null:
+			var native_counts: Vector2i = native_gated.call("last_frame_counts")
+			t.eq(native_counts.x, gated.last_frame_counts().x,
+				"native/script granted lane count agrees")
+	gated.set_lane_enabled("dragonflies", false)
+	gated.reset()
+	t.check(not gated.is_lane_enabled("dragonflies"), "reset preserves paused state")
