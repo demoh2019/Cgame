@@ -89,6 +89,15 @@ public:
 			const PackedVector2Array &p_targets, const PackedInt64Array &p_target_ids,
 			double p_radius, double p_cell_size) const;
 
+	// Batched 3D vertical-cylinder presence query, projected into an XZ hash.
+	// Returns bounded counts per source (not actor identities): useful for
+	// alarms and crowd significance without exposing game targets to clients.
+	// A zero target cohort gives one zero per valid source. Malformed inputs
+	// yield an empty array; max 4096 sources, 8192 targets, 64 hits/source.
+	PackedInt32Array query_cylinder_counts_batch(const PackedVector3Array &p_centers,
+			const PackedVector3Array &p_targets, double p_radius,
+			double p_max_height, int p_max_count) const;
+
 	// Short-horizon Mass-style steering prediction, using desired velocities
 	// and the existing bounded nearest-neighbor broadphase on projected sites.
 	// Only read-only directions are returned, never positions or gameplay hits.
