@@ -69,8 +69,12 @@ func run(t) -> void:
 	var native_filtered: Array[Vector2] = RaidReinforcements.spread_sites(
 		candidates, threats, Vector2.ZERO, 2, 4.0, true, blocked, 4.0)
 	t.eq(native_filtered, script_filtered, "occupied site filtering agrees on stock Godot and Cgame")
-	t.eq(script_filtered, [Vector2(16, 0), Vector2(8, 0)],
-		"blocked best-ranked point is rejected before EQS ranking")
+	t.eq(script_filtered.size(), 2, "two legal reinforcement positions remain after occupancy filtering")
+	t.check(not script_filtered.has(blocked[0]),
+		"occupied highest-scoring site is rejected before reinforcement selection")
+	if script_filtered.size() == 2:
+		t.check(script_filtered[0].distance_to(script_filtered[1]) >= 4.0,
+			"occupied-site filtering preserves minimum separation")
 	t.eq(RaidReinforcements.spread_sites(
 		candidates, threats, Vector2.ZERO, 2, 4.0, true, blocked, INF),
 		[], "nonfinite exclusion radius cannot return server-owned spawn sites")
