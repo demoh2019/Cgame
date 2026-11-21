@@ -462,8 +462,58 @@ class VisualQualityPackageTests(unittest.TestCase):
                      'test_equipment_persistence.gd'):
             self.assertTrue((ROOT / 'tests' / name).is_file())
 
+    def test_v17_combat_component_has_validated_team_damage_and_statuses(self):
+        combat = (ROOT / 'addons/visual_quality/combat_component.gd').read_text()
+        for token in ('class_name WorldCombatant3D', 'compute_damage',
+                      'TEAM_PLAYER', 'TEAM_HOSTILE', 'armor', 'hit_immunity_seconds',
+                      'can_receive_hit', 'receive_damage', 'apply_stun',
+                      'stun_changed.emit', 'damage_taken.emit', 'defeated.emit',
+                      'restore_health', '_defeat_reported'):
+            self.assertIn(token, combat)
+        self.assertLess(combat.index('if not is_finite(raw_damage)'), combat.index('var actual: float = compute_damage'))
+
+    def test_v17_hostile_sentry_attacks_and_sleeps_with_ai_lod(self):
+        sentry = (ROOT / 'addons/visual_quality/hostile_sentry.gd').read_text()
+        for token in ('class_name WorldHostileSentry3D', 'extends StaticBody3D',
+                      'SentryCombatant', 'WorldCombatant3D.TEAM_HOSTILE',
+                      'attack_interval', 'player_combatant.receive_damage',
+                      'sentry_defeated.emit', 'state_changed.emit',
+                      'save_sentry_state', 'load_sentry_state',
+                      'combatant.set_physics_process(enabled)'):
+            self.assertIn(token, sentry)
+        self.assertLess(sentry.index('if not ai_enabled'), sentry.index('player_combatant.receive_damage'))
+
+    def test_v17_combat_director_uses_bounded_loaded_cell_queries(self):
+        director = (ROOT / 'addons/visual_quality/combat_controller.gd').read_text()
+        for token in ('class_name WorldCombatDirector3D', 'choose_facing_target',
+                      'get_active_cell(Vector2i(x, z))', 'get_hostile_sentry',
+                      'strike_cooldown', 'pulse_cooldown', 'try_spend_stamina',
+                      'receive_damage(melee_damage', 'receive_damage(pulse_damage',
+                      'max_pulse_targets', 'clampi(ceili(radius / streamer.cell_size) + 1, 1, 3)'):
+            self.assertIn(token, director)
+        self.assertNotIn('get_nodes_in_group(', director)
+
+    def test_v17_combat_is_live_and_persistent_in_game(self):
+        forest = (ROOT / 'world/forest_cell.gd').read_text()
+        demo = (ROOT / 'demo.gd').read_text()
+        character = (ROOT / 'addons/visual_quality/character_controller.gd').read_text()
+        for token in ('Sentry.new()', 'get_hostile_sentry()', 'save_sentry_state()',
+                      'load_sentry_state(state)', 'set_ai_enabled(ai_enabled)',
+                      'sentry_defeated.emit', 'resource_awarded.emit("forest_essence", "sentry:'):
+            self.assertIn(token, forest)
+        for token in ('Combatant.new()', 'CombatDirector.new()',
+                      'player_combatant.defeated.connect',
+                      'combat_director.streamer = streamer',
+                      'KEY_M', 'KEY_N', 'KEY_BACKSPACE',
+                      '_respawn_player()', 'WorldCombatFeedback'):
+            self.assertIn(token, demo)
+        self.assertIn('attributes.health <= 0.0', character)
+        for filename in ('test_combat_component.gd', 'test_combat_selection.gd',
+                         'test_hostile_sentry.gd', 'test_combat_streaming_runtime.gd'):
+            self.assertTrue((ROOT / 'tests' / filename).is_file())
+
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd', 'test_world_telemetry.gd', 'test_world_budget_governor.gd', 'test_streaming_planner.gd', 'test_streaming_cell_profiler.gd', 'test_predictive_streaming_runtime.gd', 'test_world_interaction.gd', 'test_world_interaction_runtime.gd', 'test_inventory_component.gd', 'test_inventory_crafting.gd', 'test_inventory_persistence.gd', 'test_inventory_gameplay.gd', 'test_attributes.gd', 'test_abilities.gd', 'test_equipment.gd', 'test_equipment_persistence.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd', 'test_world_telemetry.gd', 'test_world_budget_governor.gd', 'test_streaming_planner.gd', 'test_streaming_cell_profiler.gd', 'test_predictive_streaming_runtime.gd', 'test_world_interaction.gd', 'test_world_interaction_runtime.gd', 'test_inventory_component.gd', 'test_inventory_crafting.gd', 'test_inventory_persistence.gd', 'test_inventory_gameplay.gd', 'test_attributes.gd', 'test_abilities.gd', 'test_equipment.gd', 'test_equipment_persistence.gd', 'test_combat_component.gd', 'test_combat_selection.gd', 'test_hostile_sentry.gd', 'test_combat_streaming_runtime.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
