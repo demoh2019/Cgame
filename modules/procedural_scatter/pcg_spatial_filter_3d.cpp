@@ -23,6 +23,8 @@ void PCGSpatialFilter3D::_bind_methods() {
 			&PCGSpatialFilter3D::filter_indices_excluding, DEFVAL(MAX_SELECTED));
 	ClassDB::bind_method(D_METHOD("filter_indices_excluding_volumes", "candidates", "exclusion_centers", "exclusion_radii", "box_mins", "box_maxs", "min_spacing", "max_selected"),
 			&PCGSpatialFilter3D::filter_indices_excluding_volumes, DEFVAL(MAX_SELECTED));
+	ClassDB::bind_method(D_METHOD("filter_indices_excluding_oriented_volumes", "candidates", "exclusion_centers", "exclusion_radii", "box_mins", "box_maxs", "oriented_centers", "oriented_half_extents", "oriented_yaws", "min_spacing", "max_selected"),
+			&PCGSpatialFilter3D::filter_indices_excluding_oriented_volumes, DEFVAL(MAX_SELECTED));
 	ClassDB::bind_method(D_METHOD("filter_indices_density", "candidates", "densities", "stable_ids", "seed", "max_selected"),
 			&PCGSpatialFilter3D::filter_indices_density, DEFVAL(MAX_SELECTED));
 }
@@ -336,6 +338,107 @@ PackedInt32Array PCGSpatialFilter3D::filter_indices_excluding_volumes(
 	// cell. O(N * boxes + N * spheres + N) expected, bounded to 128 each.
 	const PackedInt32Array local = filter_indices_excluding(not_in_boxes,
 			p_exclusion_centers, p_exclusion_radii, p_min_spacing, p_max_selected);
+	PackedInt32Array result;
+	result.resize(local.size());
+	for (int i = 0; i < local.size(); ++i) {
+		result.set(i, original_indices[local[i]]);
+	}
+	return result;
+}
+
+// Oriented Y-axis box exclusions, then original mixed sphere/AABB selection.
+// Preserves original candidate ordering, stable indices and minimum spacing.
+// No scene, physics or RNG side effects. All inputs validated before filtering.
+PackedInt32Array PCGSpatialFilter3D::filter_indices_excluding_oriented_volumes(
+		const PackedVector3Array &p_candidates,
+		const PackedVector3Array &p_exclusion_centers,
+		const PackedFloat64Array &p_exclusion_radii,
+		const PackedVector3Array &p_box_mins,
+		const PackedVector3Array &p_box_maxs,
+		const PackedVector3Array &p_oriented_centers,
+		const PackedVector3Array &p_oriented_half_extents,
+		const PackedFloat64Array &p_oriented_yaws,
+		double p_min_spacing, int p_max_selected) const {
+	PackedInt32Array empty;
+	const int obb_count = p_oriented_centers.size();
+	if (obb_count != p_oriented_half_extents.size() ||
+			obb_count != p_oriented_yaws.size() ||
+			obb_count > MAX_EXCLUSION_ZONES ||
+			p_candidates.size() > MAX_CANDIDATES ||
+			p_max_selected < 0 || p_max_selected > MAX_SELECTED ||
+			!Math::is_finite(p_min_spacing) || p_min_spacing < 0.0 ||
+			p_min_spacing > MAX_SPACING ||
+			(p_min_spacing > 0.0 && p_min_spacing < MIN_SPACING)) {
+		return empty;
+	}
+	// Fast path is the exact legacy implementation, including its validation.
+	if (obb_count == 0) {
+		return filter_indices_excluding_volumes(p_candidates, p_exclusion_centers,
+				p_exclusion_radii, p_box_mins, p_box_maxs, p_min_spacing, p_max_selected);
+	}
+	Vector<double> cos_yaws;
+	Vector<double> sin_yaws;
+	cos_yaws.resize(obb_count);
+	sin_yaws.resize(obb_count);
+	for (int b = 0; b < obb_count; ++b) {
+		const Vector3 center = p_oriented_centers[b];
+		const Vector3 extents = p_oriented_half_extents[b];
+		const double yaw = p_oriented_yaws[b];
+		if (!center.is_finite() || !extents.is_finite() || !Math::is_finite(yaw) ||
+				Math::abs(yaw) > Math::deg_to_rad(360.0) ||
+				Math::abs(double(center.x)) > MAX_COORDINATE ||
+				Math::abs(double(center.y)) > MAX_COORDINATE ||
+				Math::abs(double(center.z)) > MAX_COORDINATE ||
+				extents.x < 0.0 || extents.y < 0.0 || extents.z < 0.0 ||
+				double(extents.x) > MAX_SPACING ||
+				double(extents.y) > MAX_SPACING ||
+				double(extents.z) > MAX_SPACING) {
+			return empty;
+		}
+		cos_yaws.write[b] = Math::cos(yaw);
+		sin_yaws.write[b] = Math::sin(yaw);
+	}
+	// Invalid candidates are rejected even when inside one of the zones.
+	for (const Vector3 &point : p_candidates) {
+		if (!point.is_finite() ||
+				Math::abs(double(point.x)) > MAX_COORDINATE ||
+				Math::abs(double(point.y)) > MAX_COORDINATE ||
+				Math::abs(double(point.z)) > MAX_COORDINATE) {
+			return empty;
+		}
+	}
+	PackedVector3Array not_in_oriented_boxes;
+	PackedInt32Array original_indices;
+	for (int i = 0; i < p_candidates.size(); ++i) {
+		const Vector3 point = p_candidates[i];
+		bool blocked = false;
+		for (int b = 0; b < obb_count; ++b) {
+			const Vector3 delta = point - p_oriented_centers[b];
+			const Vector3 extents = p_oriented_half_extents[b];
+			// Godot's Y-axis yaw maps local X to world -Z.
+			// Inverse yaw: x_local = cos(yaw)*dx - sin(yaw)*dz;
+			//              z_local = sin(yaw)*dx + cos(yaw)*dz.
+			const double local_x = cos_yaws[b] * double(delta.x) -
+					sin_yaws[b] * double(delta.z);
+			const double local_z = sin_yaws[b] * double(delta.x) +
+					cos_yaws[b] * double(delta.z);
+			if (Math::abs(local_x) <= double(extents.x) &&
+					Math::abs(double(delta.y)) <= double(extents.y) &&
+					Math::abs(local_z) <= double(extents.z)) {
+				blocked = true;
+				break;
+			}
+		}
+		if (!blocked) {
+			not_in_oriented_boxes.push_back(point);
+			original_indices.push_back(i);
+		}
+	}
+	// Apply mixed AABB/sphere exclusions and spatial thinning to the
+	// surviving points. OBB-rejected points never reserve spacing cells.
+	const PackedInt32Array local = filter_indices_excluding_volumes(
+			not_in_oriented_boxes, p_exclusion_centers, p_exclusion_radii,
+			p_box_mins, p_box_maxs, p_min_spacing, p_max_selected);
 	PackedInt32Array result;
 	result.resize(local.size());
 	for (int i = 0; i < local.size(); ++i) {
