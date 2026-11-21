@@ -2,6 +2,7 @@ extends RefCounted
 ## Native/stock-Godot UE-style simulated proxy yaw smoothing, no prediction.
 const Smooth = preload("res://scripts/client/network_snapshot_smoothing.gd")
 const EntityView = preload("res://scripts/client/entity_view.gd")
+const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 
 
 func run(t) -> void:
@@ -112,4 +113,24 @@ func run(t) -> void:
 		"teleports continue to reset history instead of blending positions")
 	t.check(entity_source.contains("if _render_time >= float(older[0]):"),
 		"missing packets never trigger extrapolation")
+
+	# Execute the real remote-actor _sample() path with four replicated
+	# snapshots instead of merely inspecting the source string.
+	t.current = "live EntityView interpolates replicated player/zombie turns"
+	var prior_quality: int = GraphicsQuality.level()
+	GraphicsQuality.set_level(2, false)
+	view._history["player:37"] = [previous, older, newer, following]
+	view._history["zombie:88"] = [previous, older, newer, following]
+	view._render_time = 1.05
+	var player_sample: Array = view._sample("player:37")
+	var zombie_sample: Array = view._sample("zombie:88")
+	t.near(float(player_sample[1]), refined, 0.000001,
+		"networked player's real render yaw uses angular Hermite")
+	t.near(float(zombie_sample[1]), refined, 0.000001,
+		"networked infected's real render yaw uses the same policy")
+	GraphicsQuality.set_level(0, false)
+	var cheap_sample: Array = view._sample("player:37")
+	t.near(float(cheap_sample[1]), 0.5, 0.000001,
+		"Performance tier uses cheap linear yaw on real game history")
+	GraphicsQuality.set_level(prior_quality, false)
 	view.free()
