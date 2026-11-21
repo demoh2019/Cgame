@@ -336,17 +336,26 @@ void WorldStreamer::_forget_dead_chunks() {
 // oldest entry deterministically whenever the cache grows or shrinks.
 void WorldStreamer::_trim_cached_chunks() {
 	while (int(cached_chunks.size()) > max_cached_chunks) {
+		// Protect cells the current focus/nearby source is requesting. Without
+		// this, unloading the current chunk first would evict the previous
+		// destination immediately even on a one-slot cache backtrack.
+		Vector3 focus_position_local;
+		const bool have_focus = _get_focus_position(focus_position_local);
 		bool found = false;
+		bool oldest_requested = true;
 		Vector3i oldest_cell;
 		uint64_t oldest_age = 0;
 		for (const KeyValue<Vector3i, CachedChunk> &entry : cached_chunks) {
 			const Vector3i &cell = entry.key;
-			if (!found || entry.value.age < oldest_age ||
-					(entry.value.age == oldest_age && (cell.x < oldest_cell.x ||
-							(cell.x == oldest_cell.x && (cell.y < oldest_cell.y ||
-								(cell.y == oldest_cell.y && cell.z < oldest_cell.z)))))) {
+			const bool requested = have_focus && _cell_requested(focus_position_local, cell);
+			if (!found || (oldest_requested && !requested) ||
+					(requested == oldest_requested && (entry.value.age < oldest_age ||
+							(entry.value.age == oldest_age && (cell.x < oldest_cell.x ||
+								(cell.x == oldest_cell.x && (cell.y < oldest_cell.y ||
+										(cell.y == oldest_cell.y && cell.z < oldest_cell.z)))))))) {
 				oldest_cell = cell;
 				oldest_age = entry.value.age;
+				oldest_requested = requested;
 				found = true;
 			}
 		}
