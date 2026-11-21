@@ -22,6 +22,7 @@ class FrameUpdateBudget : public RefCounted {
 		StringName name;
 		double elapsed = 0.0;
 		double importance = 1.0;
+		double rate_scale = 1.0; // Frequency multiplier; 1.0 keeps the tier baseline.
 		int64_t estimated_cost_us = 0;
 		int overdue_frames = 0;
 	};
@@ -64,6 +65,9 @@ public:
 	int64_t get_frame_time_budget_us() const { return frame_time_budget_us; }
 	bool record_cost(const StringName &p_lane, int64_t p_elapsed_us);
 	bool set_lane_importance(const StringName &p_lane, double p_importance);
+	// Distinct from importance (scheduling priority): sets when a lane is due.
+	bool set_lane_rate_scale(const StringName &p_lane, double p_scale);
+	double get_lane_rate_scale(const StringName &p_lane) const;
 	double get_lane_importance(const StringName &p_lane) const;
 	int64_t get_lane_estimated_cost_us(const StringName &p_lane) const;
 	int64_t get_reserved_estimated_cost_us() const { return reserved_estimated_cost_us; }

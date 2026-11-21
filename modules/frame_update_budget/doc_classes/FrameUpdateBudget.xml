@@ -37,6 +37,17 @@
 			<description>Sets the soft main-thread CPU budget, 0–1000000 microseconds. Zero disables the time cap. Returns false without changing the setting for invalid input.</description>
 		</method>
 		<method name="get_frame_time_budget_us" qualifiers="const"><return type="int" /></method>
+		<method name="set_lane_rate_scale">
+			<return type="bool" />
+			<param index="0" name="lane" type="StringName" />
+			<param index="1" name="scale" type="float" />
+			<description>Sets a lane's relative update frequency, 0.75–2.0 inclusive. A value of 1.0 uses the current quality tier's default rate. Unlike [method set_lane_importance], this changes when the lane becomes eligible, not its priority among eligible lanes. Invalid/unknown/nonfinite inputs return false without changing state. Changes take effect on the next [method begin_frame]; they never bypass the frame time or slot limits.</description>
+		</method>
+		<method name="get_lane_rate_scale" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="lane" type="StringName" />
+			<description>Returns the lane's rate multiplier (default 1.0), or -1.0 for an unknown lane. Survives [method reset].</description>
+		</method>
 		<method name="set_lane_importance">
 			<return type="bool" />
 			<param index="0" name="lane" type="StringName" />

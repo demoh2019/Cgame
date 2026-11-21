@@ -221,4 +221,55 @@ TEST_CASE("[FrameUpdateBudget] Learned costs reserve affordable lanes first") {
 	CHECK(b->get_lane_estimated_cost_us("heavy") == 1500);
 }
 
+
+TEST_CASE("[FrameUpdateBudget] Lane rates reject invalid values and preserve importance") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane(StringName("visible")));
+	CHECK(b->get_lane_rate_scale(StringName("visible")) == 1.0);
+	CHECK(b->set_lane_importance(StringName("visible"), 3.0));
+	CHECK(b->set_lane_rate_scale(StringName("visible"), 1.5));
+	CHECK(b->get_lane_importance(StringName("visible")) == 3.0);
+	CHECK(b->get_lane_rate_scale(StringName("visible")) == 1.5);
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("visible"), 0.5));
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("visible"), 2.1));
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("visible"), std::numeric_limits<double>::infinity()));
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("visible"), std::numeric_limits<double>::quiet_NaN()));
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("missing"), 1.0));
+	CHECK(b->get_lane_rate_scale(StringName("missing")) == -1.0);
+	CHECK(b->get_lane_rate_scale(StringName("visible")) == 1.5);
+	b->reset();
+	CHECK(b->get_lane_rate_scale(StringName("visible")) == 1.5);
+	CHECK(b->unregister_lane(StringName("visible")));
+	CHECK(b->get_lane_rate_scale(StringName("visible")) == -1.0);
+}
+
+TEST_CASE("[FrameUpdateBudget] Faster lanes tick more frequently with bounded CPU slots") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane(StringName("visible")));
+	CHECK(b->register_lane(StringName("hidden")));
+	CHECK(b->set_lane_rate_scale(StringName("visible"), 1.5));
+	CHECK(b->set_lane_rate_scale(StringName("hidden"), 0.75));
+	b->begin_frame(1.0 / 60.0, 0);
+	CHECK(b->consume(StringName("visible"), 1.0 / 60.0) > 0.0);
+	CHECK(b->consume(StringName("hidden"), 1.0 / 60.0) > 0.0);
+	int visible_updates = 0;
+	int hidden_updates = 0;
+	for (int frame = 0; frame < 240; frame++) {
+		b->begin_frame(1.0 / 60.0, 0);
+		// Fixed call order puts the less relevant system first.
+		if (b->consume(StringName("hidden"), 1.0 / 60.0) > 0.0) {
+			hidden_updates++;
+		}
+		if (b->consume(StringName("visible"), 1.0 / 60.0) > 0.0) {
+			visible_updates++;
+		}
+		CHECK(b->last_frame_counts().x <= 1); // One low-quality update per frame.
+	}
+	CHECK(visible_updates > hidden_updates);
+	CHECK(visible_updates >= 50);
+	CHECK(hidden_updates >= 25); // Even de-prioritized lanes make progress.
+}
+
 } // namespace TestFrameUpdateBudget
