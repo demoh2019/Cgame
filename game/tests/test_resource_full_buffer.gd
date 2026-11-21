@@ -22,7 +22,7 @@ func run(t) -> void:
 	t.eq(mm.instance_count, 12, "no allocation or removal")
 	t.eq(mm.visible_instance_count, -1, "visible range unchanged")
 	for i in 12:
-		t.eq(mm.get_instance_transform(i), transforms[i], "instance transform restored from packed data")
+		t.check(mm.get_instance_transform(i).is_equal_approx(transforms[i]), "instance transform preserved after 32-bit GPU packing")
 		t.eq(mm.get_instance_color(i), colors[i], "instance color preserved from packed data")
 	# The renderer buffer is row-major, not the column-major Basis view.
 	t.near(buffer[3 * 16 + 3], 3.0, 0.00001, "rotation-safe transform X origin")
