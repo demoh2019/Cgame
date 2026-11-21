@@ -81,7 +81,9 @@ jobs:
             res://tests/test_combat_component.gd \
             res://tests/test_combat_selection.gd \
             res://tests/test_hostile_sentry.gd \
-            res://tests/test_combat_streaming_runtime.gd; do
+            res://tests/test_combat_streaming_runtime.gd \
+            res://tests/test_combat_visibility.gd \
+            res://tests/test_combat_visibility_runtime.gd; do
             /tmp/godot-bin/Godot_v4.6.3-stable_linux.x86_64 --headless --path . --script "$script"
           done
 
