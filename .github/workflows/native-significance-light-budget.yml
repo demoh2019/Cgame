@@ -67,18 +67,7 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 180s "$BIN" --headless --path game --script res://tests/run_fx_scalability_budget.gd 2>&1 | tee significance-fx-game.log
-          grep -E '^FX SCALABILITY TOTAL: [0-9]+ checks, 0 failures
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: significance-light-budget-logs
-          if-no-files-found: ignore
-          path: |
-            significance-native.log
-            significance-import.log
-            significance-game.log
-            significance-fx-game.log
- significance-fx-game.log
+          grep -E '^FX SCALABILITY TOTAL: [0-9]+ checks, 0 failures$' significance-fx-game.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' significance-fx-game.log; then exit 1; fi
       - name: Store regression logs
         if: always()
@@ -90,3 +79,4 @@ jobs:
             significance-native.log
             significance-import.log
             significance-game.log
+            significance-fx-game.log
