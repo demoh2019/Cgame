@@ -32,12 +32,12 @@ TEST_CASE("[TextureStreaming] Unreal MemoryMargin-style safety pool math") {
 }
 
 TEST_CASE("[TextureStreaming] reserve calculations never overflow or overreserve") {
-	constexpr uint64_t HUGE = UINT64_MAX;
+	constexpr uint64_t HUGE_BYTES = UINT64_MAX;
 	for (int pct = -10; pct <= 110; ++pct) {
 		for (uint64_t total : { uint64_t(0), uint64_t(1), uint64_t(19),
 				uint64_t(99), uint64_t(100), uint64_t(101),
 				uint64_t(1024ull * 1024ull), uint64_t(65535ull * 1024ull * 1024ull),
-				HUGE - 1, HUGE }) {
+				HUGE_BYTES - 1, HUGE_BYTES }) {
 			const uint64_t reserved = reserve_bytes(total, pct);
 			const uint64_t usable = usable_budget_bytes(total, pct);
 			CHECK(reserved <= total);

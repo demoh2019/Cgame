@@ -1257,10 +1257,10 @@ TEST_CASE("[GameplayFX] CueQueue resilient lifecycle survives low-priority visua
 	CHECK(cue->get_evicted_transient_count() == 2);
 	const Array events = cue->take_events(2);
 	REQUIRE(events.size() == 2);
-	CHECK(String(events[0]["event"]) == "started");
-	CHECK(String(events[1]["event"]) == "started");
-	CHECK(int(events[0]["priority"]) == 2);
-	CHECK(int(events[1]["priority"]) == 2);
+	CHECK(String(Dictionary(events[0])["event"]) == "started");
+	CHECK(String(Dictionary(events[1])["event"]) == "started");
+	CHECK(int(Dictionary(events[0])["priority"]) == 2);
+	CHECK(int(Dictionary(events[1])["priority"]) == 2);
 	CHECK(cue->emit_cue("GameplayCue.Ambient.Refill1", 1.0, 0));
 	CHECK(cue->emit_cue("GameplayCue.Ambient.Refill2", 1.0, 0));
 	CHECK(cue->replace_active_resilient(Dictionary(), 2));
@@ -1269,8 +1269,8 @@ TEST_CASE("[GameplayFX] CueQueue resilient lifecycle survives low-priority visua
 	CHECK(cue->get_evicted_transient_count() == 4);
 	const Array stopped = cue->take_events(2);
 	REQUIRE(stopped.size() == 2);
-	CHECK(String(stopped[0]["event"]) == "stopped");
-	CHECK(String(stopped[1]["event"]) == "stopped");
+	CHECK(String(Dictionary(stopped[0])["event"]) == "stopped");
+	CHECK(String(Dictionary(stopped[1])["event"]) == "stopped");
 }
 
 TEST_CASE("[GameplayFX] CueQueue resilient preflight rolls back when not enough lower-priority victims") {
