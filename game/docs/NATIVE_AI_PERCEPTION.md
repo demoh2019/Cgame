@@ -10,6 +10,20 @@ The authoritative zombie simulation in `game/scripts/shared/zombie.gd` now recog
 - Sensors are created lazily per infected NPC, so idle unengaged NPCs do not allocate them. Audio is represented by gameplay events; real `AudioStreamPlayer` playback alone is not a stimulus.
 - The GDScript adapter checks `ClassDB.class_exists()` and falls back to its previous behavior under stock Godot, which cannot instantiate these fork-specific classes.
 
+## Multi-source perception history
+
+The engine now has an optional native `AIStimulusHistory2D`, inspired by Unreal AI Perception's per-source stimuli and age. It holds up to 16 events by default, configurable from 1 to 64, with a `source_id`, sense (`SIGHT`, `SOUND`, `DAMAGE`), position, priority strength, and remaining lifetime. An identified source refreshes its record instead of duplicating it; older entries expire or are evicted at capacity.
+
+`native_infected_senses.gd` records only **server-confirmed** sights and sounds from the existing occlusion, wind, safe-zone, sound and leash checks. It never reads hidden target movement into the visual history. Sound ranking within the history considers a signal's intensity and age, and `best_confirmed_stimulus(sense)` returns the highest-scoring current event. If a chased target escapes the pursuit leash and the original ranked sound has expired, the NPC may investigate a separately confirmed still-live sound. **The history never sets combat targets, generates damage, or bypasses a protected player.**
+
+The native class is created lazily together with the existing senses. On stock Godot the new methods return empty dictionaries/lists, and original AI behavior is preserved. For diagnostics, call `zombie.get_ai_debug_snapshot()["perception"]` on the authoritative server to inspect the `stimulus_count`, `best_sight_stimulus`, `best_sound_stimulus`, and up to eight `recent_stimuli`. These records contain last-seen player IDs/positions and **must never be sent to untrusted multiplayer clients**.
+
+```gdscript
+var senses := NativeSenses.new() # From res://scripts/shared/native_infected_senses.gd
+senses.record_confirmed_sound(listener, accepted_position, approved_hearing_range, server_peer_id)
+var best_sound := senses.best_confirmed_stimulus(1)
+```
+
 ## Behavior trees
 
 `BehaviorTreeReactiveSelector` and `BehaviorTreeReactiveSequence` extend the existing `BehaviorTreeComposite` **Resource** classes in the current `develop` branch. They reevaluate priority and guards per runner tick and cancel the execution memory of an interrupted branch. The existing `BehaviorTreeRunner`, `BehaviorTreeBlackboardCheck`, `BehaviorTreeBlackboardSet`, `BehaviorTreeWait` remain intact. The canonical server simulation keeps its existing state machine because its combat, networking and AI authority requirements are richer than the example tree.
