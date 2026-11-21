@@ -82,6 +82,7 @@ class WorldPartition3D : public Node3D {
 	void _capture_cell_physics_state(const Vector2i &p_cell, Node *p_instance);
 	void _restore_cell_physics_state(const Vector2i &p_cell, Node *p_instance);
 	static bool _valid_body_state(const Dictionary &p_state);
+	static bool _valid_body_path(const String &p_path);
 	void _restore_cell_state(const Vector2i &p_cell, Node *p_instance);
 	void _unload_cell(const Vector2i &p_cell);
 	void _clear_active_cells();

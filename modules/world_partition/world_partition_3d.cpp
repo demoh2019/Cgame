@@ -813,6 +813,14 @@ void WorldPartition3D::_stream_candidate_cell(const Vector2i &p_cell, int &r_new
 	}
 }
 
+bool WorldPartition3D::_valid_body_path(const String &p_path) {
+	if (p_path.is_empty() || p_path.contains("..")) {
+		return false;
+	}
+	const NodePath path = NodePath(p_path);
+	return !path.is_absolute() && path.get_subname_count() == 0;
+}
+
 bool WorldPartition3D::_valid_body_state(const Dictionary &p_state) {
 	if (!p_state.has("transform") || !p_state.has("linear_velocity") || !p_state.has("angular_velocity") || !p_state.has("sleeping") || !p_state.has("freeze")) {
 		return false;
@@ -884,15 +892,12 @@ void WorldPartition3D::_restore_cell_physics_state(const Vector2i &p_cell, Node 
 			continue;
 		}
 		const String path_text = key;
-		// A checkpoint must not traverse outside the cell root or address
+		// A checkpoint must not traverse outside the cell root or access
 		// node properties through subnames.
-		if (path_text.contains("..")) {
+		if (!_valid_body_path(path_text)) {
 			continue;
 		}
 		const NodePath path = NodePath(path_text);
-		if (path.is_absolute() || path.get_subname_count() > 0) {
-			continue;
-		}
 		RigidBody3D *body = Object::cast_to<RigidBody3D>(p_instance->get_node_or_null(path));
 		if (body == nullptr || (body != p_instance && !p_instance->is_ancestor_of(body)) || !bool(body->get_meta(SNAME("streaming_persistent"), false))) {
 			continue;
@@ -950,7 +955,7 @@ void WorldPartition3D::load_cell_physics_states(const Dictionary &p_states) {
 		Dictionary valid;
 		for (int j = 0; j < names.size() && valid.size() < 128; j++) {
 			const Variant name = names[j];
-			if (name.get_type() != Variant::STRING || String(name).is_empty() || candidates[name].get_type() != Variant::DICTIONARY) {
+			if (name.get_type() != Variant::STRING || !_valid_body_path(String(name)) || candidates[name].get_type() != Variant::DICTIONARY) {
 				continue;
 			}
 			const Dictionary record = candidates[name];
