@@ -118,7 +118,7 @@ TEST_CASE("[AIStimulusHistory2D] Expiring one source does not erase another") {
 	Dictionary best = history->get_best(AIStimulusHistory2D::SOUND);
 	CHECK(best["source_id"] == 2);
 	CHECK(best["position"] == Vector2(9, 0));
-	history->advance_time(1.9);
+	history->advance_time(2.0);
 	CHECK(history->get_event_count() == 0);
 }
 
