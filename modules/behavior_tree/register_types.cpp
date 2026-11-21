@@ -30,6 +30,7 @@
 
 #include "register_types.h"
 
+#include "ai_action_cooldowns.h"
 #include "ai_execution_profiler.h"
 #include "ai_hearing_sensor_2d.h"
 #include "ai_stimulus_history_2d.h"
@@ -77,6 +78,7 @@ void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(AIHearingSensor2D);
 	GDREGISTER_CLASS(AIStimulusHistory2D);
 	GDREGISTER_CLASS(AIExecutionProfiler);
+	GDREGISTER_CLASS(AIActionCooldowns);
 	GDREGISTER_CLASS(AISimulationLOD2D);
 	GDREGISTER_CLASS(AIUpdateScheduler);
 	GDREGISTER_CLASS(AIThreatTable2D);
