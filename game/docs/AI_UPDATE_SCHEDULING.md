@@ -263,9 +263,10 @@ even for duplicate positions. A valid empty player set produces one
 empty packed array per source, distinct from malformed input.
 
 Limits: 4096 source points, 8192 target points, 32768 returned pairs,
+and **262144 maximum candidate distance tests** to protect crowded cells,
 finite coordinates within ±1,000,000 units, and a separate finite
 radius within 0..256m per source. Malformed arrays or a result exceeding
-the pair cap fail atomically with `[]`, permitting a full-scan fallback.
+the pair or distance-test budgets fail atomically with `[]`, permitting a full-scan fallback.
 There are no scene queries, physics changes, game target assignments,
 raycasts, or per-neighbor Dictionaries in this native API.
 
