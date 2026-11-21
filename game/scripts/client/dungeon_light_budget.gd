@@ -117,6 +117,72 @@ static func stable_nearest(candidates: Array, maximum: int, radius: float,
 	return result
 
 
+## Camera/split-screen aware significance: bounded native world selection with
+## stable IDs, while stock Godot follows the same nearest-observer scoring.
+## This only changes cosmetic torch activation, never damage or enemy vision.
+static func stable_world(candidates: Array, observers: PackedVector3Array,
+		maximum: int, radius: float, retained: Array = [],
+		hysteresis: float = 4.0, native: Object = null) -> Array:
+	if (maximum <= 0 or not is_finite(radius) or radius <= 0.0
+			or observers.is_empty() or observers.size() > 16):
+		return []
+	for eye in observers:
+		if not eye.is_finite():
+			return []
+	var previous := PackedInt64Array()
+	var old_ids: Dictionary = {}
+	for raw_id in retained:
+		var old_id: int = int(raw_id)
+		if old_id > 0 and not old_ids.has(old_id) and previous.size() < 128:
+			previous.append(old_id)
+			old_ids[old_id] = true
+	var records: Array = []
+	var positions := PackedVector3Array()
+	var ids := PackedInt64Array()
+	var priorities := PackedByteArray()
+	var seen: Dictionary = {}
+	for entry in candidates:
+		if positions.size() >= 16384:
+			break
+		var id: int = int(entry.get("id", 0))
+		var point: Vector3 = entry.get("position", Vector3(INF, INF, INF))
+		if id <= 0 or not point.is_finite() or seen.has(id):
+			continue
+		seen[id] = true
+		records.append(entry)
+		positions.append(point)
+		ids.append(id)
+		priorities.append(0) # All torches are cosmetic and in one priority tier.
+	if records.is_empty():
+		return []
+	var bonus: float = clampf(hysteresis, 0.0, radius) if is_finite(hysteresis) else 0.0
+	var selected: Array = []
+	if native != null and native.has_method("select_world_priority_stable"):
+		var indices: PackedInt32Array = native.call("select_world_priority_stable",
+			positions, observers, priorities, ids, previous,
+			mini(maximum, 128), radius, bonus)
+		for index in indices:
+			var record: Dictionary = records[index].duplicate()
+			var distance_sq: float = INF
+			var position: Vector3 = record["position"]
+			for eye in observers:
+				distance_sq = minf(distance_sq, position.distance_squared_to(eye))
+			record["distance_sq"] = distance_sq
+			selected.append(record)
+		return selected
+	var eligible: Array = []
+	for record in records:
+		var distance_sq: float = INF
+		var position: Vector3 = record["position"]
+		for eye in observers:
+			distance_sq = minf(distance_sq, position.distance_squared_to(eye))
+		if is_finite(distance_sq) and distance_sq <= radius * radius:
+			var entry: Dictionary = record.duplicate()
+			entry["distance_sq"] = distance_sq
+			eligible.append(entry)
+	return stable_nearest(eligible, mini(maximum, 128), radius, retained, bonus)
+
+
 ## Soft fading keeps the room light from popping at the budget range.
 static func intensity(distance: float, radius: float, time: float,
 		seed: float, flicker_amount: float) -> float:
@@ -139,23 +205,40 @@ func _process(delta: float) -> void:
 		return
 	var profile: Dictionary = settings(_quality)
 	var radius: float = float(profile["radius"])
+	var observers := PackedVector3Array()
+	observers.append(camera.global_position)
+	# Optional observer nodes cover additional local viewports without
+	# allocating separate light pools. A global maximum of 16 stays bounded.
+	for observer in get_tree().get_nodes_in_group("aa_dungeon_light_observer"):
+		if observers.size() >= 16:
+			break
+		if observer is Node3D and observer.is_inside_tree():
+			observers.append((observer as Node3D).global_position)
 	var candidates: Array = []
-	var eye: Vector3 = camera.global_position
 	for node in get_tree().get_nodes_in_group(GROUP):
 		if not (node is OmniLight3D):
 			continue
 		var light := node as OmniLight3D
 		if not is_instance_valid(light):
 			continue
-		var dist_sq: float = eye.distance_squared_to(light.global_position)
-		if dist_sq < radius * radius:
-			candidates.append({"node": light, "distance_sq": dist_sq, "id": light.get_instance_id()})
+		# Cheap broad-phase; distant streamed chunks do not enter the native
+		# ranking batch and cannot consume its 16,384-candidate bound.
+		var point: Vector3 = light.global_position
+		var nearby := false
+		for eye in observers:
+			if point.distance_squared_to(eye) <= radius * radius:
+				nearby = true
+				break
+		if not nearby:
+			continue
+		candidates.append({"node": light, "position": point,
+			"id": light.get_instance_id()})
 	var renderer: String = str(RenderingServer.get_current_rendering_method())
 	var previous: Array = []
 	for torch in _active:
 		if is_instance_valid(torch):
 			previous.append(torch.get_instance_id())
-	var selected: Array = stable_nearest(candidates,
+	var selected: Array = stable_world(candidates, observers,
 		effective_max(_quality, renderer), radius, previous, 4.0, _native_significance)
 	var keep: Dictionary = {}
 	var seconds: float = float(Time.get_ticks_msec()) * 0.001
