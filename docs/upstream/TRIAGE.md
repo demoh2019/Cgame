@@ -6,7 +6,7 @@ Source: docs/upstream/godot_open.json (open, non-draft PRs, milestones 4.6–4.8
 
 - Merged into develop: 157
 - Reverted after merge: #112954 (needs ScriptEditor API removed by another PR), #119985 (already in develop as 00bab93018)
-- Conflict with develop: 0 — need manual port
+- Conflict with develop: 44 — need manual port
 - Conflict with other PRs in the batch: 1
 
 Engine editor build (macOS arm64) passes. Tests not run.
