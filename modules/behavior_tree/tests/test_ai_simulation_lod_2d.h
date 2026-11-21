@@ -96,4 +96,40 @@ TEST_CASE("[AISimulationLOD2D] Atomic interval configuration and rollback") {
 	CHECK(lod->get_far_interval() == real_t(0.8));
 }
 
+TEST_CASE("[AISimulationLOD2D] Hysteresis holds medium/far bands but restores near immediately") {
+	Ref<AISimulationLOD2D> lod;
+	lod.instantiate();
+	// A passive observer moving 1m across a boundary does not flip its scan
+	// frequency. Meaningful movement beyond the hysteresis margin does.
+	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.5, 4.0) == real_t(0.5));
+	CHECK(lod->get_hysteretic_interval(65.0, 30.0, 60.0, 0.5, 4.0) == real_t(1.0));
+	CHECK(lod->get_hysteretic_interval(59.0, 30.0, 60.0, 1.0, 4.0) == real_t(1.0));
+	CHECK(lod->get_hysteretic_interval(55.0, 30.0, 60.0, 1.0, 4.0) == real_t(0.5));
+	// Near is asymmetric: moving away may retain fast scanning briefly;
+	// moving into the leash must never retain a slow scan.
+	CHECK(lod->get_hysteretic_interval(33.0, 30.0, 60.0, 0.25, 4.0) == real_t(0.25));
+	CHECK(lod->get_hysteretic_interval(35.0, 30.0, 60.0, 0.25, 4.0) == real_t(0.5));
+	CHECK(lod->get_hysteretic_interval(30.0, 30.0, 60.0, 1.0, 4.0) == real_t(0.25));
+	CHECK(lod->get_hysteretic_interval(20.0, 30.0, 60.0, 0.5, 4.0) == real_t(0.25));
+	CHECK(lod->get_hysteretic_interval(1000.0, 30.0, 60.0, 1.0, 4.0, true) == real_t(0.25));
+	CHECK(lod->get_hysteretic_interval(INF, 30.0, 60.0, 0.5, 4.0) == real_t(1.0));
+}
+
+TEST_CASE("[AISimulationLOD2D] Hysteresis fails safe on invalid input and after reconfiguration") {
+	Ref<AISimulationLOD2D> lod;
+	lod.instantiate();
+	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.5, 0.0) == real_t(1.0));
+	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.123, 4.0) == real_t(1.0));
+	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, NaN, 4.0) == real_t(1.0));
+	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.5, NaN) == real_t(1.0));
+	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.5, -1.0) == real_t(1.0));
+	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.5, 16.0) == real_t(1.0));
+	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 30.0, 0.5, 4.0) == real_t(0.25));
+	CHECK(lod->get_hysteretic_interval(-INF, 30.0, 60.0, 0.5, 4.0) == real_t(0.25));
+	CHECK(lod->get_hysteretic_interval(NaN, 30.0, 60.0, 0.5, 4.0) == real_t(0.25));
+	CHECK(lod->configure_intervals(0.1, 0.3, 0.8));
+	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.3, 4.0) == real_t(0.3));
+	CHECK(lod->get_hysteretic_interval(62.0, 30.0, 60.0, 0.5, 4.0) == real_t(0.8));
+}
+
 } // namespace TestAISimulationLOD2D
