@@ -31,6 +31,7 @@
 #include "register_types.h"
 
 #include "environment_query_3d.h"
+#include "environment_query_tick_budget.h"
 
 #include "core/object/class_db.h"
 
@@ -39,6 +40,7 @@ void initialize_environment_query_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 	GDREGISTER_CLASS(EnvironmentQuery3D);
+	GDREGISTER_CLASS(EnvironmentQueryTickBudget);
 }
 
 void uninitialize_environment_query_module(ModuleInitializationLevel) {

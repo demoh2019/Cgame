@@ -377,6 +377,10 @@ var _flank_slot_reservations: Variant = null # Shared native AI Smart Object lea
 var _pack_spatial_grid: Variant = null # Shared stateless C++ broadphase for pack alerts and passive separation.
 const AI_EQS_REPLAN_MIN_POPULATION := 64
 const AI_EQS_REPLAN_QUOTA := 8 # Regular tactical queries per authoritative tick.
+const AI_EQS_GLOBAL_QUOTA_US := 600 # Shared ordinary EQS CPU time per tick (soft).
+const AI_EQS_GLOBAL_URGENT_US := 240 # Independent bounded slot-recovery pool.
+var _eqs_tick_budget: Variant = null # Native, main-thread-only instance shared by infected.
+var _eqs_tick_budget_active: bool = false
 var last_eqs_replan_stats: Dictionary = {"enabled": false, "population": 0, "eligible": 0,
 	"granted": 0, "deferred": 0, "urgent": 0}
 const AI_CROWD_SEPARATION_MIN := 32
@@ -8241,9 +8245,12 @@ func _try_trigger_infected_snare(zombie, trap_id: int) -> bool:
 ## authoritative Smart Object lease expiry. On unavailable native API the
 ## previous full-frequency behavior is retained without guessed masks.
 func _budget_eqs_replans(cohort: Array, delta: float) -> void:
+	_eqs_tick_budget_active = false
 	for agent in cohort:
 		agent.flank_replan_allowed = true
 		agent.flank_incremental_enabled = false
+		agent.flank_tick_budget = null
+		agent.flank_step_urgent = false
 	var enabled: bool = cohort.size() >= AI_EQS_REPLAN_MIN_POPULATION and \
 			cohort.size() <= 4096 and tick_count >= 0 and \
 			ClassDB.class_exists("EnvironmentQuery3D") and \
@@ -8257,8 +8264,17 @@ func _budget_eqs_replans(cohort: Array, delta: float) -> void:
 	# follow the preexisting synchronous path.
 	var incremental_available: bool = ClassDB.class_has_method(
 		"EnvironmentQuery3D", "begin_incremental_top_positions")
+	# A single ledger coordinates every query in this authoritative tick.
+	# The old per-agent 120us limit remains as an additional safety bound.
+	if incremental_available and ClassDB.class_exists("EnvironmentQueryTickBudget"):
+		if _eqs_tick_budget == null:
+			_eqs_tick_budget = ClassDB.instantiate("EnvironmentQueryTickBudget")
+		if _eqs_tick_budget != null and _eqs_tick_budget.has_method("begin_tick"):
+			_eqs_tick_budget_active = bool(_eqs_tick_budget.begin_tick(
+				tick_count, AI_EQS_GLOBAL_QUOTA_US, AI_EQS_GLOBAL_URGENT_US))
 	for agent in cohort:
 		agent.flank_incremental_enabled = incremental_available
+		agent.flank_tick_budget = _eqs_tick_budget if _eqs_tick_budget_active else null
 	var eligible: Array = []
 	var urgent := PackedByteArray()
 	for agent in cohort:
@@ -8287,6 +8303,7 @@ func _budget_eqs_replans(cohort: Array, delta: float) -> void:
 		if cache_valid:
 			continue
 		eligible.append(agent)
+		agent.flank_step_urgent = invalid_lease
 		urgent.append(1 if invalid_lease else 0)
 	if eligible.is_empty():
 		last_eqs_replan_stats = {"enabled": true, "population": cohort.size(),
@@ -8577,6 +8594,16 @@ func _tick_zombies(delta: float) -> void:
 	last_eqs_replan_stats["cpu_us"] = eqs_cpu_us
 	last_eqs_replan_stats["scored_candidates"] = eqs_scored_candidates
 	last_eqs_replan_stats["timed_steps"] = eqs_timed_steps
+	# Additional shared-budget instrumentation is separate from native
+	# score-only timings, since sub-microsecond debits round up to 1us.
+	last_eqs_replan_stats["global_enabled"] = _eqs_tick_budget_active
+	last_eqs_replan_stats["regular_budget_us"] = AI_EQS_GLOBAL_QUOTA_US if _eqs_tick_budget_active else 0
+	last_eqs_replan_stats["urgent_budget_us"] = AI_EQS_GLOBAL_URGENT_US if _eqs_tick_budget_active else 0
+	last_eqs_replan_stats["global_regular_used_us"] = int(_eqs_tick_budget.get_regular_spent_us()) if _eqs_tick_budget_active else 0
+	last_eqs_replan_stats["global_urgent_used_us"] = int(_eqs_tick_budget.get_urgent_spent_us()) if _eqs_tick_budget_active else 0
+	last_eqs_replan_stats["global_denied"] = int(_eqs_tick_budget.get_denied_count()) if _eqs_tick_budget_active else 0
+	last_eqs_replan_stats["global_regular_steps"] = int(_eqs_tick_budget.get_regular_completed()) if _eqs_tick_budget_active else 0
+	last_eqs_replan_stats["global_urgent_steps"] = int(_eqs_tick_budget.get_urgent_completed()) if _eqs_tick_budget_active else 0
 	# Real survivors are considered before idle infected investigate remains.
 	# Reuse existing investigate_decoy: never replace combat targets or spawn mobs.
 	if tick_count % 5 == 0 and not bags.is_empty():
