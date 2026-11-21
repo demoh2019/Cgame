@@ -39,7 +39,7 @@ TEST_CASE("[FrameUpdateBudget] Quality, pressure and bounded updates") {
 		budget->consume(StringName("b"), 0.05);
 	}
 	CHECK(budget->pressure_percent() >= 40.0);
-	CHECK(budget->current_budget() == 1);
+	CHECK(budget->current_budget() == 2); // Two lanes cap the effective slots.
 	CHECK(budget->consume(StringName("a"), 1.0, true) <= 0.16);
 	budget->reset();
 	CHECK(budget->pressure_percent() == 0.0);
