@@ -82,6 +82,33 @@ TEST_CASE("[AIThreatTable2D] Threat caps, decay and malformed samples") {
 	CHECK(entries.is_empty());
 }
 
+TEST_CASE("[AIThreatTable2D] Per-target attenuation does not create or amplify threat") {
+	Ref<AIThreatTable2D> table;
+	table.instantiate();
+	Dictionary entries;
+	entries[1] = 80.0;
+	entries[2] = 10.0;
+	CHECK(table->scale(entries, 1, 0.35));
+	CHECK(Math::is_equal_approx(double(entries[1]), 28.0));
+	CHECK(double(entries[2]) == 10.0);
+	CHECK_FALSE(table->scale(entries, 99, 0.5));
+	CHECK_FALSE(entries.has(99));
+	CHECK_FALSE(table->scale(entries, 1, NaN));
+	CHECK_FALSE(table->scale(entries, 1, INF));
+	CHECK_FALSE(table->scale(entries, 1, -0.1));
+	CHECK_FALSE(table->scale(entries, 1, 1.01));
+	CHECK_FALSE(table->scale(entries, -1, 0.5));
+	CHECK(Math::is_equal_approx(double(entries[1]), 28.0));
+	CHECK(table->scale(entries, 1, 1.0));
+	CHECK(table->scale(entries, 1, 0.0));
+	CHECK_FALSE(entries.has(1));
+	CHECK(double(entries[2]) == 10.0);
+	entries[3] = NaN;
+	CHECK_FALSE(table->scale(entries, 3, 0.5));
+	CHECK_FALSE(entries.has(3));
+	CHECK(entries.size() == 1);
+}
+
 TEST_CASE("[AIThreatTable2D] Pick respects leash, safe zones and switch margin") {
 	Ref<AIThreatTable2D> table;
 	table.instantiate();

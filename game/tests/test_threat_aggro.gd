@@ -80,6 +80,37 @@ func run(t) -> void:
 	t.check(not broken.has(2), "malformed recorded threat cannot poison the table")
 	t.check(broken.has(1), "malformed peer entries do not erase valid attackers")
 
+	t.current = "native/fallback per-target threat attenuation"
+	var retained: Dictionary = {1: 80.0, 2: 10.0}
+	t.check(Threat.scale(retained, 1, 0.35), "existing threat can be reduced")
+	t.near(float(retained[1]), 28.0, 0.00001, "medic cover retains exactly 35 percent")
+	t.eq(float(retained[2]), 10.0, "other attacker is unchanged")
+	t.check(not Threat.scale(retained, 3, 0.5), "missing peer cannot gain aggro")
+	for bad_factor in [NAN, INF, -0.1, 1.1]:
+		t.check(not Threat.scale(retained, 1, bad_factor),
+			"invalid retention must be rejected")
+	t.near(float(retained[1]), 28.0, 0.00001,
+		"invalid retention never modifies threat")
+	t.check(Threat.scale(retained, 1, 1.0), "identity retention is supported")
+	t.check(Threat.scale(retained, 1, 0.0), "zero retention clears this target")
+	t.check(not retained.has(1), "zero retention does not leave a ghost target")
+	t.eq(float(retained[2]), 10.0, "other combatants still own their threat")
+	var malformed_retention: Dictionary = {1: NAN, 2: 10.0}
+	t.check(not Threat.scale(malformed_retention, 1, 0.5),
+		"malformed stored threat is rejected")
+	t.check(not malformed_retention.has(1) and malformed_retention.has(2),
+		"only the malformed peer is removed")
+	if native_threat_available:
+		var native_tracker: Object = ClassDB.instantiate("AIThreatTable2D")
+		# An older Cgame runtime can expose the class without this added method.
+		# The game adapter then uses the stock-Godot path until it is rebuilt.
+		if native_tracker != null and native_tracker.has_method("scale"):
+			var raw_native: Dictionary = {1: 80.0, 2: 10.0}
+			t.check(native_tracker.scale(raw_native, 1, 0.35),
+				"new engine method is script-callable")
+			t.near(float(raw_native[1]), 28.0, 0.00001,
+				"native engine matches the fallback's retention")
+
 	t.current = "real damage creates zombie aggro"
 	var world := WorldGen.new(39)
 	var server := GameServer.new(world, 39)

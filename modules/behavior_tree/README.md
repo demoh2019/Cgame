@@ -256,6 +256,7 @@ caller-owned `Dictionary`:
 var table := AIThreatTable2D.new()
 var hate := {} # each NPC owns its own table
 table.record(hate, attacker_id, actual_server_damage)
+table.scale(hate, medic_id, 0.35) # retain existing healer aggro after an authorized rescue
 table.decay(hate, delta)
 var best_peer_id := table.pick(hate, server_players, enemy_xz, max_leash, current_peer_id)
 ```
@@ -271,6 +272,12 @@ once and calls its methods from the authoritative infected state machine,
 with a GDScript reference fallback on stock Godot. Source identities,
 damage validation, safe-zone authority and network synchronization remain
 entirely game-owned. No native threat data is sent to ordinary clients.
+
+The new `scale(entries, peer_id, factor)` method offers an opt-in, server-only
+single-target hate reduction primitive. It rejects non-finite factors, factors
+outside [0, 1] and missing peer IDs without altering the table. Factor zero
+forgets one target; it never generates combat threat or amplifies existing hate.
+Albion After uses this engine feature for guardian-assisted medic rescue.
 
 See `game/docs/NATIVE_AI_THREAT_TABLE.md`.
 
