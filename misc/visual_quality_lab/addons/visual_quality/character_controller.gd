@@ -40,6 +40,10 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	if delta <= 0.0:
 		return
+	if is_instance_valid(attributes) and attributes.health <= 0.0:
+		velocity = Vector3.ZERO
+		move_and_slide()
+		return
 	var axes: Vector2 = read_movement_axes()
 	var direction: Vector3 = global_basis * Vector3(axes.x, 0.0, axes.y)
 	var sprinting: bool = Input.is_key_pressed(KEY_SHIFT)
