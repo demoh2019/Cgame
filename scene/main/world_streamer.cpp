@@ -320,6 +320,10 @@ void WorldStreamer::_forget_dead_chunks() {
 		}
 	}
 	for (const Vector3i &cell : dead) {
+		const ObjectID *old_id = loaded.getptr(cell);
+		if (old_id != nullptr) {
+			cache_ineligible_nodes.erase(*old_id);
+		}
 		loaded.erase(cell);
 		const bool *active = simulation_active_cells.getptr(cell);
 		if (active != nullptr && !*active) {
@@ -331,11 +335,115 @@ void WorldStreamer::_forget_dead_chunks() {
 	}
 }
 
-void WorldStreamer::_unload_cell(const Vector3i &p_cell) {
+// Cached nodes are detached from the scene tree (no render/physics/process
+// cost), but still own their resources. Keep the cap strict and evict the
+// oldest entry deterministically whenever the cache grows or shrinks.
+void WorldStreamer::_trim_cached_chunks() {
+	while (int(cached_chunks.size()) > max_cached_chunks) {
+		// Protect cells the current focus/nearby source is requesting. Without
+		// this, unloading the current chunk first would evict the previous
+		// destination immediately even on a one-slot cache backtrack.
+		Vector3 focus_position_local;
+		const bool have_focus = _get_focus_position(focus_position_local);
+		bool found = false;
+		bool oldest_requested = true;
+		Vector3i oldest_cell;
+		uint64_t oldest_age = 0;
+		for (const KeyValue<Vector3i, CachedChunk> &entry : cached_chunks) {
+			const Vector3i &cell = entry.key;
+			const bool requested = have_focus && _cell_requested(focus_position_local, cell);
+			const bool tie_before = cell.x < oldest_cell.x ||
+					(cell.x == oldest_cell.x && (cell.y < oldest_cell.y ||
+							(cell.y == oldest_cell.y && cell.z < oldest_cell.z)));
+			const bool older = entry.value.age < oldest_age ||
+					(entry.value.age == oldest_age && tie_before);
+			if (!found || (oldest_requested && !requested) ||
+					(requested == oldest_requested && older)) {
+				oldest_cell = cell;
+				oldest_age = entry.value.age;
+				oldest_requested = requested;
+				found = true;
+			}
+		}
+		if (!found) {
+			break;
+		}
+		const CachedChunk entry = cached_chunks[oldest_cell];
+		cached_chunks.erase(oldest_cell);
+		Node *chunk = Object::cast_to<Node>(ObjectDB::get_instance(entry.node_id));
+		if (chunk && !chunk->is_queued_for_deletion()) {
+			chunk->queue_free();
+		}
+		if (cache_evictions < INT32_MAX) {
+			++cache_evictions;
+		}
+	}
+}
+
+void WorldStreamer::_discard_cached_chunks() {
+	for (const KeyValue<Vector3i, CachedChunk> &entry : cached_chunks) {
+		Node *chunk = Object::cast_to<Node>(ObjectDB::get_instance(entry.value.node_id));
+		if (chunk && chunk->get_parent() == nullptr && !chunk->is_queued_for_deletion()) {
+			// Detached nodes cannot rely on their former parent for cleanup.
+			memdelete(chunk);
+		}
+	}
+	cached_chunks.clear();
+}
+
+void WorldStreamer::clear_cached_chunks() {
+	_discard_cached_chunks();
+	cache_clock = 0;
+	cache_hits = 0;
+	cache_evictions = 0;
+}
+
+void WorldStreamer::set_max_cached_chunks(int p_count) {
+	const int bounded = CLAMP(p_count, 0, 16);
+	if (max_cached_chunks == bounded) {
+		return;
+	}
+	max_cached_chunks = bounded;
+	_trim_cached_chunks();
+}
+
+WorldStreamer::~WorldStreamer() {
+	_discard_cached_chunks();
+}
+
+bool WorldStreamer::_restore_cached_chunk(const Vector3i &p_cell) {
+	const CachedChunk *entry = cached_chunks.getptr(p_cell);
+	if (entry == nullptr) {
+		return false;
+	}
+	const ObjectID id = entry->node_id;
+	cached_chunks.erase(p_cell);
+	Node *chunk = Object::cast_to<Node>(ObjectDB::get_instance(id));
+	if (chunk == nullptr || chunk->is_queued_for_deletion() || chunk->get_parent() != nullptr) {
+		return false;
+	}
+	// Re-enter through the normal adoption path: initial simulation tier,
+	// optional staged-detail tracking and chunk_loaded always apply.
+	if (!_adopt_chunk(p_cell, chunk)) {
+		memdelete(chunk);
+		return false;
+	}
+	if (chunk->has_method(SNAME("on_streaming_cache_restored"))) {
+		chunk->call(SNAME("on_streaming_cache_restored"));
+	}
+	if (cache_hits < INT32_MAX) {
+		++cache_hits;
+	}
+	return true;
+}
+
+void WorldStreamer::_unload_cell(const Vector3i &p_cell, bool p_allow_cache) {
 	HashMap<Vector3i, ObjectID>::Iterator it = loaded.find(p_cell);
 	if (!it) {
 		return;
 	}
+	const bool generator_compatible = !cache_ineligible_nodes.has(it->value);
+	cache_ineligible_nodes.erase(it->value);
 	Node *chunk = Object::cast_to<Node>(ObjectDB::get_instance(it->value));
 	loaded.remove(it);
 	const bool *active = simulation_active_cells.getptr(p_cell);
@@ -345,10 +453,24 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell) {
 	simulation_active_cells.erase(p_cell);
 	pending_visual_details.erase(p_cell);
 	if (chunk) {
+		// Only generator-owned roots that opt in may remain cached. Packed
+		// scenes and mutable/authoritative chunks keep legacy free-on-unload.
+		const bool may_cache = p_allow_cache && generator_compatible && max_cached_chunks > 0 && chunk_generator.is_valid() &&
+				chunk->get_parent() == _get_parent_for_chunks() && !chunk->is_queued_for_deletion() &&
+				chunk->has_method(SNAME("can_cache_streaming_chunk")) &&
+				bool(chunk->call(SNAME("can_cache_streaming_chunk")));
 		if (chunk->get_parent()) {
 			chunk->get_parent()->remove_child(chunk);
 		}
-		chunk->queue_free();
+		if (may_cache && !chunk->is_queued_for_deletion()) {
+			CachedChunk entry;
+			entry.node_id = chunk->get_instance_id();
+			entry.age = ++cache_clock;
+			cached_chunks[p_cell] = entry;
+			_trim_cached_chunks();
+		} else {
+			chunk->queue_free();
+		}
 	}
 	emit_signal(SNAME("chunk_unloaded"), p_cell);
 }
@@ -472,6 +594,11 @@ bool WorldStreamer::_finalize_chunk(const Vector3i &p_cell, const String &p_path
 // Main-thread chunk creation remains indivisible. Generation and adoption
 // time includes Node::_ready() callbacks, even for missing/failed cells.
 void WorldStreamer::_generate_cell(const Vector3i &cell) {
+	// A cache hit still consumes the same integration slot and CPU time slice
+	// as a new scene: reattaching a subtree may be expensive.
+	if (_restore_cached_chunk(cell)) {
+		return;
+	}
 	Variant cell_variant = cell;
 	const Variant *args[1] = { &cell_variant };
 	Variant result;
@@ -850,12 +977,14 @@ void WorldStreamer::_update_streaming() {
 }
 
 void WorldStreamer::_reset_state() {
+	// A grid/axis reset must never reuse stale cell geometry.
+	clear_cached_chunks();
 	LocalVector<Vector3i> cells;
 	for (const KeyValue<Vector3i, ObjectID> &entry : loaded) {
 		cells.push_back(entry.key);
 	}
 	for (const Vector3i &cell : cells) {
-		_unload_cell(cell);
+		_unload_cell(cell, false);
 	}
 	// In-flight requests finish on their own; their results are released when polled.
 	missing.clear();
@@ -864,6 +993,7 @@ void WorldStreamer::_reset_state() {
 	generate_queue.clear();
 	pending_visual_details.clear();
 	simulation_active_cells.clear();
+	cache_ineligible_nodes.clear();
 	simulation_inactive_count = 0;
 	last_queued_view_direction = Vector3();
 	truncated_warned = false;
@@ -886,9 +1016,12 @@ void WorldStreamer::_notification(int p_what) {
 
 		case NOTIFICATION_EXIT_TREE: {
 			set_process_internal(false);
+			// Detached opt-in roots are not scene children and require explicit cleanup.
+			clear_cached_chunks();
 			if (chunk_parent.is_empty()) {
 				// Chunks are our children and go away with us; just forget them.
 				loaded.clear();
+				cache_ineligible_nodes.clear();
 				simulation_active_cells.clear();
 				simulation_inactive_count = 0;
 				pending_visual_details.clear();
@@ -1124,6 +1257,7 @@ void WorldStreamer::set_chunk_path_template(const String &p_template) {
 	if (chunk_path_template == p_template) {
 		return;
 	}
+	clear_cached_chunks();
 	chunk_path_template = p_template;
 	missing.clear();
 	failed.clear();
@@ -1131,6 +1265,7 @@ void WorldStreamer::set_chunk_path_template(const String &p_template) {
 }
 
 void WorldStreamer::set_chunk_provider(const Callable &p_provider) {
+	clear_cached_chunks();
 	chunk_provider = p_provider;
 	missing.clear();
 	failed.clear();
@@ -1138,6 +1273,13 @@ void WorldStreamer::set_chunk_provider(const Callable &p_provider) {
 }
 
 void WorldStreamer::set_chunk_generator(const Callable &p_generator) {
+	clear_cached_chunks(); // Old nodes cannot be reattached under a different generator.
+	// Existing live chunks remain resident under legacy semantics. Mark them
+	// noncacheable so unloading later cannot resurrect geometry from the
+	// old generator under the newly configured callback.
+	for (const KeyValue<Vector3i, ObjectID> &entry : loaded) {
+		cache_ineligible_nodes.insert(entry.value);
+	}
 	chunk_generator = p_generator;
 	generate_queue.clear();
 	missing.clear();
@@ -1146,6 +1288,10 @@ void WorldStreamer::set_chunk_generator(const Callable &p_generator) {
 }
 
 void WorldStreamer::set_chunk_parent(const NodePath &p_parent) {
+	if (chunk_parent == p_parent) {
+		return;
+	}
+	clear_cached_chunks(); // Detached nodes from the old world parent are invalid here.
 	chunk_parent = p_parent;
 }
 
@@ -1222,12 +1368,13 @@ void WorldStreamer::refresh(bool p_retry) {
 }
 
 void WorldStreamer::unload_all() {
+	clear_cached_chunks(); // Manual reset always releases memory, not just scene residency.
 	LocalVector<Vector3i> cells;
 	for (const KeyValue<Vector3i, ObjectID> &entry : loaded) {
 		cells.push_back(entry.key);
 	}
 	for (const Vector3i &cell : cells) {
-		_unload_cell(cell);
+		_unload_cell(cell, false);
 	}
 }
 
@@ -1303,6 +1450,12 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_chunk_path_template", "template"), &WorldStreamer::set_chunk_path_template);
 	ClassDB::bind_method(D_METHOD("get_chunk_path_template"), &WorldStreamer::get_chunk_path_template);
 	ClassDB::bind_method(D_METHOD("set_chunk_generator", "generator"), &WorldStreamer::set_chunk_generator);
+	ClassDB::bind_method(D_METHOD("set_max_cached_chunks", "count"), &WorldStreamer::set_max_cached_chunks);
+	ClassDB::bind_method(D_METHOD("get_max_cached_chunks"), &WorldStreamer::get_max_cached_chunks);
+	ClassDB::bind_method(D_METHOD("get_cached_chunk_count"), &WorldStreamer::get_cached_chunk_count);
+	ClassDB::bind_method(D_METHOD("get_chunk_cache_hit_count"), &WorldStreamer::get_chunk_cache_hit_count);
+	ClassDB::bind_method(D_METHOD("get_chunk_cache_eviction_count"), &WorldStreamer::get_chunk_cache_eviction_count);
+	ClassDB::bind_method(D_METHOD("clear_cached_chunks"), &WorldStreamer::clear_cached_chunks);
 	ClassDB::bind_method(D_METHOD("get_chunk_generator"), &WorldStreamer::get_chunk_generator);
 	ClassDB::bind_method(D_METHOD("set_chunk_provider", "provider"), &WorldStreamer::set_chunk_provider);
 	ClassDB::bind_method(D_METHOD("get_chunk_provider"), &WorldStreamer::get_chunk_provider);
@@ -1348,6 +1501,7 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_simulation_transitions_per_update", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_simulation_transitions_per_update", "get_max_simulation_transitions_per_update");
 	ADD_GROUP("Budget", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_concurrent_loads", PROPERTY_HINT_RANGE, "1,64,1,or_greater"), "set_max_concurrent_loads", "get_max_concurrent_loads");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cached_chunks", PROPERTY_HINT_RANGE, "0,16,1"), "set_max_cached_chunks", "get_max_cached_chunks");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_instantiations_per_frame", PROPERTY_HINT_RANGE, "1,16,1,or_greater"), "set_max_instantiations_per_frame", "get_max_instantiations_per_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_chunk_work_usec", PROPERTY_HINT_RANGE, "0,1000000,100,suffix:us"), "set_max_chunk_work_usec", "get_max_chunk_work_usec");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "update_interval", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater,suffix:s"), "set_update_interval", "get_update_interval");

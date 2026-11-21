@@ -120,6 +120,19 @@ private:
 	bool enabled = true;
 
 	HashMap<Vector3i, ObjectID> loaded;
+	// Nodes resident before a generator replacement may not enter the new cache.
+	HashSet<ObjectID> cache_ineligible_nodes;
+	// Explicitly opt-in, bounded procedural scene retention. Detached nodes do
+	// not render or process; only roots that allow caching can be preserved.
+	struct CachedChunk {
+		ObjectID node_id;
+		uint64_t age = 0;
+	};
+	HashMap<Vector3i, CachedChunk> cached_chunks;
+	int max_cached_chunks = 0; // Zero preserves legacy free-on-unload.
+	uint64_t cache_clock = 0;
+	int cache_hits = 0;
+	int cache_evictions = 0;
 	HashMap<Vector3i, bool> simulation_active_cells;
 	int simulation_inactive_count = 0;
 	// Optional cosmetic work is tracked separately from playable chunk residency.
@@ -159,7 +172,10 @@ private:
 	void _generate_cell(const Vector3i &p_cell);
 	void _record_chunk_work(uint64_t p_started_usec);
 	void _finish_chunk_work_frame();
-	void _unload_cell(const Vector3i &p_cell);
+	void _unload_cell(const Vector3i &p_cell, bool p_allow_cache = true);
+	bool _restore_cached_chunk(const Vector3i &p_cell);
+	void _trim_cached_chunks();
+	void _discard_cached_chunks();
 	void _reset_state();
 	void _record_failure(const Vector3i &p_cell, const String &p_reason);
 	void _update_retries(const Vector3 &p_focus, real_t p_keep_radius);
@@ -257,6 +273,15 @@ public:
 	// (or null for an empty cell). Use it for worlds generated from a seed. Takes precedence over the
 	// provider and the path template.
 	void set_chunk_generator(const Callable &p_generator);
+	// Retain up to 16 detached PROCEDURAL chunk roots by cell coordinate.
+	// A root must explicitly implement can_cache_streaming_chunk() -> true.
+	// Cached chunks never count as loaded and reinsertion is still frame-budgeted.
+	void set_max_cached_chunks(int p_count);
+	int get_max_cached_chunks() const { return max_cached_chunks; }
+	int get_cached_chunk_count() const { return int(cached_chunks.size()); }
+	int get_chunk_cache_hit_count() const { return cache_hits; }
+	int get_chunk_cache_eviction_count() const { return cache_evictions; }
+	void clear_cached_chunks();
 	Callable get_chunk_generator() const { return chunk_generator; }
 	void set_chunk_parent(const NodePath &p_parent);
 	NodePath get_chunk_parent() const { return chunk_parent; }
@@ -287,6 +312,7 @@ public:
 	void unload_all();
 
 	WorldStreamer() {}
+	~WorldStreamer();
 };
 
 VARIANT_ENUM_CAST(WorldStreamer::Axes);

@@ -1302,6 +1302,30 @@ func _build_windmills(windmills: Array, origin: Vector2) -> void:
 var _streaming_simulation_active := true
 
 
+## Only immutable client-generated scenery may use WorldStreamer's optional
+## bounded detached-node cache. This chunk never owns server authority.
+func can_cache_streaming_chunk() -> bool:
+	return true
+
+
+## Reattached scenes never rerun _ready(). Restore deferred decor queue
+## membership and force grass/shadow LOD checks near the new camera position.
+func on_streaming_cache_restored() -> void:
+	_grass_lod_elapsed = GRASS_LOD_INTERVAL
+	_grass_last_eye = Vector2.INF
+	_shadow_timer = SHADOW_INTERVAL
+	_shadow_last_eye = Vector2.INF
+	if _decor_next < _decor_tasks.size():
+		var queued := false
+		for reference in _decor_pending:
+			if reference.get_ref() == self:
+				queued = true
+				break
+		if not queued:
+			_decor_pending.append(weakref(self))
+	set_process(_streaming_simulation_active)
+
+
 func set_streaming_simulation_active(active: bool) -> void:
 	if _streaming_simulation_active == active:
 		return
