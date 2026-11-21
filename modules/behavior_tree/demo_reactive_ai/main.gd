@@ -25,6 +25,7 @@ var current_action := "patrol"
 var last_status := BehaviorTreeTask.RUNNING
 var last_debug_snapshot: Dictionary = {}
 var last_profile_snapshot: Dictionary = {}
+var last_trace_snapshot: Dictionary = {}
 var brain := BehaviorTreeRunner.new()
 var sensor := AIVisualSensor2D.new()
 var hearing := AIHearingSensor2D.new()
@@ -83,6 +84,7 @@ func _ready() -> void:
     brain.root_task = priorities
     brain.auto_tick = false
     brain.profiling_enabled = true  # Demo opt-in; gameplay uses disabled-by-default runners.
+    brain.trace_enabled = true  # Per-node inspector, independently toggled with T.
     add_child(brain)
 
     hud = Label.new()
@@ -193,6 +195,7 @@ func _physics_process(delta: float) -> void:
         last_status = brain.tick(AI_TICK_SECONDS)
         last_debug_snapshot = brain.get_debug_snapshot()
         last_profile_snapshot = brain.get_profile_snapshot()
+        last_trace_snapshot = brain.get_trace_snapshot()
         current_action = str(brain.get_blackboard().get("action", "patrol"))
 
     var enemy_motion := Vector2.ZERO
@@ -350,6 +353,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
         last_navigation_profile = {}
         brain.reset_profile()
         last_profile_snapshot = brain.get_profile_snapshot()
+    elif event.keycode == KEY_T:
+        brain.trace_enabled = not brain.is_trace_enabled()
+        last_trace_snapshot = brain.get_trace_snapshot()
     elif event.keycode == KEY_R:
         enemy_health = 100
         player_position = Vector2(160, 350)
@@ -364,6 +370,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
         last_navigation_profile = {}
         brain.reset_profile()
         last_profile_snapshot = brain.get_profile_snapshot()
+        brain.reset_trace()
+        last_trace_snapshot = brain.get_trace_snapshot()
         ai_timer = 0.0
         sensor.reset()
         hearing.reset()
@@ -383,7 +391,7 @@ func _update_hud() -> void:
     if hud == null:
         return
     var status_text := "RUNNING" if last_status == BehaviorTreeTask.RUNNING else ("SUCCESS" if last_status == BehaviorTreeTask.SUCCESS else "FAILURE")
-    hud.text = "SIGHT + HEARING + A* NAVIGATION | Arrows: move | F: shout | Space: hit | P: profile | R: reset\n"
+    hud.text = "SIGHT + HEARING + A* NAVIGATION | Arrows: move | F: shout | Space: hit | P: profile | T: trace | R: reset\n"
     hud.text += "Enemy HP: %d | AI: %s | Tree: %s | Visible: %s\n" % [enemy_health, current_action, status_text, str(sensor.is_target_visible())]
     hud.text += "Sight: %.1fs | Sound: %.1fs | Gray wall blocks LOS | Yellow X = last seen position" % [sensor.get_memory_remaining(), hearing.get_memory_remaining()]
     # Update diagnostic snapshots only at logical AI ticks, not render frames.
@@ -396,6 +404,20 @@ func _update_hud() -> void:
         int(decision.get("count", 0)),
         float(decision.get("mean_usec", 0.0)),
         int(decision.get("max_usec", 0))
+    ]
+    var trace_steps: Array = last_trace_snapshot.get("steps", [])
+    var traced_leaf := "none"
+    var traced_status := "-"
+    for trace_entry in trace_steps:
+        var step: Dictionary = trace_entry
+        if int(step.get("status", -1)) == BehaviorTreeTask.RUNNING:
+            traced_leaf = str(step.get("path", ""))
+            traced_status = "RUNNING"
+    hud.text += "\\nNode trace: %s | Steps: %d | Active: %s (%s)" % [
+        "ON" if brain.is_trace_enabled() else "OFF",
+        trace_steps.size(),
+        traced_leaf,
+        traced_status
     ]
     hud.text += "\nNative shout gate: %.1fs | Sound investigation time limit: 0.8s" % player_action_cooldowns.get_remaining(&"shout")
     var path_rows: Dictionary = last_navigation_profile.get("categories", {})
