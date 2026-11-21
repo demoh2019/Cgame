@@ -427,6 +427,10 @@ private:
 	// Runtime-controlled by the game's graphics preset. Atomic because feedback
 	// is processed on a worker while the graphics UI runs on the main thread.
 	std::atomic<uint8_t> detail_prefetch_mips{ 0 };
+	// Effective value is recalculated by the feedback worker, not the UI.
+	// All cross-thread reads and writes are atomic.
+	std::atomic<uint8_t> effective_detail_prefetch_mips{ 0 };
+	std::atomic<bool> adaptive_detail_prefetch_enabled{ false };
 	uint32_t setting_budget_mb_override = UINT32_MAX;
 	uint8_t setting_min_lod_override = UINT8_MAX;
 	uint8_t setting_max_lod_override = UINT8_MAX;
@@ -647,10 +651,30 @@ public:
 	void set_detail_prefetch_mips(int p_mips) {
 		const uint8_t bounded = p_mips <= 0 ? 0 : (p_mips >= 2 ? 2 : uint8_t(p_mips));
 		detail_prefetch_mips.store(bounded, std::memory_order_relaxed);
+		// Preserve immediate old behavior when adaptive mode is off.
+		if (!adaptive_detail_prefetch_enabled.load(std::memory_order_relaxed)) {
+			effective_detail_prefetch_mips.store(bounded, std::memory_order_relaxed);
+		}
 	}
 
 	int get_detail_prefetch_mips() const {
 		return int(detail_prefetch_mips.load(std::memory_order_relaxed));
+	}
+
+	// Opt in to Unreal-style memory-pool-aware predictive mip prefetch.
+	// Never bypasses the existing per-texture memory fitter.
+	void set_adaptive_detail_prefetch_enabled(bool p_enabled) {
+		adaptive_detail_prefetch_enabled.store(p_enabled, std::memory_order_relaxed);
+		effective_detail_prefetch_mips.store(
+				detail_prefetch_mips.load(std::memory_order_relaxed), std::memory_order_relaxed);
+	}
+
+	bool is_adaptive_detail_prefetch_enabled() const {
+		return adaptive_detail_prefetch_enabled.load(std::memory_order_relaxed);
+	}
+
+	int get_effective_detail_prefetch_mips() const {
+		return int(effective_detail_prefetch_mips.load(std::memory_order_relaxed));
 	}
 
 	void set_min_lod_override(int32_t p_mip) {
