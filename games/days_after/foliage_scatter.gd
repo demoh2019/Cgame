@@ -54,7 +54,7 @@ const BOX_MAXS = [
 # Centers and half-extents are in world units, yaws use Godot +Y radians.
 const ORIENTED_BOX_CENTERS = [Vector3(13.0, 0.7, 13.0)]
 const ORIENTED_BOX_HALF_EXTENTS = [Vector3(5.4, 1.4, 1.4)]
-const ORIENTED_BOX_YAWS = [deg_to_rad(35.0)]
+const ORIENTED_BOX_YAWS = [0.6108652381980153] # 35 degrees in radians.
 
 var _selected_positions := PackedVector3Array()
 
