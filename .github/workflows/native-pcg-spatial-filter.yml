@@ -5,6 +5,7 @@ on:
     branches: [develop]
     paths:
       - 'modules/procedural_scatter/**'
+      - 'games/days_after/**'
       - 'game/scripts/client/scenery_batches.gd'
       - 'game/scripts/client/chunk_view.gd'
       - 'game/tests/test_pcg_scenery_spacing.gd'
@@ -14,6 +15,7 @@ on:
     branches: [develop]
     paths:
       - 'modules/procedural_scatter/**'
+      - 'games/days_after/**'
       - 'game/scripts/client/scenery_batches.gd'
       - 'game/scripts/client/chunk_view.gd'
       - 'game/tests/test_pcg_scenery_spacing.gd'
@@ -56,6 +58,19 @@ jobs:
           timeout 180s "$BIN" --headless --path game --script res://tests/run_pcg_scenery_spacing.gd 2>&1 | tee pcg-game.log
           grep -E '^PCG SCENERY TOTAL: [0-9]+ checks, 0 failures$' pcg-game.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-game.log; then exit 1; fi
+      - name: Import Days After prototype
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path games/days_after --editor --import --quit 2>&1 | tee pcg-days-after-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' pcg-days-after-import.log; then exit 1; fi
+      - name: Run native exclusion-volume gameplay smoke
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path games/days_after --script res://smoke_test.gd 2>&1 | tee pcg-days-after-smoke.log
+          grep -F 'PASS: scene, bounded visual LOD, exclusion-safe PCG foliage,' pcg-days-after-smoke.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-days-after-smoke.log; then exit 1; fi
       - name: Upload PCG logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -66,3 +81,5 @@ jobs:
             pcg-native.log
             pcg-import.log
             pcg-game.log
+            pcg-days-after-import.log
+            pcg-days-after-smoke.log

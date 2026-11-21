@@ -59,3 +59,19 @@ GDScript fallback works on stock Godot. This is presentation-only LOD: no AI,
 combat, resource pickup, collision, or network authority is skipped. The
 headless smoke test checks budgeted visibility, distance culling and restoration.
 Actual performance gains require profiling.
+
+## Native PCG exclusion zones and instanced grass
+
+The ruined-world scene now has deterministic collision-free grass distributed
+with one `MultiMeshInstance3D` instead of one draw object per blade. A shuffled
+625-cell source grid is thinned to at most 160 instances with a 2.1-meter
+minimum 3D spacing. `PCGSpatialFilter3D.filter_indices_excluding()` subtracts
+spherical zones around spawn, loot, ruined structures, and the barricade
+**before** spacing. The native filter returns original indices in stable order,
+so the output remains reproducible. A GDScript fallback maintains equivalent
+results on stock Godot or old Cgame builds.
+
+This affects visual decoration only, not gathering, physics collisions, AI,
+spawning, networking, or server state. The standalone headless smoke verifies
+exclusion boundaries, spacing, instancing limits, deterministic regeneration,
+and native/fallback parity. No FPS improvement is claimed without profiling.
