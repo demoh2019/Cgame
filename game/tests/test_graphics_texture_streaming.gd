@@ -51,3 +51,38 @@ func run(t) -> void:
 	var quality_source: String = (Quality as Script).source_code
 	t.check(quality_source.contains("GraphicsTextureStreaming.apply(_level"),
 		"shared graphics quality profile configures engine prefetch")
+
+
+	t.current = "Unreal STAT STREAMING-style runtime profiler integration"
+	var registered: Array[StringName] = Streaming.register_profiler_monitors()
+	if Engine.has_singleton("TextureStreaming"):
+		var streaming_server: Object = Engine.get_singleton("TextureStreaming")
+		t.check(streaming_server != null, "native texture server is available for profiler callbacks")
+		if streaming_server != null:
+			for monitor_name in Streaming.PROFILER_METRICS:
+				var metric_method: StringName = Streaming.PROFILER_METRICS[monitor_name]
+				if streaming_server.has_method(metric_method):
+					t.check(Performance.has_custom_monitor(monitor_name),
+						"live engine metric %s is visible in Godot's profiler" % monitor_name)
+					t.check(float(streaming_server.call(metric_method)) >= 0.0,
+						"native texture metric %s is a nonnegative gauge" % monitor_name)
+				else:
+					t.check(not registered.has(monitor_name),
+						"older engine skips unsupported metric %s" % monitor_name)
+			if streaming_server.has_method("get_streaming_texture_count"):
+				t.eq(int(streaming_server.call("get_streaming_texture_count")), 0,
+					"fresh headless renderer starts without active streamed textures")
+				t.eq(int(streaming_server.call("get_streaming_pending_count")), 0,
+					"without GPU material feedback there are no pending mip changes")
+				t.eq(int(streaming_server.call("get_streaming_budget_reduction_steps")), 0,
+					"no stream feedback means zero budget-induced quality cuts")
+			var duplicate: Array[StringName] = Streaming.register_profiler_monitors()
+			t.check(duplicate.is_empty(), "registering monitoring twice does not overwrite callbacks")
+	else:
+		t.check(registered.is_empty(), "stock Godot skips native texture statistics safely")
+	for monitor_name in registered:
+		t.check(Performance.has_custom_monitor(monitor_name),
+			"registered texture metrics use the ordinary Godot Performance API")
+		Performance.remove_custom_monitor(monitor_name)
+		t.check(not Performance.has_custom_monitor(monitor_name),
+			"texture callbacks can be cleaned up on leaving online play")
