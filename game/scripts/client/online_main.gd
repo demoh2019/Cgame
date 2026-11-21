@@ -1266,7 +1266,7 @@ func _on_welcomed() -> void:
 	_ambient_motes.setup(client.world)
 	add_child(_ambient_motes)
 	# Circling bird flock overhead in daylight; one MultiMesh draw call.
-	_ambient_birds = AmbientBirds.new()
+	_ambient_birds = AmbientBirds.new(client.world.world_seed)
 	add_child(_ambient_birds)
 	# Native Flock3D fish shoal in nearby deep water (empty on engines without it).
 	_fish_shoals = FishShoals.new()

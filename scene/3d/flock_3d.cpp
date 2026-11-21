@@ -74,6 +74,12 @@ Vector3 Flock3D::compute_steering(int p_index, const LocalVector<Vector3> &p_pos
 }
 
 void Flock3D::_reset_agents() {
+	// Seeded procedural worlds must recreate the same flock after entering
+	// a scene tree, changing quality/agent count or rebuilding a MultiMesh.
+	// Unseeded legacy flocks retain their original evolving RNG behavior.
+	if (seeded_simulation) {
+		rng.seed(simulation_seed);
+	}
 	positions.resize(agent_count);
 	velocities.resize(agent_count);
 	for (int i = 0; i < agent_count; i++) {
@@ -157,6 +163,15 @@ int Flock3D::get_agent_count() const {
 	return agent_count;
 }
 
+void Flock3D::set_simulation_seed(uint64_t p_seed) {
+	if (seeded_simulation && simulation_seed == p_seed) {
+		return;
+	}
+	seeded_simulation = true;
+	simulation_seed = p_seed;
+	_reset_agents();
+}
+
 void Flock3D::set_active(bool p_active) {
 	active = p_active;
 	_update_process();
@@ -223,6 +238,8 @@ void Flock3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("scatter_from", "global_point", "strength", "radius"), &Flock3D::scatter_from);
 	ClassDB::bind_method(D_METHOD("set_agent_count", "count"), &Flock3D::set_agent_count);
 	ClassDB::bind_method(D_METHOD("get_agent_count"), &Flock3D::get_agent_count);
+	ClassDB::bind_method(D_METHOD("set_simulation_seed", "seed"), &Flock3D::set_simulation_seed);
+	ClassDB::bind_method(D_METHOD("get_simulation_seed"), &Flock3D::get_simulation_seed);
 	ClassDB::bind_method(D_METHOD("set_active", "active"), &Flock3D::set_active);
 	ClassDB::bind_method(D_METHOD("is_active"), &Flock3D::is_active);
 	ClassDB::bind_method(D_METHOD("set_speed", "speed"), &Flock3D::set_speed);
@@ -249,6 +266,7 @@ void Flock3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_home_offset"), &Flock3D::get_home_offset);
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "agent_count", PROPERTY_HINT_RANGE, "0,1024,1"), "set_agent_count", "get_agent_count");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "simulation_seed"), "set_simulation_seed", "get_simulation_seed");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "active"), "set_active", "is_active");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "speed", PROPERTY_HINT_RANGE, "0,100,0.01,suffix:m/s"), "set_speed", "get_speed");
 	ADD_GROUP("Steering", "");
@@ -266,5 +284,5 @@ void Flock3D::_bind_methods() {
 }
 
 Flock3D::Flock3D() {
-	rng.seed(0x5eed1234u);
+	rng.seed(simulation_seed);
 }

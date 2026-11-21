@@ -58,6 +58,10 @@ class Flock3D : public MultiMeshInstance3D {
 	LocalVector<Vector3> positions;
 	LocalVector<Vector3> velocities;
 	RandomPCG rng;
+	// Optional deterministic reset seed; ordinary Flock3D scenes keep
+	// their historical evolving RNG until explicitly opted in.
+	uint64_t simulation_seed = 0x5eed1234u;
+	bool seeded_simulation = false;
 
 	void _reset_agents();
 	void _update_process();
@@ -74,6 +78,8 @@ public:
 
 	void set_agent_count(int p_count);
 	int get_agent_count() const;
+	void set_simulation_seed(uint64_t p_seed);
+	uint64_t get_simulation_seed() const { return simulation_seed; }
 	void set_active(bool p_active);
 	bool is_active() const;
 	void set_speed(float p_speed);

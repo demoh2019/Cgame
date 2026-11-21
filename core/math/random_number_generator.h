@@ -49,6 +49,11 @@ public:
 	_FORCE_INLINE_ void set_seed(uint64_t p_seed) { randbase.seed(p_seed); }
 	_FORCE_INLINE_ uint64_t get_seed() { return randbase.get_seed(); }
 
+	// Derive a stable PCG seed from the original seed and a named numeric
+	// substream. Neither method consumes or alters this generator's state.
+	uint64_t get_substream_seed(int64_t p_stream_id);
+	Ref<RandomNumberGenerator> fork(int64_t p_stream_id);
+
 	_FORCE_INLINE_ void set_state(uint64_t p_state) { randbase.set_state(p_state); }
 	_FORCE_INLINE_ uint64_t get_state() const { return randbase.get_state(); }
 
