@@ -504,6 +504,46 @@ PackedInt32Array SignificanceBudgetPlanner::select_shadow_casters(
 	return selected;
 }
 
+PackedInt32Array SignificanceBudgetPlanner::select_world_priority_stable(
+		const PackedVector3Array &p_positions, const PackedVector3Array &p_viewers,
+		const PackedByteArray &p_priorities, const PackedInt64Array &p_ids,
+		const PackedInt64Array &p_retained_ids, int p_budget, double p_max_distance,
+		double p_hysteresis) const {
+	PackedInt32Array empty;
+	const int count = p_positions.size();
+	ERR_FAIL_COND_V_MSG(count != p_priorities.size() || count != p_ids.size() ||
+			count > MAX_CANDIDATES || p_viewers.is_empty() || p_viewers.size() > MAX_VIEWERS ||
+			p_retained_ids.size() > MAX_BUDGET || !valid_budget(p_budget) ||
+			!Math::is_finite(p_max_distance) || p_max_distance < 0.0 ||
+			p_max_distance > MAX_RANGE || !Math::is_finite(p_hysteresis) ||
+			p_hysteresis < 0.0 || p_hysteresis > p_max_distance,
+			empty, "Invalid stable world-significance array sizes or bounds.");
+
+	for (int v = 0; v < p_viewers.size(); ++v) {
+		ERR_FAIL_COND_V_MSG(!p_viewers[v].is_finite(), empty,
+				"Stable world-significance viewer positions must be finite.");
+	}
+
+	// Reuse the validated priority-stable top-K selector, so precomputed and
+	// world-space queries share stable tie rules and a strict hard range.
+	PackedFloat64Array distances;
+	distances.resize(count);
+	for (int i = 0; i < count; ++i) {
+		ERR_FAIL_COND_V_MSG(!p_positions[i].is_finite(), empty,
+				"Stable world-significance candidate positions must be finite.");
+		double nearest_squared = Math::INF;
+		for (int v = 0; v < p_viewers.size(); ++v) {
+			const double squared = (p_positions[i] - p_viewers[v]).length_squared();
+			ERR_FAIL_COND_V_MSG(!Math::is_finite(squared), empty,
+					"Stable world-significance distance overflow.");
+			nearest_squared = MIN(nearest_squared, squared);
+		}
+		distances.set(i, Math::sqrt(nearest_squared));
+	}
+	return select_top_priority_stable(distances, p_priorities, p_ids,
+			p_retained_ids, p_budget, p_max_distance, p_hysteresis);
+}
+
 void SignificanceBudgetPlanner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("select_top", "distances", "priorities", "budget"),
 			&SignificanceBudgetPlanner::select_top);
@@ -516,6 +556,8 @@ void SignificanceBudgetPlanner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("select_top_stable", "distances", "ids", "retained_ids", "budget", "max_distance", "hysteresis"),
 			&SignificanceBudgetPlanner::select_top_stable, DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("select_shadow_casters", "bounds_min", "bounds_max", "roles", "current", "camera", "role_radii", "budget", "hysteresis"), &SignificanceBudgetPlanner::select_shadow_casters, DEFVAL(16), DEFVAL(5.0));
+	ClassDB::bind_method(D_METHOD("select_world_priority_stable", "positions", "viewers", "priorities", "ids", "retained_ids", "budget", "max_distance", "hysteresis"),
+			&SignificanceBudgetPlanner::select_world_priority_stable, DEFVAL(1000.0), DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("select_world", "positions", "viewers", "priorities", "budget", "max_distance"),
 			&SignificanceBudgetPlanner::select_world, DEFVAL(1000.0));
 }

@@ -68,3 +68,19 @@ for each pending cosmetic burst and uses the native selector when available.
 Godot or older Cgame binaries. Gameplay, audio, server state and networking
 are not affected. The user-visible impact requires profiling in a running
 scene; no FPS improvement is claimed.
+
+
+## Stable multi-observer visual LOD (Days After)
+
+`select_world_priority_stable(positions, viewers, priorities, ids, retained_ids,
+budget, max_distance=1000.0, hysteresis=0.0)` combines nearest-of-16 observer
+ranking with strict 0–3 importance, persistent-ID retention and a hard range.
+It builds nearest-observer distances and reuses the native priority-stable
+bounded selector. It never changes scene nodes or physics itself.
+
+`games/days_after/debris_lod.gd` calls this at 5 Hz for 96 non-colliding
+ruin fragments, showing at most 18 nearby meshes. Stock Godot uses a matching
+GDScript fallback. Collectibles, collisions, infected AI and survival state
+are unaffected. Native unit tests cover multi-viewer ranking, retention,
+priority, hard range and invalid inputs. Measure runtime frame time before
+claiming a speedup.
