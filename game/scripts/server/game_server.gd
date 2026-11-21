@@ -7942,19 +7942,30 @@ func _manage_zombie_population() -> void:
 					z.position = Vector3(float(tree["x"]) + 0.45, world.height_at(float(tree["x"]), float(tree["z"])) + TreeAmbush.PERCH_HEIGHT, float(tree["z"]))
 			zombies[zombie_id] = z
 			state["zombie"] = zombie_id
-	# Sleeping: remove zombies nobody is near, and let their spawns create them again later.
+	# Batch the proximity checks for living, unprotected infected. One native
+	# query processes the whole set instead of crossing the script/C++ boundary
+	# once per zombie. Dead/loot-guard/night-horde rules are not changed.
 	var gone: Array = []
+	var probe_positions := PackedVector2Array()
+	var probe_zombie_ids: Array[int] = []
+	var probe_spawn_ids: Array[int] = []
 	for zombie in zombies.values():
 		if not zombie.is_alive():
 			gone.append(zombie.id)
 		elif zombie.supply_cache_id >= 0 and bags.has(zombie.supply_cache_id):
-			continue # Guard stays loaded while its loot is alive: no lure-and-return exploit.
+			continue # Loot guards cannot be unloaded to reset their loot.
 		elif not night_horde.is_empty() and night_horde.get("ids", []).has(zombie.id):
-			continue # Prevent running away to unload an active horde and claim a win.
-		elif not presence.any_within(Vector2(zombie.position.x, zombie.position.z), ZOMBIE_ACTIVE_RADIUS):
-			gone.append(zombie.id)
-			if spawn_state.has(zombie.spawn_id):
-				spawn_state[zombie.spawn_id] = {"zombie": -1, "next": 0.0}
+			continue # Keep active night-horde participants until the fight ends.
+		else:
+			probe_positions.append(Vector2(zombie.position.x, zombie.position.z))
+			probe_zombie_ids.append(zombie.id)
+			probe_spawn_ids.append(zombie.spawn_id)
+	var near_players: PackedByteArray = presence.any_within_batch(probe_positions, ZOMBIE_ACTIVE_RADIUS)
+	for i in range(probe_zombie_ids.size()):
+		if near_players[i] == 0:
+			gone.append(probe_zombie_ids[i])
+			if spawn_state.has(probe_spawn_ids[i]):
+				spawn_state[probe_spawn_ids[i]] = {"zombie": -1, "next": 0.0}
 	for id in gone:
 		zombies.erase(id)
 	last_population_query_stats = presence.snapshot()

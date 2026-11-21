@@ -125,4 +125,54 @@ TEST_CASE("[SpatialPointGrid2D] Rebuild and configured grid preserve exactness")
 	CHECK(grid->snapshot()["queries"] == 2);
 }
 
+
+TEST_CASE("[SpatialPointGrid2D] Batch proximity equals scalar with ordered results and statistics") {
+	Ref<SpatialPointGrid2D> grid;
+	grid.instantiate();
+	TypedArray<Vector2> positions;
+	positions.push_back(Vector2(0, 0));
+	positions.push_back(Vector2(-128, 0));
+	for (int i = 0; i < 30; i++) {
+		positions.push_back(Vector2(real_t(1000 + i * 77), real_t(i * 91)));
+	}
+	grid->rebuild(positions);
+	PackedVector2Array probes;
+	probes.push_back(Vector2(0, 0));
+	probes.push_back(Vector2(12, 0));
+	probes.push_back(Vector2(-128, 0));
+	probes.push_back(Vector2(-116, 0));
+	probes.push_back(Vector2(500, 500));
+	probes.push_back(Vector2(Math::NaN, 0));
+
+	const PackedByteArray exact = grid->any_within_batch(probes, real_t(12.0), false);
+	REQUIRE(exact.size() == probes.size());
+	CHECK(exact[0] == 1);
+	CHECK(exact[1] == 0); // Strict boundary excludes exactly 12 m.
+	CHECK(exact[2] == 1);
+	CHECK(exact[3] == 0);
+	CHECK(exact[4] == 0);
+	CHECK(exact[5] == 0); // Invalid probes fail closed.
+	CHECK(grid->snapshot()["batch_calls"] == 1);
+	CHECK(grid->snapshot()["queries"] == 5); // Invalid probe doesn't count.
+
+	const PackedByteArray inclusive = grid->any_within_batch(probes, real_t(12.0), true);
+	CHECK(inclusive[1] == 1);
+	CHECK(inclusive[3] == 1);
+	CHECK(grid->snapshot()["batch_calls"] == 2);
+	CHECK(grid->snapshot()["queries"] == 10);
+
+	PackedVector2Array empty;
+	const PackedByteArray none = grid->any_within_batch(empty, real_t(130.0));
+	CHECK(none.is_empty());
+	CHECK(grid->snapshot()["batch_calls"] == 3);
+	CHECK(grid->snapshot()["queries"] == 10);
+
+	const PackedByteArray huge = grid->any_within_batch(probes, real_t(1000000.0));
+	CHECK(huge[0] == 1);
+	CHECK(huge[5] == 0);
+	grid->rebuild(positions);
+	CHECK(grid->snapshot()["batch_calls"] == 0);
+	CHECK(grid->snapshot()["queries"] == 0);
+}
+
 } // namespace TestSpatialPointGrid2D
