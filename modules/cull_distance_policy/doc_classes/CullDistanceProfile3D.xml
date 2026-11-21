@@ -27,6 +27,15 @@
 			<param index="1" name="authored_distance" type="float" default="0.0" />
 			<description>Uses stored pairs to resolve each object's longest AABB dimension, without passing or revalidating the same profile arrays for each instance. Bounds and author cap are validated on every call. Returns -1 for invalid bounds, cap or unconfigured profile. Selection and no-interpolation semantics are identical to [method get_cull_distance]. Pure data API: callers set visibility themselves.</description>
 		</method>
+		<method name="get_cached_cull_distances" qualifiers="const">
+			<return type="PackedFloat64Array" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="1" name="sizes" type="PackedVector3Array" />
+			<param index="2" name="authored_distances" type="PackedFloat64Array" />
+			<description>
+				Bulk version of [method get_cached_cull_distance] for up to 4096 objects. Pass index-aligned local AABB positions, AABB sizes and authored caps. Returns the same number of size-based cull distances in the same order, after validating all rows. Unconfigured profiles, mismatched lengths, more than 4096 entries, invalid boxes, or nonfinite/negative/out-of-range caps reject the entire batch with an empty array. Does not modify the scene or automatically cull anything. The caller remains responsible for rendering changes and batching smaller requests.
+			</description>
+		</method>
 		<method name="get_cull_distance" qualifiers="const">
 			<return type="float" />
 			<param index="0" name="bounds" type="AABB" />
