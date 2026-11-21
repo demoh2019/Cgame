@@ -1078,7 +1078,45 @@ static bool _world_partition_triangle_overlaps_disc(const Vector2 &a, const Vect
 			_world_partition_point_segment_distance_squared(center, c, a) <= radius_squared;
 }
 
+// Shared with both the complete builder and incremental replacement:
+// their slope and circle-clearance behavior must stay bit-for-bit identical.
+static bool _world_partition_navigation_triangle_allowed(const PackedVector3Array &p_vertices, const int p_indices[3], const PackedVector3Array &p_blockers, real_t p_agent_radius, real_t p_minimum_up) {
+	const Vector3 &v0 = p_vertices[p_indices[0]];
+	const Vector3 &v1 = p_vertices[p_indices[1]];
+	const Vector3 &v2 = p_vertices[p_indices[2]];
+	const Vector3 normal = (v1 - v0).cross(v2 - v0);
+	const real_t length = normal.length();
+	if (length <= CMP_EPSILON || normal.y < length * p_minimum_up) {
+		return false;
+	}
+	const Vector2 p0(v0.x, v0.z);
+	const Vector2 p1(v1.x, v1.z);
+	const Vector2 p2(v2.x, v2.z);
+	const real_t min_x = MIN(p0.x, MIN(p1.x, p2.x));
+	const real_t max_x = MAX(p0.x, MAX(p1.x, p2.x));
+	const real_t min_z = MIN(p0.y, MIN(p1.y, p2.y));
+	const real_t max_z = MAX(p0.y, MAX(p1.y, p2.y));
+	for (int i = 0; i < p_blockers.size(); i++) {
+		const Vector3 &blocker = p_blockers[i];
+		const real_t radius = blocker.z + p_agent_radius;
+		if (blocker.x < min_x - radius || blocker.x > max_x + radius || blocker.y < min_z - radius || blocker.y > max_z + radius) {
+			continue;
+		}
+		if (_world_partition_triangle_overlaps_disc(p0, p1, p2, Vector2(blocker.x, blocker.y), radius)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static uint64_t _world_partition_triangle_id(int p_a, int p_b, int p_c) {
+	// Resolution is at most 32, thus all vertex indices are smaller than
+	// 1089 < 2^11. Keep all three ordered indices in an exact 64-bit key.
+	return (uint64_t(p_a) << 22) | (uint64_t(p_b) << 11) | uint64_t(p_c);
+}
+
 Ref<NavigationMesh> WorldPartition3D::build_navigation_tile(const PackedVector3Array &p_vertices, int p_resolution, const PackedVector3Array &p_blockers, real_t p_agent_radius, real_t p_max_slope_degrees) const {
+	last_navigation_tile_retested_triangles = 0;
 	ERR_FAIL_COND_V_MSG(p_resolution < 2 || p_resolution > MAX_NAVMESH_TILE_RESOLUTION, Ref<NavigationMesh>(), "Navigation tile resolution must be 2 to 32.");
 	const int stride = p_resolution + 1;
 	ERR_FAIL_COND_V_MSG(p_vertices.size() != stride * stride, Ref<NavigationMesh>(), "Navigation tile vertices must contain (resolution+1)^2 samples in Z-major, then X-major order.");
@@ -1104,35 +1142,8 @@ Ref<NavigationMesh> WorldPartition3D::build_navigation_tile(const PackedVector3A
 			const int triangles[2][3] = { { a, c, b }, { b, c, d } };
 			for (int triangle_index = 0; triangle_index < 2; triangle_index++) {
 				const int *indexes = triangles[triangle_index];
-				const Vector3 &v0 = p_vertices[indexes[0]];
-				const Vector3 &v1 = p_vertices[indexes[1]];
-				const Vector3 &v2 = p_vertices[indexes[2]];
-				const Vector3 normal = (v1 - v0).cross(v2 - v0);
-				const real_t length = normal.length();
-				if (length <= CMP_EPSILON || normal.y < length * minimum_up) {
-					continue; // Degenerate, upside-down or too steep.
-				}
-				const Vector2 p0(v0.x, v0.z);
-				const Vector2 p1(v1.x, v1.z);
-				const Vector2 p2(v2.x, v2.z);
-				const real_t min_x = MIN(p0.x, MIN(p1.x, p2.x));
-				const real_t max_x = MAX(p0.x, MAX(p1.x, p2.x));
-				const real_t min_z = MIN(p0.y, MIN(p1.y, p2.y));
-				const real_t max_z = MAX(p0.y, MAX(p1.y, p2.y));
-				bool blocked = false;
-				for (int i = 0; i < p_blockers.size(); i++) {
-					const Vector3 &blocker = p_blockers[i];
-					const real_t radius = blocker.z + p_agent_radius;
-					if (blocker.x < min_x - radius || blocker.x > max_x + radius || blocker.y < min_z - radius || blocker.y > max_z + radius) {
-						continue;
-					}
-					const Vector2 center(blocker.x, blocker.y);
-					if (_world_partition_triangle_overlaps_disc(p0, p1, p2, center, radius)) {
-						blocked = true;
-						break;
-					}
-				}
-				if (!blocked) {
+				last_navigation_tile_retested_triangles++;
+				if (_world_partition_navigation_triangle_allowed(p_vertices, indexes, p_blockers, p_agent_radius, minimum_up)) {
 					Vector<int> polygon;
 					polygon.push_back(indexes[0]);
 					polygon.push_back(indexes[1]);
@@ -1143,6 +1154,146 @@ Ref<NavigationMesh> WorldPartition3D::build_navigation_tile(const PackedVector3A
 		}
 	}
 	return navigation_mesh;
+}
+
+Ref<NavigationMesh> WorldPartition3D::patch_navigation_tile(const Ref<NavigationMesh> &p_previous, int p_resolution, const PackedVector3Array &p_previous_blockers, const PackedVector3Array &p_blockers, real_t p_agent_radius, real_t p_max_slope_degrees) const {
+	last_navigation_tile_retested_triangles = 0;
+	ERR_FAIL_COND_V_MSG(p_previous.is_null(), Ref<NavigationMesh>(), "An incremental patch requires a prior valid NavigationMesh.");
+	ERR_FAIL_COND_V_MSG(p_resolution < 2 || p_resolution > MAX_NAVMESH_TILE_RESOLUTION, Ref<NavigationMesh>(), "Navigation tile patch resolution must be 2 to 32.");
+	ERR_FAIL_COND_V_MSG(p_previous_blockers.size() > MAX_NAVMESH_TILE_BLOCKERS || p_blockers.size() > MAX_NAVMESH_TILE_BLOCKERS, Ref<NavigationMesh>(), "Navigation tile patch accepts at most 256 old and 256 new blockers.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_agent_radius) || p_agent_radius < 0.0 || p_agent_radius > 8.0, Ref<NavigationMesh>(), "Navigation tile patch agent radius must be 0 to 8.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_max_slope_degrees) || p_max_slope_degrees < 0.0 || p_max_slope_degrees > 89.0, Ref<NavigationMesh>(), "Navigation tile patch slope must be 0 to 89 degrees.");
+	const int stride = p_resolution + 1;
+	const PackedVector3Array vertices = p_previous->get_vertices();
+	ERR_FAIL_COND_V_MSG(vertices.size() != stride * stride, Ref<NavigationMesh>(), "Previous NavigationMesh vertex count does not match the requested tile resolution.");
+	for (int i = 0; i < vertices.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!vertices[i].is_finite(), Ref<NavigationMesh>(), "Previous NavMesh contains non-finite terrain vertices.");
+	}
+	for (int i = 0; i < p_previous_blockers.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!p_previous_blockers[i].is_finite() || p_previous_blockers[i].z < 0.0 || p_previous_blockers[i].z > 16.0, Ref<NavigationMesh>(), "Previous blocker must have finite coordinates and radius 0 to 16.");
+	}
+	for (int i = 0; i < p_blockers.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!p_blockers[i].is_finite() || p_blockers[i].z < 0.0 || p_blockers[i].z > 16.0, Ref<NavigationMesh>(), "New blocker must have finite coordinates and radius 0 to 16.");
+	}
+
+	// The caller must provide the same terrain, agent radius and slope policy
+	// as the original build. Validate the original topology before reusing it.
+	// A foreign or malformed mesh is safely rebuilt in full, not trusted.
+	HashSet<uint64_t> existing_triangles;
+	const int polygon_count = p_previous->get_polygon_count();
+	if (polygon_count > 2 * p_resolution * p_resolution) {
+		return build_navigation_tile(vertices, p_resolution, p_blockers, p_agent_radius, p_max_slope_degrees);
+	}
+	for (int i = 0; i < polygon_count; i++) {
+		const Vector<int> polygon = p_previous->get_polygon(i);
+		if (polygon.size() != 3) {
+			return build_navigation_tile(vertices, p_resolution, p_blockers, p_agent_radius, p_max_slope_degrees);
+		}
+		const int first = polygon[0];
+		const int second = polygon[1];
+		const int third = polygon[2];
+		if (first < 0 || first >= vertices.size() || second < 0 || second >= vertices.size() || third < 0 || third >= vertices.size()) {
+			return build_navigation_tile(vertices, p_resolution, p_blockers, p_agent_radius, p_max_slope_degrees);
+		}
+		const int row = first / stride;
+		const int column = first % stride;
+		const bool upper_triangle = row < p_resolution && column < p_resolution && second == first + stride && third == first + 1;
+		const bool lower_triangle = row < p_resolution && column > 0 && second == first + stride - 1 && third == first + stride;
+		const uint64_t id = _world_partition_triangle_id(first, second, third);
+		if ((!upper_triangle && !lower_triangle) || existing_triangles.has(id)) {
+			return build_navigation_tile(vertices, p_resolution, p_blockers, p_agent_radius, p_max_slope_degrees);
+		}
+		existing_triangles.insert(id);
+	}
+
+	// Match blockers as a multiset so order changes alone are cache hits and
+	// duplicate footprints are tracked accurately. Bound worst case to 256^2.
+	HashSet<int> consumed_new;
+	real_t min_x = std::numeric_limits<real_t>::max();
+	real_t min_z = std::numeric_limits<real_t>::max();
+	real_t max_x = -std::numeric_limits<real_t>::max();
+	real_t max_z = -std::numeric_limits<real_t>::max();
+	bool changed = false;
+	auto add_dirty_footprint = [&](const Vector3 &p_blocker) {
+		const real_t radius = p_blocker.z + p_agent_radius;
+		min_x = MIN(min_x, p_blocker.x - radius);
+		min_z = MIN(min_z, p_blocker.y - radius);
+		max_x = MAX(max_x, p_blocker.x + radius);
+		max_z = MAX(max_z, p_blocker.y + radius);
+		changed = true;
+	};
+	for (int old_i = 0; old_i < p_previous_blockers.size(); old_i++) {
+		bool matched = false;
+		for (int new_i = 0; new_i < p_blockers.size(); new_i++) {
+			if (!consumed_new.has(new_i) && p_previous_blockers[old_i] == p_blockers[new_i]) {
+				consumed_new.insert(new_i);
+				matched = true;
+				break;
+			}
+		}
+		if (!matched) {
+			add_dirty_footprint(p_previous_blockers[old_i]);
+		}
+	}
+	for (int new_i = 0; new_i < p_blockers.size(); new_i++) {
+		if (!consumed_new.has(new_i)) {
+			add_dirty_footprint(p_blockers[new_i]);
+		}
+	}
+	if (!changed) {
+		// Immutable cache hit: caller can retain the same NavigationMesh Ref.
+		return p_previous;
+	}
+	if (!Math::is_finite(min_x) || !Math::is_finite(min_z) || !Math::is_finite(max_x) || !Math::is_finite(max_z)) {
+		return build_navigation_tile(vertices, p_resolution, p_blockers, p_agent_radius, p_max_slope_degrees);
+	}
+
+	// Reconstruct polygons in canonical grid order. Triangles wholly outside
+	// the changed region reuse the old walkability mask with zero geometry
+	// tests, while overlapping triangles use the same filter as a full bake.
+	Ref<NavigationMesh> refreshed;
+	refreshed.instantiate();
+	refreshed->set_vertices(vertices);
+	const real_t min_up = Math::cos(Math::deg_to_rad(p_max_slope_degrees));
+	for (int z = 0; z < p_resolution; z++) {
+		for (int x = 0; x < p_resolution; x++) {
+			const int a = z * stride + x;
+			const int b = a + 1;
+			const int c = a + stride;
+			const int d = c + 1;
+			const int triangles[2][3] = { { a, c, b }, { b, c, d } };
+			for (int t = 0; t < 2; t++) {
+				const int *indices = triangles[t];
+				const Vector3 &v0 = vertices[indices[0]];
+				const Vector3 &v1 = vertices[indices[1]];
+				const Vector3 &v2 = vertices[indices[2]];
+				const real_t triangle_min_x = MIN(v0.x, MIN(v1.x, v2.x));
+				const real_t triangle_max_x = MAX(v0.x, MAX(v1.x, v2.x));
+				const real_t triangle_min_z = MIN(v0.z, MIN(v1.z, v2.z));
+				const real_t triangle_max_z = MAX(v0.z, MAX(v1.z, v2.z));
+				const bool touches_change = !(triangle_max_x < min_x || triangle_min_x > max_x || triangle_max_z < min_z || triangle_min_z > max_z);
+				bool keep = false;
+				if (touches_change) {
+					last_navigation_tile_retested_triangles++;
+					keep = _world_partition_navigation_triangle_allowed(vertices, indices, p_blockers, p_agent_radius, min_up);
+				} else {
+					keep = existing_triangles.has(_world_partition_triangle_id(indices[0], indices[1], indices[2]));
+				}
+				if (keep) {
+					Vector<int> polygon;
+					polygon.push_back(indices[0]);
+					polygon.push_back(indices[1]);
+					polygon.push_back(indices[2]);
+					refreshed->add_polygon(polygon);
+				}
+			}
+		}
+	}
+	return refreshed;
+}
+
+int WorldPartition3D::get_last_navigation_tile_retested_triangle_count() const {
+	return last_navigation_tile_retested_triangles;
 }
 
 Array WorldPartition3D::find_cell_path(const Vector2i &p_from, const Vector2i &p_to, bool p_loaded_only) const {
@@ -1826,6 +1977,8 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_configured_cell_count"), &WorldPartition3D::get_configured_cell_count);
 	ClassDB::bind_method(D_METHOD("find_cell_path", "from", "to", "loaded_only"), &WorldPartition3D::find_cell_path, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("build_navigation_tile", "vertices", "resolution", "blockers", "agent_radius", "max_slope_degrees"), &WorldPartition3D::build_navigation_tile, DEFVAL(0.45), DEFVAL(45.0));
+	ClassDB::bind_method(D_METHOD("patch_navigation_tile", "previous", "resolution", "previous_blockers", "blockers", "agent_radius", "max_slope_degrees"), &WorldPartition3D::patch_navigation_tile, DEFVAL(0.45), DEFVAL(45.0));
+	ClassDB::bind_method(D_METHOD("get_last_navigation_tile_retested_triangle_count"), &WorldPartition3D::get_last_navigation_tile_retested_triangle_count);
 	ClassDB::bind_method(D_METHOD("pin_cell", "cell"), &WorldPartition3D::pin_cell);
 	ClassDB::bind_method(D_METHOD("unpin_cell", "cell"), &WorldPartition3D::unpin_cell);
 	ClassDB::bind_method(D_METHOD("is_cell_pinned", "cell"), &WorldPartition3D::is_cell_pinned);

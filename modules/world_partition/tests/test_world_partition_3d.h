@@ -1009,4 +1009,103 @@ TEST_CASE("[WorldPartition3D] Dynamic NavMesh dirty tile scheduling validates bu
 	memdelete(world);
 }
 
+
+TEST_CASE("[WorldPartition3D] Incremental NavMesh patches exactly match full tile after obstacle edits") {
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	PackedVector3Array vertices;
+	for (int z = 0; z <= 16; z++) {
+		for (int x = 0; x <= 16; x++) {
+			vertices.push_back(Vector3(2 * x, 0, 2 * z));
+		}
+	}
+	auto same_polygons = [](const Ref<NavigationMesh> &a, const Ref<NavigationMesh> &b) -> bool {
+		if (a.is_null() || b.is_null() || a->get_polygon_count() != b->get_polygon_count() || a->get_vertices() != b->get_vertices()) {
+			return false;
+		}
+		for (int i = 0; i < a->get_polygon_count(); i++) {
+			if (a->get_polygon(i) != b->get_polygon(i)) {
+				return false;
+			}
+		}
+		return true;
+	};
+
+	PackedVector3Array static_blockers;
+	static_blockers.push_back(Vector3(5, 5, 0.6));
+	static_blockers.push_back(Vector3(27, 25, 0.8));
+	Ref<NavigationMesh> baseline = partition->build_navigation_tile(vertices, 16, static_blockers, 0.45, 42.0);
+	REQUIRE(baseline.is_valid());
+	CHECK(partition->get_last_navigation_tile_retested_triangle_count() == 512);
+	PackedVector3Array placed = static_blockers;
+	placed.push_back(Vector3(16, 16, 1.42));
+	Ref<NavigationMesh> patched = partition->patch_navigation_tile(baseline, 16, static_blockers, placed, 0.45, 42.0);
+	REQUIRE(patched.is_valid());
+	const int addition_checks = partition->get_last_navigation_tile_retested_triangle_count();
+	CHECK(addition_checks > 0);
+	CHECK(addition_checks < 512);
+	Ref<NavigationMesh> full_placed = partition->build_navigation_tile(vertices, 16, placed, 0.45, 42.0);
+	CHECK(same_polygons(patched, full_placed)); // Canonical triangle order, not count alone.
+
+	Ref<NavigationMesh> cache_hit = partition->patch_navigation_tile(patched, 16, placed, placed, 0.45, 42.0);
+	CHECK(cache_hit.ptr() == patched.ptr());
+	CHECK(partition->get_last_navigation_tile_retested_triangle_count() == 0);
+	PackedVector3Array reordered = placed;
+	reordered.set(0, placed[2]);
+	reordered.set(2, placed[0]);
+	cache_hit = partition->patch_navigation_tile(patched, 16, placed, reordered, 0.45, 42.0);
+	CHECK(cache_hit.ptr() == patched.ptr()); // Blocker order does not change physics.
+	CHECK(partition->get_last_navigation_tile_retested_triangle_count() == 0);
+
+	PackedVector3Array moved = static_blockers;
+	moved.push_back(Vector3(19, 12, 1.42));
+	Ref<NavigationMesh> moved_patch = partition->patch_navigation_tile(patched, 16, placed, moved, 0.45, 42.0);
+	REQUIRE(moved_patch.is_valid());
+	const int movement_checks = partition->get_last_navigation_tile_retested_triangle_count();
+	CHECK(movement_checks > addition_checks); // Old and new influence regions must both be visited.
+	CHECK(movement_checks < 512);
+	Ref<NavigationMesh> moved_full = partition->build_navigation_tile(vertices, 16, moved, 0.45, 42.0);
+	CHECK(same_polygons(moved_patch, moved_full));
+
+	Ref<NavigationMesh> removed = partition->patch_navigation_tile(moved_patch, 16, moved, static_blockers, 0.45, 42.0);
+	REQUIRE(removed.is_valid());
+	CHECK(same_polygons(removed, baseline)); // Removal restores original triangle graph.
+	CHECK(partition->get_last_navigation_tile_retested_triangle_count() > 0);
+
+	PackedVector3Array repeated = static_blockers;
+	repeated.push_back(Vector3(16, 16, 1.42));
+	repeated.push_back(Vector3(16, 16, 1.42));
+	Ref<NavigationMesh> repeated_full = partition->build_navigation_tile(vertices, 16, repeated, 0.45, 42.0);
+	Ref<NavigationMesh> repeated_patch = partition->patch_navigation_tile(baseline, 16, static_blockers, repeated, 0.45, 42.0);
+	CHECK(same_polygons(repeated_patch, repeated_full));
+	repeated.resize(repeated.size() - 1);
+	// Remove exactly one duplicate and retain the other.
+	PackedVector3Array double_barrier = repeated;
+	double_barrier.push_back(Vector3(16, 16, 1.42));
+	Ref<NavigationMesh> single_patch = partition->patch_navigation_tile(repeated_patch, 16, double_barrier, repeated, 0.45, 42.0);
+	Ref<NavigationMesh> single_full = partition->build_navigation_tile(vertices, 16, repeated, 0.45, 42.0);
+	CHECK(same_polygons(single_patch, single_full));
+
+	Ref<NavigationMesh> invalid_previous;
+	ERR_PRINT_OFF;
+	CHECK(partition->patch_navigation_tile(invalid_previous, 16, static_blockers, placed).is_null());
+	CHECK(partition->patch_navigation_tile(baseline, 33, static_blockers, placed).is_null());
+	PackedVector3Array bad_new = placed;
+	bad_new.push_back(Vector3(0, 0, -1));
+	CHECK(partition->patch_navigation_tile(baseline, 16, static_blockers, bad_new).is_null());
+	ERR_PRINT_ON;
+
+	Ref<NavigationMesh> malformed;
+	malformed.instantiate();
+	malformed->set_vertices(vertices);
+	Vector<int> bogus_triangle;
+	bogus_triangle.push_back(0);
+	bogus_triangle.push_back(1);
+	bogus_triangle.push_back(2);
+	malformed->add_polygon(bogus_triangle);
+	Ref<NavigationMesh> fallback = partition->patch_navigation_tile(malformed, 16, static_blockers, placed, 0.45, 42.0);
+	CHECK(same_polygons(fallback, full_placed)); // Malformed cached topology is not reused.
+	CHECK(partition->get_last_navigation_tile_retested_triangle_count() == 512);
+	memdelete(partition);
+}
+
 } // namespace TestWorldPartition3D

@@ -576,6 +576,7 @@ func _refresh_hud() -> void:
     var collidable: int = world_partition.get_physics_active_cell_count() if world_partition != null else 0
     var nav_regions: int = world_partition.get_navigation_active_cell_count() if world_partition != null else 0
     var nav_dirty: int = world_partition.get_navigation_dirty_cell_count() if world_partition != null else 0
+    var nav_triangles: int = world_partition.get_last_navigation_tile_retested_triangle_count() if world_partition != null else 0
     var nav_updates: int = world_partition.get_navigation_updates_used_this_frame() if world_partition != null else 0
     var nav_budget: int = world_partition.max_navigation_updates_per_physics_frame if world_partition != null else 0
     var quest_text: String = _quest_hud_text()
@@ -589,7 +590,7 @@ func _refresh_hud() -> void:
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
         + "Ячейки: %d/%d   закреплено: %d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pinned, pending, inflight, failed, current_region.x, current_region.y] \
-        + "Упреждающая загрузка: %s   LOD дальних: %d   симуляция: %d   коллизии: %d   NavMesh: %d   пересборка: %d   навигация: %d/%d\n" % [predicted_text, distant, simulated, collidable, nav_regions, nav_dirty, nav_updates, nav_budget] \
+        + "Упреждающая загрузка: %s   LOD дальних: %d   симуляция: %d   коллизии: %d   NavMesh: %d   пересборка: %d   треугольники: %d/512   навигация: %d/%d\n" % [predicted_text, distant, simulated, collidable, nav_regions, nav_dirty, nav_triangles, nav_updates, nav_budget] \
         + "Атмосфера: %02d:%02d  %s  %s (F6/F7/F8)\n" % [int(atmosphere_clock.day_hours), int(fmod(atmosphere_clock.day_hours, 1.0) * 60.0), atmosphere_clock.get_weather_name(), "ПАУЗА" if atmosphere_clock.paused else "цикл"] \
         + quest_text + "\n" \
         + "Здоровье: %d/100   Противники: %d   побеждено: %d   F/ЛКМ: удар\n" % [player_health, enemy_count, defeated_mobs.size()] \

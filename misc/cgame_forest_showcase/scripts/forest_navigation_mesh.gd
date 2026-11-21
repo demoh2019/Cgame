@@ -47,3 +47,16 @@ static func build_tile(cell_world_origin: Vector3, partition: WorldPartition3D,
             preview.add_polygon(PackedInt32Array([a, c, b]))
             preview.add_polygon(PackedInt32Array([b, c, d]))
     return preview
+
+
+static func patch_tile(cell_world_origin: Vector3, partition: WorldPartition3D,
+        previous: NavigationMesh, previous_blockers: PackedVector3Array,
+        blockers: PackedVector3Array) -> NavigationMesh:
+    # Full fallback only for a missing/cold cache; the native patch detects
+    # old/new obstacle differences and re-tests just the touched triangles.
+    # Terrain samples and agent/slope policy must not change within a live LOD.
+    if not is_instance_valid(partition) or previous == null:
+        return build_tile(cell_world_origin, partition, blockers)
+    return partition.patch_navigation_tile(
+        previous, SAMPLE_COUNT, previous_blockers, blockers,
+        AGENT_RADIUS, MAX_SLOPE_DEGREES)
