@@ -795,8 +795,9 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 		0.0 if use_smart_slots else float(posmod(id, 8)) * 0.4)
 	_flank_query.set("candidates", ring)
 	# The authoritative server grants each agent a per-tick EQS work slot.
-	# The native cursor scores at most THREE source candidates per admitted
-	# tick; never use partial rankings to claim a gameplay Smart Object.
+	# The native cursor starts conservatively, then adapts to measured CPU
+	# microseconds with an eight-item hard maximum per granted work tick.
+	# Never use partial rankings to claim a gameplay Smart Object.
 	var ranked_indices := PackedInt32Array()
 	var ranked := PackedVector3Array()
 	var top_count: int = 8 if use_smart_slots or incremental_available else 3
