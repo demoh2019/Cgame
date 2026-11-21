@@ -56,6 +56,12 @@ static func unload_budget_for_quality(value: int) -> int:
 	return [12, 20, 32, 48][clampi(value, 0, 3)]
 
 
+## Soft wall-clock time slice for native obsolete-chunk deactivation.
+## Keep a small guaranteed cleanup slice even on Performance settings.
+static func unload_time_budget_for_quality(value: int) -> int:
+	return [400, 650, 900, 1200][clampi(value, 0, 3)]
+
+
 ## Cosmetic streaming only: scripts far from the camera update at a
 ## budgeted interval instead of running expensive visual work every frame.
 ## This is separate from the even farther complete simulation-pause radius.
@@ -414,6 +420,12 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 			var unload_limit: int = unload_budget_for_quality(_level)
 			if int(streamer.call("get_max_unloads_per_update")) != unload_limit:
 				streamer.call("set_max_unloads_per_update", unload_limit)
+		# One expensive scene detach must not consume a whole frame of
+		# subsequent cleanup. Older native builds remain fully compatible.
+		if streamer.has_method("set_max_unload_work_usec"):
+			var unload_usec: int = unload_time_budget_for_quality(_level)
+			if int(streamer.call("get_max_unload_work_usec")) != unload_usec:
+				streamer.call("set_max_unload_work_usec", unload_usec)
 		# Native cosmetic tick LOD never pauses collision, network state,
 		# loot or other authoritative actors; only ChunkView opts in.
 		if streamer.has_method("set_tick_throttle_radius"):
