@@ -192,3 +192,32 @@ static func apply_simulation_layers(streamer: WorldStreamer, underground: bool) 
 	var enabled: bool = not underground
 	if bool(streamer.call("is_simulation_layer_enabled", &"SurfaceCosmetics")) != enabled:
 		streamer.call("set_simulation_layer_enabled", &"SurfaceCosmetics", enabled)
+
+## Read-only main streaming readiness for a compact client HUD indicator.
+## Older fork engines lack this native API; do not invent a percentage.
+## Game systems never use this cosmetic estimate as combat authority.
+static func format_focus_streaming_status(status: Dictionary) -> String:
+	var total: int = int(status.get("total", 0))
+	if total <= 0:
+		return ""
+	if bool(status.get("truncated", false)):
+		return "WORLD STREAMING: grid limit reached"
+	var failed: int = maxi(0, int(status.get("failed", 0)))
+	var pending: int = maxi(0, int(status.get("pending", 0)))
+	if failed > 0:
+		return "WORLD STREAMING: %d failed, %d pending" % [failed, pending]
+	if pending <= 0:
+		return ""
+	var progress: float = float(status.get("progress", 0.0))
+	if not is_finite(progress):
+		progress = 0.0
+	return "WORLD STREAMING: %d%% | pending %d" % [
+		roundi(clampf(progress, 0.0, 1.0) * 100.0), pending]
+
+
+static func focus_loading_notice(streamer: WorldStreamer) -> String:
+	if streamer == null or not streamer.has_method("get_focus_streaming_status"):
+		return ""
+	var status: Dictionary = streamer.call("get_focus_streaming_status", true)
+	return format_focus_streaming_status(status)
+

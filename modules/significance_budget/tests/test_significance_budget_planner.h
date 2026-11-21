@@ -147,4 +147,41 @@ TEST_CASE("[SignificanceBudget] stable selection rejects malformed input atomica
 	CHECK(planner->select_top_stable(distances, ids, retained, 1, 10.0).is_empty());
 }
 
+
+TEST_CASE("[SignificanceBudget] category caps protect critical VFX during crowd storms") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distances = { 2.0, 1.0, 3.0, 5.0, 4.0, 120.0, 1.0, 2.0 };
+	const PackedByteArray priorities = { 0, 0, 1, 3, 2, 3, 2, 2 };
+	const PackedByteArray categories = { 0, 0, 1, 3, 2, 3, 2, 2 };
+	const PackedInt32Array caps = { 1, 2, 2, 1 };
+	const PackedInt32Array expected = { 3, 6, 7, 2, 1 };
+	const PackedInt32Array minimal = { 3, 6 };
+	const PackedInt32Array edge = { 6, 1 };
+	CHECK(planner->select_effects(distances, priorities, categories, caps, 5, 100.0) == expected);
+	CHECK(planner->select_effects(distances, priorities, categories, caps, 2, 100.0) == minimal);
+	CHECK(planner->select_effects(distances, priorities, categories, caps, 8, 1.0) == edge);
+	CHECK(planner->select_effects(distances, priorities, categories, caps, 0, 100.0).is_empty());
+	CHECK(distances[0] == 2.0);
+}
+
+TEST_CASE("[SignificanceBudget] invalid category input is rejected atomically") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distances = { 1.0, 2.0 };
+	const PackedByteArray priorities = { 3, 0 };
+	const PackedByteArray groups = { 2, 0 };
+	const PackedInt32Array caps = { 2, 2, 2, 2 };
+	CHECK(planner->select_effects(distances, priorities, groups, caps, 2, 90.0).size() == 2);
+	CHECK(planner->select_effects({ 1.0 }, priorities, groups, caps, 2, 90.0).is_empty());
+	CHECK(planner->select_effects({ 1.0, Math::NaN }, priorities, groups, caps, 2, 90.0).is_empty());
+	CHECK(planner->select_effects({ 1.0, -1.0 }, priorities, groups, caps, 2, 90.0).is_empty());
+	CHECK(planner->select_effects(distances, { 3, 4 }, groups, caps, 2, 90.0).is_empty());
+	CHECK(planner->select_effects(distances, priorities, { 2, 4 }, caps, 2, 90.0).is_empty());
+	CHECK(planner->select_effects(distances, priorities, groups, { 1, 2 }, 2, 90.0).is_empty());
+	CHECK(planner->select_effects(distances, priorities, groups, { -1, 2, 2, 2 }, 2, 90.0).is_empty());
+	CHECK(planner->select_effects(distances, priorities, groups, caps, 129, 90.0).is_empty());
+	CHECK(planner->select_effects(distances, priorities, groups, caps, 2, Math::INF).is_empty());
+}
+
 } // namespace TestSignificanceBudgetPlanner

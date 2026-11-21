@@ -185,6 +185,61 @@ int WorldStreamer::get_auxiliary_source_failed_count() const {
 	return _get_auxiliary_completion(false).failed;
 }
 
+
+WorldStreamer::AuxiliaryCompletion WorldStreamer::_get_focus_completion(
+		bool p_require_visual_details, bool &r_truncated) const {
+	AuxiliaryCompletion result;
+	r_truncated = false;
+	Vector3 position;
+	if (!enabled || !_get_focus_position(position) ||
+			!Math::is_finite(load_radius) || load_radius < 0.0 ||
+			!Math::is_finite(cell_size) || cell_size <= 0.0) {
+		return result;
+	}
+
+	// Use the *same* player-centered eligibility set and hard cap as the
+	// actual streaming scheduler, but do not inspect the optional waypoint
+	// source (whose progress is available from the auxiliary source API).
+	LocalVector<Vector3i> wanted;
+	WorldStreamingGrid::cells_in_radius(position, load_radius, cell_size,
+			_grid_axes(), wanted, WorldStreamingGrid::MAX_CELLS, &r_truncated);
+	for (const Vector3i &cell : wanted) {
+		++result.total;
+		if (failed.has(cell)) {
+			++result.failed;
+			continue;
+		}
+		const ObjectID *id = loaded.getptr(cell);
+		if (id != nullptr && ObjectDB::get_instance(*id) != nullptr) {
+			if (!p_require_visual_details || !pending_visual_details.has(cell)) {
+				++result.completed;
+			}
+		} else if (missing.has(cell)) {
+			// A procedural generator's intentional empty result is complete.
+			++result.completed;
+		}
+	}
+	return result;
+}
+
+Dictionary WorldStreamer::get_focus_streaming_status(bool p_require_visual_details) const {
+	bool truncated = false;
+	const AuxiliaryCompletion status = _get_focus_completion(p_require_visual_details, truncated);
+	const int pending = status.total - status.completed - status.failed;
+	const bool ready = status.total > 0 && !truncated && status.failed == 0 && pending == 0;
+	Dictionary result;
+	result["total"] = status.total;
+	result["completed"] = status.completed;
+	result["pending"] = pending;
+	result["failed"] = status.failed;
+	result["truncated"] = truncated;
+	result["ready"] = ready;
+	// Fail closed rather than claiming 100% completion for a truncated grid.
+	result["progress"] = status.total > 0 && !truncated ?
+			real_t(status.completed) / real_t(status.total) : real_t(0.0);
+	return result;
+}
+
 bool WorldStreamer::_cell_requested(const Vector3 &p_focus, const Vector3i &p_cell) const {
 	if (WorldStreamingGrid::distance_to_cell(p_focus, p_cell, cell_size, _grid_axes()) <= load_radius) {
 		return true;
@@ -1272,6 +1327,7 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_auxiliary_source_ready", "require_visual_details"), &WorldStreamer::is_auxiliary_source_ready, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_auxiliary_source_pending_count", "require_visual_details"), &WorldStreamer::get_auxiliary_source_pending_count, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_auxiliary_source_failed_count"), &WorldStreamer::get_auxiliary_source_failed_count);
+	ClassDB::bind_method(D_METHOD("get_focus_streaming_status", "require_visual_details"), &WorldStreamer::get_focus_streaming_status, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("set_route_cells", "cells"), &WorldStreamer::set_route_cells);
 	ClassDB::bind_method(D_METHOD("get_route_cells"), &WorldStreamer::get_route_cells);
 	ClassDB::bind_method(D_METHOD("clear_route_cells"), &WorldStreamer::clear_route_cells);

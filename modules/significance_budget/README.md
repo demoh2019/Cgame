@@ -25,3 +25,21 @@ out-of-range objects. IDs are stable across changing candidate order; invalid
 or duplicate IDs fail closed. Albion After uses this to select dungeon torches
 from the global light pool, while preserving a same-order GDScript fallback
 for stock Godot. Shadow-casting budgets remain independent and capped.
+
+## Native Niagara-inspired Effect Type budgets
+
+`select_effects(distances, priorities, categories, category_caps, budget,
+max_distance)` ranks visual-only effect descriptors by priority (3 first),
+then camera distance, then stable source order. Four independent groups,
+each capped at 0..128, compete under a shared <=128 effect budget.
+The implementation is pure C++, O(N*K) with O(4*K) scratch, validating
+all inputs before returning an output. Category caps prevent a burst of
+dust or ordinary hit particles from consuming all presentation slots.
+
+Albion After uses it via `fx_scalability_policy.gd` and `effects.gd`.
+These only control local presentation and never affect gameplay damage,
+network authority, event delivery, audio or inventory. The script fallback
+implements identical ordering on stock Godot.
+
+Reference: Unreal Engine Niagara Effect Types and scalability:
+https://dev.epicgames.com/documentation/en-us/unreal-engine/performance-budgeting-using-effect-types-in-niagara-for-unreal-engine

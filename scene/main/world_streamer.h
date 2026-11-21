@@ -36,6 +36,7 @@
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
 #include "core/string/string_name.h"
+#include "core/variant/dictionary.h"
 
 // Streams the parts ("chunks") of a big world in and out around a focus point, so an open world
 // only keeps the nearby scenes in memory. The world is split into a grid of square (or cubic)
@@ -79,6 +80,8 @@ private:
 	};
 	// Query only; does not request resources, instantiate scenes or alter residency.
 	AuxiliaryCompletion _get_auxiliary_completion(bool p_require_visual_details) const;
+	// Read-only main focus completion, using the same bounded grid as streaming.
+	AuxiliaryCompletion _get_focus_completion(bool p_require_visual_details, bool &r_truncated) const;
 	// Optional route plan from AStarGrid2D or another game planner.
 	// Only reorders already-eligible player-radius chunks: it never adds
 	// residency, skips streaming budgets or loads a distant island.
@@ -216,6 +219,9 @@ public:
 	bool is_auxiliary_source_ready(bool p_require_visual_details = false) const;
 	int get_auxiliary_source_pending_count(bool p_require_visual_details = false) const;
 	int get_auxiliary_source_failed_count() const;
+	// One snapshot avoids four O(cells) queries from HUD/telemetry clients.
+	// No cell generation, resource requests or main-thread scene work.
+	Dictionary get_focus_streaming_status(bool p_require_visual_details = false) const;
 	void set_max_concurrent_loads(int p_count);
 	int get_max_concurrent_loads() const { return max_concurrent_loads; }
 	void set_max_instantiations_per_frame(int p_count);

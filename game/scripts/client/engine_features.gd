@@ -1,4 +1,5 @@
 extends RefCounted
+const GameplayCues = preload("res://scripts/client/gameplay_cues.gd")
 ## Runtime detection of optional native engine classes, so scripts run on older editor binaries too.
 ## Everything touching a custom class goes through ClassDB.instantiate / set / call, so scripts parse without it.
 
@@ -24,6 +25,7 @@ static func tag_node(node: Node, tags: Array) -> void:
 		node.set_meta("effect_timeline", ClassDB.instantiate("GameplayEffectTimeline"))
 	if has("GameplayAttributeSet"):
 		node.set_meta("attributes", ClassDB.instantiate("GameplayAttributeSet"))
+	GameplayCues.attach(node)
 
 
 ## Creates an engine class by name and applies properties; returns null when the binary lacks it.
@@ -129,6 +131,8 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 				stack_container.call("replace_stack_branch", StringName("Runtime"), counts)
 			else:
 				stack_container.call("replace_stacks", counts)
+	# Replicated status transitions produce cosmetic cue lifecycle events.
+	GameplayCues.sync(node, kind, snapshot)
 	# Attribute snapshots are read-only presentation mirrors, never combat authority.
 	var attrs: Object = node.get_meta("attributes", null) as Object
 	if attrs != null and attrs.has_method("replace_snapshot"):

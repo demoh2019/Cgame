@@ -32,6 +32,7 @@
 #include "../audio_duck_mix.h"
 #include "../gameplay_attribute_set.h"
 #include "../gameplay_cooldown_tracker.h"
+#include "../gameplay_cue_queue.h"
 #include "../gameplay_effect_timeline.h"
 #include "../radial_force_field_3d.h"
 #include "../sound_concurrency.h"
@@ -573,6 +574,88 @@ TEST_CASE("[GameplayFX] CooldownTracker snapshot rollback and frame-rate indepen
 	CHECK(tracker->tick(3.0).size() == 1);
 	CHECK(tracker->get_cooldown_count() == 0);
 	CHECK(other->get_cooldown_count() == 2);
+}
+
+TEST_CASE("[GameplayFX] CueQueue active lifecycle, priorities and deduplication") {
+	Ref<GameplayCueQueue> cue;
+	cue.instantiate();
+	Dictionary status;
+	status["GameplayCue.Status.Sundered"] = 1;
+	status[StringName("GameplayCue.Status.Resolve")] = 3;
+	CHECK(cue->replace_active(status, 2));
+	CHECK(cue->get_active_count() == 2);
+	CHECK(cue->replace_active(status, 2)); // Idempotent replication.
+	CHECK(cue->get_pending_count() == 2);
+	Array events = cue->take_events();
+	CHECK(events.size() == 2);
+	CHECK(String(events[0]["event"]) == "started");
+	CHECK(String(events[1]["event"]) == "started");
+	CHECK(cue->get_pending_count() == 0);
+	CHECK(cue->get_active_stacks("GameplayCue.Status.Resolve") == 3);
+
+	CHECK(cue->emit_cue("GameplayCue.Status.Sundered", 0.6, 1));
+	for (int i = 0; i < 80; ++i) {
+		CHECK(cue->emit_cue("GameplayCue.Status.Sundered", 0.9, 1));
+	}
+	CHECK(cue->emit_cue("GameplayCue.Status.Resolve", 1.0, 7));
+	CHECK(cue->get_pending_count() == 2);
+	events = cue->take_events(1);
+	REQUIRE(events.size() == 1);
+	CHECK(String(events[0]["tag"]) == "GameplayCue.Status.Resolve");
+	CHECK(String(events[0]["event"]) == "executed");
+	events = cue->take_events(8);
+	REQUIRE(events.size() == 1);
+	CHECK(String(events[0]["tag"]) == "GameplayCue.Status.Sundered");
+	CHECK(int(events[0]["count"]) == 32); // Bounded coalescing.
+	CHECK(double(events[0]["magnitude"]) == doctest::Approx(0.9));
+
+	status["GameplayCue.Status.Sundered"] = 0;
+	status[StringName("GameplayCue.Status.Resolve")] = 4;
+	CHECK(cue->replace_active(status));
+	CHECK(cue->get_active_count() == 1);
+	CHECK(cue->get_active_stacks("GameplayCue.Status.Sundered") == 0);
+	events = cue->take_events();
+	CHECK(events.size() == 2);
+	CHECK(String(events[0]["event"]) == "stopped");
+	CHECK(String(events[1]["event"]) == "updated");
+	CHECK(int(events[1]["stacks"]) == 4);
+}
+
+TEST_CASE("[GameplayFX] CueQueue atomic rollback and bounded event buffering") {
+	Ref<GameplayCueQueue> cue;
+	cue.instantiate();
+	CHECK(cue->set_active("GameplayCue.Status.Resolve", 2));
+	CHECK(cue->take_events().size() == 1);
+	const Dictionary baseline = cue->get_active_snapshot();
+	Dictionary bad;
+	bad["GameplayCue.Status.Valid"] = 2;
+	bad["GameplayCue.Bad"] = -1;
+	CHECK_FALSE(cue->replace_active(bad));
+	CHECK(cue->get_active_snapshot() == baseline);
+	bad.erase("GameplayCue.Bad");
+	bad["NotACue"] = 1;
+	CHECK_FALSE(cue->replace_active(bad));
+	CHECK_FALSE(cue->set_active("GameplayCue.Invalid", -1));
+	CHECK_FALSE(cue->emit_cue("GameplayCue.Status.Resolve", Math::NaN));
+	CHECK_FALSE(cue->emit_cue("GameplayCue.Status.Resolve", 1.0, 8));
+	CHECK(cue->get_pending_count() == 0);
+	Dictionary copy = cue->get_active_snapshot();
+	copy[StringName("GameplayCue.Status.Resolve")] = 999;
+	CHECK(cue->get_active_stacks("GameplayCue.Status.Resolve") == 2);
+
+	for (int i = 0; i < GameplayCueQueue::MAX_PENDING; ++i) {
+		CHECK(cue->emit_cue(StringName(String("GameplayCue.Test.") + itos(i)), 1.0));
+	}
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK_FALSE(cue->emit_cue("GameplayCue.Overflow", 1.0));
+	CHECK_FALSE(cue->set_active("GameplayCue.Status.Resolve", 3)); // A new lifecycle event cannot fit.
+	CHECK(cue->get_active_stacks("GameplayCue.Status.Resolve") == 2);
+	CHECK(cue->take_events(0).is_empty());
+	CHECK(cue->take_events(500).size() == 32);
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING - 32);
+	cue->reset();
+	CHECK(cue->get_active_count() == 0);
+	CHECK(cue->get_pending_count() == 0);
 }
 
 } // namespace TestGameplayFX

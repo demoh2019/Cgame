@@ -40,6 +40,7 @@ const EquipmentPresets = preload("res://scripts/shared/equipment_presets.gd")
 var client
 var _bars: Dictionary = {}
 var _zone_label: Label
+var world_streaming_notice := ""
 var _info_label: Label
 var _vendor_water_button: Button
 var _vendor_food_button: Button
@@ -3649,6 +3650,8 @@ func _process(_delta: float) -> void:
 		float(client.you.get("guardian_cooldown", 0.0)),
 		float(client.you.get("guardian_brace", 0.0))
 	]
+	if not world_streaming_notice.is_empty():
+		_info_label.text += "\n" + world_streaming_notice
 	var combat_stress: float = float(client.you.get("combat_stress", 0.0))
 	if combat_stress >= CombatStress.HUD_THRESHOLD:
 		_info_label.text += "\nINFECTED PRESSURE: %d/100 | passive stamina recovery -%d%%. Regroup or find shelter." % [

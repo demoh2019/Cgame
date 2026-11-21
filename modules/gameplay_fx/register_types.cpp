@@ -30,14 +30,20 @@
 #include "register_types.h"
 
 #include "audio_duck_mix.h"
+#include "audio_mix_snapshot_controller.h"
 #include "gameplay_attribute_set.h"
 #include "gameplay_cooldown_tracker.h"
+#include "gameplay_cue_queue.h"
 #include "gameplay_effect_timeline.h"
 #include "radial_force_field_3d.h"
 #include "sound_concurrency.h"
 #include "sound_propagation.h"
 
 #include "core/object/class_db.h"
+
+#ifdef TESTS_ENABLED
+#include "tests/test_audio_mix_snapshot_controller.h"
+#endif
 
 void initialize_gameplay_fx_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
@@ -50,7 +56,9 @@ void initialize_gameplay_fx_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(GameplayEffectTimeline);
 	GDREGISTER_CLASS(GameplayAttributeSet);
 	GDREGISTER_CLASS(GameplayCooldownTracker);
+	GDREGISTER_CLASS(GameplayCueQueue);
 	GDREGISTER_CLASS(AudioDuckMix);
+	GDREGISTER_CLASS(AudioMixSnapshotController);
 }
 
 void uninitialize_gameplay_fx_module(ModuleInitializationLevel) {

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GameplayCueQueue" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		A bounded, priority-aware queue for cosmetic Gameplay Cue events.
+	</brief_description>
+	<description>
+		Queues transient [code]executed[/code] cues and persistent [code]started[/code], [code]updated[/code], and [code]stopped[/code] lifecycle events. Inspired by Gameplay Cues in Unreal Engine GAS, this class separates visual/sound dispatch from authoritative combat. The caller is responsible for replicating authoritative state, choosing effects and draining events. Tags must start with [code]GameplayCue.[/code]. A queue stores up to 128 active tags and 128 undrained events. Repeated pending events of the same tag and type coalesce, with counts capped at 32. Higher-priority events drain first; events with equal priority retain insertion order. Each call to [method take_events] returns at most 32 events.
+	</description>
+	<methods>
+		<method name="emit_cue">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="magnitude" type="float" default="1.0" />
+			<param index="2" name="priority" type="int" default="0" />
+			<description>Queues one transient cue. Identical tag/event pairs are aggregated; priority is 0 to 7 and magnitude is a finite nonnegative value no greater than one million. Returns false without mutation on invalid input or a full queue.</description>
+		</method>
+		<method name="set_active">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="stacks" type="int" />
+			<param index="2" name="priority" type="int" default="0" />
+			<description>Sets one persistent cue stack count. Zero stops the cue. Unchanged stacks do not enqueue another event; active and pending state are updated atomically.</description>
+		</method>
+		<method name="replace_active">
+			<return type="bool" />
+			<param index="0" name="snapshot" type="Dictionary" />
+			<param index="1" name="priority" type="int" default="0" />
+			<description>Transactionally applies a snapshot of tag to integer stack count, emitting only changes. Malformed input or insufficient pending capacity leaves both active and pending state unchanged.</description>
+		</method>
+		<method name="get_active_snapshot" qualifiers="const">
+			<return type="Dictionary" />
+			<description>Returns an independent mapping of active cue tags to stack counts.</description>
+		</method>
+		<method name="get_active_stacks" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="tag" type="StringName" />
+			<description>Returns exact cue stack count, or zero when absent.</description>
+		</method>
+		<method name="is_active" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<description>Whether the exact cue tag is active.</description>
+		</method>
+		<method name="take_events">
+			<return type="Array" />
+			<param index="0" name="max_events" type="int" default="32" />
+			<description>Drains up to 32 events sorted by descending priority with stable insertion order for ties. Each dictionary includes tag, event, stacks, count, priority and magnitude. Event is one of started/updated/stopped/executed. A zero or negative limit drains nothing.</description>
+		</method>
+		<method name="get_active_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of persistent cue tags.</description>
+		</method>
+		<method name="get_pending_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of queued coalesced events.</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>Clears all active and pending cues without emitting events.</description>
+		</method>
+	</methods>
+</class>

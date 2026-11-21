@@ -9,6 +9,7 @@ const AudioSurfaces = preload("res://scripts/client/audio_surfaces.gd")
 const AudioVoices = preload("res://scripts/client/audio_voices.gd")
 const AudioSpatial = preload("res://scripts/client/audio_spatial.gd")
 const AudioDucking = preload("res://scripts/client/audio_ducking.gd")
+const AudioMixSnapshots = preload("res://scripts/client/audio_mix_snapshots.gd")
 const AudioAmbient = preload("res://scripts/client/audio_ambient.gd")
 const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 ## Optional engine SoundConcurrencyManager (null on a binary without the gameplay_fx module).
@@ -32,6 +33,10 @@ var _humidity := 0.0
 var _duck := 0.0
 var _duck_sources: Dictionary = {} # Old binaries: independent event holds in GDScript.
 var _native_duck: Object = null # Native AudioDuckMix, a data-only mixer.
+var _native_mix_snapshots: Object = null # Unreal Control Bus Mix-style layered profiles.
+var _script_mix_snapshots: Dictionary = {} # Older Cgame/stock Godot parity.
+var _mix_zone: String = "" # Only change zone mix when the listener moves zones.
+var _storm_mix_active: bool = false
 var _surface := "grass"
 var _cutoff := AudioSpatial.OPEN_CUTOFF
 
@@ -62,6 +67,7 @@ func _ready() -> void:
 	_sfx_lowpass = AudioMix.ensure_lowpass(ReverbZones.BUS)
 	AudioMix.load_all()
 	_native_duck = EngineFeatures.make("AudioDuckMix")
+	_native_mix_snapshots = EngineFeatures.make("AudioMixSnapshotController")
 	_ambience = AudioStreamPlayer.new()
 	_ambience.bus = "Ambience"
 	_ambience.stream = Assets.sound("ambience")
@@ -384,6 +390,67 @@ func update_reverb(underground: bool, biome: String, delta: float) -> void:
 	ReverbZones.blend(ReverbZones.reverb(_sfx_bus), ReverbZones.zone_for(underground, biome), 1.0 - exp(-2.0 * delta))
 
 
+## Named bus snapshots live independently of temporary sound-event ducks.
+## The C++ module only calculates offsets; we compose them with user sliders.
+func _activate_mix_snapshot(source: String, offsets: Dictionary, fade_seconds: float) -> void:
+	if _native_mix_snapshots != null:
+		_native_mix_snapshots.call("activate_mix", StringName(source), offsets, fade_seconds)
+	else:
+		AudioMixSnapshots.activate_mix(_script_mix_snapshots, source, offsets, fade_seconds)
+
+
+func _deactivate_mix_snapshot(source: String, fade_seconds: float) -> void:
+	if _native_mix_snapshots != null:
+		_native_mix_snapshots.call("deactivate_mix", StringName(source), fade_seconds)
+	else:
+		AudioMixSnapshots.deactivate_mix(_script_mix_snapshots, source, fade_seconds)
+
+
+func _snapshot_bus_db(bus: String) -> float:
+	if _native_mix_snapshots != null:
+		return float(_native_mix_snapshots.call("get_bus_offset_db", StringName(bus)))
+	return AudioMixSnapshots.bus_offset_db(_script_mix_snapshots, bus)
+
+
+## Unreal Audio Volume / Control Bus Mix-style independent, layered profiles.
+## Storm has hysteresis: a fluctuating forecast cannot re-trigger every frame.
+func _update_environment_mix_snapshots(underground: bool, biome: String,
+		storm: float, delta: float) -> void:
+	var zone: String = ReverbZones.zone_for(underground, biome)
+	if zone != _mix_zone:
+		if _mix_zone == "underground":
+			_deactivate_mix_snapshot("Zone.Underground", 1.25)
+		elif _mix_zone == "forest":
+			_deactivate_mix_snapshot("Zone.Forest", 1.25)
+		if zone == "underground":
+			_activate_mix_snapshot("Zone.Underground", {
+				"Music": -3.0, "Ambience": -4.0, "SFX": -2.0}, 1.25)
+		elif zone == "forest":
+			_activate_mix_snapshot("Zone.Forest", {
+				"Ambience": -1.5, "SFX": -0.5}, 1.25)
+		_mix_zone = zone
+	if is_finite(storm):
+		if not _storm_mix_active and storm >= 0.70:
+			_activate_mix_snapshot("Weather.Storm", {
+				"Music": -2.0, "Ambience": -1.0, "SFX": -0.75}, 2.0)
+			_storm_mix_active = true
+		elif _storm_mix_active and storm <= 0.55:
+			_deactivate_mix_snapshot("Weather.Storm", 2.0)
+			_storm_mix_active = false
+	if _native_mix_snapshots != null:
+		_native_mix_snapshots.call("tick", delta)
+	else:
+		AudioMixSnapshots.tick(_script_mix_snapshots, delta)
+
+
+## Do not resubmit identical AudioServer bus gain every render frame.
+static func _apply_bus_gain(bus: String, gain_db: float) -> void:
+	var index: int = AudioServer.get_bus_index(bus)
+	gain_db = maxf(-80.0, gain_db)
+	if index >= 0 and absf(AudioServer.get_bus_volume_db(index) - gain_db) > 0.01:
+		AudioServer.set_bus_volume_db(index, gain_db)
+
+
 ## Per-frame environment audio: listener filtering, surface footsteps, weather loops, biome bed, music ducking.
 ## `storm` 0..1, `wind` is the wind speed, `covered` = sheltered or underground.
 func update_environment(listener: Vector3, ground_height: Callable, underground: bool, biome: String,
@@ -408,18 +475,22 @@ func update_environment(listener: Vector3, ground_height: Callable, underground:
 	_ambience.volume_db = lerpf(_ambience.volume_db, float(bed["db"]), 1.0 - exp(-1.5 * delta))
 	_rain.volume_db = lerpf(_rain.volume_db, AudioAmbient.rain_db(storm, covered), 1.0 - exp(-2.0 * delta))
 	_wind.volume_db = lerpf(_wind.volume_db, AudioAmbient.wind_db(wind, storm, underground), 1.0 - exp(-2.0 * delta))
+	# Long-lived zone/weather mix profiles are separate from transient audio ducks.
+	_update_environment_mix_snapshots(underground, biome, storm, delta)
 	# Native Unreal-style duck bus mixer, with independent event holds.
 	# The fallback follows the same target and 40/4 dB/s envelope exactly.
 	if _native_duck != null:
 		_duck = float(_native_duck.call("tick", delta))
 	else:
 		_duck = AudioDucking.tick_sources(_duck_sources, _duck, delta)
-	var music_bus := AudioServer.get_bus_index("Music")
-	if music_bus != -1:
-		AudioServer.set_bus_volume_db(music_bus, AudioMix.linear_to_db(AudioMix.volumes["Music"]) + _duck if AudioMix.volumes["Music"] > 0.0001 else -80.0)
-	var amb_bus := AudioServer.get_bus_index("Ambience")
-	if amb_bus != -1:
-		AudioServer.set_bus_volume_db(amb_bus, AudioMix.linear_to_db(AudioMix.volumes["Ambience"]) + _duck * 0.4 if AudioMix.volumes["Ambience"] > 0.0001 else -80.0)
+	# Sum user volume, independent named zone/weather offsets and event ducking.
+	# Muted user sliders remain muted even when a profile is activated.
+	var music_gain: float = AudioMix.linear_to_db(AudioMix.volumes["Music"]) + _duck + _snapshot_bus_db("Music") if AudioMix.volumes["Music"] > 0.0001 else -80.0
+	var ambience_gain: float = AudioMix.linear_to_db(AudioMix.volumes["Ambience"]) + _duck * 0.4 + _snapshot_bus_db("Ambience") if AudioMix.volumes["Ambience"] > 0.0001 else -80.0
+	var effects_gain: float = AudioMix.linear_to_db(AudioMix.volumes["SFX"]) + _snapshot_bus_db("SFX") if AudioMix.volumes["SFX"] > 0.0001 else -80.0
+	_apply_bus_gain("Music", music_gain)
+	_apply_bus_gain("Ambience", ambience_gain)
+	_apply_bus_gain("SFX", effects_gain)
 
 
 ## Dip music for one named event. Retrigger resets only that source's hold.

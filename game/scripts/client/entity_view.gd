@@ -17,6 +17,7 @@ const NetworkJitterBuffer = preload("res://scripts/client/network_jitter_buffer.
 const LootDropBounce = preload("res://scripts/client/loot_drop_bounce.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const EngineFeatures = preload("res://scripts/client/engine_features.gd")
+const GameplayCues = preload("res://scripts/client/gameplay_cues.gd")
 const AnimLod = preload("res://scripts/client/anim_lod.gd")
 const CombatAnimationPriority = preload("res://scripts/client/combat_animation_priority.gd")
 const CampfireFx = preload("res://scripts/client/campfire_fx.gd")
@@ -783,14 +784,18 @@ func _process(delta: float) -> void:
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			var model: Node3D = node.get_node("Model")
 			model.update_motion(delta)
-			# Periodic visual feedback is coalesced by the native effect timeline:
-			# no damage, attack, RPC or client-authoritative state transition.
-			if key.begins_with("zombie:") and not periodic_pulses.is_empty() and GraphicsQuality.level() >= 2:
-				if model.has_method("status_pulse"):
-					var pulse_color := Color(0.70, 0.38, 1.0)
-					if periodic_pulses.has(StringName("Runtime.Status.Sundered")):
-						pulse_color = Color(1.0, 0.43, 0.15)
-					model.call("status_pulse", pulse_color)
+			# Gameplay Cues coalesce replicated status starts and periodic pulses.
+			# Dispatch is cosmetic only; no combat events or RPCs originate here.
+			if key.begins_with("zombie:"):
+				var cues: Array = GameplayCues.frame_events(node, periodic_pulses)
+				if GraphicsQuality.level() >= 2 and model.has_method("status_pulse"):
+					for cue in cues:
+						if str(cue.get("event", "")) == "stopped":
+							continue
+						var pulse_color: Color = GameplayCues.pulse_color(str(cue.get("tag", "")))
+						if pulse_color.a > 0.0:
+							model.call("status_pulse", pulse_color)
+							break
 			anim_models.append(model)
 			if key.begins_with("player:"):
 				var bike = node.get_node("TrailBike")
