@@ -108,4 +108,55 @@ TEST_CASE("[SpatialRelevancyGrid2D] Multiple viewers match brute-force source or
 	CHECK(int(grid->get_stats()["queries"]) == 100);
 	CHECK(int(grid->get_stats()["rebuilds"]) == 1);
 }
+
+TEST_CASE("[SpatialRelevancyGrid2D] Batched viewers preserve scalar sets and input ordering") {
+	Ref<SpatialRelevancyGrid2D> grid;
+	grid.instantiate();
+	PackedInt64Array ids;
+	PackedVector2Array actors;
+	for (int i = 0; i < 160; i++) {
+		ids.push_back(10000 + i);
+		actors.push_back(Vector2((i * 197) % 3100 - 1550, (i * 311) % 2900 - 1450));
+	}
+	REQUIRE(grid->rebuild(ids, actors));
+	PackedVector2Array viewers = {
+		Vector2(0, 0), Vector2(-1550, -1450), Vector2(64, -32),
+		Vector2(1500, 1300), Vector2(Math::NaN, 0)
+	};
+	const Array batched = grid->query_many(viewers, 90.0);
+	REQUIRE(batched.size() == viewers.size());
+	for (int viewer_index = 0; viewer_index < viewers.size(); viewer_index++) {
+		const PackedInt64Array actual = batched[viewer_index];
+		const PackedInt64Array scalar = grid->query_ids(viewers[viewer_index], 90.0);
+		CHECK(actual == scalar);
+		PackedInt64Array brute;
+		if (viewers[viewer_index].is_finite()) {
+			for (int i = 0; i < actors.size(); i++) {
+				if (viewers[viewer_index].distance_squared_to(actors[i]) <= 90.0 * 90.0) {
+					brute.push_back(ids[i]);
+				}
+			}
+		}
+		CHECK(actual == brute);
+	}
+	CHECK(int(grid->get_stats()["batch_calls"]) == 1);
+	CHECK(int(grid->get_stats()["batch_viewers"]) == viewers.size());
+	CHECK(int(grid->get_stats()["queries"]) == 8); // Invalid viewer never increments.
+	const Array huge = grid->query_many(viewers, 100000.0);
+	REQUIRE(huge.size() == viewers.size());
+	CHECK(int(grid->get_stats()["batch_calls"]) == 2);
+	CHECK(int(grid->get_stats()["fallback_scans"]) >= 4);
+	const Array empty = grid->query_many(PackedVector2Array(), 90.0);
+	CHECK(empty.is_empty());
+	CHECK(int(grid->get_stats()["batch_calls"]) == 3);
+	CHECK(int(grid->get_stats()["batch_viewers"]) == 10);
+	PackedVector2Array oversized;
+	oversized.resize(4097);
+	CHECK(grid->query_many(oversized, 90.0).is_empty());
+	CHECK(int(grid->get_stats()["batch_calls"]) == 3);
+	grid->clear();
+	CHECK(int(grid->get_stats()["batch_calls"]) == 0);
+	CHECK(int(grid->get_stats()["batch_viewers"]) == 0);
+}
+
 } // namespace TestSpatialRelevancyGrid2D

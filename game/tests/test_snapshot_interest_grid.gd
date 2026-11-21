@@ -37,6 +37,19 @@ func run(t) -> void:
 			"invalid entities cannot silently disappear")
 		t.eq(native.get_stats()["entities"], 0,
 			"failed rebuild clears partially indexed state")
+		t.check(native.rebuild(player_ids, player_positions), "batch test restores native index")
+		var multi_viewers := PackedVector2Array([
+			Vector2(-20, -20), Vector2(0, 0), Vector2(700, 700), Vector2(NAN, 0)])
+		var grouped: Array = native.query_many(multi_viewers, 90.0)
+		t.eq(grouped.size(), multi_viewers.size(), "native produces one set per viewer")
+		for i in multi_viewers.size():
+			t.eq(grouped[i], native.query_ids(multi_viewers[i], 90.0),
+				"native batch preserves exact scalar set at viewer %d" % i)
+		t.eq(native.get_stats()["batch_calls"], 1, "one batch invocation recorded")
+		t.eq(native.get_stats()["batch_viewers"], multi_viewers.size(),
+			"batch counts all viewers including invalid positions")
+		var none: Array = native.query_many(PackedVector2Array(), 90.0)
+		t.eq(none.size(), 0, "empty batch returns no viewer lists")
 	else:
 		t.check(not ClassDB.class_exists("SpatialRelevancyGrid2D"),
 			"stock Godot intentionally preserves original snapshot loops")
@@ -62,11 +75,28 @@ func run(t) -> void:
 	var started: bool = server.prepare_snapshot_interest()
 	t.eq(started, native != null, "network interest index only active on Cgame")
 	var indexed: Dictionary = server.snapshot_for(101)
+	if started:
+		t.eq(server._snapshot_player_ids_by_peer.size(), server.players.size(),
+			"one cached player set per actual receiver")
+		t.eq(server._snapshot_zombie_ids_by_peer.size(), server.players.size(),
+			"one cached infected set per actual receiver")
+		var p_stats: Dictionary = server._snapshot_players_grid.get_stats()
+		var z_stats: Dictionary = server._snapshot_zombies_grid.get_stats()
+		t.eq(p_stats["batch_calls"], 1, "native player index gathered in one call")
+		t.eq(z_stats["batch_calls"], 1, "native infected index gathered in one call")
+		t.eq(p_stats["queries"], server.players.size(),
+			"one C++ query per viewer, not per snapshot invocation")
+		t.eq(z_stats["queries"], server.players.size(),
+			"all infected relevance precomputed before packet assembly")
 	t.eq(indexed["players"], baseline["players"],
 		"native index never changes replicated player payload or ordering")
 	t.eq(indexed["zombies"], baseline["zombies"],
 		"native index never changes replicated infected payload or ordering")
 	server.finish_snapshot_interest()
+	t.eq(server._snapshot_player_ids_by_peer.size(), 0,
+		"broadcast completion clears cached player sets")
+	t.eq(server._snapshot_zombie_ids_by_peer.size(), 0,
+		"broadcast completion clears cached infected sets")
 	t.eq(server.last_snapshot_interest_stats.get("enabled", false),
 		native != null, "native diagnostics only when index was used")
 	near_player.position = Vector3(700, 0, 700)
@@ -79,6 +109,11 @@ func run(t) -> void:
 	t.eq(after_move["players"], fresh["players"], "rebuild sees player teleport")
 	t.eq(after_move["zombies"], fresh["zombies"], "rebuild sees infected relocation")
 	server.finish_snapshot_interest()
+	if started:
+		t.eq(server.last_snapshot_interest_stats["players"]["batch_calls"], 1,
+			"one player batch again after teleport rebuild")
+		t.eq(server.last_snapshot_interest_stats["zombies"]["batch_calls"], 1,
+			"one infected batch again after relocation rebuild")
 
 	t.current = "real Net sends one shared index per snapshot cadence"
 	var net_source: String = (Net as Script).source_code

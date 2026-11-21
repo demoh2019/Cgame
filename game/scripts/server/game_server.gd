@@ -382,6 +382,9 @@ var _snapshot_players_grid: Variant = null
 var _snapshot_zombies_grid: Variant = null
 var _snapshot_interest_prepared: bool = false
 var _snapshot_interest_tick: int = -1
+# Precomputed once per 10 Hz broadcast; never sent to clients or saved.
+var _snapshot_player_ids_by_peer: Dictionary = {}
+var _snapshot_zombie_ids_by_peer: Dictionary = {}
 var last_snapshot_interest_stats: Dictionary = {"enabled": false}
 var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
@@ -8853,6 +8856,8 @@ func threat_scan_for(peer_id: int) -> Dictionary:
 ## broadcast. Only transient authoritative server values enter these grids.
 func prepare_snapshot_interest() -> bool:
 	_snapshot_interest_prepared = false
+	_snapshot_player_ids_by_peer.clear()
+	_snapshot_zombie_ids_by_peer.clear()
 	last_snapshot_interest_stats = {"enabled": false}
 	if not ClassDB.class_exists("SpatialRelevancyGrid2D"):
 		return false
@@ -8861,6 +8866,8 @@ func prepare_snapshot_interest() -> bool:
 		_snapshot_zombies_grid = ClassDB.instantiate("SpatialRelevancyGrid2D")
 	if _snapshot_players_grid == null or _snapshot_zombies_grid == null:
 		return false
+	if not _snapshot_players_grid.has_method("query_many") or not _snapshot_zombies_grid.has_method("query_many"):
+		return false # A mismatched older Cgame build still uses direct scans.
 	var player_ids := PackedInt64Array()
 	var player_positions := PackedVector2Array()
 	for other in players.values():
@@ -8878,6 +8885,18 @@ func prepare_snapshot_interest() -> bool:
 		return false
 	if not _snapshot_zombies_grid.rebuild(infected_ids, infected_positions):
 		return false
+	# Gather all viewer sets with only TWO native calls for the broadcast,
+	# instead of two calls for every connected survivor.
+	var nearby_players_by_viewer: Array = _snapshot_players_grid.query_many(
+		player_positions, Defs.INTEREST_RADIUS)
+	var nearby_infected_by_viewer: Array = _snapshot_zombies_grid.query_many(
+		player_positions, Defs.INTEREST_RADIUS)
+	if nearby_players_by_viewer.size() != player_ids.size() or 			nearby_infected_by_viewer.size() != player_ids.size():
+		return false # Resource guard: fall back rather than hide entities.
+	for i in player_ids.size():
+		var peer_id: int = int(player_ids[i])
+		_snapshot_player_ids_by_peer[peer_id] = nearby_players_by_viewer[i]
+		_snapshot_zombie_ids_by_peer[peer_id] = nearby_infected_by_viewer[i]
 	_snapshot_interest_prepared = true
 	_snapshot_interest_tick = tick_count
 	return true
@@ -8891,6 +8910,8 @@ func finish_snapshot_interest() -> void:
 			"zombies": _snapshot_zombies_grid.get_stats(),
 		}
 	_snapshot_interest_prepared = false
+	_snapshot_player_ids_by_peer.clear()
+	_snapshot_zombie_ids_by_peer.clear()
 
 
 ## What one player is allowed to know: their own full state and nearby entities.
@@ -8902,8 +8923,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var here := Vector2(player.position.x, player.position.z)
 	var nearby_players: Array = []
 	var player_candidates: Array = []
-	if _snapshot_interest_prepared and _snapshot_interest_tick == tick_count:
-		var player_ids: PackedInt64Array = _snapshot_players_grid.query_ids(here, Defs.INTEREST_RADIUS)
+	if _snapshot_interest_prepared and _snapshot_interest_tick == tick_count 			and _snapshot_player_ids_by_peer.has(peer_id):
+		var player_ids: PackedInt64Array = _snapshot_player_ids_by_peer[peer_id]
 		for candidate_id in player_ids:
 			var candidate = players.get(candidate_id)
 			if candidate != null:
@@ -8932,8 +8953,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var nearby_zombies: Array = []
 	var party_flank_hint: Dictionary = {}
 	var zombie_candidates: Array = []
-	if _snapshot_interest_prepared and _snapshot_interest_tick == tick_count:
-		var infected_ids: PackedInt64Array = _snapshot_zombies_grid.query_ids(here, Defs.INTEREST_RADIUS)
+	if _snapshot_interest_prepared and _snapshot_interest_tick == tick_count 			and _snapshot_zombie_ids_by_peer.has(peer_id):
+		var infected_ids: PackedInt64Array = _snapshot_zombie_ids_by_peer[peer_id]
 		for candidate_id in infected_ids:
 			var candidate = zombies.get(candidate_id)
 			if candidate != null:

@@ -61,3 +61,46 @@ build and benchmark results.
 References:
 - https://dev.epicgames.com/documentation/en-us/unreal-engine/replication-graph-in-unreal-engine
 - https://dev.epicgames.com/documentation/en-us/unreal-engine/actor-relevancy-in-unreal-engine
+
+## Batched per-viewer gather — native engine extension
+
+An optional `query_many(centers: PackedVector2Array, radius: float) -> Array`
+on `SpatialRelevancyGrid2D` collects one **source-order-preserving**
+`PackedInt64Array` per viewer with a single script/native call. It reuses
+the existing exact `query_ids` path for safe cell bounds, inclusive 90 m
+distance checks, negative coordinates and oversized radii. Up to 4,096
+viewers may be queried in one call; an oversized batch returns an empty
+array, allowing game code to fall back rather than silently hide actors.
+Empty and invalid individual viewer coordinates behave like scalar calls.
+
+The engine's `get_stats()` now includes `batch_calls` and
+`batch_viewers`, in addition to existing per-view query diagnostics.
+
+### Applied to the live Albion After networking path
+
+`GameServer.prepare_snapshot_interest()` now gathers all connected
+viewers' 90 m nearby player IDs **and** nearby infected IDs in two
+native invocations per 10 Hz network broadcast. Temporary ID lists are
+indexed by peer ID in the authoritative server, and
+`snapshot_for(peer_id)` consumes those lists while retaining its final
+exact-radius and public-field checks. No packet schema or gameplay,
+combat or inventory visibility rules were changed.
+
+`finish_snapshot_interest()` clears the temporary caches immediately;
+standalone snapshots still use the complete legacy scans. If the native
+API is absent (older Cgame binary), a rebuild fails or the batch exceeds
+the engine's resource guard, the server retains its existing full-scan
+fallback for the whole broadcast.
+
+This adapts the **viewer-dependent gather** stage of Unreal Replication
+Graph and Iris prioritization, without claiming full Iris, bandwidth
+compression or server-authoritative event dormancy.
+
+References:
+- https://dev.epicgames.com/documentation/en-us/unreal-engine/replication-graph-in-unreal-engine
+- https://dev.epicgames.com/documentation/en-us/unreal-engine/iris-prioritization-in-unreal-engine
+
+Native C++ and game integration regressions are in the existing
+`test_spatial_relevancy_grid_2d.cpp` and `test_snapshot_interest_grid.gd`
+suites; updates to either source file trigger the existing dedicated
+`native-spatial-relevancy.yml` CI.
