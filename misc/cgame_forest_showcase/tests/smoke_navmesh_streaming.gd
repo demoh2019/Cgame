@@ -130,6 +130,31 @@ func _run() -> void:
         _fail("NavigationServer3D did not connect adjacent streamed terrain tiles")
         return
 
+    # An actual forest stalker must consume a native steering permit and
+    # retrieve a synchronized NavigationServer3D path across the two cells.
+    var target := Node3D.new()
+    root.add_child(target)
+    target.global_position = Vector3(
+        34, TerrainHeight.height_at(34, 16) + 1.1, 16)
+    var enemy := CharacterBody3D.new()
+    enemy.set_script(preload("res://scripts/forest_stalker.gd"))
+    root.add_child(enemy)
+    enemy.call("configure", "navmesh_stalker", target, Vector3(
+        24, TerrainHeight.height_at(24, 16) + 1.1, 16), stream)
+    enemy.call("set_encounter_active", true)
+    for i in range(12):
+        await physics_frame
+    await process_frame
+    if int(enemy.get("navmesh_path_queries")) < 1 \
+            or int(enemy.get("navmesh_path_successes")) < 1:
+        _fail("real stalker did not obtain a streamed cross-cell NavMesh path")
+        return
+    enemy.queue_free()
+    await process_frame
+    if stream.has_navigation_agent("navmesh_stalker"):
+        _fail("removed NavMesh stalker kept an obsolete native agent ID")
+        return
+
     stream.remove_streaming_source("arrival")
     if not await _wait_nav(stream, REMOTE, false):
         _fail("removing the urgent source left distant navigation active")
