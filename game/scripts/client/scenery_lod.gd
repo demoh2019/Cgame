@@ -112,20 +112,63 @@ static func cull_range_for_bounds(bounds: AABB, sizes: PackedFloat32Array,
 	return _cull_range_fallback(bounds, sizes, ranges, authored_distance)
 
 
+## Cached profile presets avoid allocating two arrays and revalidating the
+## same size-distance pairs for every streamed decorative MultiMesh instance.
+## One immutable profile is configured per quality tier. Older custom engines
+## and stock Godot use the same cached packed arrays with the legacy method.
+static var _decor_profile_sizes: PackedFloat32Array = PackedFloat32Array([1.0, 4.0, 10.0, 24.0, 64.0])
+static var _decor_profile_ranges_by_quality: Dictionary = {}
+static var _decor_cached_profiles: Dictionary = {}
+static var _decor_cached_api_state: int = -1 # -1 unchecked, 0 unavailable, 1 native usable.
+
+
+static func _decor_ranges_for_quality(level: int) -> PackedFloat32Array:
+	var safe_level: int = clampi(level, 0, 3)
+	if not _decor_profile_ranges_by_quality.has(safe_level):
+		var scale: float = float(PRESETS[safe_level]["decor_scale"])
+		_decor_profile_ranges_by_quality[safe_level] = PackedFloat32Array([
+			45.0 * scale, 75.0 * scale, 105.0 * scale, 160.0 * scale, 0.0])
+	return _decor_profile_ranges_by_quality[safe_level]
+
+
+static func _decor_native_profile(level: int, sizes: PackedFloat32Array,
+		ranges: PackedFloat32Array) -> Object:
+	if _decor_cached_api_state == -1:
+		_decor_cached_api_state = 0
+		if ClassDB.class_exists("CullDistanceProfile3D"):
+			var probe: Object = ClassDB.instantiate("CullDistanceProfile3D")
+			if probe != null and probe.has_method("configure") and \
+					probe.has_method("get_cached_cull_distance"):
+				_decor_cached_api_state = 1
+				if bool(probe.call("configure", sizes, ranges)):
+					_decor_cached_profiles[level] = probe
+	if _decor_cached_api_state != 1:
+		return null
+	if not _decor_cached_profiles.has(level):
+		var profile: Object = ClassDB.instantiate("CullDistanceProfile3D")
+		if profile == null or not bool(profile.call("configure", sizes, ranges)):
+			return null
+		_decor_cached_profiles[level] = profile
+	return _decor_cached_profiles[level]
+
+
 ## Size-distance pairs are quality-scaled but never override the category or
-## the author's draw cap. Largest batches are left unchanged (range zero).
-## This affects cosmetic decor only: tree shaders, resources and landmarks
-## retain their previous culling and silhouette ranges.
+## the author's draw cap. Large batches remain unchanged (zero cull range).
+## Never affects gameplay objects, terrain collisions or landmarks.
 static func decor_range_for_bounds(bounds: AABB, quality: int,
 		authored_distance: float, prefer_native: bool = true) -> float:
 	if authored_distance <= 0.0 or not is_finite(authored_distance) or \
 			not bounds.size.is_finite() or bounds.size == Vector3.ZERO:
 		return authored_distance
-	var scale: float = float(PRESETS[clampi(quality, 0, 3)]["decor_scale"])
-	var sizes := PackedFloat32Array([1.0, 4.0, 10.0, 24.0, 64.0])
-	var ranges := PackedFloat32Array([45.0 * scale, 75.0 * scale,
-		105.0 * scale, 160.0 * scale, 0.0])
-	var range_result: float = cull_range_for_bounds(bounds, sizes,
+	var safe_level: int = clampi(quality, 0, 3)
+	var ranges: PackedFloat32Array = _decor_ranges_for_quality(safe_level)
+	if prefer_native:
+		var profile: Object = _decor_native_profile(safe_level, _decor_profile_sizes, ranges)
+		if profile != null:
+			var cached_result: float = float(profile.call(
+				"get_cached_cull_distance", bounds, authored_distance))
+			return cached_result if cached_result >= 0.0 else authored_distance
+	var range_result: float = cull_range_for_bounds(bounds, _decor_profile_sizes,
 		ranges, authored_distance, prefer_native)
 	return range_result if range_result >= 0.0 else authored_distance
 
