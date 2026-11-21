@@ -11,6 +11,7 @@ TEST_FORCE_LINK(test_crowd_animation_tier_planner)
 #ifdef MODULE_CROWD_ANIMATION_TIER_PLANNER_ENABLED
 
 #include "modules/crowd_animation_tier_planner/crowd_animation_tier_planner.h"
+#include "modules/crowd_animation_tier_planner/crowd_animation_budget_governor.h"
 
 #include <limits>
 
@@ -331,6 +332,85 @@ TEST_CASE("[CrowdAnimationTierPlanner] CPU gate validates input and unsampled es
 	CHECK(planner->cap_full_pose_cost(too_many, many_distances,
 			many_retained, many_costs, 100).is_empty());
 	ERR_PRINT_ON
+}
+
+
+TEST_CASE("[CrowdAnimationBudgetGovernor] hysteretic adaptation and gradual recovery") {
+	Ref<CrowdAnimationBudgetGovernor> governor;
+	governor.instantiate();
+	CHECK(governor->get_max_budget_us() == 0);
+	CHECK(governor->get_current_budget_us() == 0);
+	CHECK(governor->get_frames_observed() == 0);
+	REQUIRE(governor->configure(1500, 12500));
+	CHECK(governor->get_current_budget_us() == 1500);
+	for (int i = 0; i < 12; ++i) {
+		CHECK(governor->observe_process_time(25000) == 1500);
+	}
+	CHECK(governor->get_frames_observed() == 12);
+	CHECK(governor->get_pressure_percent() > 95);
+	for (int i = 0; i < 12; ++i) {
+		governor->observe_process_time(25000);
+	}
+	CHECK(governor->get_current_budget_us() == 1125); // 25% less after 2 bad windows.
+	for (int i = 0; i < 24; ++i) {
+		governor->observe_process_time(25000);
+	}
+	CHECK(governor->get_current_budget_us() == 844);
+	// Quiet windows restore quality slowly (1/8 of configured maximum).
+	for (int i = 0; i < 72; ++i) {
+		governor->observe_process_time(2500);
+	}
+	CHECK(governor->get_current_budget_us() > 844);
+	CHECK(governor->get_current_budget_us() < 1500);
+	CHECK(governor->get_smoothed_process_us() <= 3000);
+	CHECK(governor->get_frames_observed() == 120);
+
+	// Re-applying identical settings must not discard learned pressure.
+	const int previous_budget = governor->get_current_budget_us();
+	REQUIRE(governor->configure(1500, 12500));
+	CHECK(governor->get_current_budget_us() == previous_budget);
+	CHECK(governor->observe_process_time(0) == previous_budget); // No sample.
+	CHECK(governor->get_frames_observed() == 120);
+}
+
+TEST_CASE("[CrowdAnimationBudgetGovernor] bounds, quality transitions and enable override") {
+	Ref<CrowdAnimationBudgetGovernor> governor;
+	governor.instantiate();
+	REQUIRE(governor->configure(750, 12500));
+	for (int i = 0; i < 24; ++i) {
+		governor->observe_process_time(50000);
+	}
+	CHECK(governor->get_current_budget_us() == 563);
+	// Invalid configuration must be atomic and not reset evidence.
+	const int before_frames = governor->get_frames_observed();
+	CHECK_FALSE(governor->configure(-1, 12500));
+	CHECK_FALSE(governor->configure(100001, 12500));
+	CHECK_FALSE(governor->configure(750, 999));
+	CHECK_FALSE(governor->configure(750, 100001));
+	CHECK(governor->get_max_budget_us() == 750);
+	CHECK(governor->get_current_budget_us() == 563);
+	CHECK(governor->get_frames_observed() == before_frames);
+	ERR_PRINT_OFF
+	CHECK(governor->observe_process_time(-1) == -1);
+	CHECK(governor->observe_process_time(1000001) == -1);
+	ERR_PRINT_ON
+	CHECK(governor->get_frames_observed() == before_frames);
+
+	governor->set_enabled(false);
+	CHECK(governor->get_current_budget_us() == 750);
+	for (int i = 0; i < 24; ++i) {
+		CHECK(governor->observe_process_time(100000) == 750);
+	}
+	CHECK(governor->get_frames_observed() == before_frames);
+	governor->set_enabled(true);
+	CHECK(governor->get_current_budget_us() == 750);
+	CHECK(governor->get_frames_observed() == 0);
+	REQUIRE(governor->configure(2750, 16000));
+	CHECK(governor->get_current_budget_us() == 2750);
+	CHECK(governor->get_frames_observed() == 0);
+	REQUIRE(governor->configure(0, 12500)); // Performance: never admits full IK.
+	CHECK(governor->observe_process_time(25000) == 0);
+	CHECK(governor->get_frames_observed() == 0);
 }
 
 } // namespace TestCrowdAnimationTierPlanner
