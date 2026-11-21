@@ -93,4 +93,57 @@ TEST_CASE("[PCGFoliageScalability3D] atomic validation and bounded cluster count
 	CHECK(planned[4095] >= 1);
 }
 
+TEST_CASE("[PCGFoliageScalability3D] temporal count deadband prevents tiny density oscillation") {
+	Ref<PCGFoliageScalability3D> planner;
+	planner.instantiate();
+	const PackedInt32Array counts = { 100, 100, 0, 10 };
+	const PackedFloat32Array distances = { 18, 30, 50, 18 };
+	const PackedInt32Array history = { 68, 68, 0, -1 };
+	const PackedInt32Array expected = { 68, 68, 0, 7 };
+	CHECK(planner->plan_visible_counts_stable(counts, distances, history, 1) == expected);
+	// Suppressed one-count changes are released once the actual requested
+	// count differs by more than the two-instance threshold.
+	CHECK(planner->plan_visible_counts_stable({ 100 }, { 125 }, { 68 }, 1)[0] == 42);
+	CHECK(planner->plan_visible_counts_stable({ 100 }, { 125 }, { 42 }, 1)[0] == 42);
+	CHECK(planner->plan_visible_counts_stable({ 100 }, { 30 }, { -1 }, 1)[0] == 67);
+	CHECK(planner->plan_visible_counts_stable({ 100 }, { 30 }, { 68 }, 1, 0)[0] == 67);
+	// Tier switch with -1 bypasses the deadband and restores full Ultra.
+	CHECK(planner->plan_visible_counts_stable({ 10 }, { 125 }, { -1 }, 3)[0] == 10);
+	CHECK(planner->plan_visible_counts_stable({ 10 }, { 125 }, { -1 }, 0)[0] == 2);
+	// Nonempty foliage cannot stick at a previously hidden 0 count.
+	CHECK(planner->plan_visible_counts_stable({ 1 }, { 18 }, { 0 }, 0)[0] == 1);
+	CHECK(planner->plan_visible_counts_stable({ 0 }, { 18 }, { 0 }, 0)[0] == 0);
+}
+
+TEST_CASE("[PCGFoliageScalability3D] stable planner validates all prior rows atomically") {
+	Ref<PCGFoliageScalability3D> planner;
+	planner.instantiate();
+	CHECK(planner->plan_visible_counts_stable({ 10, 20 }, { 18, 19 }, { -1 }, 1).is_empty());
+	CHECK(planner->plan_visible_counts_stable({ 10, 20 }, { 18 }, { -1, -1 }, 1).is_empty());
+	CHECK(planner->plan_visible_counts_stable({ 10, 20 }, { 18, 19 }, { -1, 21 }, 1).is_empty());
+	CHECK(planner->plan_visible_counts_stable({ 10, 20 }, { 18, 19 }, { -1, -2 }, 1).is_empty());
+	CHECK(planner->plan_visible_counts_stable({ 10 }, { 18 }, { -1 }, 1, -1).is_empty());
+	CHECK(planner->plan_visible_counts_stable({ 10 }, { 18 }, { -1 }, 1, 9).is_empty());
+	CHECK(planner->plan_visible_counts_stable({ 10 }, { Math::NaN }, { -1 }, 1).is_empty());
+	CHECK(planner->plan_visible_counts_stable({ 10 }, { 18 }, { -1 }, 4).is_empty());
+	CHECK(planner->plan_visible_counts_stable({ 10 }, { 18 }, { -1 }, 1, 2, 20, 20).is_empty());
+	CHECK(planner->plan_visible_counts_stable({}, {}, {}, 1).is_empty());
+	PackedInt32Array counts;
+	PackedFloat32Array distances;
+	PackedInt32Array history;
+	for (int i = 0; i < 4096; ++i) {
+		counts.push_back(100);
+		distances.push_back(30.0f);
+		history.push_back(68);
+	}
+	const PackedInt32Array planned = planner->plan_visible_counts_stable(counts, distances, history, 1);
+	REQUIRE(planned.size() == 4096);
+	CHECK(planned[0] == 68);
+	CHECK(planned[4095] == 68);
+	counts.push_back(100);
+	distances.push_back(30.0f);
+	history.push_back(68);
+	CHECK(planner->plan_visible_counts_stable(counts, distances, history, 1).is_empty());
+}
+
 } // namespace TestPCGFoliageScalability3D
