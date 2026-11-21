@@ -969,6 +969,21 @@ bool Object::_instance_binding_reference(bool p_reference) {
 	return can_die;
 }
 
+bool Object::_instance_binding_reference(bool p_reference) {
+	bool can_die = true;
+	if (_instance_bindings) {
+		MutexLock instance_binding_lock(_control_mutex);
+		for (uint32_t i = 0; i < _instance_binding_count; i++) {
+			if (_instance_bindings[i].reference_callback) {
+				if (!_instance_bindings[i].reference_callback(_instance_bindings[i].token, _instance_bindings[i].binding, p_reference)) {
+					can_die = false;
+				}
+			}
+		}
+	}
+	return can_die;
+}
+
 void Object::_gdvirtual_init_method_ptr(uint32_t p_compat_hash, void *&r_fn_ptr, const StringName &p_fn_name, bool p_compat) const {
 	void *fn_ptr = nullptr;
 	if (_extension->get_virtual_call_data2 && _extension->call_virtual_with_data) {
