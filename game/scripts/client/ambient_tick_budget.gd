@@ -10,6 +10,7 @@ const MAX_STEP := 0.16
 
 var _elapsed: Dictionary = {}
 var _importance: Dictionary = {}
+var _rate_scale: Dictionary = {} # Frequency, not scheduling importance.
 var _estimates: Dictionary = {}
 var _overdue: Dictionary = {}
 var _reserved_estimate_us: int = 0
@@ -56,7 +57,6 @@ func begin_frame(delta: float, quality: int) -> void:
 	_tie_start = (_tie_start + 1) % LANES.size()
 	if not is_finite(delta) or delta <= 0.0:
 		return
-	var interval: float = 1.0 / HZ_BY_QUALITY[_quality]
 	for _slot in range(_budget):
 		var pick: String = ""
 		var best_priority: float = -1.0
@@ -70,6 +70,7 @@ func begin_frame(delta: float, quality: int) -> void:
 				if _reserved.has(lane):
 					continue
 				var due: float = minf(float(_elapsed.get(lane, 0.0)) + delta, MAX_STEP)
+				var interval: float = 1.0 / (HZ_BY_QUALITY[_quality] * float(_rate_scale.get(lane, 1.0)))
 				if due + 0.000001 < interval:
 					continue
 				var estimated: int = int(_estimates.get(lane, 0))
@@ -92,6 +93,7 @@ func begin_frame(delta: float, quality: int) -> void:
 			_reserved_estimate_us + int(_estimates.get(pick, 0)))
 	for lane in LANES:
 		var due: float = minf(float(_elapsed.get(lane, 0.0)) + delta, MAX_STEP)
+		var interval: float = 1.0 / (HZ_BY_QUALITY[_quality] * float(_rate_scale.get(lane, 1.0)))
 		if due + 0.000001 >= interval and not _reserved.has(lane):
 			_overdue[lane] = mini(120, int(_overdue.get(lane, 0)) + 1)
 
@@ -109,7 +111,7 @@ func consume(lane: String, delta: float, force: bool = false) -> float:
 		_record_update()
 		return elapsed
 	_elapsed[lane] = elapsed
-	var interval: float = 1.0 / HZ_BY_QUALITY[_quality if _quality >= 0 else 0]
+	var interval: float = 1.0 / (HZ_BY_QUALITY[_quality if _quality >= 0 else 0] * float(_rate_scale.get(lane, 1.0)))
 	if elapsed + 0.000001 < interval or _spent >= _budget or not _reserved.has(lane) \
 			or (_time_budget_us > 0 and _frame_cost_us >= _time_budget_us):
 		_last_skipped += 1
@@ -185,6 +187,32 @@ func record_cost(lane: String, elapsed_us: int) -> bool:
 			int((3 * previous + elapsed_us + 2) / 4)
 	_frame_cost_us = mini(1000000000, _frame_cost_us + elapsed_us)
 	return true
+
+
+## Rate controls how soon a lane becomes eligible. Importance controls how
+## urgent it is once due; the two settings deliberately remain independent.
+func set_lane_rate_scale(lane: String, scale: float) -> bool:
+	if not LANES.has(lane) or not is_finite(scale) or scale < 0.75 or scale > 2.0:
+		return false
+	_rate_scale[lane] = scale
+	return true
+
+
+func get_lane_rate_scale(lane: String) -> float:
+	if not LANES.has(lane):
+		return -1.0
+	return float(_rate_scale.get(lane, 1.0))
+
+
+## Deterministic mapping of existing scene importance to a conservative rate.
+## 0.25 -> 0.75x, 1.0 -> 1.0x, 4.0 -> 1.5x. No per-frame allocations.
+static func rate_scale_for_importance(importance: float) -> float:
+	if not is_finite(importance):
+		return 1.0
+	var safe: float = clampf(importance, 0.25, 4.0)
+	if safe <= 1.0:
+		return 0.75 + (safe - 0.25) / 3.0
+	return 1.0 + (safe - 1.0) / 6.0
 
 
 func set_lane_importance(lane: String, importance: float) -> bool:
