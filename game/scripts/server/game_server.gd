@@ -381,6 +381,11 @@ const AI_CROWD_SEPARATION_TICKS := 5 # 4Hz, not every 20Hz movement tick.
 const AI_CROWD_SEPARATION_RADIUS := 2.5
 var _crowd_separation_enabled: bool = false
 var last_crowd_separation_stats: Dictionary = {"enabled": false, "population": 0, "sources": 0}
+# Cross-set Mass/Chaos-style native broadphase for PvE snares; script owns exact hits.
+const AI_SNARE_BROADPHASE_MIN_NPCS := 32
+const AI_SNARE_BROADPHASE_MIN_TRAPS := 8
+const AI_SNARE_BROADPHASE_MAX_NPCS := 4096
+var last_snare_query_stats: Dictionary = {"native": false, "population": 0, "traps": 0, "candidates": 0}
 var last_pack_query_stats: Dictionary = {"native": false, "population": 0, "sources": 0, "max_alerts": 12, "alerts_sent": 0}
 var last_ai_schedule_stats: Dictionary = {"enabled": false, "population": 0, "phase_due": 0, "phase_deferred": 0}
 var last_population_query_stats: Dictionary = {} # Last once-per-second maintenance broadphase counters.
@@ -8135,6 +8140,25 @@ func _refresh_passive_crowd_separation(cohort: Array) -> void:
 		"sources": source_agents.size(), "period_ticks": AI_CROWD_SEPARATION_TICKS}
 
 
+## Server-only profiling; candidate counts are prefilters, never confirmed hits.
+func get_snare_query_stats() -> Dictionary:
+	return last_snare_query_stats.duplicate(true)
+
+
+## Always revalidate a fresh server-owned trap; the native broadphase
+## supplies indices only and can never authorize a trap trigger itself.
+func _try_trigger_infected_snare(zombie, trap_id: int) -> bool:
+	var trap: Dictionary = infected_snares.get(trap_id, {})
+	if trap.is_empty() or not InfectedSnare.catches(trap, zombie, time):
+		return false
+	if not zombie.apply_snare(InfectedSnare.root_duration(zombie)):
+		return false
+	infected_snares.erase(trap_id)
+	events.append({"type": "snare_triggered", "id": trap_id,
+		"zombie": zombie.id, "x": trap["x"], "z": trap["z"]})
+	return true
+
+
 func _tick_zombies(delta: float) -> void:
 	var info: Dictionary = {}
 	for player in players.values():
@@ -8186,6 +8210,38 @@ func _tick_zombies(delta: float) -> void:
 			or (_crowd_separation_enabled and (ai_cohort.size() < AI_CROWD_SEPARATION_MIN \
 			or ai_cohort.size() > AI_CROWD_SEPARATION_MAX)):
 		_refresh_passive_crowd_separation(ai_cohort)
+	# Snapshot trap order once and use source-to-target spatial hashing.
+	# Exact trap rules remain in _try_trigger_infected_snare(), and removed
+	# traps are ignored when later NPCs encounter the same index.
+	var snare_ids: Array = []
+	var snare_batches: Array = []
+	var snare_batch_used := false
+	if ai_cohort.size() >= AI_SNARE_BROADPHASE_MIN_NPCS \
+			and ai_cohort.size() <= AI_SNARE_BROADPHASE_MAX_NPCS \
+			and infected_snares.size() >= AI_SNARE_BROADPHASE_MIN_TRAPS \
+			and infected_snares.size() <= InfectedSnare.MAX_GLOBAL:
+		if _pack_spatial_grid == null and ClassDB.class_exists("AIProximityGrid2D"):
+			_pack_spatial_grid = ClassDB.instantiate("AIProximityGrid2D")
+		if _pack_spatial_grid != null and _pack_spatial_grid.has_method("query_cross_radius_batch"):
+			var sources := PackedVector2Array()
+			var targets := PackedVector2Array()
+			for zombie in ai_cohort:
+				sources.append(Vector2(zombie.position.x, zombie.position.z))
+			for trap_id in infected_snares:
+				var trap: Dictionary = infected_snares[trap_id]
+				snare_ids.append(trap_id)
+				targets.append(Vector2(float(trap["x"]), float(trap["z"])))
+			# Expand candidate radius by 1mm for float32/float64 parity.
+			# The authoritative InfectedSnare.catches() still uses 1.35m.
+			snare_batches = _pack_spatial_grid.query_cross_radius_batch(
+				sources, targets, InfectedSnare.TRIGGER_RADIUS + 0.001, 2.0)
+			snare_batch_used = snare_batches.size() == ai_cohort.size()
+	var snare_candidates := 0
+	if snare_batch_used:
+		for candidates in snare_batches:
+			snare_candidates += candidates.size()
+	last_snare_query_stats = {"native": snare_batch_used, "population": ai_cohort.size(),
+		"traps": infected_snares.size(), "candidates": snare_candidates}
 	var due_mask := PackedByteArray()
 	if stagger_decisions and _ai_update_scheduler.has_method("get_due_mask") \
 			and ai_cohort.size() <= AI_BATCH_MAX_SIZE:
@@ -8199,15 +8255,17 @@ func _tick_zombies(delta: float) -> void:
 	for i in range(ai_cohort.size()):
 		var zombie = ai_cohort[i]
 		zombie.flank_reservations = _flank_slot_reservations
-		# One-shot root triggered by a living non-boss infected. All hit checks
-		# use authoritative zombie positions; players cannot submit target IDs.
-		for trap_id in infected_snares.keys():
-			var trap: Dictionary = infected_snares[trap_id]
-			if InfectedSnare.catches(trap, zombie, time):
-				if zombie.apply_snare(InfectedSnare.root_duration(zombie)):
-					infected_snares.erase(trap_id)
-					events.append({"type": "snare_triggered", "id": trap_id,
-						"zombie": zombie.id, "x": trap["x"], "z": trap["z"]})
+		# Only candidate pairs reach the unchanged authoritative narrowphase.
+		# Stable trap-index order preserves the one-shot winner when two NPCs
+		# enter a trap simultaneously. Old engines keep the exact full scan.
+		if snare_batch_used:
+			var nearby_trap_indices: PackedInt32Array = snare_batches[i]
+			for trap_index in nearby_trap_indices:
+				if _try_trigger_infected_snare(zombie, int(snare_ids[trap_index])):
+					break
+		else:
+			for trap_id in infected_snares.keys():
+				if _try_trigger_infected_snare(zombie, int(trap_id)):
 					break
 		if zombie.perched:
 			_tick_percher(zombie)
