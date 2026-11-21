@@ -6,7 +6,9 @@ extends RefCounted
 static func keep_indices(points: PackedVector2Array, separation: float,
 		max_keep: int = -1, force_scalar: bool = false) -> PackedInt32Array:
 	var empty := PackedInt32Array()
-	if points.size() > 8192 or not is_finite(separation) or separation < 0.0 			or not is_finite(separation * separation) or max_keep < -1 or max_keep > 8192:
+	if points.size() > 8192 or not is_finite(separation) or separation < 0.0:
+		return empty
+	if not is_finite(separation * separation) or max_keep < -1 or max_keep > 8192:
 		return empty
 	for point in points:
 		if not point.is_finite():
@@ -33,7 +35,11 @@ static func keep_indices(points: PackedVector2Array, separation: float,
 static func candidates(rng: RandomNumberGenerator, rect: Rect2, attempts: int,
 		separation: float, max_keep: int, force_scalar: bool = false) -> PackedVector2Array:
 	var result := PackedVector2Array()
-	if rng == null or not rect.position.is_finite() or not rect.size.is_finite() 			or rect.size.x <= 0.0 or rect.size.y <= 0.0 			or attempts < 0 or attempts > 8192:
+	if rng == null or not rect.position.is_finite() or not rect.size.is_finite():
+		return result
+	if rect.size.x <= 0.0 or rect.size.y <= 0.0 or attempts < 0 or attempts > 8192:
+		return result
+	if not is_finite(separation) or separation < 0.0 or max_keep < -1 or max_keep > 8192:
 		return result
 	var points := PackedVector2Array()
 	points.resize(attempts)

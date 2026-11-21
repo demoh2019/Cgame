@@ -982,7 +982,6 @@ Vector2 Geometry2D::get_closest_point_to_segment_uncapped(const Vector2 &p_point
 }
 
 
-
 PackedInt32Array Geometry2D::prune_points_min_distance(const PackedVector2Array &p_points, real_t p_min_distance, int p_max_kept) {
 	PackedInt32Array result;
 	ERR_FAIL_COND_V_MSG(p_points.size() > 8192, result, "A point-pruning batch may contain at most 8192 points.");
