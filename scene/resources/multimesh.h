@@ -108,6 +108,8 @@ public:
 	void set_instance_transform(int p_instance, const Transform3D &p_transform);
 	// Sparse, prevalidated instance transform updates (3D and 2D).
 	bool set_instance_transforms_batch(const PackedInt32Array &p_indices, const TypedArray<Transform3D> &p_transforms);
+	// Prevalidated sparse 3D transform + vertex color updates for instanced gameplay.
+	bool set_instance_visual_states_batch(const PackedInt32Array &p_indices, const TypedArray<Transform3D> &p_transforms, const PackedColorArray &p_colors);
 	bool set_instance_transforms_2d_batch(const PackedInt32Array &p_indices, const TypedArray<Transform2D> &p_transforms);
 	void set_instance_transform_2d(int p_instance, const Transform2D &p_transform);
 	Transform3D get_instance_transform(int p_instance) const;

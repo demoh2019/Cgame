@@ -97,6 +97,17 @@
 				This custom instance data has to be manually accessed in your custom shader using [code]INSTANCE_CUSTOM[/code].
 			</description>
 		</method>
+		<method name="set_instance_visual_states_batch">
+			<return type="bool" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<param index="1" name="transforms" type="Array[Transform3D]" />
+			<param index="2" name="colors" type="PackedColorArray" />
+			<description>
+				Updates both a sparse set of 3D instance transforms and per-instance vertex colors in one scripting call. This is intended for pooled cargo, interactive entities and factory conveyors where an instance's movement and visual status must remain synchronized.
+				Requires [enum TRANSFORM_3D] and [member use_colors] enabled. All three arrays must have equal lengths, indices must be unique and within the allocated [member instance_count], and all transform and color components must be finite. Hidden slots may be updated. Invalid input returns [code]false[/code] without modifying any instance; an empty batch succeeds when the format and color mode are valid.
+				The method does [b]not[/b] change [member visible_instance_count], [member instance_count], custom shader data, physics collision or navigation. It uses separate RenderingServer transform and color updates internally per index: one scripting entry point, [b]not[/b] one GPU upload. Whole-buffer updates can use [method set_buffer] instead.
+			</description>
+		</method>
 		<method name="set_instance_transforms_batch">
 			<return type="bool" />
 			<param index="0" name="indices" type="PackedInt32Array" />
