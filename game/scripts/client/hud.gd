@@ -1,4 +1,5 @@
 extends CanvasLayer
+const UiSafeArea = preload("res://scripts/client/ui_safe_area.gd")
 ## All of the interface, built in code: vitals, zone, inventory, crafting and a message log.
 
 const Defs = preload("res://scripts/shared/defs.gd")
@@ -144,9 +145,12 @@ func _build() -> void:
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for side in ["left", "top", "right", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 14)
+	# Base 14 px plus the display's unsafe area (notches, overscan, handheld bezels).
+	UiSafeArea.apply(margin, UiSafeArea.current(get_viewport()))
 	add_child(margin)
+	get_viewport().size_changed.connect(func() -> void:
+		if is_instance_valid(margin):
+			UiSafeArea.apply(margin, UiSafeArea.current(get_viewport())))
 
 
 	var radar := SurvivalRadar.new()
