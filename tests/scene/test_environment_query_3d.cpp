@@ -908,6 +908,64 @@ TEST_CASE("[EnvironmentQuery3D] Fibonacci annulus rejects invalid geometry befor
 	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 1, 4, 65536).size() == 65536);
 }
 
+TEST_CASE("[EnvironmentQuery3D] EQS query budget rotates a fixed cohort fairly") {
+	const int count = 80;
+	const int budget = 8;
+	PackedByteArray visited;
+	visited.resize(count);
+	for (int tick = 0; tick < 10; tick++) {
+		const PackedByteArray mask = EnvironmentQuery3D::schedule_query_mask(count, tick, budget);
+		REQUIRE(mask.size() == count);
+		int admitted = 0;
+		for (int i = 0; i < count; i++) {
+			CHECK(mask[i] <= 1);
+			if (mask[i] != 0) {
+				admitted++;
+				CHECK(visited[i] == 0);
+				visited.set(i, 1);
+			}
+		}
+		CHECK(admitted == budget);
+		CHECK(EnvironmentQuery3D::schedule_query_mask(count, tick, budget) == mask);
+	}
+	for (int i = 0; i < count; i++) {
+		CHECK(visited[i] == 1);
+	}
+	CHECK(EnvironmentQuery3D::schedule_query_mask(5, 9999999999LL, 3).size() == 5);
+}
+
+TEST_CASE("[EnvironmentQuery3D] EQS query budget urgent bypass preserves regular quota") {
+	PackedByteArray urgent;
+	urgent.resize(10);
+	urgent.set(7, 1);
+	urgent.set(9, 1);
+	const PackedByteArray result = EnvironmentQuery3D::schedule_query_mask(10, 0, 3, urgent);
+	REQUIRE(result.size() == 10);
+	int admitted = 0;
+	for (int i = 0; i < result.size(); i++) {
+		admitted += int(result[i]);
+	}
+	CHECK(admitted == 5);
+	CHECK(result[7] == 1);
+	CHECK(result[9] == 1);
+	CHECK(EnvironmentQuery3D::schedule_query_mask(10, 0, 0, urgent) == urgent);
+	CHECK(EnvironmentQuery3D::schedule_query_mask(3, 1, 64) == PackedByteArray({ 1, 1, 1 }));
+	CHECK(EnvironmentQuery3D::schedule_query_mask(0, 0, 0).is_empty());
+}
+
+TEST_CASE("[EnvironmentQuery3D] EQS query budget invalid requests fail closed") {
+	ERR_PRINT_OFF
+	CHECK(EnvironmentQuery3D::schedule_query_mask(-1, 0, 2).is_empty());
+	CHECK(EnvironmentQuery3D::schedule_query_mask(4097, 0, 2).is_empty());
+	CHECK(EnvironmentQuery3D::schedule_query_mask(10, -1, 2).is_empty());
+	CHECK(EnvironmentQuery3D::schedule_query_mask(10, 0, -1).is_empty());
+	CHECK(EnvironmentQuery3D::schedule_query_mask(10, 0, 65).is_empty());
+	CHECK(EnvironmentQuery3D::schedule_query_mask(10, 0, 2, PackedByteArray({ 1, 0 })).is_empty());
+	CHECK(EnvironmentQuery3D::schedule_query_mask(2, 0, 2, PackedByteArray({ 1, 2 })).is_empty());
+	ERR_PRINT_ON
+	CHECK(EnvironmentQuery3D::schedule_query_mask(4096, 0, 64).size() == 4096);
+}
+
 TEST_CASE("[EnvironmentQuery3D] Evaluation does not mutate input candidates") {
 	PackedVector3Array points = { Vector3(7, 0, 0), Vector3(1, 0, 0) };
 	Ref<EnvironmentQuery3D> q = make_query(points);

@@ -40,6 +40,14 @@
 			<param index="0" name="count" type="int" />
 			<description>Returns 1–64 top-ranked positions in O(N*K) time and O(K) scratch storage, without creating result dictionaries or sorting the full candidate set. Uses identical filters, scores, stable source-index ties, and [member max_results] as [method query].</description>
 		</method>
+		<method name="schedule_query_mask" qualifiers="static">
+			<return type="PackedByteArray" />
+			<param index="0" name="agent_count" type="int" />
+			<param index="1" name="tick" type="int" />
+			<param index="2" name="regular_budget" type="int" />
+			<param index="3" name="urgent" type="PackedByteArray" default="PackedByteArray()" />
+			<description>Builds a deterministic work-admission mask for an [b]ordered, stable cohort[/b] of AI requests, inspired by the time-sliced EQS manager in Unreal Engine. Returns exactly [param agent_count] bytes, with 1 meaning the caller may perform an EQS query this tick. Regular requests are admitted through a rotating contiguous window of up to [param regular_budget] slots (0–64); [param urgent] flags may additionally bypass this regular quota to prevent stuck ownership recovery. The urgent mask must be empty or contain exactly one 0/1 byte for each agent. Accepts 0–4096 agents and nonnegative ticks; invalid input returns an empty array. No game time, callbacks, threads, physics, navmesh or scene access occurs. The caller owns the stable ordering, decides urgency and must continue updating gameplay simulation even when a query is deferred. This budgets [i]query count[/i], not CPU microseconds, and does not incrementally execute a single long query.</description>
+		</method>
 		<method name="sample_ring" qualifiers="static">
 			<return type="PackedVector3Array" />
 			<param index="0" name="center" type="Vector3" />

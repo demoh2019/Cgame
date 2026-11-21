@@ -59,6 +59,80 @@ func run(t) -> void:
             "single-slot scheduling never delays a survivor encounter")
         scheduler.set_slots_per_cycle(4)
 
+    t.current = "EQS work-budget rotation is bounded and never delays urgent recovery"
+    var budget_available: bool = ClassDB.class_exists("EnvironmentQuery3D") and \
+        ClassDB.class_has_method("EnvironmentQuery3D", "schedule_query_mask")
+    if budget_available:
+        var touched := PackedByteArray()
+        touched.resize(80)
+        for tick in range(10):
+            var mask: PackedByteArray = ClassDB.class_call_static("EnvironmentQuery3D",
+                "schedule_query_mask", 80, tick, 8)
+            t.eq(mask.size(), 80, "each tick returns a full index-preserving EQS admission mask")
+            var admits: int = 0
+            for idx in range(80):
+                if mask[idx] != 0:
+                    admits += 1
+                    t.eq(int(touched[idx]), 0, "stable cohort receives no duplicate grant in a rotation")
+                    touched[idx] = 1
+            t.eq(admits, 8, "exactly eight ordinary tactical queries admitted per tick")
+        for idx in range(80):
+            t.eq(int(touched[idx]), 1, "every active agent gets a regular turn")
+        var urgent_mask := PackedByteArray()
+        urgent_mask.resize(10)
+        urgent_mask[9] = 1
+        var selected: PackedByteArray = ClassDB.class_call_static("EnvironmentQuery3D",
+            "schedule_query_mask", 10, 0, 2, urgent_mask)
+        t.eq(selected[9], 1, "lost slot is admitted despite regular quota")
+        t.eq(selected.count(1), 3, "urgent work does not displace ordinary work")
+
+    t.current = "EQS throttling never defers pursuit or overwrites an old lease"
+    var gated := Zombie.new(867, "walker", Vector3.ZERO)
+    gated.flank_replan_allowed = false
+    var requested_goal := Vector2(10.0, 0.0)
+    t.eq(gated._flank_goal(Vector2.ZERO, requested_goal), requested_goal,
+        "denied optional EQS lookup returns direct pursuit instead")
+    t.check(gated._flank_query == null,
+        "deferred tactical query cannot construct native candidate resources")
+    gated.flank_replan_allowed = true
+    if ClassDB.class_exists("EnvironmentQuery3D"):
+        t.near(gated._flank_goal(Vector2.ZERO, requested_goal).distance_to(requested_goal),
+            Zombie.FLANK_RING, 0.001, "allowed EQS lookup still builds valid flank goals")
+
+    t.current = "Real server budgets flank replans for large crowds"
+    var eqs_server := GameServer.new(WorldGen.new(713), 713)
+    var eqs_target = eqs_server.add_player(88, "EQS target")
+    eqs_target.position = Vector3(900.0, WorldGen.HUB_HEIGHT, 900.0)
+    for index in range(80):
+        var infected := Zombie.new(82000 + index, "walker",
+            eqs_target.position + Vector3(10.0, 0.0, 0.0))
+        infected.target_id = eqs_target.id
+        infected.state = Zombie.State.CHASE
+        eqs_server.zombies[infected.id] = infected
+    var all_granted := {}
+    for step in range(10):
+        eqs_server.tick_count = step
+        eqs_server._budget_eqs_replans(eqs_server.zombies.values(), 0.05)
+        var diagnostics: Dictionary = eqs_server.get_eqs_replan_stats()
+        if budget_available:
+            t.eq(int(diagnostics["eligible"]), 80,
+                "all active chasers with expired goals enter authoritative EQS queue")
+            t.eq(int(diagnostics["granted"]), 8, "real server enforces eight regular replans")
+            t.eq(int(diagnostics["deferred"]), 72, "excess EQS work is deferred")
+        for infected in eqs_server.zombies.values():
+            if infected.flank_replan_allowed:
+                all_granted[infected.id] = true
+    if budget_available:
+        t.eq(all_granted.size(), 80,
+            "rotating EQS budget eventually admits every active chaser")
+    else:
+        t.eq(all_granted.size(), 80,
+            "stock Godot retains unthrottled tactical compatibility")
+    eqs_server.zombies.clear()
+    eqs_server._budget_eqs_replans([], 0.05)
+    t.check(not eqs_server.get_eqs_replan_stats()["enabled"],
+        "empty/depopulated server immediately disables optional EQS budgeting")
+
     t.current = "Direct infected AI preserves first-contact and urgent selection"
     var world := WorldGen.new(42)
     var ground: float = WorldGen.HUB_HEIGHT

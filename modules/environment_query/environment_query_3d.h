@@ -148,4 +148,9 @@ public:
 	// Deterministic area-uniform annulus candidates with a golden-angle phase.
 	// O(count), 1..65536 bounded points; never queries the scene or navigation.
 	static PackedVector3Array sample_fibonacci_annulus(const Vector3 &p_center, double p_inner_radius, double p_outer_radius, int p_count, double p_phase = 0.0);
+
+	// Main-thread EQS work admission mask: regular work is capped at 64 per
+	// tick and rotated over a stable ordered cohort. Urgent recovery bypasses
+	// the regular quota. O(N) time and O(N) bytes, no clock or scene access.
+	static PackedByteArray schedule_query_mask(int p_agent_count, int64_t p_tick, int p_regular_budget, const PackedByteArray &p_urgent = PackedByteArray());
 };
