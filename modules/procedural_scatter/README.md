@@ -84,3 +84,53 @@ native selector and stock Godot GDScript fallback are checked for parity
 in the same headless gameplay smoke.
 
 Reference: [Unreal Engine PCG Biome exclusions and volumes](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-pcg-biome-core-and-sample-plugins-overview-guide-in-unreal-engine).
+
+## Seeded, stable-ID point density sampling
+
+Inspired by Unreal Engine PCG point `$Density` and density filters,
+Cgame now exposes a **native, deterministic** density operation:
+
+```gdscript
+var pcg := PCGSpatialFilter3D.new()
+var ids := PackedInt32Array([10, 11, 12])
+var densities := PackedFloat32Array([1.0, 0.0, 0.75])
+var selected_indices := pcg.filter_indices_density(
+    candidate_positions, densities, ids, 90421)
+```
+
+- `filter_indices_density(candidates, densities, stable_ids, seed,
+  max_selected=4096)` uses a small 31-bit prime-modulus hash of each
+  stable ID and the seed; **no global RNG**, allocation beyond the
+  bounded working set, or scene traversal. Density zero always rejects,
+  density one always accepts.
+- A candidate's pass/fail decision depends on **stable ID and seed**,
+  not array index or position. Reordering or reloading chunks does not
+  change which stable IDs pass. Output contains original input indices
+  in input order, with a final cap of 4096.
+- Validation is all-or-nothing, including rejected/zero-density points:
+  at most 16384 finite bounded positions, matching density and ID arrays,
+  finite density values in [0,1], **unique** stable IDs in
+  [0, 2147483646], seed in [0, 2147483646], output cap in [0,4096].
+  Invalid data returns an empty array.
+- Two multiply-add-modulus stages use integer intermediates below
+  `2^53`, supporting exact C++/GDScript fallback parity. Hashes are
+  deterministic distribution tools, not cryptographic identifiers.
+- To preserve spatial coverage, **filter by density first**; then
+  submit the surviving positions to `filter_indices_excluding_volumes()`
+  for sphere/box exclusion and minimum spacing. Never select a capped
+  first batch of 4096 if the next stage needs to consider more
+  candidates — process bounded tiles independently instead.
+
+### Days After biome example
+
+The game uses stable IDs tied to 25×25 grid cells, with probabilities
+from 0.13 on worn approaches to 0.94 in denser outskirts. The engine
+samples points before mixed-volume rejection and spatial thinning.
+Up to 160 collision-free grass blades render in one `MultiMesh` batch;
+stock Godot can run an independent GDScript fallback. The smoke checks
+the patchy density distribution, exclusion and spacing constraints,
+regeneration, and native/fallback parity.
+
+Upstream reference:
+[Unreal PCG Framework Node Reference](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).
+
