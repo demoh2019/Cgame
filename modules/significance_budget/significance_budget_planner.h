@@ -55,6 +55,17 @@ public:
 
 	// Convenience for multi-viewer worlds. Only candidates within inclusive
 	// p_max_distance of at least one viewer are eligible.
+
+	// Bounded HLOD shadow-caster planning for GPU-instanced scenery.
+	// Roles: 0=bush, 1=tree, 2=structure, 3=disabled. Returns stable
+	// indices ranked by role, active-state hysteresis and AABB footprint
+	// distance. No scene mutations or shadow-map work is performed here.
+	PackedInt32Array select_shadow_casters(
+			const PackedVector3Array &p_bounds_min, const PackedVector3Array &p_bounds_max,
+			const PackedByteArray &p_roles, const PackedByteArray &p_current,
+			const Vector3 &p_camera, const PackedFloat64Array &p_role_radii,
+			int p_budget = 16, double p_hysteresis = 5.0) const;
+
 	PackedInt32Array select_world(const PackedVector3Array &p_positions,
 			const PackedVector3Array &p_viewers, const PackedByteArray &p_priorities,
 			int p_budget, double p_max_distance = 1000.0) const;
