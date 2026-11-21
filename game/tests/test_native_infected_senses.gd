@@ -222,6 +222,49 @@ func run(t) -> void:
         t.check(disconnected._native_senses.get_recent_confirmed_stimuli().is_empty(),
             "disconnected source cannot persist as a later history candidate")
 
+    t.current = "Per-actor sound memory anchors a lost chase to its own confirmed source"
+    var individual := NativeSenses.new()
+    individual.record_confirmed_sound(Vector2(12, 0), Vector2(12, 0), 20.0, 77)
+    individual.record_confirmed_sound(Vector2.ZERO, Vector2(5, 0), 20.0, 41)
+    if individual.has_native_history() and individual.has_native_hearing():
+        t.eq(individual.best_confirmed_stimulus(1).get("source_id"), 77,
+            "global noise ranking still prefers the stronger other survivor")
+        t.eq(individual.best_confirmed_stimulus_for_source_in_radius(
+            1, 41, Vector2.ZERO, 5.0).get("position"), Vector2(5, 0),
+            "source-filtered query returns the chased player's own accepted noise at the boundary")
+        t.check(individual.best_confirmed_stimulus_for_source_in_radius(
+            1, 41, Vector2.ZERO, 4.99).is_empty(),
+            "source-filtered queries cannot search beyond the present leash")
+        t.check(individual.best_confirmed_stimulus_for_source_in_radius(
+            1, 999, Vector2.ZERO, 30.0).is_empty(),
+            "an unheard source has no authoritative memory to return")
+        t.check(individual.best_confirmed_stimulus_for_source_in_radius(
+            1, -1, Vector2.ZERO, 30.0).is_empty(),
+            "anonymous stimuli are not impersonated as known actor memories")
+        t.eq(individual.get_recent_confirmed_stimuli().size(), 2,
+            "source queries never mutate live memory")
+        var target_lost := Zombie.new(981, "walker", Vector3(0.0, height, 0.0))
+        target_lost._native_senses = individual
+        target_lost.target_id = 41
+        target_lost.state = Zombie.State.CHASE
+        target_lost.think_timer = 1.0
+        target_lost.last_known_target = Vector2(-30, 0)
+        target_lost.think(world, {41: {"position": Vector3(1000.0, height, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}}, 0.1, rng)
+        t.eq(target_lost.target_id, -1, "distant escaped target releases combat aggro")
+        t.eq(target_lost.state, Zombie.State.INVESTIGATE,
+            "source-specific memory can only guide investigation, not targeting")
+        t.eq(target_lost.last_known_target, Vector2(5, 0),
+            "investigation remembers the actual target instead of the louder third party")
+        individual.advance_time(4.0)
+        t.check(individual.best_confirmed_stimulus_for_source_in_radius(
+            1, 41, Vector2.ZERO, 30.0).is_empty(),
+            "expired sound events cannot be used as actor-specific tracking")
+    else:
+        t.check(individual.best_confirmed_stimulus_for_source_in_radius(
+            1, 41, Vector2.ZERO, 20.0).is_empty(),
+            "stock Godot preserves the existing no-native-memory behavior")
+
     t.current = "Chase recovery can investigate a second confirmed sound"
     var secondary_memory := NativeSenses.new()
     secondary_memory.record_confirmed_sound(Vector2.ZERO, Vector2(4, 0), 20.0, 11)
