@@ -58,7 +58,8 @@ static func install(fire: Dictionary, owner_id: int, group_id: int, now: float) 
 
 ## A positive result authorizes ONE private event, not an automatic attack.
 ## No enemies are spawned, damaged, or exposed with exact coordinates.
-static func scan(fire: Dictionary, zombies: Dictionary, now: float) -> int:
+static func scan(fire: Dictionary, zombies: Dictionary, now: float,
+		precomputed_count: int = -1) -> int:
 	if seconds_left(fire, now) <= 0.0:
 		return 0
 	if now < float(fire.get("alarm_next_scan", INF)):
@@ -70,17 +71,22 @@ static func scan(fire: Dictionary, zombies: Dictionary, now: float) -> int:
 	if not is_finite(fx) or not is_finite(fy) or not is_finite(fz):
 		return 0
 	var detected := 0
-	for infected in zombies.values():
-		if infected == null or not infected.is_alive() or not infected.position.is_finite():
-			continue
-		var point: Vector3 = infected.position
-		if absf(point.y - fy) > DETECTION_HEIGHT:
-			continue
-		if Vector2(point.x - fx, point.z - fz).length_squared() > DETECTION_RADIUS * DETECTION_RADIUS:
-			continue
-		detected += 1
-		if detected >= MAX_DETECTED:
-			break
+	if precomputed_count >= 0 and precomputed_count <= MAX_DETECTED:
+		# The server-only native spatial query is a candidate count, never
+		# an authorization to bypass timing, fuel, owner or alert cooldown.
+		detected = precomputed_count
+	else:
+		for infected in zombies.values():
+			if infected == null or not infected.is_alive() or not infected.position.is_finite():
+				continue
+			var point: Vector3 = infected.position
+			if absf(point.y - fy) > DETECTION_HEIGHT:
+				continue
+			if Vector2(point.x - fx, point.z - fz).length_squared() > DETECTION_RADIUS * DETECTION_RADIUS:
+				continue
+			detected += 1
+			if detected >= MAX_DETECTED:
+				break
 	if detected == 0 or now < float(fire.get("alarm_next_alert", INF)):
 		return 0
 	fire["alarm_next_alert"] = now + ALERT_COOLDOWN

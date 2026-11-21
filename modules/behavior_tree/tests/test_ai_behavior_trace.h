@@ -62,12 +62,12 @@ TEST_CASE("[AIBehaviorTrace] Nesting returns start order and inclusive task dura
 	REQUIRE(steps.size() == 2);
 	Dictionary parent = steps[0];
 	Dictionary leaf = steps[1];
-	CHECK(parent["path"] == "root");
-	CHECK(parent["task_class"] == "BehaviorTreeSequence");
+	CHECK(parent["path"] == Variant("root"));
+	CHECK(parent["task_class"] == Variant("BehaviorTreeSequence"));
 	CHECK(int(parent["depth"]) == 0);
 	CHECK(int(parent["status"]) == BehaviorTreeTask::RUNNING);
 	CHECK(int64_t(parent["duration_usec"]) >= 0);
-	CHECK(leaf["path"] == "root/0");
+	CHECK(leaf["path"] == Variant("root/0"));
 	CHECK(int(leaf["depth"]) == 1);
 	CHECK(int(leaf["status"]) == BehaviorTreeTask::RUNNING);
 	CHECK(int64_t(leaf["duration_usec"]) >= 0);
@@ -108,7 +108,7 @@ TEST_CASE("[AIBehaviorTrace] Tick lifecycle clears only prior events") {
 	const Array steps = snap["steps"];
 	REQUIRE(steps.size() == 1);
 	Dictionary item = steps[0];
-	CHECK(item["task_class"] == "Second");
+	CHECK(item["task_class"] == Variant("Second"));
 	trace->reset();
 	const Dictionary reset = trace->get_snapshot();
 	CHECK(int64_t(reset["tick_index"]) == 0);
@@ -152,7 +152,7 @@ TEST_CASE("[AIBehaviorTrace] Snapshot is detached from the recording") {
 	Array events = actual["steps"];
 	REQUIRE(events.size() == 1);
 	Dictionary entry = events[0];
-	CHECK(entry["path"] == "root");
+	CHECK(entry["path"] == Variant("root"));
 }
 
 TEST_CASE("[AIBehaviorTrace] Runner emits task-by-task pre-order with parent statuses") {
@@ -176,17 +176,17 @@ TEST_CASE("[AIBehaviorTrace] Runner emits task-by-task pre-order with parent sta
 	runner->set_trace_enabled(true);
 	CHECK(runner->tick(0.2) == BehaviorTreeTask::RUNNING);
 	const Dictionary snapshot = runner->get_trace_snapshot();
-	CHECK(snapshot["enabled"] == true);
+	CHECK(snapshot["enabled"] == Variant(true));
 	CHECK(int64_t(snapshot["tick_index"]) == 1);
 	Array steps = snapshot["steps"];
 	REQUIRE(steps.size() == 3);
 	Dictionary top = steps[0], guard = steps[1], timer = steps[2];
-	CHECK(top["path"] == "root");
-	CHECK(top["task_class"] == "BehaviorTreeReactiveSequence");
+	CHECK(top["path"] == Variant("root"));
+	CHECK(top["task_class"] == Variant("BehaviorTreeReactiveSequence"));
 	CHECK(int(top["status"]) == BehaviorTreeTask::RUNNING);
-	CHECK(guard["path"] == "root/0");
+	CHECK(guard["path"] == Variant("root/0"));
 	CHECK(int(guard["status"]) == BehaviorTreeTask::SUCCESS);
-	CHECK(timer["path"] == "root/1");
+	CHECK(timer["path"] == Variant("root/1"));
 	CHECK(int(timer["status"]) == BehaviorTreeTask::RUNNING);
 	const Dictionary runner_memory = runner->get_debug_snapshot()["execution_memory"];
 	CHECK_FALSE(runner_memory.has("__bt_trace_sink"));
@@ -213,9 +213,9 @@ TEST_CASE("[AIBehaviorTrace] Nested decorators trace every executed child") {
 	Array steps = runner->get_trace_snapshot()["steps"];
 	REQUIRE(steps.size() == 3);
 	Dictionary a = steps[0], b = steps[1], c = steps[2];
-	CHECK(a["path"] == "root");
-	CHECK(b["path"] == "root/0");
-	CHECK(c["path"] == "root/0/0");
+	CHECK(a["path"] == Variant("root"));
+	CHECK(b["path"] == Variant("root/0"));
+	CHECK(c["path"] == Variant("root/0/0"));
 	CHECK(int(c["status"]) == BehaviorTreeTask::RUNNING);
 	memdelete(runner);
 }
@@ -228,7 +228,7 @@ TEST_CASE("[AIBehaviorTrace] Disabled runners do not retain trace contexts") {
 	runner->set_root_task(wait);
 	CHECK_FALSE(runner->is_trace_enabled());
 	CHECK(runner->tick(0.2) == BehaviorTreeTask::RUNNING);
-	CHECK(runner->get_trace_snapshot()["enabled"] == false);
+	CHECK(runner->get_trace_snapshot()["enabled"] == Variant(false));
 	const Array no_steps = runner->get_trace_snapshot()["steps"];
 	CHECK(no_steps.is_empty());
 	const Dictionary runner_memory = runner->get_debug_snapshot()["execution_memory"];

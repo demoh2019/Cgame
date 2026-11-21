@@ -38,6 +38,14 @@ static func _distance_to_cell(point: Vector3, cell: Vector3i, size: float) -> fl
 	return Vector2(point.x - x, point.z - z).length()
 
 
+func _slow_unload(_cell: Vector3i) -> void:
+	# Deterministic regression: an indivisible scene callback exceeds
+	# the soft time slice, so subsequent chunks must be deferred.
+	var until_usec: int = Time.get_ticks_usec() + 2000
+	while Time.get_ticks_usec() < until_usec:
+		pass
+
+
 func run(t) -> void:
 	t.current = "legacy whole-world unloads remain unlimited"
 	var legacy := _make_streamer()
@@ -135,6 +143,31 @@ func run(t) -> void:
 		"removing source eventually releases its former resident cells")
 	auxiliary.free()
 
+	t.current = "soft unload time slice defers remaining visual cells"
+	var sliced := _make_streamer()
+	sliced.max_unloads_per_update = 16
+	sliced.max_unload_work_usec = 1000
+	sliced.refresh()
+	var sliced_count: int = sliced.get_loaded_count()
+	t.check(sliced_count > 2, "multiple visual chunks resident before time slicing")
+	sliced.chunk_unloaded.connect(Callable(self, "_slow_unload"))
+	sliced.focus_position = Vector3(512, 0, 512)
+	sliced.refresh()
+	t.eq(sliced.get_last_unload_count(), 1,
+		"slow scene-tree callback cannot cause additional unloads after time budget expires")
+	t.eq(sliced.get_last_deferred_unload_count(), sliced_count - 1,
+		"time-sliced cleanup reports actual remaining backlog")
+	t.check(sliced.get_last_unload_work_usec() >= 1000,
+		"the profiler includes the indivisible callback time, even beyond the soft cap")
+	sliced.refresh()
+	t.eq(sliced.get_last_unload_count(), 1,
+		"following refresh continues draining the deferred backlog")
+	sliced.chunk_unloaded.disconnect(Callable(self, "_slow_unload"))
+	sliced.unload_all()
+	t.eq(sliced.get_last_unload_work_usec(), 0,
+		"explicit unload_all resets the last timed work counter")
+	sliced.free()
+
 	t.current = "native hard cap and preset-driven game integration"
 	var config := WorldStreamer.new()
 	config.max_unloads_per_update = -30
@@ -143,6 +176,16 @@ func run(t) -> void:
 	t.eq(config.max_unloads_per_update, 64, "native budget never exceeds 64 cells")
 	config.max_unloads_per_update = 3
 	t.eq(config.max_unloads_per_update, 3, "valid custom count is preserved")
+	config.max_unload_work_usec = -20
+	t.eq(config.max_unload_work_usec, 0, "zero disables the soft time slice")
+	config.max_unload_work_usec = 5000000
+	t.eq(config.max_unload_work_usec, 1000000, "native time slice is bounded")
+	config.max_unload_work_usec = 400
+	t.eq(config.max_unload_work_usec, 400, "valid microsecond cap is preserved")
+	if config.has_method("get_effective_unloads_per_update"):
+		t.eq(config.get_effective_unloads_per_update(), 3, "unpressured unload limit matches preset")
+		config.adaptive_chunk_budget_enabled = true
+		t.eq(config.get_effective_unloads_per_update(), 3, "adaptive mode starts without reducing throughput")
 	t.eq(config.get_last_unload_count(), 0,
 		"configuration does not fabricate unloaded work")
 	config.free()
@@ -154,11 +197,23 @@ func run(t) -> void:
 		"invalid low-quality value cannot disable cleanup unintentionally")
 	t.eq(GraphicsQuality.unload_budget_for_quality(500), 48,
 		"invalid high-quality value is clamped")
+	var expected_usec: Array[int] = [400, 650, 900, 1200]
+	for tier in expected_usec.size():
+		t.eq(GraphicsQuality.unload_time_budget_for_quality(tier), expected_usec[tier],
+			"Albion After graphics tiers configure native unload CPU time slices")
+	t.eq(GraphicsQuality.unload_time_budget_for_quality(-40), 400,
+		"low-quality invalid input cannot bypass the CPU time slice")
+	t.eq(GraphicsQuality.unload_time_budget_for_quality(500), 1200,
+		"high-quality invalid input is clamped")
 	var graphics_source := FileAccess.get_file_as_string("res://scripts/client/graphics_quality.gd")
 	t.check(graphics_source.contains("streamer.has_method(\"set_max_unloads_per_update\")")
 		and graphics_source.contains("set_max_unloads_per_update"),
 		"real game applies native limits whenever graphics quality changes")
+	t.check(graphics_source.contains("set_max_unload_work_usec"),
+		"real game applies the native unload wall-clock budget by graphics tier")
 	var online := FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
 	t.check(online.contains("Albion/StreamUnloadsDeferred")
 		and online.contains("Albion/StreamUnloadedLastUpdate"),
 		"performance profiler tracks actual deferred and completed cleanup")
+	t.check(online.contains("Albion/StreamUnloadCPUus"),
+		"performance profiler tracks actual synchronous visual-chunk unload time")

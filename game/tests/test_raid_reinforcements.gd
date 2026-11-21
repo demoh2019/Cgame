@@ -25,7 +25,9 @@ class RidgeWorld:
 class FlatWorld:
 	extends RefCounted
 	var world_seed: int = 721
-	func zone_at(x: float, _z: float) -> int:
+	var queried_sites: Array[Vector2] = []
+	func zone_at(x: float, z: float) -> int:
+		queried_sites.append(Vector2(x, z))
 		return 2 if x > 100.0 else 0
 	func is_safe(x: float, _z: float) -> bool:
 		return x <= 100.0
@@ -53,6 +55,53 @@ func run(t) -> void:
 	t.eq(RaidReinforcements.kinds(2).size(), 2, "final wave is bounded")
 
 
+	t.current = "native EQS Donut generator and portable ring-source parity"
+	var ring_center := Vector2(215.0, 200.0)
+	for phase_id in [1, 2]:
+		var scripted_ring: PackedVector2Array = RaidReinforcements.candidate_ring_points(
+			ring_center, phase_id, false)
+		var native_ring: PackedVector2Array = RaidReinforcements.candidate_ring_points(
+			ring_center, phase_id, true)
+		t.eq(scripted_ring.size(), RaidReinforcements.RADII.size() * RaidReinforcements.ANGLES,
+			"portable raid sampling retains every original site in every encounter phase")
+		t.eq(native_ring.size(), scripted_ring.size(),
+			"native EQS donut path preserves the exact candidate budget")
+		for index in scripted_ring.size():
+			t.check(native_ring[index].distance_to(scripted_ring[index]) < 0.001,
+				"all ring candidate coordinates and their phase-rotated source indices agree")
+			var ring_index: int = index / RaidReinforcements.ANGLES
+			t.near(native_ring[index].distance_to(ring_center),
+				float(RaidReinforcements.RADII[ring_index]), 0.001,
+				"candidates retain the correct server-owned raid distance band")
+	t.eq(RaidReinforcements.candidate_ring_points(Vector2(INF, 0), 1).size(), 0,
+		"nonfinite raid centers cannot generate native or script candidates")
+	t.eq(RaidReinforcements.candidate_ring_points(ring_center, 3).size(), 0,
+		"invalid raid phase cannot generate positions")
+
+	t.current = "EQS Cone forward-sector parity and bounded geometry"
+	var cone_center := Vector2(215.0, 200.0)
+	var cone_axis := Vector2(4.0, 1.0)
+	var script_cone := RaidReinforcements.candidate_cone_points(cone_center, cone_axis, false)
+	var native_cone := RaidReinforcements.candidate_cone_points(cone_center, cone_axis, true)
+	t.eq(script_cone.size(), RaidReinforcements.CONE_RINGS * RaidReinforcements.CONE_RAYS,
+		"portable cone has the exact bounded candidate count")
+	t.eq(native_cone.size(), script_cone.size(),
+		"native and stock Godot use the same cone sampling budget")
+	var cone_centerline := cone_axis.normalized()
+	for index in script_cone.size():
+		t.check(native_cone[index].distance_to(script_cone[index]) <= 0.001,
+			"native sector positions match the stock Godot fallback")
+		var displacement: Vector2 = (native_cone[index] - cone_center)
+		var expected_radius: float = float(RaidReinforcements.RADII[0]) if index < RaidReinforcements.CONE_RAYS else float(RaidReinforcements.RADII[-1])
+		t.near(displacement.length(), expected_radius, 0.001,
+			"all cone candidates remain within authoritative raid rings")
+		t.check(displacement.normalized().dot(cone_centerline) >= cos(deg_to_rad(RaidReinforcements.CONE_DEGREES / 2.0)) - 0.001,
+			"sector points stay inside the designated forward arc")
+	t.eq(RaidReinforcements.candidate_cone_points(cone_center, Vector2.ZERO).size(), 0,
+		"undefined cone heading cannot create spawn points")
+	t.eq(RaidReinforcements.candidate_cone_points(Vector2(INF, 0), Vector2.RIGHT).size(), 0,
+		"nonfinite cone center fails closed")
+	
 	t.current = "bounded deterministic spread ranking"
 	var candidates: Array[Vector2] = [
 		Vector2(8, 0), Vector2(8, 1), Vector2(16, 0),
@@ -143,6 +192,34 @@ func run(t) -> void:
 	var sites := RaidReinforcements.sites(world, server.players,
 		server.zombies, boss.position, 1, 2)
 	t.eq(sites.size(), 2, "clear dangerous terrain permits two adds")
+	# Second phase augments the old donut with a real forward cone, while
+	# retaining the exact same zone, terrain and occupancy validation.
+	world.queried_sites.clear()
+	var phase_two_sites := RaidReinforcements.sites(
+		world, server.players, server.zombies, boss.position, 2, 2)
+	t.eq(phase_two_sites.size(), 2, "forward-sector wave still finds two safe spawn sites")
+	var closest_player_axis := Vector2(ally.position.x - boss.position.x,
+		ally.position.z - boss.position.z)
+	var cone_wave_points := RaidReinforcements.candidate_cone_points(
+		Vector2(boss.position.x, boss.position.z), closest_player_axis)
+	var cone_visited := false
+	for sample in cone_wave_points:
+		for checked in world.queried_sites:
+			if checked.distance_to(sample) <= 0.001:
+				cone_visited = true
+				break
+		if cone_visited:
+			break
+	t.check(cone_visited,
+		"second raid phase actually submits native/fallback cone candidates to server terrain validation")
+	for site in phase_two_sites:
+		t.check(site.distance_to(Vector2(fighter.position.x, fighter.position.z)) >=
+			RaidReinforcements.MIN_PLAYER_DISTANCE,
+			"forward sector does not permit spawning on the frontline player")
+		t.check(site.distance_to(Vector2(ally.position.x, ally.position.z)) >=
+			RaidReinforcements.MIN_PLAYER_DISTANCE,
+			"forward sector does not permit spawning on the closest ally")
+
 	var ridge := RidgeWorld.new()
 	var ridge_sites: Array[Vector2] = RaidReinforcements.sites(
 		ridge, server.players, server.zombies, boss.position, 1, 2)

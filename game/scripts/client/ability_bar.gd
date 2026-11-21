@@ -93,10 +93,18 @@ func _process(delta: float) -> void:
 		if _last_snapshot_received != int(client.snapshots_received):
 			if AbilityCooldowns.reconcile_native(_cooldown_tracker, client.you):
 				_last_snapshot_received = int(client.snapshots_received)
+	# One native read retrieves all five authoritative cooldown projections,
+	# including the shared ability lock. No client ability grants are inferred.
+	var slot_names := PackedStringArray()
+	for entry in SLOT_DEFS:
+		slot_names.append(str(entry["slot"]))
+	var cooldowns: PackedFloat64Array = AbilityCooldowns.display_many(
+		slot_names, client.you, _cooldown_tracker)
 	for i in SLOT_DEFS.size():
 		var entry: Dictionary = SLOT_DEFS[i]
 		var slot: String = str(entry["slot"])
-		var remaining: float = AbilityCooldowns.display_remaining(slot, client.you, _cooldown_tracker)
+		var remaining: float = cooldowns[i] if cooldowns.size() == SLOT_DEFS.size() \
+			else AbilityCooldowns.display_remaining(slot, client.you, _cooldown_tracker)
 		var label: String = slot_label(slot, client.inventory, client.you, remaining)
 		if AbilityCooldowns.activation_feedback_active(_cooldown_tracker, slot):
 			label += " •"

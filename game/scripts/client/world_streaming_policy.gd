@@ -55,6 +55,31 @@ static func ground_view(camera: Camera3D) -> Vector3:
 	return forward.normalized()
 
 
+## Convert the perspective camera into a conservative horizontal view cone.
+## The extra margin reduces visible pop-in around the screen edges.
+## Non-perspective cameras retain legacy heading-only streaming.
+static func horizontal_cone_half_angle(fov: float, aspect: float, keep_height: bool) -> float:
+	if not is_finite(fov) or not is_finite(aspect) or aspect <= 0.0:
+		return 180.0
+	var half_angle: float = deg_to_rad(clampf(fov, 1.0, 179.0) * 0.5)
+	if keep_height:
+		half_angle = atan(tan(half_angle) * aspect)
+	return clampf(rad_to_deg(half_angle) + 12.0, 20.0, 89.0)
+
+
+static func view_cone_half_angle(camera: Camera3D) -> float:
+	if camera == null or camera.projection != Camera3D.PROJECTION_PERSPECTIVE:
+		return 180.0
+	var viewport: Viewport = camera.get_viewport()
+	if viewport == null:
+		return 180.0
+	var size: Vector2 = viewport.get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		return 180.0
+	return horizontal_cone_half_angle(camera.fov, size.x / size.y,
+		camera.keep_aspect == Camera3D.KEEP_HEIGHT)
+
+
 ## Run after Camera3D look_at(), so zoom/photo orbit uses the actual
 ## rendered view instead of stale movement input. Native Cgame setters are
 ## idempotent; do not touch loaded cells or resource allocations here.
@@ -71,6 +96,11 @@ static func apply_view(streamer: WorldStreamer, camera: Camera3D,
 	var direction: Vector3 = ground_view(camera)
 	if not streamer.view_direction.is_equal_approx(direction):
 		streamer.view_direction = direction
+	# Older custom engine builds keep the original heading-only schedule.
+	if "view_cone_half_angle_degrees" in streamer:
+		var half_angle: float = view_cone_half_angle(camera)
+		if not is_equal_approx(streamer.view_cone_half_angle_degrees, half_angle):
+			streamer.view_cone_half_angle_degrees = half_angle
 
 
 ## Nearby personal map markers become a bounded second streaming source.
@@ -179,6 +209,19 @@ static func apply_waypoint(streamer: WorldStreamer, waypoint: Vector2,
 			not (streamer.call("get_auxiliary_source_position") as Vector3).is_equal_approx(destination) or \
 			not is_equal_approx(float(streamer.call("get_auxiliary_source_radius")), radius):
 		streamer.call("set_auxiliary_source", destination, radius)
+
+
+## Unreal-inspired named simulation Data Layer. Surface chunk scene roots opt
+## into this client-cosmetic layer; disabling it suspends expensive grass,
+## decor, windmill and shadow callbacks, not terrain/collision/network play.
+## Idempotent setter; old Cgame builds simply retain their normal LOD tier.
+static func apply_simulation_layers(streamer: WorldStreamer, underground: bool) -> void:
+	if streamer == null or not streamer.has_method("set_simulation_layer_enabled") or \
+			not streamer.has_method("is_simulation_layer_enabled"):
+		return
+	var enabled: bool = not underground
+	if bool(streamer.call("is_simulation_layer_enabled", &"SurfaceCosmetics")) != enabled:
+		streamer.call("set_simulation_layer_enabled", &"SurfaceCosmetics", enabled)
 
 ## Read-only main streaming readiness for a compact client HUD indicator.
 ## Older fork engines lack this native API; do not invent a percentage.

@@ -3,6 +3,7 @@ extends RefCounted
 ## The server and every client build the same world from the same seed, so the world never has to
 ## be sent over the network, only what changes in it.
 
+const WorldRivers = preload("res://scripts/shared/world_rivers.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
@@ -20,9 +21,12 @@ var _hub_structures: Array = []
 var _level_rx: int = 1 << 30
 var _level_rz: int = 1 << 30
 var _levellers: Array = []
+var _erosion: FastNoiseLite
 var poi_building := false # While sites are being found, terrain is read without their levelling.
 var roads # Seeded roads shared by renderer and movement physics.
+var rivers # Seeded rivers and lakes carved into the land (world_rivers.gd).
 var poi # Villages, camps, forts, ruined cities and the rest: see world_poi.gd.
+var spawn_extender = null # Optional per-chunk content hook (server/pcg_spawns.gd); null = classic chunks.
 const CACHE_LIMIT := 256
 
 # Height range in meters. The hub is leveled to HUB_HEIGHT so the town can be built flat.
@@ -41,6 +45,10 @@ func _init(p_seed: int = 1337) -> void:
 	_detail = _make_noise(p_seed + 202, 0.07, 2)
 	_temperature = _make_noise(p_seed + 303, 0.0021, 2)
 	_moisture = _make_noise(p_seed + 404, 0.0026, 2)
+	_erosion = _make_noise(p_seed + 505, 0.0055, 3)
+	_erosion.fractal_type = FastNoiseLite.FRACTAL_RIDGED
+	rivers = WorldRivers.new(self)
+	rivers.ensure_built() # Before sites: villages must see the rivers to stay out of them.
 	poi = WorldPoi.new(self)
 	roads = WorldRoads.new(self)
 
@@ -71,6 +79,17 @@ static func mix(a: int, b: int, c: int, d: int = 0) -> int:
 
 ## Terrain height: the natural land, levelled under every site so buildings stand on flat ground.
 func height_at(x: float, z: float) -> float:
+	var ground: float = ground_at(x, z)
+	# Bridge decks carry roads over rivers: you walk on the deck, not in the water below.
+	if roads != null and not poi_building:
+		var deck: float = roads.bridge_deck(x, z)
+		if deck > ground:
+			return deck
+	return ground
+
+
+## The ground itself (no bridge decks): what the terrain mesh is built from.
+func ground_at(x: float, z: float) -> float:
 	if x >= Dungeon.UNDERGROUND_X - 40.0 and not poi_building:
 		return Dungeon.FLOOR_Y # The stone floor of the dungeons below the bunkers.
 	var raw: float = _raw_height(x, z)
@@ -94,7 +113,13 @@ func height_at(x: float, z: float) -> float:
 	return result
 
 
+## Natural land with rivers and lakes cut in.
 func _raw_height(x: float, z: float) -> float:
+	return rivers.carve(x, z, _base_height(x, z)) if rivers != null else _base_height(x, z)
+
+
+## The natural land before rivers: continents, hills, mountains, and erosion on the slopes.
+func _base_height(x: float, z: float) -> float:
 	var continent := _continent.get_noise_2d(x, z) # -1..1
 	var hills := _hills.get_noise_2d(x, z)
 	var detail := _detail.get_noise_2d(x, z)
@@ -102,6 +127,14 @@ func _raw_height(x: float, z: float) -> float:
 	var base := continent * 26.0 + hills * 7.0 + detail * 0.8 + LAND_BIAS
 	var mountain := maxf(continent - 0.28, 0.0)
 	base += mountain * mountain * 180.0
+	# Erosion, approximated analytically (no per-frame simulation; height_at must stay a pure function):
+	# hydraulic - branching gullies and ravines cut down the high ground, deepest on mountains;
+	# thermal - the very tops slump, so peaks round off instead of standing as needles.
+	var high: float = smoothstep(10.0, 60.0, base)
+	var gully: float = 1.0 - absf(_erosion.get_noise_2d(x, z))
+	base -= high * pow(gully, 5.0) * (6.0 + mountain * 55.0)
+	if base > 70.0:
+		base = 70.0 + (base - 70.0) * 0.72
 	# Level the hub and blend smoothly into the wilderness.
 	var distance := Vector2(x, z).length()
 	# The edge of the world: the land sinks into the sea.
@@ -111,7 +144,13 @@ func _raw_height(x: float, z: float) -> float:
 
 
 func is_water(x: float, z: float) -> bool:
-	return height_at(x, z) < Defs.WATER_LEVEL
+	var ground: float = height_at(x, z)
+	return ground < Defs.WATER_LEVEL or (rivers != null and rivers.surface_at(x, z) > ground)
+
+
+## Water surface height here: the sea level, or a river/lake surface above it.
+func water_level_at(x: float, z: float) -> float:
+	return maxf(Defs.WATER_LEVEL, rivers.surface_at(x, z) if rivers != null else -INF)
 
 
 func normal_at(x: float, z: float) -> Vector3:
@@ -125,7 +164,7 @@ func biome_at(x: float, z: float) -> String:
 	if Dungeon.is_underground(x, z):
 		return "dungeon"
 	var height := height_at(x, z)
-	if height < Defs.WATER_LEVEL - 0.4:
+	if height < Defs.WATER_LEVEL - 0.4 or (rivers != null and rivers.surface_at(x, z) > height):
 		return "water"
 	if height < Defs.WATER_LEVEL + 1.2:
 		return "beach"
@@ -671,7 +710,10 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 	_add_hostiles(cell, origin, zone, ruin, spawns)
 	_add_groves(cell, origin, tier, nodes, sites)
 	_add_outposts(cell, origin, zone, ruin, structures, crates, props, sites)
-	return {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
+	var generated := {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
+	if spawn_extender != null:
+		spawn_extender.extend(cell, generated)
+	return generated
 
 
 ## Trees and rocks keep out of the inner part of a settlement, camp or city.

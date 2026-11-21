@@ -156,4 +156,497 @@ TEST_CASE("[AIProximityGrid2D] Nearest request cannot bypass source, radius or s
 }
 
 
+TEST_CASE("[AIProximityGrid2D] Native batch separation pushes close passive agents apart") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array positions;
+	positions.push_back(Vector2(0, 0));
+	positions.push_back(Vector2(1, 0));
+	positions.push_back(Vector2(20, 0));
+	PackedInt32Array sources;
+	sources.push_back(0);
+	sources.push_back(1);
+	sources.push_back(2);
+	const PackedVector2Array result = grid->query_separation_batch(positions, sources, 2.5, 3.0, 8);
+	REQUIRE(result.size() == 3);
+	CHECK(result[0].x < real_t(0.0));
+	CHECK(result[1].x > real_t(0.0));
+	CHECK(result[0].y == real_t(0.0));
+	CHECK(result[1].y == real_t(0.0));
+	CHECK(result[2] == Vector2());
+	CHECK(result[0].length() <= real_t(1.0));
+	CHECK(result[1].length() <= real_t(1.0));
+	// Return values never depend on HashMap bucket traversal or RNG.
+	CHECK(grid->query_separation_batch(positions, sources, 2.5, 3.0, 8) == result);
+}
+
+TEST_CASE("[AIProximityGrid2D] Coincident actors diverge deterministically, including negative cells") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array positions;
+	positions.push_back(Vector2(-3, -3));
+	positions.push_back(Vector2(-3, -3));
+	positions.push_back(Vector2(-15, -15));
+	PackedInt32Array sources;
+	sources.push_back(0);
+	sources.push_back(1);
+	sources.push_back(0);
+	const PackedVector2Array result = grid->query_separation_batch(positions, sources, 2.5, 3.0, 1);
+	REQUIRE(result.size() == 3);
+	CHECK(result[0] == Vector2(-1, 0));
+	CHECK(result[1] == Vector2(1, 0));
+	CHECK(result[2] == result[0]);
+	const PackedVector2Array edge = grid->query_separation_batch(positions, sources, 0.0, 3.0, 1);
+	CHECK(edge.is_empty()); // Zero radius is intentionally rejected.
+}
+
+TEST_CASE("[AIProximityGrid2D] Separation requests fail atomically on malformed inputs") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array positions;
+	positions.push_back(Vector2(0, 0));
+	positions.push_back(Vector2(3, 4));
+	PackedInt32Array sources;
+	sources.push_back(0);
+	CHECK(grid->query_separation_batch(positions, sources, 5.0, 5.0, 1).size() == 1);
+	CHECK(grid->query_separation_batch(positions, sources, -1.0, 5.0, 1).is_empty());
+	CHECK(grid->query_separation_batch(positions, sources, 6.0, 5.0, 1).is_empty());
+	CHECK(grid->query_separation_batch(positions, sources, 5.0, 5.0, 0).is_empty());
+	CHECK(grid->query_separation_batch(positions, sources, 5.0, 5.0, 65).is_empty());
+	CHECK(grid->query_separation_batch(positions, sources, Math::INF, 5.0, 1).is_empty());
+	CHECK(grid->query_separation_batch(positions, sources, 5.0, Math::INF, 1).is_empty());
+	PackedInt32Array invalid_sources;
+	invalid_sources.push_back(0);
+	invalid_sources.push_back(3);
+	CHECK(grid->query_separation_batch(positions, invalid_sources, 5.0, 5.0, 2).is_empty());
+	positions.push_back(Vector2(Math::NaN, 0));
+	CHECK(grid->query_separation_batch(positions, sources, 5.0, 5.0, 1).is_empty());
+}
+
+TEST_CASE("[AIProximityGrid2D] Cross-set broadphase preserves inclusive radii and target order") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array sources;
+	sources.push_back(Vector2(0, 0));
+	sources.push_back(Vector2(-6, -6));
+	sources.push_back(Vector2(200, 200));
+	PackedVector2Array targets;
+	targets.push_back(Vector2(3, 4)); // Inclusive 5m boundary.
+	targets.push_back(Vector2(0, 0));
+	targets.push_back(Vector2(-9, -10)); // Negative cell boundary.
+	targets.push_back(Vector2(6, 0)); // Outside 5m.
+	targets.push_back(Vector2(3, 4)); // Two distinct trap identities.
+	const Array found = grid->query_cross_radius_batch(sources, targets, 5.0, 5.0);
+	REQUIRE(found.size() == 3);
+	const PackedInt32Array first = found[0];
+	CHECK(first.size() == 3);
+	CHECK(first[0] == 0);
+	CHECK(first[1] == 1);
+	CHECK(first[2] == 4);
+	const PackedInt32Array second = found[1];
+	CHECK(second.size() == 1);
+	CHECK(second[0] == 2);
+	const PackedInt32Array third = found[2];
+	CHECK(third.is_empty());
+	CHECK(grid->query_cross_radius_batch(sources, targets, 5.0, 5.0) == found);
+}
+
+TEST_CASE("[AIProximityGrid2D] Cross-set requests reject malformed cohorts atomically") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array sources;
+	sources.push_back(Vector2(0, 0));
+	PackedVector2Array targets;
+	targets.push_back(Vector2(0, 0));
+	CHECK(grid->query_cross_radius_batch(sources, targets, 0.0, 1.0).size() == 1);
+	CHECK(grid->query_cross_radius_batch(sources, targets, -1.0, 2.0).is_empty());
+	CHECK(grid->query_cross_radius_batch(sources, targets, 2.0, 1.0).is_empty());
+	CHECK(grid->query_cross_radius_batch(sources, targets, Math::INF, 2.0).is_empty());
+	CHECK(grid->query_cross_radius_batch(sources, targets, 2.0, Math::INF).is_empty());
+	CHECK(grid->query_cross_radius_batch(PackedVector2Array(), targets, 1.0, 2.0).is_empty());
+	CHECK(grid->query_cross_radius_batch(sources, PackedVector2Array(), 1.0, 2.0).is_empty());
+	PackedVector2Array invalid_sources = sources;
+	invalid_sources.push_back(Vector2(Math::NaN, 0));
+	CHECK(grid->query_cross_radius_batch(invalid_sources, targets, 1.0, 2.0).is_empty());
+	PackedVector2Array invalid_targets = targets;
+	invalid_targets.push_back(Vector2(Math::INF, 0));
+	CHECK(grid->query_cross_radius_batch(sources, invalid_targets, 1.0, 2.0).is_empty());
+	PackedVector2Array excessive_sources;
+	excessive_sources.resize(4097);
+	CHECK(grid->query_cross_radius_batch(excessive_sources, targets, 1.0, 2.0).is_empty());
+	PackedVector2Array excessive_targets;
+	excessive_targets.resize(8193);
+	CHECK(grid->query_cross_radius_batch(sources, excessive_targets, 1.0, 2.0).is_empty());
+	// Dense matched pairs must also fail atomically to protect memory.
+	PackedVector2Array dense_sources;
+	dense_sources.resize(513);
+	PackedVector2Array dense_targets;
+	dense_targets.resize(64);
+	CHECK(grid->query_cross_radius_batch(dense_sources, dense_targets, 1.0, 2.0).is_empty());
+	CHECK(grid->query_cross_radius_batch(sources, targets, 1.0, 2.0).size() == 1);
+}
+
+TEST_CASE("[AIProximityGrid2D] Predictive separation sidesteps head-on crossings") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array positions;
+	positions.push_back(Vector2(0, 0));
+	positions.push_back(Vector2(2, 0));
+	PackedVector2Array velocities;
+	velocities.push_back(Vector2(1, 0));
+	velocities.push_back(Vector2(-1, 0));
+	PackedInt32Array sources;
+	sources.push_back(0);
+	sources.push_back(1);
+	const PackedVector2Array now = grid->query_separation_batch(positions, sources, 1.5, 2.0, 8);
+	REQUIRE(now.size() == 2);
+	CHECK(now[0] == Vector2());
+	CHECK(now[1] == Vector2()); // No static neighbors yet.
+	const PackedVector2Array future = grid->query_predictive_separation_batch(
+			positions, velocities, sources, 1.5, 2.0, 8, 1.0);
+	REQUIRE(future.size() == 2);
+	CHECK(future[0].x == real_t(0.0));
+	CHECK(future[0].y > real_t(0.0));
+	CHECK(future[1].x == real_t(0.0));
+	CHECK(future[1].y < real_t(0.0));
+	CHECK(future[0].length() <= real_t(1.0));
+	CHECK(future[1].length() <= real_t(1.0));
+	CHECK(grid->query_predictive_separation_batch(positions, velocities, sources, 1.5, 2.0, 8, 1.0) == future);
+	// A near miss (not exact equality) must still sidestep before contact.
+	positions.set(1, Vector2(2.2, 0));
+	const PackedVector2Array near_miss = grid->query_predictive_separation_batch(
+			positions, velocities, sources, 1.5, 2.0, 8, 1.0);
+	REQUIRE(near_miss.size() == 2);
+	CHECK(near_miss[0].x == real_t(0.0));
+	CHECK(near_miss[0].y > real_t(0.5));
+	CHECK(near_miss[1].x == real_t(0.0));
+	CHECK(near_miss[1].y < real_t(-0.5));
+}
+
+TEST_CASE("[AIProximityGrid2D] Predictions retain zero-horizon parity and static overlap ties") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array positions;
+	positions.push_back(Vector2(-5, 0));
+	positions.push_back(Vector2(-4, 0));
+	positions.push_back(Vector2(10, 0));
+	PackedVector2Array velocities;
+	velocities.push_back(Vector2(-1, 0));
+	velocities.push_back(Vector2(1, 0));
+	velocities.push_back(Vector2());
+	PackedInt32Array sources;
+	sources.push_back(0);
+	sources.push_back(1);
+	const PackedVector2Array static_result = grid->query_separation_batch(positions, sources, 2.5, 3.0, 2);
+	const PackedVector2Array zero_horizon = grid->query_predictive_separation_batch(
+			positions, velocities, sources, 2.5, 3.0, 2, 0.0);
+	CHECK(zero_horizon == static_result);
+	const PackedVector2Array moving_apart = grid->query_predictive_separation_batch(
+			positions, velocities, sources, 2.5, 3.0, 2, 1.0);
+	REQUIRE(moving_apart.size() == 2);
+	CHECK(moving_apart[0] == Vector2());
+	CHECK(moving_apart[1] == Vector2());
+	positions.set(1, Vector2(-5, 0));
+	velocities.set(0, Vector2());
+	velocities.set(1, Vector2());
+	const PackedVector2Array overlapping = grid->query_predictive_separation_batch(
+			positions, velocities, sources, 2.5, 3.0, 2, 1.0);
+	REQUIRE(overlapping.size() == 2);
+	CHECK(overlapping[0] == Vector2(-1, 0));
+	CHECK(overlapping[1] == Vector2(1, 0));
+}
+
+TEST_CASE("[AIProximityGrid2D] Invalid predictive velocities and horizons fail atomically") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array positions;
+	positions.push_back(Vector2(0, 0));
+	PackedVector2Array velocity;
+	velocity.push_back(Vector2(1, 0));
+	PackedInt32Array source;
+	source.push_back(0);
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 3.0, 2, 0.7).size() == 1);
+	CHECK(grid->query_predictive_separation_batch(positions, PackedVector2Array(), source, 2.5, 3.0, 2, 0.7).is_empty());
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 3.0, 2, -1.0).is_empty());
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 3.0, 2, 2.1).is_empty());
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 3.0, 2, Math::INF).is_empty());
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 0.0, 3.0, 2, 0.7).is_empty());
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 2.0, 2, 0.7).is_empty());
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 3.0, 0, 0.7).is_empty());
+	PackedInt32Array invalid_source;
+	invalid_source.push_back(3);
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, invalid_source, 2.5, 3.0, 2, 0.7).is_empty());
+	velocity.set(0, Vector2(60, 0));
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 3.0, 2, 0.7).is_empty());
+	velocity.set(0, Vector2(Math::NaN, 0));
+	CHECK(grid->query_predictive_separation_batch(positions, velocity, source, 2.5, 3.0, 2, 0.7).is_empty());
+}
+
+
+TEST_CASE("[AIProximityGrid2D] EQS cross-nearest chooses closest and stable world ID ties") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array sources;
+	sources.push_back(Vector2(0, 0));
+	sources.push_back(Vector2(-10, -10));
+	sources.push_back(Vector2(300, 300));
+	PackedVector2Array targets;
+	targets.push_back(Vector2(4, 0));
+	targets.push_back(Vector2(-4, 0));
+	targets.push_back(Vector2(-13, -14)); // Exactly five meters.
+	targets.push_back(Vector2(100, 0));
+	PackedInt64Array ids;
+	ids.push_back(30);
+	ids.push_back(10);
+	ids.push_back(50);
+	ids.push_back(1);
+	const PackedInt32Array found = grid->query_cross_nearest_batch(sources, targets, ids, 5.0, 5.0);
+	REQUIRE(found.size() == 3);
+	CHECK(found[0] == 1); // Equal distances, smallest world ID.
+	CHECK(found[1] == 2); // Inclusive negative-cell radius.
+	CHECK(found[2] == -1);
+	CHECK(grid->query_cross_nearest_batch(sources, targets, ids, 5.0, 5.0) == found);
+	// Duplicate coordinates are distinct items, not conflated actor positions.
+	targets.set(0, Vector2(-4, 0));
+	const PackedInt32Array duplicate = grid->query_cross_nearest_batch(sources, targets, ids, 5.0, 5.0);
+	CHECK(duplicate[0] == 1);
+	ids.set(0, 10);
+	const PackedInt32Array equal_ids = grid->query_cross_nearest_batch(sources, targets, ids, 5.0, 5.0);
+	CHECK(equal_ids[0] == 0); // Original index is stable secondary tie.
+}
+
+TEST_CASE("[AIProximityGrid2D] EQS cross-nearest supports zero radius, duplicate sources and negative cells") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array sources;
+	sources.push_back(Vector2(-6, -6));
+	sources.push_back(Vector2(-6, -6));
+	sources.push_back(Vector2(0, 0));
+	PackedVector2Array targets;
+	targets.push_back(Vector2(-6, -6));
+	PackedInt64Array ids;
+	ids.push_back(-23);
+	const PackedInt32Array nearest = grid->query_cross_nearest_batch(sources, targets, ids, 0.0, 1.0);
+	REQUIRE(nearest.size() == 3);
+	CHECK(nearest[0] == 0);
+	CHECK(nearest[1] == 0);
+	CHECK(nearest[2] == -1);
+	CHECK(grid->query_cross_nearest_batch(sources, targets, ids, 8.5, 9.0).size() == 3);
+}
+
+TEST_CASE("[AIProximityGrid2D] EQS cross-nearest rejects malformed data atomically") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array sources;
+	sources.push_back(Vector2(0, 0));
+	PackedVector2Array targets;
+	targets.push_back(Vector2(1, 0));
+	PackedInt64Array ids;
+	ids.push_back(1);
+	CHECK(grid->query_cross_nearest_batch(sources, targets, ids, 2.0, 2.0).size() == 1);
+	CHECK(grid->query_cross_nearest_batch(sources, targets, PackedInt64Array(), 2.0, 2.0).is_empty());
+	CHECK(grid->query_cross_nearest_batch(sources, targets, ids, -1.0, 2.0).is_empty());
+	CHECK(grid->query_cross_nearest_batch(sources, targets, ids, 3.0, 2.0).is_empty());
+	CHECK(grid->query_cross_nearest_batch(sources, targets, ids, Math::INF, 2.0).is_empty());
+	CHECK(grid->query_cross_nearest_batch(sources, targets, ids, 2.0, Math::INF).is_empty());
+	CHECK(grid->query_cross_nearest_batch(PackedVector2Array(), targets, ids, 2.0, 2.0).is_empty());
+	CHECK(grid->query_cross_nearest_batch(sources, PackedVector2Array(), PackedInt64Array(), 2.0, 2.0).is_empty());
+	PackedVector2Array invalid_sources = sources;
+	invalid_sources.push_back(Vector2(Math::NaN, 0));
+	CHECK(grid->query_cross_nearest_batch(invalid_sources, targets, ids, 2.0, 2.0).is_empty());
+	PackedVector2Array invalid_targets = targets;
+	invalid_targets.push_back(Vector2(Math::INF, 0));
+	ids.push_back(2);
+	CHECK(grid->query_cross_nearest_batch(sources, invalid_targets, ids, 2.0, 2.0).is_empty());
+	PackedVector2Array too_many_sources;
+	too_many_sources.resize(4097);
+	CHECK(grid->query_cross_nearest_batch(too_many_sources, targets, PackedInt64Array(), 2.0, 2.0).is_empty());
+	PackedVector2Array too_many_targets;
+	too_many_targets.resize(8193);
+	CHECK(grid->query_cross_nearest_batch(sources, too_many_targets, ids, 2.0, 2.0).is_empty());
+}
+
+TEST_CASE("[AIProximityGrid2D] Cylinder counts honor XZ radius, height and source order") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector3Array centers;
+	centers.push_back(Vector3(0, 0, 0));
+	centers.push_back(Vector3(-10, -4, -10));
+	centers.push_back(Vector3(300, 0, 300));
+	PackedVector3Array targets;
+	targets.push_back(Vector3(3, 0, 4)); // Inclusive XZ radius.
+	targets.push_back(Vector3(3, 8, 4)); // Inclusive height.
+	targets.push_back(Vector3(3, 8.1, 4)); // Wrong floor.
+	targets.push_back(Vector3(5.01, 0, 0)); // Too far.
+	targets.push_back(Vector3(-13, 4, -14)); // Inclusive negative-cell height.
+	const PackedInt32Array result = grid->query_cylinder_counts_batch(centers, targets, 5.0, 8.0, 5);
+	REQUIRE(result.size() == 3);
+	CHECK(result[0] == 2);
+	CHECK(result[1] == 1);
+	CHECK(result[2] == 0);
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, 5.0, 8.0, 5) == result);
+	const PackedInt32Array capped = grid->query_cylinder_counts_batch(centers, targets, 5.0, 8.0, 1);
+	REQUIRE(capped.size() == 3);
+	CHECK(capped[0] == 1);
+	CHECK(capped[1] == 1);
+}
+
+TEST_CASE("[AIProximityGrid2D] Cylinder counts preserve valid empty targets and exact zero radius") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector3Array centers;
+	centers.push_back(Vector3(-6, 2, -6));
+	centers.push_back(Vector3(-6, 2, -6));
+	const PackedInt32Array empty = grid->query_cylinder_counts_batch(centers, PackedVector3Array(), 3.0, 0.0, 5);
+	REQUIRE(empty.size() == 2);
+	CHECK(empty[0] == 0);
+	CHECK(empty[1] == 0);
+	PackedVector3Array targets;
+	targets.push_back(Vector3(-6, 2, -6));
+	targets.push_back(Vector3(-6, 2.01, -6));
+	const PackedInt32Array overlap = grid->query_cylinder_counts_batch(centers, targets, 0.0, 0.0, 5);
+	REQUIRE(overlap.size() == 2);
+	CHECK(overlap[0] == 1);
+	CHECK(overlap[1] == 1);
+}
+
+TEST_CASE("[AIProximityGrid2D] Cylinder counts reject invalid and oversized inputs atomically") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector3Array centers;
+	centers.push_back(Vector3(0, 0, 0));
+	PackedVector3Array targets;
+	targets.push_back(Vector3(0, 0, 0));
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, 1.0, 2.0, 5).size() == 1);
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, -1.0, 2.0, 5).is_empty());
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, 257.0, 2.0, 5).is_empty());
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, 1.0, Math::INF, 5).is_empty());
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, 1.0, -1.0, 5).is_empty());
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, 1.0, 2.0, 0).is_empty());
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, 1.0, 2.0, 65).is_empty());
+	PackedVector3Array invalid = targets;
+	invalid.push_back(Vector3(Math::NaN, 0, 0));
+	CHECK(grid->query_cylinder_counts_batch(centers, invalid, 1.0, 2.0, 5).is_empty());
+	PackedVector3Array large_centers;
+	large_centers.resize(4097);
+	CHECK(grid->query_cylinder_counts_batch(large_centers, targets, 1.0, 2.0, 5).is_empty());
+	PackedVector3Array large_targets;
+	large_targets.resize(8193);
+	CHECK(grid->query_cylinder_counts_batch(centers, large_targets, 1.0, 2.0, 5).is_empty());
+	CHECK(grid->query_cylinder_counts_batch(PackedVector3Array(), targets, 1.0, 2.0, 5).is_empty());
+}
+
+
+TEST_CASE("[AIProximityGrid2D] Variable-radius cross cohort preserves per-agent ranges and order") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array agents;
+	agents.push_back(Vector2(0, 0));
+	agents.push_back(Vector2(-10, -10));
+	agents.push_back(Vector2(0, 0));
+	agents.push_back(Vector2(300, 300));
+	PackedFloat32Array radii;
+	radii.push_back(5.0f);
+	radii.push_back(0.0f);
+	radii.push_back(1.0f);
+	radii.push_back(3.0f);
+	PackedVector2Array targets;
+	targets.push_back(Vector2(3, 4));
+	targets.push_back(Vector2(0, 0));
+	targets.push_back(Vector2(6, 0));
+	targets.push_back(Vector2(-10, -10));
+	targets.push_back(Vector2(0, 0)); // Duplicate player coordinates.
+	const Array found = grid->query_cross_variable_radius_batch(agents, radii, targets);
+	REQUIRE(found.size() == 4);
+	const PackedInt32Array first = found[0];
+	REQUIRE(first.size() == 3);
+	CHECK(first[0] == 0);
+	CHECK(first[1] == 1);
+	CHECK(first[2] == 4);
+	const PackedInt32Array zero = found[1];
+	REQUIRE(zero.size() == 1);
+	CHECK(zero[0] == 3);
+	const PackedInt32Array third = found[2];
+	REQUIRE(third.size() == 2);
+	CHECK(third[0] == 1);
+	CHECK(third[1] == 4);
+	const PackedInt32Array distant = found[3];
+	CHECK(distant.is_empty());
+	CHECK(grid->query_cross_variable_radius_batch(agents, radii, targets) == found);
+}
+
+TEST_CASE("[AIProximityGrid2D] Variable-radius batch permits empty player cohort") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array sources;
+	sources.push_back(Vector2(2, 3));
+	sources.push_back(Vector2(-100, -200));
+	PackedFloat32Array radii;
+	radii.push_back(0.0f);
+	radii.push_back(256.0f);
+	const Array no_targets = grid->query_cross_variable_radius_batch(sources, radii, PackedVector2Array());
+	REQUIRE(no_targets.size() == 2);
+	const PackedInt32Array first = no_targets[0];
+	const PackedInt32Array second = no_targets[1];
+	CHECK(first.is_empty());
+	CHECK(second.is_empty());
+}
+
+TEST_CASE("[AIProximityGrid2D] Variable-radius rejects invalid inputs atomically") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array sources;
+	sources.push_back(Vector2(0, 0));
+	PackedFloat32Array radii;
+	radii.push_back(1.0f);
+	PackedVector2Array targets;
+	targets.push_back(Vector2(0, 0));
+	CHECK(grid->query_cross_variable_radius_batch(sources, radii, targets).size() == 1);
+	CHECK(grid->query_cross_variable_radius_batch(sources, PackedFloat32Array(), targets).is_empty());
+	CHECK(grid->query_cross_variable_radius_batch(PackedVector2Array(), radii, targets).is_empty());
+	PackedFloat32Array bad = radii;
+	bad.set(0, -1.0f);
+	CHECK(grid->query_cross_variable_radius_batch(sources, bad, targets).is_empty());
+	bad.set(0, 257.0f);
+	CHECK(grid->query_cross_variable_radius_batch(sources, bad, targets).is_empty());
+	bad.set(0, float(Math::INF));
+	CHECK(grid->query_cross_variable_radius_batch(sources, bad, targets).is_empty());
+	PackedVector2Array invalid = targets;
+	invalid.push_back(Vector2(Math::INF, 0));
+	CHECK(grid->query_cross_variable_radius_batch(sources, radii, invalid).is_empty());
+	invalid = sources;
+	invalid.push_back(Vector2(Math::NaN, 0));
+	bad = radii;
+	bad.push_back(1.0f);
+	CHECK(grid->query_cross_variable_radius_batch(invalid, bad, targets).is_empty());
+	PackedVector2Array too_many_sources;
+	too_many_sources.resize(4097);
+	CHECK(grid->query_cross_variable_radius_batch(too_many_sources, radii, targets).is_empty());
+	PackedVector2Array too_many_targets;
+	too_many_targets.resize(8193);
+	CHECK(grid->query_cross_variable_radius_batch(sources, radii, too_many_targets).is_empty());
+	PackedVector2Array dense;
+	dense.resize(4096);
+	PackedFloat32Array dense_radii;
+	dense_radii.resize(4096);
+	for (int i = 0; i < dense_radii.size(); i++) {
+		dense_radii.set(i, 1.0f);
+	}
+	PackedVector2Array many_targets;
+	many_targets.resize(9); // 36,864 hits exceed the 32,768-pair cap.
+	CHECK(grid->query_cross_variable_radius_batch(dense, dense_radii, many_targets).is_empty());
+	// Empty result sets may still be pathological when every target shares
+	// a grid cell; the 262,144 distance-test budget must reject them too.
+	for (int i = 0; i < dense_radii.size(); i++) {
+		dense_radii.set(i, 0.0f);
+	}
+	PackedVector2Array dense_near_misses;
+	dense_near_misses.resize(65);
+	for (int i = 0; i < dense_near_misses.size(); i++) {
+		dense_near_misses.set(i, Vector2(0.5, 0.5));
+	}
+	CHECK(grid->query_cross_variable_radius_batch(dense, dense_radii, dense_near_misses).is_empty());
+	CHECK(grid->query_cross_variable_radius_batch(sources, radii, targets).size() == 1);
+}
+
 } // namespace TestAIProximityGrid2D

@@ -41,6 +41,7 @@ const SUITES := [
 	"res://tests/test_ambient_birds.gd",
 	"res://tests/test_seeded_substreams.gd",
 	"res://tests/test_snow_vfx.gd",
+	"res://tests/test_fx_scalability_budget.gd",
 	"res://tests/test_graphics_white_balance.gd",
 	"res://tests/test_fish_shoals.gd",
 	"res://tests/test_dusk_bats.gd",

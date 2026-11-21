@@ -427,6 +427,13 @@ private:
 	// Runtime-controlled by the game's graphics preset. Atomic because feedback
 	// is processed on a worker while the graphics UI runs on the main thread.
 	std::atomic<uint8_t> detail_prefetch_mips{ 0 };
+	// Effective value is recalculated by the feedback worker, not the UI.
+	// All cross-thread reads and writes are atomic.
+	std::atomic<uint8_t> effective_detail_prefetch_mips{ 0 };
+	std::atomic<bool> adaptive_detail_prefetch_enabled{ false };
+	// Unreal MemoryMargin-style reserve for transient non-streaming VRAM.
+	// Atomic: quality presets run on the main thread, fitting on the worker.
+	std::atomic<uint8_t> safety_margin_percent{ 0 };
 	uint32_t setting_budget_mb_override = UINT32_MAX;
 	uint8_t setting_min_lod_override = UINT8_MAX;
 	uint8_t setting_max_lod_override = UINT8_MAX;
@@ -521,6 +528,17 @@ private:
 
 	uint64_t next_io_op_ticks = 0;
 	std::atomic<uint64_t> texture_streaming_total_memory = 0;
+	// Published once per feedback fit pass. Each field is a separate cheap
+	// atomic gauge: readers never enumerate RID owners, touch the renderer or
+	// block the feedback/I/O workers. Values can differ by one pass.
+	std::atomic<uint32_t> streaming_texture_count{ 0 };
+	std::atomic<uint32_t> streaming_pending_count{ 0 };
+	std::atomic<uint32_t> streaming_budget_reduction_steps{ 0 };
+	std::atomic<uint64_t> streaming_requested_bytes{ 0 };
+	std::atomic<uint64_t> streaming_fitted_bytes{ 0 };
+	std::atomic<uint64_t> streaming_budget_bytes{ 0 }; // Usable fitted pool after reserve.
+	std::atomic<uint64_t> streaming_configured_budget_bytes{ 0 }; // Gross allowed pool.
+	std::atomic<uint64_t> streaming_safety_reserve_bytes{ 0 }; // Held back from fitting.
 
 	void _feedback_handle_data(const PackedByteArray &p_array, RID p_buffer);
 
@@ -642,15 +660,55 @@ public:
 
 	// Status API
 	uint64_t get_memory_budget_bytes_used();
+	// Unreal STAT STREAMING-style, last completed feedback-pass diagnostics.
+	// Nonblocking atomic loads; a zero budget means memory fitting is disabled.
+	int get_streaming_texture_count() const { return int(streaming_texture_count.load(std::memory_order_relaxed)); }
+	int get_streaming_pending_count() const { return int(streaming_pending_count.load(std::memory_order_relaxed)); }
+	int get_streaming_budget_reduction_steps() const { return int(streaming_budget_reduction_steps.load(std::memory_order_relaxed)); }
+	uint64_t get_streaming_requested_bytes() const { return streaming_requested_bytes.load(std::memory_order_relaxed); }
+	uint64_t get_streaming_fitted_bytes() const { return streaming_fitted_bytes.load(std::memory_order_relaxed); }
+	uint64_t get_streaming_budget_bytes() const { return streaming_budget_bytes.load(std::memory_order_relaxed); }
+	uint64_t get_streaming_configured_budget_bytes() const { return streaming_configured_budget_bytes.load(std::memory_order_relaxed); }
+	uint64_t get_streaming_safety_reserve_bytes() const { return streaming_safety_reserve_bytes.load(std::memory_order_relaxed); }
+
+	// User-visible setting affects only streamed mip fitting when a memory
+	// budget is enabled. 0 preserves old behavior, max 25% protects quality.
+	void set_safety_margin_percent(int p_percent) {
+		const int bounded = CLAMP(p_percent, 0, 25);
+		safety_margin_percent.store(uint8_t(bounded), std::memory_order_relaxed);
+	}
+	int get_safety_margin_percent() const {
+		return int(safety_margin_percent.load(std::memory_order_relaxed));
+	}
 
 	// Properties
 	void set_detail_prefetch_mips(int p_mips) {
 		const uint8_t bounded = p_mips <= 0 ? 0 : (p_mips >= 2 ? 2 : uint8_t(p_mips));
 		detail_prefetch_mips.store(bounded, std::memory_order_relaxed);
+		// Preserve immediate old behavior when adaptive mode is off.
+		if (!adaptive_detail_prefetch_enabled.load(std::memory_order_relaxed)) {
+			effective_detail_prefetch_mips.store(bounded, std::memory_order_relaxed);
+		}
 	}
 
 	int get_detail_prefetch_mips() const {
 		return int(detail_prefetch_mips.load(std::memory_order_relaxed));
+	}
+
+	// Opt in to Unreal-style memory-pool-aware predictive mip prefetch.
+	// Never bypasses the existing per-texture memory fitter.
+	void set_adaptive_detail_prefetch_enabled(bool p_enabled) {
+		adaptive_detail_prefetch_enabled.store(p_enabled, std::memory_order_relaxed);
+		effective_detail_prefetch_mips.store(
+				detail_prefetch_mips.load(std::memory_order_relaxed), std::memory_order_relaxed);
+	}
+
+	bool is_adaptive_detail_prefetch_enabled() const {
+		return adaptive_detail_prefetch_enabled.load(std::memory_order_relaxed);
+	}
+
+	int get_effective_detail_prefetch_mips() const {
+		return int(effective_detail_prefetch_mips.load(std::memory_order_relaxed));
 	}
 
 	void set_min_lod_override(int32_t p_mip) {

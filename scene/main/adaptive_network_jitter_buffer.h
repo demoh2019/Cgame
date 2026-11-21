@@ -50,6 +50,12 @@ class AdaptiveNetworkJitterBuffer : public RefCounted {
 	int64_t ignored_packets = 0;
 	int64_t resets = 0;
 	int64_t network_gap_count = 0;
+	// Optional loss-burst recovery guard. Server timestamps only supply
+	// approximate missing snapshots; no server behavior is changed.
+	int recovery_guard_packets = 0;
+	int recovery_hold_remaining = 0;
+	int64_t estimated_missing_snapshots = 0;
+	int64_t burst_loss_events = 0;
 
 	void _reset_timing();
 
@@ -62,6 +68,11 @@ public:
 	bool configure(double p_base_delay, double p_max_delay, double p_expected_snapshot_step);
 	void reset();
 	double observe(double p_server_time, double p_local_arrival_time);
+	bool set_recovery_guard_packets(int p_packets);
+	int get_recovery_guard_packets() const { return recovery_guard_packets; }
+	int get_recovery_hold_remaining() const { return recovery_hold_remaining; }
+	int64_t get_estimated_missing_snapshots() const { return estimated_missing_snapshots; }
+	int64_t get_burst_loss_events() const { return burst_loss_events; }
 	double get_delay() const { return delay; }
 	Dictionary get_stats() const;
 };

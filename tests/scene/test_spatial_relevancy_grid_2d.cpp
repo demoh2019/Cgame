@@ -170,4 +170,78 @@ TEST_CASE("[SpatialRelevancyGrid2D] Batched viewers preserve scalar sets and inp
 	CHECK(int(grid->get_stats()["batch_viewers"]) == 0);
 }
 
+TEST_CASE("[SpatialRelevancyGrid2D] Nearest-K is distance sorted with deterministic ID ties") {
+	Ref<SpatialRelevancyGrid2D> grid;
+	grid.instantiate();
+	PackedInt64Array ids = { 50, 8, 90, 3, 15, 600, 29, 70, 11, 12 };
+	PackedVector2Array locations = {
+		Vector2(0, 0), Vector2(2, 0), Vector2(-2, 0), Vector2(0, 0),
+		Vector2(0, -2), Vector2(100, 100), Vector2(1, 0), Vector2(10, 10),
+		Vector2(-10, -10), Vector2(999, 0)
+	};
+	REQUIRE(grid->rebuild(ids, locations));
+	CHECK(bool(grid->get_stats()["indexed_mode"]));
+	const PackedInt64Array expected = { 3, 50, 29, 8, 15 };
+	CHECK(grid->query_nearest_ids(Vector2(), 2.0, 5) == expected);
+	CHECK(grid->query_nearest_ids(Vector2(), 0.0, 3) == PackedInt64Array{ 3, 50 });
+	CHECK(grid->query_nearest_ids(Vector2(), 2.0, 1) == PackedInt64Array{ 3 });
+	CHECK(grid->query_nearest_ids(Vector2(), 2.0, 128) == PackedInt64Array{ 3, 50, 29, 8, 15, 90 });
+	CHECK(grid->query_ids(Vector2(), 2.0) == PackedInt64Array{ 50, 8, 90, 3, 15, 29 });
+	CHECK(int(grid->get_stats()["nearest_queries"]) == 4);
+	const int queries_before = int(grid->get_stats()["queries"]);
+	CHECK(grid->query_nearest_ids(Vector2(Math::NaN, 0), 2.0, 5).is_empty());
+	CHECK(grid->query_nearest_ids(Vector2(), Math::NaN, 5).is_empty());
+	CHECK(grid->query_nearest_ids(Vector2(), -1.0, 5).is_empty());
+	CHECK(grid->query_nearest_ids(Vector2(), 2.0, 0).is_empty());
+	CHECK(grid->query_nearest_ids(Vector2(), 2.0, 129).is_empty());
+	CHECK(int(grid->get_stats()["queries"]) == queries_before);
+	CHECK(grid->query_nearest_ids(Vector2(), 1000.0, 3) == PackedInt64Array{ 3, 50, 29 });
+	CHECK(int(grid->get_stats()["fallback_scans"]) == 1);
+	CHECK(int(grid->get_stats()["nearest_queries"]) == 5);
+	grid->set_cell_size(32.0);
+	CHECK(grid->query_nearest_ids(Vector2(), 2.0, 5) == expected);
+	grid->clear();
+	CHECK(grid->query_nearest_ids(Vector2(), 100.0, 12).is_empty());
+	CHECK(int(grid->get_stats()["nearest_queries"]) == 1);
+	CHECK(int(grid->get_stats()["entities"]) == 0);
+}
+
+TEST_CASE("[SpatialRelevancyGrid2D] Nearest-K matches independent brute distance sort") {
+	Ref<SpatialRelevancyGrid2D> grid;
+	grid.instantiate();
+	PackedInt64Array ids;
+	PackedVector2Array locations;
+	for (int i = 0; i < 220; i++) {
+		ids.push_back(1000 + i);
+		locations.push_back(Vector2((i * 113) % 1500 - 750, (i * 241) % 1700 - 850));
+	}
+	REQUIRE(grid->rebuild(ids, locations));
+	for (int j = 0; j < 45; j++) {
+		const Vector2 center((j * 291) % 1500 - 750, (j * 337) % 1700 - 850);
+		const double radius = (j % 3 == 0) ? 48.0 : ((j % 3 == 1) ? 200.0 : 600.0);
+		PackedInt64Array expected;
+		Vector<double> distances;
+		for (int i = 0; i < ids.size(); i++) {
+			const double d = double(center.distance_squared_to(locations[i]));
+			if (d > radius * radius) {
+				continue;
+			}
+			int insert_index = 0;
+			for (; insert_index < expected.size(); insert_index++) {
+				if (d < distances[insert_index] || (d == distances[insert_index] && ids[i] < expected[insert_index])) {
+					break;
+				}
+			}
+			expected.insert(insert_index, ids[i]);
+			distances.insert(insert_index, d);
+		}
+		if (expected.size() > 7) {
+			expected.resize(7);
+		}
+		CHECK(grid->query_nearest_ids(center, radius, 7) == expected);
+	}
+	CHECK(int(grid->get_stats()["nearest_queries"]) == 45);
+	CHECK(int(grid->get_stats()["candidates"]) < 45 * locations.size());
+}
+
 } // namespace TestSpatialRelevancyGrid2D

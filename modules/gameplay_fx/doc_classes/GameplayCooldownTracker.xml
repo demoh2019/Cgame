@@ -67,6 +67,12 @@
 			<param index="1" name="group_tag" type="StringName" default="&quot;&quot;" />
 			<description>Returns the greater of the ability's cooldown and its optional shared group's cooldown.</description>
 		</method>
+		<method name="get_effective_remaining_batch" qualifiers="const">
+			<return type="PackedFloat64Array" />
+			<param index="0" name="tags" type="PackedStringArray" />
+			<param index="1" name="group_tag" type="StringName" default="&quot;&quot;" />
+			<description>Returns the effective remaining cooldown for every supplied exact ability tag, in the same order, including repeated tags. Like [method get_effective_remaining], each value is the maximum of that ability's timer and the optional shared lock. The group cooldown is read once, and the batch uses a single script-to-native call. Requests are limited to 64 tags; malformed ability/group tags or an oversized request return an empty array without modifying timers. An empty input returns an empty array. This is a read-only presentation optimization; server authority and explicit [method tick] are unchanged.</description>
+		</method>
 		<method name="is_ready" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="tag" type="StringName" />

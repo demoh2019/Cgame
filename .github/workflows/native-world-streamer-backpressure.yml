@@ -26,6 +26,9 @@ on:
       - 'game/tests/test_world_streamer_unload_budget.gd'
       - 'game/tests/run_streamer_unloads.gd'
       - 'tests/scene/test_world_streamer_unload_budget.cpp'
+      - 'game/tests/test_world_streamer_tick_interval.gd'
+      - 'game/tests/run_streamer_tick_interval.gd'
+      - 'tests/scene/test_world_streamer_tick_interval.cpp'
       - 'tests/scene/test_world_streamer_backpressure_contract.py'
       - '.github/workflows/native-world-streamer-backpressure.yml'
   push:
@@ -52,6 +55,9 @@ on:
       - 'game/tests/test_world_streamer_unload_budget.gd'
       - 'game/tests/run_streamer_unloads.gd'
       - 'tests/scene/test_world_streamer_unload_budget.cpp'
+      - 'game/tests/test_world_streamer_tick_interval.gd'
+      - 'game/tests/run_streamer_tick_interval.gd'
+      - 'tests/scene/test_world_streamer_tick_interval.cpp'
       - 'tests/scene/test_world_streamer_backpressure_contract.py'
       - '.github/workflows/native-world-streamer-backpressure.yml'
 
@@ -143,20 +149,16 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 300s "$BIN" --headless --path game --script res://tests/run_streamer_unloads.gd 2>&1 | tee streamer-unloads.log
-          grep -E '^STREAM UNLOADS TOTAL: [0-9]+ checks, 0 failures        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: adaptive-streamer-regression
-          if-no-files-found: ignore
-          path: |
-            streamer-native.log
-            streamer-import.log
-            streamer-game.log
-            simulation-tier.log
-            auxiliary-readiness.log
-            chunk-cache.log
- streamer-unloads.log
+          grep -E '^STREAM UNLOADS TOTAL: [0-9]+ checks, 0 failures$' streamer-unloads.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' streamer-unloads.log; then exit 1; fi
+      - name: Native cosmetic tick LOD and Albion quality-tier regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_streamer_tick_interval.gd 2>&1 | tee tick-interval.log
+          grep -E '^STREAM TICK INTERVAL TOTAL: [0-9]+ checks, 0 failures$' tick-interval.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' tick-interval.log; then exit 1; fi
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -169,5 +171,6 @@ jobs:
             streamer-game.log
             simulation-tier.log
             auxiliary-readiness.log
-            streamer-unloads.log
             chunk-cache.log
+            streamer-unloads.log
+            tick-interval.log

@@ -27,6 +27,38 @@
 				Removes all legs.
 			</description>
 		</method>
+		<method name="get_estimated_process_cost_us" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the bounded 1/4-exponential average of CPU time spent by this native foot placement modifier, in microseconds. Returns [code]0[/code] before the first measured update or when profiling is disabled. Measurements include ground height callbacks and leg solving, but not GPU skinning or [AnimationMixer] playback. This is diagnostic telemetry and a soft-budget estimate, not a deadline.
+			</description>
+		</method>
+		<method name="get_last_process_cost_us" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the most recent native foot placement update duration in microseconds, bounded to 1–100000 for a measured update, or zero if no sample exists.
+			</description>
+		</method>
+		<method name="get_process_sample_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of completed profiled updates, saturated at one million. Early exits without a skeleton, legs or ground source do not produce samples.
+			</description>
+		</method>
+		<method name="reset_process_telemetry">
+			<return type="void" />
+			<description>
+				Discards the last sample, average and sample count without changing foot pose, leg configuration or the [member profiling_enabled] setting.
+			</description>
+		</method>
+		<method name="smooth_process_cost_us" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="previous_us" type="int" />
+			<param index="1" name="sample_us" type="int" />
+			<description>
+				A deterministic, integer-only cost smoother: the first sample becomes the estimate, then [code](3 * previous + sample + 2) / 4[/code] (integer division). [param previous_us] must be 0–100000 and [param sample_us] must be 1–100000; invalid inputs return -1.
+			</description>
+		</method>
 		<method name="get_current_pelvis_offset" qualifiers="const">
 			<return type="float" />
 			<description>
@@ -78,6 +110,9 @@
 		</member>
 		<member name="normal_sample_distance" type="float" setter="set_normal_sample_distance" getter="get_normal_sample_distance" default="0.15">
 			The distance along X and Z between height samples used to estimate the ground normal.
+		</member>
+		<member name="profiling_enabled" type="bool" setter="set_profiling_enabled" getter="is_profiling_enabled" default="false">
+			Enables bounded CPU duration sampling of the native IK pass. Disabled by default to avoid timing overhead in projects that do not use animation work budgets. Toggling clears previous telemetry; deactivating the modifier retains the last estimate until it is reset or disabled.
 		</member>
 		<member name="pelvis_bone" type="String" setter="set_pelvis_bone" getter="get_pelvis_bone" default="&quot;&quot;">
 			The name of the pelvis bone that is lowered. If empty, the pelvis is not moved.

@@ -1,0 +1,98 @@
+name: Native Smart Object indexed claims and Albion AI regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/smart_object_slots/**'
+      - 'game/scripts/shared/flank_slot_reservations.gd'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_flank_slot_reservations.gd'
+      - 'tests/scene/test_smart_object_indexed_claims_contract.py'
+      - '.github/workflows/native-smart-object-indexed-claims.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/smart_object_slots/**'
+      - 'game/scripts/shared/flank_slot_reservations.gd'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_flank_slot_reservations.gd'
+      - 'tests/scene/test_smart_object_indexed_claims_contract.py'
+      - '.github/workflows/native-smart-object-indexed-claims.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            modules/smart_object_slots
+            game/scripts/shared/flank_slot_reservations.gd
+            game/scripts/shared/zombie.gd
+            game/scripts/server/game_server.gd
+            game/tests/test_flank_slot_reservations.gd
+            tests/scene/test_smart_object_indexed_claims_contract.py
+          sparse-checkout-cone-mode: false
+      - name: Indexed lease and live game integration contracts
+        run: python3 -m unittest tests/scene/test_smart_object_indexed_claims_contract.py -v
+
+  native-and-albion:
+    needs: source-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-smart-object-indexed
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-smart-object-indexed
+        continue-on-error: true
+      - name: Run indexed Smart Objects native tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[SmartObjects]*" 2>&1 | tee smart-object-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' smart-object-native.log; then exit 1; fi
+      - name: Import Albion After
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee smart-object-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' smart-object-import.log; then exit 1; fi
+      - name: Validate infected flank leases in real game
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --script res://tests/run_one.gd -- test_flank_slot_reservations 2>&1 | tee smart-object-game.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' smart-object-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' smart-object-game.log; then exit 1; fi
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-object-indexed-regressions
+          if-no-files-found: ignore
+          path: |
+            smart-object-native.log
+            smart-object-import.log
+            smart-object-game.log

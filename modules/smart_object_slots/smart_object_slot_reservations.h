@@ -8,6 +8,7 @@
 #pragma once
 
 #include "core/object/ref_counted.h"
+#include "core/templates/hash_map.h"
 #include "core/templates/vector.h"
 #include "core/variant/variant.h"
 
@@ -28,9 +29,16 @@ private:
 		int64_t slot_id = 0;
 		int64_t actor_id = 0;
 		double remaining = 0.0;
+		int priority = 0;
+		bool occupied = false;
 	};
 	Vector<Claim> claims;
+	// Native server hot path: indexed slot and actor lookup. Both indices
+	// follow swap-removals; at most MAX_ACTIVE_CLAIMS entries are stored.
+	HashMap<int64_t, int> slot_indices;
+	HashMap<int64_t, int> actor_indices;
 
+	void _erase_claim(int p_index);
 	int _find_slot(int64_t p_slot_id) const;
 	int _find_actor(int64_t p_actor_id) const;
 
@@ -43,11 +51,24 @@ public:
 	// an actor atomically relinquishes its old slot only after a free candidate
 	// is found. Zero signals no available slot or invalid input.
 	int64_t try_claim_first(const PackedInt64Array &p_slot_ids, int64_t p_actor_id, double p_lease_seconds);
+	// Higher-priority (0..3) agents can preempt only claimed-but-not-occupied
+	// lower-priority slots when no free candidate exists.
+	int64_t try_claim_first_priority(const PackedInt64Array &p_slot_ids,
+			int64_t p_actor_id, double p_lease_seconds, int p_priority);
+	// Atomically refresh an existing owner/slot lease and its occupancy.
+	// O(1) indexed lookup avoids another tactical search on cached AI ticks;
+	// wrong-owner or expired handles never mutate the pool.
+	bool refresh_claim(int64_t p_slot_id, int64_t p_actor_id,
+			double p_lease_seconds, bool p_occupied);
+	bool set_slot_occupied(int64_t p_slot_id, int64_t p_actor_id, bool p_occupied);
+	bool is_slot_occupied(int64_t p_slot_id) const;
 	// A release with a wrong actor ID cannot steal another actor's claim.
 	bool release_slot(int64_t p_slot_id, int64_t p_actor_id);
 	int release_actor(int64_t p_actor_id);
 	void advance_time(double p_delta);
 	void clear();
 	int64_t get_owner(int64_t p_slot_id) const;
+	// 0 if absent, otherwise the slot currently leased by this actor.
+	int64_t get_actor_slot(int64_t p_actor_id) const;
 	int get_claim_count() const { return claims.size(); }
 };

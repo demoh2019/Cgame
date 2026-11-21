@@ -32,6 +32,7 @@
 
 #include "core/config/project_settings.h"
 #include "core/object/class_db.h"
+#include "core/os/time.h"
 
 PackedStringArray SkeletonModifier3D::get_configuration_warnings() const {
 	PackedStringArray warnings = Node3D::get_configuration_warnings();
@@ -123,11 +124,42 @@ real_t SkeletonModifier3D::get_influence() const {
 	return influence;
 }
 
+int SkeletonModifier3D::smooth_modifier_cost_us(int p_previous_us, int p_sample_us) {
+	ERR_FAIL_COND_V_MSG(p_previous_us < 0 || p_previous_us > 100000 ||
+					p_sample_us < 1 || p_sample_us > 100000, -1,
+			"Skeleton modifier CPU samples must have a previous value in 0..100000us and a new value in 1..100000us.");
+	return p_previous_us == 0 ? p_sample_us : (3 * p_previous_us + p_sample_us + 2) / 4;
+}
+
+void SkeletonModifier3D::set_modifier_profiling_enabled(bool p_enabled) {
+	// Preserving the last estimate across tier changes avoids allocating a
+	// brand new 100us estimate every time a previously measured actor returns.
+	modifier_profiling_enabled = p_enabled;
+}
+
+void SkeletonModifier3D::reset_modifier_profile() {
+	modifier_last_update_us = 0;
+	modifier_estimated_update_us = 0;
+	modifier_profile_sample_count = 0;
+}
+
 void SkeletonModifier3D::process_modification(double p_delta) {
 	if (!is_inside_tree() || !active) {
 		return;
 	}
-	_process_modification(p_delta);
+	if (modifier_profiling_enabled) {
+		const uint64_t started_us = Time::get_singleton()->get_ticks_usec();
+		_process_modification(p_delta);
+		const uint64_t finished_us = Time::get_singleton()->get_ticks_usec();
+		const uint64_t measured_us = finished_us >= started_us ? finished_us - started_us : 1;
+		const int sample_us = int(CLAMP(measured_us, uint64_t(1), uint64_t(100000)));
+		modifier_last_update_us = sample_us;
+		modifier_estimated_update_us = smooth_modifier_cost_us(modifier_estimated_update_us, sample_us);
+		modifier_profile_sample_count = MIN(modifier_profile_sample_count + 1, 1000000);
+	} else {
+		_process_modification(p_delta);
+	}
+	// Signal listeners are outside the modifier's own measured work.
 	emit_signal(SNAME("modification_processed"));
 }
 
@@ -164,8 +196,17 @@ void SkeletonModifier3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_influence", "influence"), &SkeletonModifier3D::set_influence);
 	ClassDB::bind_method(D_METHOD("get_influence"), &SkeletonModifier3D::get_influence);
 
+	ClassDB::bind_method(D_METHOD("set_modifier_profiling_enabled", "enabled"), &SkeletonModifier3D::set_modifier_profiling_enabled);
+	ClassDB::bind_method(D_METHOD("is_modifier_profiling_enabled"), &SkeletonModifier3D::is_modifier_profiling_enabled);
+	ClassDB::bind_method(D_METHOD("get_modifier_last_update_us"), &SkeletonModifier3D::get_modifier_last_update_us);
+	ClassDB::bind_method(D_METHOD("get_modifier_estimated_update_us"), &SkeletonModifier3D::get_modifier_estimated_update_us);
+	ClassDB::bind_method(D_METHOD("get_modifier_profile_sample_count"), &SkeletonModifier3D::get_modifier_profile_sample_count);
+	ClassDB::bind_method(D_METHOD("reset_modifier_profile"), &SkeletonModifier3D::reset_modifier_profile);
+	ClassDB::bind_static_method("SkeletonModifier3D", D_METHOD("smooth_modifier_cost_us", "previous_us", "sample_us"), &SkeletonModifier3D::smooth_modifier_cost_us);
+
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "active"), "set_active", "is_active");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "influence", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_influence", "get_influence");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "modifier_profiling_enabled"), "set_modifier_profiling_enabled", "is_modifier_profiling_enabled");
 
 	ADD_SIGNAL(MethodInfo("modification_processed"));
 	GDVIRTUAL_BIND(_process_modification_with_delta, "delta");

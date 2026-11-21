@@ -84,6 +84,9 @@ private:
 	real_t shake_trauma_exponent = 2.0;
 	Vector3 shake_translation_current;
 	Vector3 shake_rotation_current;
+	// Camera-local visual kick towards a world impact, bounded to unit length.
+	// Stored independently of the node transform and decayed each render tick.
+	Vector3 shake_direction_impulse;
 	void _advance_shake(double p_delta);
 	KeepAspect keep_aspect = KEEP_HEIGHT;
 
@@ -181,6 +184,11 @@ public:
 	// Perspective/frustum use camera-space depth; orthogonal is constant.
 	// This is a geometry LOD hint (before viewport 3D resolution scaling).
 	real_t get_pixels_per_meter_at_position(const Vector3 &p_world_pos) const;
+	// Unreal screen-size LOD-style query for a group of instanced tiles.
+	// Computes the viewport projection and inverse camera transform ONCE
+	// for up to 4096 world points; returns 0 for behind-camera positions.
+	// Invalid input rejects the entire batch without partial results.
+	PackedFloat64Array get_pixels_per_meter_at_positions(const PackedVector3Array &p_world_positions) const;
 	// World-space diameter for a target on-screen pixel width. Useful for
 	// particles, labels and impostors with stable coverage across camera zoom.
 	// Returns 0 for invalid inputs or positions behind perspective cameras.
@@ -225,6 +233,10 @@ public:
 	// position (player, not the elevated camera in an isometric game).
 	void add_spatial_trauma(const Vector3 &p_source, const Vector3 &p_listener,
 			real_t p_amount, real_t p_inner_radius, real_t p_outer_radius);
+	// Like add_spatial_trauma, with an additional camera-local visual impulse
+	// pointing towards the impact. The player/node transform remains untouched.
+	void add_directional_spatial_trauma(const Vector3 &p_source, const Vector3 &p_listener,
+			real_t p_amount, real_t p_inner_radius, real_t p_outer_radius);
 	void set_trauma(real_t p_trauma);
 	real_t get_trauma() const;
 
@@ -239,6 +251,7 @@ public:
 	void set_shake_trauma_exponent(real_t p_exponent);
 	real_t get_shake_trauma_exponent() const;
 	Vector3 get_shake_translation() const { return shake_translation_current; }
+	Vector3 get_shake_direction_impulse() const { return shake_direction_impulse; }
 	Vector3 get_shake_rotation() const { return shake_rotation_current; }
 
 	void set_h_offset(real_t p_offset);

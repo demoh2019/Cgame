@@ -195,10 +195,10 @@ TEST_CASE("[AIHearingSensor2D] Ranked reports reject nonfinite coordinates and m
 	Ref<AIHearingSensor2D> sensor;
 	sensor.instantiate();
 	ERR_PRINT_OFF
-	CHECK_FALSE(sensor->report_noise_ranked(Vector2(NaN, 0), Vector2(), 1.0));
-	CHECK_FALSE(sensor->report_noise_ranked(Vector2(), Vector2(INF, 0), 1.0));
-	CHECK_FALSE(sensor->report_noise_ranked(Vector2(), Vector2(), NaN));
-	CHECK_FALSE(sensor->report_noise_ranked(Vector2(), Vector2(), 1.0, INF));
+	CHECK_FALSE(sensor->report_noise_ranked(Vector2(Math::NaN, 0), Vector2(), 1.0));
+	CHECK_FALSE(sensor->report_noise_ranked(Vector2(), Vector2(Math::INF, 0), 1.0));
+	CHECK_FALSE(sensor->report_noise_ranked(Vector2(), Vector2(), Math::NaN));
+	CHECK_FALSE(sensor->report_noise_ranked(Vector2(), Vector2(), 1.0, Math::INF));
 	CHECK_FALSE(sensor->report_noise_ranked(Vector2(), Vector2(), 1.0, -1.0));
 	ERR_PRINT_ON
 	CHECK_FALSE(sensor->has_sound_memory());

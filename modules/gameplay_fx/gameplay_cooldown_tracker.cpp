@@ -104,7 +104,7 @@ bool GameplayCooldownTracker::replace_snapshot(const Dictionary &p_snapshot) {
 		return false;
 	}
 	Vector<Cooldown> validated;
-	for (const Variant &key : p_snapshot) {
+	for (const Variant &key : p_snapshot.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
@@ -148,7 +148,7 @@ bool GameplayCooldownTracker::replace_cooldown_branch(const StringName &p_branch
 	// Both String and StringName keys are accepted, but may not alias.
 	Vector<StringName> seen;
 	Vector<Cooldown> replacement;
-	for (const Variant &key : p_snapshot) {
+	for (const Variant &key : p_snapshot.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
@@ -231,6 +231,29 @@ double GameplayCooldownTracker::get_effective_remaining(const StringName &p_tag,
 	return remaining;
 }
 
+PackedFloat64Array GameplayCooldownTracker::get_effective_remaining_batch(
+		const PackedStringArray &p_tags, const StringName &p_group_tag) const {
+	PackedFloat64Array values;
+	// Batch reads are for bounded presentation. Preflight the whole request
+	// so no partial array or silently truncated/cross-tag result can escape.
+	if (p_tags.size() > 64 ||
+			(!String(p_group_tag).is_empty() && !_valid_tag(p_group_tag))) {
+		return values;
+	}
+	for (int i = 0; i < p_tags.size(); ++i) {
+		if (!_valid_tag(StringName(p_tags[i]))) {
+			return values;
+		}
+	}
+	const double group_remaining = String(p_group_tag).is_empty() ? 0.0 : get_remaining(p_group_tag);
+	values.resize(p_tags.size());
+	double *write = values.ptrw();
+	for (int i = 0; i < p_tags.size(); ++i) {
+		write[i] = MAX(get_remaining(StringName(p_tags[i])), group_remaining);
+	}
+	return values;
+}
+
 bool GameplayCooldownTracker::is_ready(const StringName &p_tag, const StringName &p_group_tag) const {
 	return _valid_tag(p_tag) && (String(p_group_tag).is_empty() || _valid_tag(p_group_tag)) &&
 			get_effective_remaining(p_tag, p_group_tag) <= 0.0;
@@ -248,6 +271,7 @@ void GameplayCooldownTracker::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("tick", "delta"), &GameplayCooldownTracker::tick);
 	ClassDB::bind_method(D_METHOD("get_remaining", "tag"), &GameplayCooldownTracker::get_remaining);
 	ClassDB::bind_method(D_METHOD("get_effective_remaining", "tag", "group_tag"), &GameplayCooldownTracker::get_effective_remaining, DEFVAL(StringName()));
+	ClassDB::bind_method(D_METHOD("get_effective_remaining_batch", "tags", "group_tag"), &GameplayCooldownTracker::get_effective_remaining_batch, DEFVAL(StringName()));
 	ClassDB::bind_method(D_METHOD("is_ready", "tag", "group_tag"), &GameplayCooldownTracker::is_ready, DEFVAL(StringName()));
 	ClassDB::bind_method(D_METHOD("get_cooldown_count"), &GameplayCooldownTracker::get_cooldown_count);
 }

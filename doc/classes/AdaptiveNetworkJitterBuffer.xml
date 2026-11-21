@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AdaptiveNetworkJitterBuffer" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../doc/class.xsd">
+	<brief_description>Adaptive delay controller for client-only interpolation of authoritative network snapshots.</brief_description>
+	<description>
+		Receives increasing server timestamps together with their monotonic local arrival times. It adapts a bounded visual interpolation delay to arrival jitter and gaps in the expected snapshot cadence without predicting movement or changing server/gameplay authority. Out-of-order and duplicate server timestamps do not advance its clock, and major reconnect gaps reset temporal pressure.
+		With an optional [method set_recovery_guard_packets], inferred missing server snapshots arm a short stability window: only *new, valid* later snapshots can release the guard. During the window, the existing peak-jitter reserve stops decaying while newly observed jitter may still increase it. Once the guard expires, the original bounded slow-release rule resumes. This is a presentation smoothing technique inspired by network robustness testing and simulated-proxy smoothing in Unreal Engine; it does not request retransmissions, resend inputs, or guarantee missing server data is recovered.
+	</description>
+	<methods>
+		<method name="configure">
+			<return type="bool" />
+			<param index="0" name="base_delay" type="float" />
+			<param index="1" name="max_delay" type="float" />
+			<param index="2" name="expected_snapshot_step" type="float" />
+			<description>Configures bounds and server snapshot cadence in seconds, each within 0.01–1.0. Requires max_delay greater than or equal to base_delay. On success resets measured state/counters but retains the opt-in recovery guard configuration. Invalid requests have no effect.</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>Resets visual clock, pending recovery countdown and diagnostic counters without disabling the configured guard.</description>
+		</method>
+		<method name="observe">
+			<return type="float" />
+			<param index="0" name="server_time" type="float" />
+			<param index="1" name="local_arrival_time" type="float" />
+			<description>Processes one authoritative snapshot's server time and monotonic local receive time in seconds. Returns the current delay. Invalid, duplicated or slightly out-of-order frames are ignored, including for recovery countdown. If a server timestamp skips an expected cadence step within a valid networking epoch, increases the jitter estimate and activates the optional recovery guard. Server gaps greater than 0.65 seconds and extended local idle gaps reset stale timing pressure. The buffer never moves the simulated proxies or server.</description>
+		</method>
+		<method name="set_recovery_guard_packets">
+			<return type="bool" />
+			<param index="0" name="packets" type="int" />
+			<description>Sets the optional number of new, valid subsequent snapshots (0–32) for which the current jitter peak may not decay after an inferred missing-snapshot event. Zero (default) retains legacy decay. Each new skipped-cadence event refreshes the countdown; reconnects clear it. Changing this property also clears the current countdown. Rejects invalid counts without modifying state. Already-buffered server snapshots are not replayed.</description>
+		</method>
+		<method name="get_recovery_guard_packets" qualifiers="const">
+			<return type="int" />
+			<description>Configured recovery hold duration in successfully accepted snapshots. Zero by default.</description>
+		</method>
+		<method name="get_recovery_hold_remaining" qualifiers="const">
+			<return type="int" />
+			<description>Number of subsequent new snapshots needed before normal jitter-peak release resumes. Ignored/out-of-order timestamps do not decrease it. This is not a duration in seconds.</description>
+		</method>
+		<method name="get_estimated_missing_snapshots" qualifiers="const">
+			<return type="int" />
+			<description>Cumulative inferred missing snapshots from server-timestamp cadence, capped at one billion and at 32 per observed gap. Cadence changes can look like loss, so this is diagnostic and not the authoritative transport packet-loss count.</description>
+		</method>
+		<method name="get_burst_loss_events" qualifiers="const">
+			<return type="int" />
+			<description>Cumulative observed timestamp gaps that indicate one or more likely missing snapshots, excluding major reconnect gaps. Capped at one billion; reset clears the counter.</description>
+		</method>
+		<method name="get_delay" qualifiers="const">
+			<return type="float" />
+			<description>Current presentation interpolation delay in seconds within the configured bounds.</description>
+		</method>
+		<method name="get_stats" qualifiers="const">
+			<return type="Dictionary" />
+			<description>Read-only diagnostic snapshot: delay, peak_jitter, accepted_packets, ignored_packets, resets, network_gaps, expected_snapshot_step, recovery_guard_packets, recovery_hold_remaining, estimated_missing_snapshots, burst_loss_events, native_backend. The corresponding script fallback exports identical keys.</description>
+		</method>
+	</methods>
+	<members>
+		<member name="delay" type="float" getter="get_delay" default="0.12">
+			Current adaptive presentation delay, read-only. Its configured initial value is 0.12 seconds.
+		</member>
+		<member name="recovery_guard_packets" type="int" setter="set_recovery_guard_packets" getter="get_recovery_guard_packets" default="0">
+			Opt-in number of valid newer snapshots for which release of the jitter reserve is suppressed after a short loss burst. Zero keeps previous behavior and does not introduce new visual latency.
+		</member>
+	</members>
+</class>

@@ -55,6 +55,11 @@ public:
 	PackedStringArray tick(double p_delta);
 	double get_remaining(const StringName &p_tag) const;
 	double get_effective_remaining(const StringName &p_tag, const StringName &p_group_tag = StringName()) const;
+	// One read-only main-thread bridge for multiple HUD ability tags; honors
+	// the same shared lock for each entry. Bounded to 64 to prevent large
+	// untrusted UI requests. Invalid input returns an empty array.
+	PackedFloat64Array get_effective_remaining_batch(const PackedStringArray &p_tags,
+			const StringName &p_group_tag = StringName()) const;
 	bool is_ready(const StringName &p_tag, const StringName &p_group_tag = StringName()) const;
 	int get_cooldown_count() const { return cooldowns.size(); }
 };

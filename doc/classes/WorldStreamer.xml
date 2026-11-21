@@ -16,6 +16,7 @@
 		add_child(streamer)
 		[/codeblock]
 		Cells without a scene file are skipped silently, so the world may have holes (oceans, unfinished areas). Unload radius larger than the load radius gives hysteresis: a player pacing along a cell border does not make chunks flicker in and out.
+		To reduce initial streaming spikes for cosmetic world chunks, call [method begin_loading_range_ramp] before the initial scene load. This starts with a smaller fraction of the configured 2D loading area (or 3D volume), then grows the active load radius to its full value in game time. Only new chunk requests are gated: the configured unload radius, loaded scenes, cell geometry and auxiliary source are unaffected. This may temporarily show less distant world detail, so use it only where gameplay/collision is independently ready.
 		To reduce visible pop-in when the player runs or rides, optionally set [member velocity_hint] and [member lookahead_seconds]. The streamer orders already-eligible cells toward a bounded predicted position, but the actual focus and load/unload radii still determine residency. No extra cells are loaded, and [member max_instantiations_per_frame] still limits main-thread work.
 		Optional local route hints can improve scenery arrival along a personal waypoint path. [method set_route_cells] accepts a bounded four-connected corridor from gameplay pathfinding; it changes scheduling priority inside the same focus radius, without allocating any additional world cells. This is distinct from the bounded auxiliary streaming source, which can include a few cells near a valid nearby waypoint.
 		[b]Large worlds:[/b] when the chunks live under a [Node3D] set as [member chunk_parent] that is moved by [FloatingOrigin3D], the focus position is measured in that node's local space, so the grid stays in absolute world coordinates while the origin shifts.
@@ -23,6 +24,22 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="advance_loading_range_ramp">
+			<return type="void" />
+			<param index="0" name="delta_seconds" type="float" />
+			<description>Advances the opt-in loading area ramp using finite, positive game-time seconds. Called automatically once each engine internal process frame; manual calls are useful for deterministic simulations or tests. The full configured radius is reached after the optional delay and ramp duration.</description>
+		</method>
+		<method name="begin_loading_range_ramp">
+			<return type="void" />
+			<param index="0" name="initial_area_fraction" type="float" />
+			<param index="1" name="delay_seconds" type="float" />
+			<param index="2" name="duration_seconds" type="float" />
+			<description>Starts an opt-in startup loading area ramp without changing [member load_radius] or [member unload_radius]. Fractions are clamped to 0.05–1; delay to 0–60 seconds and duration to 0–120 seconds. For a 2D grid, 0.25 loads half the configured distance; for a 3D grid the distance is the cube root of the requested volume fraction. The initial player cell remains eligible. A zero delay and duration restores full range immediately. Runtime scene creation still uses the usual per-frame budgets; auxiliary source radius is not scaled.</description>
+		</method>
+		<method name="cancel_loading_range_ramp">
+			<return type="void" />
+			<description>Immediately restores the configured full loading radius and schedules a regular streaming queue refresh, without synchronously loading additional chunks.</description>
+		</method>
 		<method name="advance_chunk_pressure" qualifiers="static">
 			<return type="float" />
 			<param index="0" name="pressure" type="float" />
@@ -41,6 +58,28 @@
 			<param index="1" name="pressure" type="float" />
 			<description>Returns the adaptive soft CPU-time limit in microseconds; high pressure scales the configured value to 75% or 50%, but never raises the configured cap. Zero disables the time cap.</description>
 		</method>
+		<method name="calculate_adaptive_unload_slots" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="configured" type="int" />
+			<param index="1" name="pressure" type="float" />
+			<description>Returns an unload count (0–64): a positive configured limit falls to 75% at pressure 0.4 and 50% at pressure 0.8 (rounded up, minimum one). Zero remains unlimited; non-finite pressure is treated as zero.</description>
+		</method>
+		<method name="get_effective_load_radius" qualifiers="const">
+			<return type="float" />
+			<description>Actual player-centered load radius used by the current streaming scheduler and focus readiness snapshots. During a ramp, this is [member load_radius] multiplied by the square root of the loaded area fraction for XY/XZ, or the cube root for XYZ. When the ramp is disabled or finished it equals [member load_radius].</description>
+		</method>
+		<method name="get_loading_range_area_percent" qualifiers="const">
+			<return type="float" />
+			<description>Current requested main-focus loading area or volume, expressed as 5–100 percent during a ramp and 100 percent otherwise. Read-only, with no chunk creation.</description>
+		</method>
+		<method name="is_loading_range_ramping" qualifiers="const">
+			<return type="bool" />
+			<description>Whether the startup loading-range delay or expansion is still pending. Defaults to false and becomes false when full range is restored or canceled.</description>
+		</method>
+		<method name="get_effective_unloads_per_update" qualifiers="const">
+			<return type="int" />
+			<description>Current limit for far-away chunk teardown. Zero means unlimited legacy cleanup. Adaptive streaming reduces positive limits on slow frames and restores throughput on recovery; manual unload_all bypasses this budget.</description>
+		</method>
 		<method name="get_effective_instantiations_per_frame" qualifiers="const">
 			<return type="int" />
 			<description>Returns the current adaptive or legacy limit for procedural generation and threaded scene activation.</description>
@@ -52,6 +91,32 @@
 		<method name="get_streaming_frame_pressure_percent" qualifiers="const">
 			<return type="float" />
 			<description>Returns 0 to 100 for the measured render-frame backpressure. Only updated on the streamer's internal process when adaptivity is enabled.</description>
+		</method>
+		<method name="should_defer_predicted_chunk_work" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="budget_usec" type="int" />
+			<param index="1" name="previous_attempts" type="int" />
+			<param index="2" name="spent_usec" type="int" />
+			<param index="3" name="predicted_next_usec" type="int" />
+			<description>Pure admission helper: returns true only when a second or later scene work unit would exceed a positive shared CPU budget based on prior measured time plus the forecast. Unknown estimates, disabled budgets and first attempts always return false.</description>
+		</method>
+		<method name="update_chunk_work_estimate" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="previous_usec" type="int" />
+			<param index="1" name="sample_usec" type="int" />
+			<description>Pure bounded quarter-rate exponential moving average for measured per-chunk main-thread CPU microseconds. Returns the previous estimate for a zero/negative sample and clamps positive estimates to 1000000. The engine records separate procedural and threaded-finalization forecasts.</description>
+		</method>
+		<method name="get_estimated_generator_work_usec" qualifiers="const">
+			<return type="int" />
+			<description>Observed moving-average main-thread microseconds for procedural generation and node adoption, clamped to 1000000. No prediction until at least one positive sample. Resets when the generator or streaming grid changes.</description>
+		</method>
+		<method name="get_estimated_finalization_work_usec" qualifiers="const">
+			<return type="int" />
+			<description>Observed moving-average microseconds for ready-threaded-scene finalization, excluding background resource decoding. Reset on provider/template/grid changes.</description>
+		</method>
+		<method name="get_last_predicted_deferred_chunk_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of already-wanted procedural or ready-threaded cells deferred in the last frame by the optional cost forecast (not by the regular count or wall-clock limit). Recomputed on every internal update or explicit refresh.</description>
 		</method>
 		<method name="get_last_frame_chunk_work_usec" qualifiers="const">
 			<return type="int" />
@@ -123,6 +188,15 @@
 				Returns the loaded chunk of [param cell], or [code]null[/code] if that cell is not loaded.
 			</description>
 		</method>
+		<method name="advance_cached_chunk_retention">
+			<return type="void" />
+			<param index="0" name="delta_seconds" type="float" />
+			<description>Advances the TTL clock for detached procedural roots once per internal process frame. Opt-in count and soft CPU-time budgets may defer expired roots across successive frames. Headless tests can advance with positive game-time deltas. Invalid deltas are ignored and a step is bounded to 120 seconds; resident world cells are never affected.</description>
+		</method>
+		<method name="get_cached_chunk_bytes" qualifiers="const">
+			<return type="int" />
+			<description>Total game-reported estimated bytes retained in detached cached procedural chunks, excluding shared assets, pending frees and runtime GPU allocation. Count-only legacy entries contribute zero. Not actual measured RAM/VRAM.</description>
+		</method>
 		<method name="get_cached_chunk_count" qualifiers="const">
 			<return type="int" />
 			<description>Number of detached, cached procedural scene roots. These do not count toward [method get_loaded_count] and cannot be returned by [method get_chunk].</description>
@@ -130,6 +204,22 @@
 		<method name="get_chunk_cache_hit_count" qualifiers="const">
 			<return type="int" />
 			<description>Count of cached scene roots successfully reattached instead of recreated by the procedural generator. A cache hit still uses a normal main-thread integration slot.</description>
+		</method>
+		<method name="get_last_cached_expiration_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of expired detached scene roots retired by the latest cleanup pass. Zero after manual cache clear or an idle/empty step.</description>
+		</method>
+		<method name="get_last_cached_expiration_work_usec" qualifiers="const">
+			<return type="int" />
+			<description>Main-thread microseconds spent scanning and retiring expired cache entries during the latest pass. One individual destructor can exceed the soft CPU-time cap.</description>
+		</method>
+		<method name="get_last_deferred_cached_expiration_count" qualifiers="const">
+			<return type="int" />
+			<description>Already-expired cached roots deferred by the latest count or CPU-time budget, drained on subsequent frames. With both limits zero, the legacy cleanup completes in one pass.</description>
+		</method>
+		<method name="get_chunk_cache_expiration_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of detached procedural scenes retired due to the optional age limit, separate from capacity-based cache evictions. Reset by [method clear_cached_chunks].</description>
 		</method>
 		<method name="get_chunk_cache_eviction_count" qualifiers="const">
 			<return type="int" />
@@ -152,6 +242,10 @@
 			<description>
 				Returns the cells whose chunks are currently loaded.
 			</description>
+		</method>
+		<method name="get_last_unload_work_usec" qualifiers="const">
+			<return type="int" />
+			<description>Microseconds spent selecting and deactivating expired chunk roots during the last refresh, including their synchronous unload callbacks. Zero when no expired cells exist or after [method unload_all]. Deferred scene memory reclamation is not included. Compare with [member max_unload_work_usec] when profiling spikes.</description>
 		</method>
 		<method name="get_last_unload_count" qualifiers="const">
 			<return type="int" />
@@ -211,6 +305,27 @@
 				Marks optional staged cosmetic work complete for a previously loaded chunk. Does nothing for unknown or already-completed cells. Emits [signal chunk_visual_details_ready] once, without affecting gameplay state, chunk residency, load/unload radius or the procedural generation budget. Call this after cosmetic MultiMesh categories are finished.
 			</description>
 		</method>
+		<method name="calculate_retry_delay_seconds" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="cell" type="Vector3i" />
+			<param index="1" name="attempt" type="int" />
+			<param index="2" name="initial_seconds" type="float" />
+			<param index="3" name="max_seconds" type="float" />
+			<param index="4" name="spread" type="float" />
+			<description>Pure retry delay helper. Computes the capped exponential delay for attempt indices 0–8. With spread 0, it is exactly min(max_seconds, initial_seconds * 2^attempt), as before. With a finite spread in 0–0.5, a stable hash of cell coordinates and attempt spreads retries into [base * (1 - spread), base] without introducing mutable random streams. Finite positive delays at most 60 seconds are accepted; invalid values return 0 without changing scene state. Intended for deterministic testing and offline scheduling.</description>
+		</method>
+		<method name="get_last_retry_release_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of expired retry leases released to the normal chunk queue during the last streaming update. Releases do not instantiate or load resources directly; regular frame and concurrency budgets remain authoritative.</description>
+		</method>
+		<method name="get_last_retry_deferred_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of already-expired retry leases kept pending because [member max_retry_releases_per_update] was reached on the last streaming update. Retries are admitted by earliest deadline, with coordinates as a stable tie-break; they are never discarded by this limit.</description>
+		</method>
+		<method name="get_retry_pending_count" qualifiers="const">
+			<return type="int" />
+			<description>Count of failed cells with a scheduled next attempt; exhausted failures and intentionally empty cells are excluded. Includes expired retries deferred by the optional release limit.</description>
+		</method>
 		<method name="refresh">
 			<return type="void" />
 			<param index="0" name="retry" type="bool" default="false" />
@@ -260,6 +375,30 @@
 				Returns the cell that contains [param position] on the streamed [member axes].
 			</description>
 		</method>
+		<method name="set_simulation_layer_enabled">
+			<return type="bool" />
+			<param index="0" name="layer" type="StringName" />
+			<param index="1" name="enabled" type="bool" />
+			<description>Enables/disables a named cosmetic simulation layer. Scene roots can opt in through [code]get_streaming_simulation_layer()[/code] returning a String or StringName. Unknown layers are enabled by default. At most 16 layer names (up to 64 characters each) can be configured; malformed or excess names return false without changing state. No residency, collision, physics, navigation or authoritative gameplay is changed. The engine applies at most [member max_simulation_transitions_per_update] transitions on its next normal streaming update.</description>
+		</method>
+		<method name="is_simulation_layer_enabled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="layer" type="StringName" />
+			<description>Returns whether a runtime cosmetic simulation layer is enabled (true for unknown names).</description>
+		</method>
+		<method name="get_cell_simulation_layer" qualifiers="const">
+			<return type="StringName" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>Returns a loaded chunk's opted-in simulation layer, or an empty name for unloaded or untagged chunks. Metadata is discarded on unload.</description>
+		</method>
+		<method name="get_simulation_layer_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of configured runtime cosmetic layers (at most 16).</description>
+		</method>
+		<method name="get_tick_throttled_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns the number of loaded chunk roots actually receiving a positive cosmetic tick interval. Roots without [code]set_streaming_tick_interval(seconds)[/code] are not counted. Does not alter CPU update frequency on its own.</description>
+		</method>
 		<method name="get_simulation_active_count" qualifiers="const">
 			<return type="int" />
 			<description>
@@ -270,6 +409,11 @@
 			<return type="bool" />
 			<param index="0" name="require_visual_details" type="bool" default="false" />
 			<description>Whether all cells intersecting the currently active, nearby auxiliary source are settled and no cells have failed. Intentionally empty cells count as settled. With [param require_visual_details] true, waits for optional staged cosmetic completion. This is a visual streaming readiness snapshot, not a safe-teleport, physics, or server-authority barrier. Disabled or remote sources return false.</description>
+		</method>
+		<method name="is_cell_tick_throttled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>Whether the given loaded chunk root currently receives a positive, reduced-frequency cosmetic tick interval. Returns false for unloaded cells and roots without the callback.</description>
 		</method>
 		<method name="is_cell_simulation_active" qualifiers="const">
 			<return type="bool" />
@@ -316,14 +460,32 @@
 		<member name="max_concurrent_loads" type="int" setter="set_max_concurrent_loads" getter="get_max_concurrent_loads" default="4">
 			Maximum number of chunks loading in the background at the same time.
 		</member>
+		<member name="cached_chunk_retention_seconds" type="float" setter="set_cached_chunk_retention_seconds" getter="get_cached_chunk_retention_seconds" default="0.0">
+			Optional maximum retention time for detached, immutable procedural scene roots, clamped to 0–120 game-time seconds. Zero disables expiry for legacy projects. A positive limit releases cached roots when old, even while the player stands still and the count/estimated-byte budgets are not full. This does not unload active world cells, server/physics/quest entities or additional streaming sources. A cache hit before expiry retains normal scene adoption and work budgets; an expired cell is regenerated on the next request. The engine automatically advances time while running; [method advance_cached_chunk_retention] can drive deterministic headless tests. Use [method get_chunk_cache_expiration_count] to monitor expired roots separately from capacity evictions.
+		</member>
+		<member name="max_cached_expirations_per_frame" type="int" setter="set_max_cached_expirations_per_frame" getter="get_max_cached_expirations_per_frame" default="0">
+			Optional per-frame cap (0–16) on destruction of expired detached procedural chunk roots, with zero preserving the legacy unlimited TTL pass. The engine always retires at least one overdue root, then defers the remaining roots to later internal frames. Explicit TTL changes and manual cache clearing remain synchronous.
+		</member>
+		<member name="max_cached_expiration_work_usec" type="int" setter="set_max_cached_expiration_work_usec" getter="get_max_cached_expiration_work_usec" default="0">
+			Optional per-frame soft CPU-time budget (0–1000000 microseconds) for TTL expiry. Zero disables the time limit. Once the first overdue root is retired, no further destructor is started if the budget elapsed. Individual scene deletion can exceed its budget; both this and [member max_cached_expirations_per_frame] apply together. See [method get_last_cached_expiration_work_usec] and [method get_last_deferred_cached_expiration_count].
+		</member>
+		<member name="max_cached_chunk_bytes" type="int" setter="set_max_cached_chunk_bytes" getter="get_max_cached_chunk_bytes" default="0">
+			Optional estimated memory budget for detached procedural scene roots, clamped to 0–268435456 bytes (256 MiB). Zero preserves original count-only caching. A positive value requires each opted-in chunk to implement [code]get_streaming_cache_cost_bytes() -&gt; int[/code] and return a positive estimate no greater than the cap. Unknown, invalid and oversized values decline caching; overbudget caches evict oldest unrequested roots first. These gameplay estimates do not guarantee physical RAM/VRAM, include shared assets or track pending queued frees. Decreasing the budget immediately trims detached roots and never touches active/authoritative world residency.
+		</member>
 		<member name="max_cached_chunks" type="int" setter="set_max_cached_chunks" getter="get_max_cached_chunks" default="0">
 			Opt-in bounded cache for unloaded, procedural Node roots that implement [code]can_cache_streaming_chunk() -&gt; bool[/code] and explicitly return [code]true[/code]. Zero preserves normal unload-and-free behavior; values are clamped to 0–16 complete scene roots. Cached roots are detached and do not render or simulate, but still retain memory. Least-recent entries are evicted first, but cells requested again by the current focus/source take precedence over nonrequested cached cells. Returning to the exact cell reattaches through the ordinary budgeted load path and optionally invokes [code]on_streaming_cache_restored()[/code] after adoption. Cached roots are cleared on grid/parent/generator changes, manual unload and destruction; only immutable client visuals should opt in. Not for authoritative entities, physics, quest state, or network-owned objects.
+		</member>
+		<member name="predictive_chunk_work_budget_enabled" type="bool" setter="set_predictive_chunk_work_budget_enabled" getter="is_predictive_chunk_work_budget_enabled" default="false">
+			Optional cost-forecast admission for procedural and threaded-ready cell activation, using independent 1/4 exponential moving averages of observed main-thread microseconds. Enabled only when [member max_chunk_work_usec] is positive. After at least one completed cell work unit in this frame, a candidate is postponed when its predicted cost plus already-measured work exceeds the shared frame budget. The first cell is never blocked, unknown costs do not block, and a single noninterruptible scene activation can exceed the soft limit. All normal loading priorities and cell count budgets still apply. Zero CPU time budget or default disabled mode retain legacy behavior. The budget uses real measurements, not GPU time or background texture decoding; estimates reset when the corresponding generator/provider/grid changes.
 		</member>
 		<member name="max_chunk_work_usec" type="int" setter="set_max_chunk_work_usec" getter="get_max_chunk_work_usec" default="0">
 			Soft CPU-time budget, in microseconds, shared across finished-scene activation and procedural chunk generation during one streaming update. Both paths use the same frame start timestamp. Once at least one chunk has been processed, no more chunks are integrated after the budget expires. A single chunk cannot be interrupted and may take longer than the budget. Enable [member adaptive_chunk_budget_enabled] to temporarily reduce effective limits during sustained slow frames; call [method get_effective_chunk_work_usec] for the resulting cap. The value is clamped to [code]0[/code] through [code]1000000[/code]; [code]0[/code] disables time slicing while keeping [member max_instantiations_per_frame] active. Also works with [method refresh].
 		</member>
+		<member name="max_unload_work_usec" type="int" setter="set_max_unload_work_usec" getter="get_max_unload_work_usec" default="0">
+			Optional soft CPU-time budget in microseconds for deactivating obsolete chunk scene roots, measured from unload selection through synchronous node removal and signals. Requires [member max_unloads_per_update] greater than zero; zero preserves count-only unloading and the original unlimited legacy path. At least one eligible chunk can be retired even if its work exceeds the cap, so this cannot provide a hard real-time guarantee. The value is clamped to 0–1000000. The count limit always applies too; [method unload_all], scene-tree teardown and grid resets bypass the time cap. Queued scene memory freeing may happen later and is not included.
+		</member>
 		<member name="max_unloads_per_update" type="int" setter="set_max_unloads_per_update" getter="get_max_unloads_per_update" default="0">
-			Optional maximum number of far-away chunk roots unloaded per streaming refresh. Zero preserves the original unlimited teardown behavior; positive values are clamped to 1–64. On teleport or a rapidly moving observer, the streamer unloads farthest expired cells first (stable coordinate ties) and leaves other expired cells resident temporarily, re-evaluating them on the next refresh. Nearby auxiliary streaming sources still protect their cells. Does not limit [method unload_all], scene-tree teardown, or grid configuration resets. Only enable for chunk scene roots whose gameplay/physics state is safe to retain temporarily; delayed cleanup increases peak memory residency.
+			Optional maximum number of far-away chunk roots unloaded per streaming refresh. Zero preserves the original unlimited teardown behavior; positive values are clamped to 1–64. On teleport or a rapidly moving observer, the streamer unloads farthest expired cells first (stable coordinate ties) and leaves other expired cells resident temporarily, re-evaluating them on the next refresh. Nearby auxiliary streaming sources still protect their cells. With [member adaptive_chunk_budget_enabled], positive limits decrease during slow frames without stopping cleanup; see [method get_effective_unloads_per_update]. Does not limit [method unload_all], scene-tree teardown, or grid configuration resets. Only enable for chunk scene roots whose gameplay/physics state is safe to retain temporarily; delayed cleanup increases peak memory residency.
 		</member>
 		<member name="max_instantiations_per_frame" type="int" setter="set_max_instantiations_per_frame" getter="get_max_instantiations_per_frame" default="1">
 			Maximum number of chunks activated during one native streaming update, counting both finished background scene loads and procedural generator calls against the same budget. Once the limit is reached, remaining cells stay queued for a later update. A generator that returns [code]null[/code] or fails still consumes a slot, since the callback may already have done expensive CPU work. Combine with [member max_chunk_work_usec] to load several cheap chunks without scheduling more work after a costly chunk.
@@ -337,11 +499,26 @@
 		<member name="simulation_hysteresis" type="float" setter="set_simulation_hysteresis" getter="get_simulation_hysteresis" default="16.0">
 			Extra distance in metres an already-active chunk retains simulation after leaving [member simulation_radius]. Inactive chunks only reactivate when entering the inner radius. Clamped to 0–1000 metres.
 		</member>
+		<member name="tick_throttle_radius" type="float" setter="set_tick_throttle_radius" getter="get_tick_throttle_radius" default="-1.0">
+			Unreal-style optional cosmetic update-frequency tier for streamed chunks. Negative (default) disables and avoids the per-chunk scan; 0–100000 chooses the full-rate near radius. Chunk roots must implement [code]set_streaming_tick_interval(seconds: float)[/code]. Outside this radius plus [member tick_throttle_hysteresis], opted-in roots receive [member tick_throttle_interval]; when returning inside the radius they receive zero (full rate). Existing root transitions are bounded and nearest near-recoveries run first. Purely advisory: the root chooses which script effects to throttle, never physics or gameplay authority.
+		</member>
+		<member name="tick_throttle_interval" type="float" setter="set_tick_throttle_interval" getter="get_tick_throttle_interval" default="0.125">
+			Positive seconds between expensive cosmetic scene updates in the distant tier. Clamped to 0–1 second; zero restores full-rate callbacks over the configured transition budget. The actual chunk script must accumulate delta and decide how to defer work; setting this does not affect engine physics ticks.
+		</member>
+		<member name="tick_throttle_hysteresis" type="float" setter="set_tick_throttle_hysteresis" getter="get_tick_throttle_hysteresis" default="8.0">
+			Extra distance required before promoting a near full-rate chunk to the reduced-frequency tier. Clamped 0–1000; returning within the normal radius restores near rate immediately, subject to the transition budget.
+		</member>
+		<member name="max_tick_throttle_transitions_per_update" type="int" setter="set_max_tick_throttle_transitions_per_update" getter="get_max_tick_throttle_transitions_per_update" default="4">
+			Maximum number of existing loaded chunk callback rate changes (1–64) during one streaming refresh. New chunk initial tick rates are set before scene attachment and are already covered by the normal chunk generation/activation budget.
+		</member>
 		<member name="simulation_radius" type="float" setter="set_simulation_radius" getter="get_simulation_radius" default="-1.0">
 			Opt-in distance in metres for cosmetic/script simulation on resident chunks. Negative (default) preserves all legacy chunk processing and avoids per-chunk simulation scans. The streamer calls a chunk root's optional [code]set_streaming_simulation_active(active: bool)[/code] when its tier changes; it never alters scene descendants, terrain, physics or networking by itself. State changes do not load or unload cells. Clamped to -1 (disabled) or 0–100000 metres.
 		</member>
 		<member name="unload_radius" type="float" setter="set_unload_radius" getter="get_unload_radius" default="192.0">
 			Loaded cells farther than this distance from the focus are freed. Values below [member load_radius] are treated as equal to it.
+		</member>
+		<member name="view_cone_half_angle_degrees" type="float" setter="set_view_cone_half_angle_degrees" getter="get_view_cone_half_angle_degrees" default="180.0">
+			Optional camera-space horizontal half field of view for scheduling. The default 180 degrees preserves the existing heading-only priority. With positive [member view_priority] and a nonzero [member view_direction], values from 1 to 179.99 degrees smoothly reduce the view bonus near the cone edge and remove it outside the cone; they do not cull chunks, change cell residency, or consume extra requests. Use a conservative margin for the camera and treat orthographic or unknown cameras as 180 degrees. Invalid or non-finite settings are rejected or clamped to 1–180 degrees.
 		</member>
 		<member name="view_direction" type="Vector3" setter="set_view_direction" getter="get_view_direction" default="Vector3(0, 0, 0)">
 			Optional normalized camera heading. When [member view_priority] is positive, both procedural chunk generation and completed threaded scene activation prefer nearby cells within the camera's view direction. A zero or non-finite direction disables view weighting, returning to movement-only priority. This is independent of residency and does not add extra cells to memory.
@@ -352,11 +529,22 @@
 		<member name="velocity_hint" type="Vector3" setter="set_velocity_hint" getter="get_velocity_hint" default="Vector3(0, 0, 0)">
 			Estimated velocity of the player or camera, in metres per second, used only to prioritize chunks within [member load_radius]. The ignored grid axis is discarded. Non-finite hints are rejected, while zero velocity preserves nearest-first loading. Update this when the character moves; reset it after a teleport or network correction.
 		</member>
+		<member name="retry_delay_spread" type="float" setter="set_retry_delay_spread" getter="get_retry_delay_spread" default="0.0">
+			Opt-in deterministic per-cell backoff spread, from 0 (disabled) to 0.5. Instead of retrying an entire region of failed scene resources on identical timestamps, spreads each existing exponential retry delay by as much as this fraction below the base capped delay. The timer still uses monotonic engine time, existing maximum attempt count and maximum retry delay. This is a recovery/load-scheduling optimization, not a claim that transient errors will succeed.
+		</member>
+		<member name="max_retry_releases_per_update" type="int" setter="set_max_retry_releases_per_update" getter="get_max_retry_releases_per_update" default="0">
+			Maximum expired failed cells (1–32, or 0 for legacy unlimited) to release to the ordinary streaming queue each update. When set, releases are sorted by oldest ready deadline and then cell coordinates so repeated failures cannot starve later eligible cells. Cells still obey all original load priority, worker concurrency and frame/CPU budgets. An exhausted or intentionally empty procedural cell is never forcibly retried.
+		</member>
 		<member name="update_interval" type="float" setter="set_update_interval" getter="get_update_interval" default="0.1">
 			Time in seconds between two evaluations of which cells to load and unload. Checking a few times per second is enough; [code]0[/code] checks every frame.
 		</member>
 	</members>
 	<signals>
+		<signal name="chunk_tick_interval_changed">
+			<param index="0" name="cell" type="Vector3i" />
+			<param index="1" name="seconds" type="float" />
+			<description>Emitted when an already-loaded opted-in chunk changes its effective cosmetic update interval. Initial chunk setup is available through [method is_cell_tick_throttled] and [signal chunk_loaded].</description>
+		</signal>
 		<signal name="chunk_simulation_changed">
 			<param index="0" name="cell" type="Vector3i" />
 			<param index="1" name="active" type="bool" />

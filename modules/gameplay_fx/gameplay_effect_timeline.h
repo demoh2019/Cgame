@@ -10,6 +10,7 @@
 #include "core/string/string_name.h"
 #include "core/templates/vector.h"
 #include "core/variant/dictionary.h"
+#include "core/variant/binder_common.h"
 #include "core/variant/variant.h"
 
 // A reusable deterministic timeline: time moves only when tick(delta) is called.
@@ -47,6 +48,10 @@ private:
 	static bool _valid_duration(double p_seconds);
 	static bool _valid_stacks(int p_stacks);
 	static bool _tag_matches(const String &p_active, const String &p_requirement);
+	// Shared simulation kernel. Null expiry sink avoids allocating unused
+	// expired-tag arrays in per-actor cosmetic update hot paths.
+	void _advance(double p_delta, PackedStringArray *r_expired);
+	bool _replace_effect_branch(const StringName &p_branch, const Dictionary &p_effects, bool p_preserve_pending);
 
 protected:
 	static void _bind_methods();
@@ -74,8 +79,16 @@ public:
 	bool replace_snapshot(const Dictionary &p_effects);
 	// Atomically refresh one authoritative tag namespace; preserve other timers and pulses.
 	bool replace_effect_branch(const StringName &p_branch, const Dictionary &p_effects);
+	// Replication-friendly reconciliation: preserve queued pulses for continuing
+	// effects whose period has not changed. Drop only removed/rephased branch
+	// effects; other branches are never touched. Same atomic validation.
+	bool reconcile_effect_branch(const StringName &p_branch, const Dictionary &p_effects);
 	Dictionary get_snapshot() const;
 	PackedStringArray tick(double p_delta);
+	// One native call for presentation loops that need only periodic pulses.
+	// Equivalent to tick(delta), then take_periodic_pulses(), without
+	// constructing an unused expired-tags array.
+	Dictionary tick_and_take_periodic_pulses(double p_delta);
 	double get_remaining(const StringName &p_tag) const;
 	int get_stacks(const StringName &p_tag) const;
 	bool has_effect(const StringName &p_tag) const;

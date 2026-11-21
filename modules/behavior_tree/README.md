@@ -1,5 +1,34 @@
 # Behavior Tree module (runtime MVP)
 
+## One-call Mass Simulation LOD planning for server-owned infected
+
+`AISimulationLOD2D.plan_passive_scan(agent_id, distance, near_distance, far_distance,
+previous_interval, hysteresis, already_staggered, urgent=false)` returns a
+`Vector2(nominal_interval, next_scan_delay)`. The caller records the nominal
+interval, flags the first distant stagger exactly once, and uses the delay
+only for **unengaged passive target acquisition**.
+
+This combines the existing scalar distance-tier, deterministic ID-phase, and
+hysteretic interval methods inside one native call. It is inspired by Unreal
+Engine Mass Simulation LOD (variable-frequency updates grouped by significance),
+but is a small pure-data API, **not** a full MassEntity framework:
+https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-mass-gameplay-in-unreal-engine
+
+Albion After's authoritative `game/scripts/shared/zombie.gd` invokes the
+combined method only when no player target is selected and the infected is
+idle/wandering. All attack ticks, projectiles, movement, threats, health,
+server validation, and RNG sequences remain untouched. The legacy scalar
+branch stays available for older native Cgame builds; stock Godot still runs
+the original 0.25s passive scan.
+
+Native C++ tests compare the combined result against the scalar composition
+across boundary distances, one-time phases, hysteresis states, urgent
+interruptions and invalid inputs. The real zombie game regression verifies
+startup scan timing, saved nominal tier, urgent bypass and near-range recovery.
+This reduces multiple script/native method calls to one per eligible scan;
+it is **not** a measured TPS or FPS claim.
+
+
 This optional, built-in Godot module provides the **runtime foundation** of a
 behavior tree system for gameplay AI. It is not a visual graph editor yet.
 When enabled, all resources are available in the scene inspector and in
@@ -367,3 +396,56 @@ on an intentionally reverse-ordered 19-member group (12 wake, 6 remain
 unalerted). The scoped CI workflow builds the custom Godot engine and
 runs headless tests. Benchmark actual frame time on dense encounters before
 asserting performance gains.
+
+## Ranked confirmed stimuli and bounded investigation (Unreal AI Perception-inspired)
+
+`AIStimulusHistory2D.get_ranked(sense, limit=8)` exposes a detached,
+highest-decayed-score-first list of up to 64 **previously admitted** sound,
+sight or damage events. Exact ties resolve deterministically by source ID
+then 2D position, not arrival order. Per-agent history is already capped at
+64; the implementation keeps a bounded top-K of indices (O(N*K)). Invalid
+senses or limits fail with an empty result, and the old `get_best` and
+`get_recent` contracts remain intact.
+
+Albion After adds `NativeInfectedSenses.get_ranked_confirmed_stimuli()`
+with a no-op fallback on older binaries that cannot rank events. Infected
+investigating a lost target may check **one additional** remembered sound
+location after reaching the first location, provided the event is still
+alive, distinct and inside the existing pursuit leash. No new target
+is acquired; safe-zone, sight, occlusion, affiliation, sound acceptance,
+damage, movement and server ownership remain game responsibilities. The
+history coordinates and ranked source IDs remain server-side only.
+
+This is a minimal memory and search extension, not Unreal's complete
+automatic perception subsystem.
+
+Follow-up locations are also screened against the current authoritative safe-zone and water checks before the server chooses to investigate them.
+## Native encounter pressure budgeting — MassSpawner-inspired
+
+`AIEncounterBudget` provides an optional, deterministic, configurable
+server-side **numeric admission** policy for PvE waves. It does not spawn
+actors, ask physics for nearby targets or operate on the network. The game
+supplies authoritative counts, zone difficulty and health fraction.
+
+- `configure_limits(global_limit, soft_density, dense_density,
+  local_hard_limit, base_squad, max_squad, max_zone_bonus)` validates every
+  parameter atomically and rejects invalid configurations without changing
+  the previous state. Global cap is 1–8192, all density thresholds strictly
+  increase and squad caps are bounded to 64.
+- `get_spawn_budget(total_infected, nearby, health_ratio, zone)` is capped
+  by both remaining global headroom and local density/health pressure. Invalid
+  counts or nonfinite health return zero (never accidental enemy spawns).
+- `get_respite_seconds(base_delay, nearby, health_ratio)` adds bounded
+  recovery time (0–75s) during crowded or injured-survivor encounters.
+  There are no timers or hidden frame dependencies in the engine class.
+
+Albion After's existing `WorldEncounterDirector` now uses the native
+policy when available and otherwise executes the original GDScript
+formulas byte-for-byte; the server still owns spawn placement, safe zones,
+world cap, real enemy lifecycle and event broadcasts. Native-vs-GDScript
+parity tests exercise zone, health, density and headroom boundaries.
+The policy introduces native engine **functionality**, not an automatic
+Unreal MassSpawner implementation or a proven frame-time improvement.
+
+Reference design:
+https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-mass-gameplay-in-unreal-engine

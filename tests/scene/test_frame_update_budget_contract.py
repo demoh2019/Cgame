@@ -29,6 +29,7 @@ class TestFrameBudgetContract(unittest.TestCase):
             "set_frame_time_budget_us", "get_frame_time_budget_us", "record_cost",
             "current_frame_cost_us", "last_frame_cost_us",
             "set_lane_rate_scale", "get_lane_rate_scale",
+            "get_lane_last_frame_cost_us",
         ):
             self.assertIn(name, names)
 
@@ -55,6 +56,9 @@ class TestFrameBudgetContract(unittest.TestCase):
         self.assertIn("int64_t frame_time_budget_us = 2500", header)
         self.assertIn("double rate_scale = 1.0", header)
         self.assertIn("Math::is_finite(p_scale)", src)
+        self.assertIn("lane.previous_frame_cost_us = lane.frame_cost_us;", src)
+        self.assertIn("lane.frame_cost_us = MIN(int64_t(1000000000)", src)
+        self.assertIn("get_lane_last_frame_cost_us", header)
         self.assertIn("p_scale < 0.75 || p_scale > 2.0", src)
         self.assertIn("1.0 / (rates[quality] * lane.rate_scale)", src)
         self.assertIn("1.0 / (rates[quality] * lanes[i].rate_scale)", src)
@@ -95,6 +99,10 @@ class TestFrameBudgetContract(unittest.TestCase):
         self.assertIn("_ambient_rate_cache", main)
         self.assertIn("_ambient_budget.call(\"set_lane_rate_scale\"", main)
         self.assertIn("native/script significance and rate parity", tests)
+        self.assertIn("per-lane completed-frame CPU profiler parity", tests)
+        self.assertIn("Albion/AmbientCPUus/", main)
+        self.assertIn('Callable(_ambient_budget, "get_lane_last_frame_cost_us")', main)
+        self.assertIn("func get_lane_last_frame_cost_us", fallback)
         self.assertIn("soft CPU time budget and native compatibility", tests)
 
 

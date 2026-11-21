@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PCGSurfaceFilter3D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Filters procedural 3D sample points by surface normal slope and elevation.
+	</brief_description>
+	<description>
+		An Unreal PCG-inspired deterministic selection utility for procedural vegetation and set dressing. The [method filter_indices] method keeps original source indices in input order, without changing positions, normals, the scene tree, physics, or seeded random number generators. The caller supplies sampled world-space normals and positions.
+		The filter accepts up to 16,384 positions with matching nonzero finite normals, coordinates within +/-10,000,000 units, and at most 4,096 selected indices. All inputs are validated before selection, including points that would later fail the slope/height test. Invalid inputs return an empty [PackedInt32Array]. This utility does not sample terrain or generate normals.
+	</description>
+	<methods>
+		<method name="filter_indices" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="1" name="normals" type="PackedVector3Array" />
+			<param index="2" name="min_slope_degrees" type="float" default="0.0" />
+			<param index="3" name="max_slope_degrees" type="float" default="90.0" />
+			<param index="4" name="min_height" type="float" default="-10000000.0" />
+			<param index="5" name="max_height" type="float" default="10000000.0" />
+			<param index="6" name="max_selected" type="int" default="4096" />
+			<description>
+				Returns indices for points whose Y elevation is within [param min_height] and [param max_height] and whose surface-normal angle from world up is between [param min_slope_degrees] and [param max_slope_degrees], inclusive. Angles range from 0 (flat upward-facing ground) through 90 (vertical wall); downward-facing normals are excluded. Input normals need not be unit length but must be nonzero and finite. No randomness, terrain sampling, or placement is performed. An empty input yields an empty result.
+			</description>
+		</method>
+			<method name="align_transforms" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="transforms" type="Array" />
+			<param index="1" name="normals" type="PackedVector3Array" />
+			<param index="2" name="max_tilt_degrees" type="float" default="35.0" />
+			<description>
+				Aligns each input [Transform3D] to an upward-facing terrain surface normal, limited by [param max_tilt_degrees] (0 to 90). A world-space tilt is multiplied on the left of the original transform basis, preserving authored/random yaw, existing uniform or nonuniform scale, original instance origins, and order. A zero limit keeps the original transforms. Intended for low-profile procedural decorations such as pebbles on sloped ground, using sampled normals supplied by the caller.
+				Accepts at most 16,384 transforms with matching, finite, nonzero, upward-hemisphere normals and positions in the +/-10,000,000 range. Inputs are fully validated before processing. Invalid data returns an empty array, including a malformed late element; the original input is never modified. Does not perform terrain queries, RNG, physics, or scene-tree updates. On a valid empty input, returns an empty array.
+			</description>
+		</method>
+	</methods>
+</class>

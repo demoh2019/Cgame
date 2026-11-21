@@ -80,6 +80,10 @@ const MIN_INFECTED_DISTANCE := 3.5
 const MIN_GUARD_SEPARATION := 5.0
 const GUARD_RADII := [8.0, 11.0, 14.0]
 const GUARD_ANGLES := 16
+const GUARD_GRID_HALF := Vector2(12.0, 12.0)
+const GUARD_GRID_SPACING := 6.0
+const GUARD_GRID_SAMPLES := 25 # Bounded 5x5 fallthrough when all rings are blocked.
+
 
 
 static func guard_types(zone: int) -> Array[String]:
@@ -88,6 +92,76 @@ static func guard_types(zone: int) -> Array[String]:
 	if zone == 3:
 		return ["runner", "walker", "brute"]
 	return []
+
+
+## A context-relative 5x5 backup search. Never trusts client coordinates.
+## Direction points AWAY from the closest finite survivor; ties use X/Z.
+static func guard_grid_candidates(center: Vector2, survivors: Array[Vector3],
+		prefer_native: bool = true) -> PackedVector2Array:
+	var result := PackedVector2Array()
+	if not center.is_finite():
+		return result
+	var facing := Vector2(0.0, 1.0)
+	var nearest := INF
+	var nearest_point := Vector2.INF
+	for survivor in survivors:
+		if not survivor.is_finite():
+			continue
+		var at := Vector2(survivor.x, survivor.z)
+		var away := center - at
+		var squared := away.length_squared()
+		if squared > 0.000001 and is_finite(squared) and \
+				(squared < nearest or (squared == nearest and \
+				(at.x < nearest_point.x or (at.x == nearest_point.x and at.y < nearest_point.y)))):
+			nearest = squared
+			nearest_point = at
+			facing = away.normalized()
+	var native_grid := PackedVector3Array()
+	if prefer_native and ClassDB.class_exists("EnvironmentQuery3D") \
+			and ClassDB.class_has_method("EnvironmentQuery3D", "sample_oriented_grid"):
+		native_grid = ClassDB.class_call_static("EnvironmentQuery3D", "sample_oriented_grid",
+			Vector3(center.x, 0.0, center.y), Vector3(facing.x, 0.0, facing.y),
+			GUARD_GRID_HALF, GUARD_GRID_SPACING, GUARD_GRID_SAMPLES)
+	var generated := PackedVector2Array()
+	if native_grid.size() == GUARD_GRID_SAMPLES:
+		for sample in native_grid:
+			generated.append(Vector2(sample.x, sample.z))
+	else:
+		var right := Vector2(facing.y, -facing.x)
+		for z_index in 5:
+			for x_index in 5:
+				var local := Vector2(-GUARD_GRID_HALF.x + float(x_index) * GUARD_GRID_SPACING,
+					-GUARD_GRID_HALF.y + float(z_index) * GUARD_GRID_SPACING)
+				generated.append(center + right * local.x + facing * local.y)
+	# Skip samples at/inside the cache; only genuinely peripheral guard sites.
+	for sample in generated:
+		if sample.is_finite() and sample.distance_to(center) >= float(GUARD_RADII[0]):
+			result.append(sample)
+	return result
+
+
+## Reusable authoritative vetting for both ordinary concentric rings and
+## context-facing fallback grid; never bypass the game's security boundary.
+static func _guard_point_safe(world, point: Vector2, zone: int,
+		survivors: Array[Vector3], infected: Dictionary,
+		selected: Array[Dictionary]) -> bool:
+	if not point.is_finite() or world.zone_at(point.x, point.y) != zone or \
+			world.is_safe(point.x, point.y) or world.is_water(point.x, point.y) or \
+			world.normal_at(point.x, point.y).y < 0.75 or \
+			not Movement._is_free(world, point):
+		return false
+	for survivor in survivors:
+		if survivor.is_finite() and \
+				point.distance_to(Vector2(survivor.x, survivor.z)) < MIN_SURVIVOR_DISTANCE:
+			return false
+	for enemy in infected.values():
+		if enemy.is_alive() and point.distance_to(
+				Vector2(enemy.position.x, enemy.position.z)) < MIN_INFECTED_DISTANCE:
+			return false
+	for prior in selected:
+		if point.distance_to(Vector2(float(prior["x"]), float(prior["z"]))) < MIN_GUARD_SEPARATION:
+			return false
+	return true
 
 
 ## Validate positions against server-owned player/zombie locations and collisions.
@@ -113,31 +187,15 @@ static func guard_sites(world, site: Dictionary, survivors: Array[Vector3],
 		for index in GUARD_ANGLES:
 			var angle: float = TAU * float(posmod(index + angle_offset, GUARD_ANGLES)) / float(GUARD_ANGLES)
 			var point: Vector2 = center + Vector2.from_angle(angle) * float(radius)
-			if world.zone_at(point.x, point.y) != zone or \
-					world.is_safe(point.x, point.y) or world.is_water(point.x, point.y) or \
-					world.normal_at(point.x, point.y).y < 0.75 or \
-					not Movement._is_free(world, point):
-				continue
-			var clear := true
-			for survivor in survivors:
-				if survivor.is_finite() and point.distance_to(Vector2(survivor.x, survivor.z)) < MIN_SURVIVOR_DISTANCE:
-					clear = false
-					break
-			if not clear:
-				continue
-			for enemy in infected.values():
-				if enemy.is_alive() and point.distance_to(
-						Vector2(enemy.position.x, enemy.position.z)) < MIN_INFECTED_DISTANCE:
-					clear = false
-					break
-			if not clear:
-				continue
-			for prior in result:
-				if point.distance_to(Vector2(float(prior["x"]), float(prior["z"]))) < MIN_GUARD_SEPARATION:
-					clear = false
-					break
-			if clear:
+			if _guard_point_safe(world, point, zone, survivors, infected, result):
 				result.append({"x": point.x, "z": point.y, "kind": kinds[result.size()]})
 				if result.size() >= desired:
 					return result
+	# Only when rings are exhausted, supplement with engine-oriented grid.
+	# Every candidate goes through the SAME server-owned safety predicate.
+	for point in guard_grid_candidates(center, survivors):
+		if _guard_point_safe(world, point, zone, survivors, infected, result):
+			result.append({"x": point.x, "z": point.y, "kind": kinds[result.size()]})
+			if result.size() >= desired:
+				return result
 	return result
