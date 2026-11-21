@@ -4,7 +4,7 @@ extends RefCounted
 ## implementations share the same API and semantics, so callers never need to care which one they got.
 ##
 ## Usage: preload this file and call create() instead of Script.new():
-##   const TradeJournalFacade = preload("res://game_facade/trade_journal.gd")
+##   const TradeJournalFacade = preload("res://scripts/native/trade_journal.gd")
 ##   var obj = TradeJournalFacade.create()
 
 const NATIVE_CLASS := "CgameTradeJournal"

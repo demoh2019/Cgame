@@ -4,7 +4,7 @@ extends RefCounted
 ## implementations share the same API and semantics, so callers never need to care which one they got.
 ##
 ## Usage: preload this file and call create() instead of Script.new():
-##   const LagCompensationFacade = preload("res://game_facade/lag_compensation.gd")
+##   const LagCompensationFacade = preload("res://scripts/native/lag_compensation.gd")
 ##   var obj = LagCompensationFacade.create()
 
 const NATIVE_CLASS := "CgameLagCompensation"

@@ -4,7 +4,7 @@ extends RefCounted
 ## implementations share the same API and semantics, so callers never need to care which one they got.
 ##
 ## Usage: preload this file and call create() instead of Script.new():
-##   const ClusterSimulatorFacade = preload("res://game_facade/cluster_simulator.gd")
+##   const ClusterSimulatorFacade = preload("res://scripts/native/cluster_simulator.gd")
 ##   var obj = ClusterSimulatorFacade.create()
 
 const NATIVE_CLASS := "CgameClusterSimulator"

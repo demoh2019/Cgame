@@ -5,7 +5,7 @@ extends RefCounted
 ## built with it (checked with ClassDB), and otherwise falls back to the original GDScript library
 ## in res://scripts/client. Both back ends keep the same semantics, so game code is written once:
 ##
-##     const Gfx = preload("res://game_facade/cgame_rendering.gd")
+##     const Gfx = preload("res://scripts/native/cgame_rendering.gd")
 ##     Gfx.frame_pacing_apply(quality_level)
 ##     var report = Gfx.gpu_report_new()
 ##

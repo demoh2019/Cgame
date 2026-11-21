@@ -4,7 +4,7 @@ extends RefCounted
 ## implementations share the same API and semantics, so callers never need to care which one they got.
 ##
 ## Usage: preload this file and call create() instead of Script.new():
-##   const GuildSyncFacade = preload("res://game_facade/guild_sync.gd")
+##   const GuildSyncFacade = preload("res://scripts/native/guild_sync.gd")
 ##   var obj = GuildSyncFacade.create(0)
 
 const NATIVE_CLASS := "CgameGuildSync"
