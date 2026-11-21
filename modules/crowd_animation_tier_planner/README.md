@@ -82,6 +82,46 @@ The approach follows Unreal's Animation Budget Allocator **state-change
 throttling** idea, not Unreal's proprietary code:
 https://dev.epicgames.com/documentation/unreal-engine/animation-budget-allocator-in-unreal-engine
 
+## Measured full-pose CPU budget (Unreal-style work-unit pressure)
+
+`plan_visible_tiers_costed(distances, priority_flags, visible_flags,
+retained_full_flags, full_pose_cost_us, full_budget, priority_budget,
+full_pose_budget_us, hysteresis=1.5)` adds a **second soft admission cap**
+to the existing stable/visible tier-0 IK pool. The existing distance,
+visibility and retention rules choose up to `full_budget` winners first;
+then each accepted full-pose cost estimate must fit the remaining
+microsecond allowance. Over-budget winners are demoted to tier 1, still
+playing full-rate locomotion and combat. This does not refill vacated IK
+slots with actors outside the original winning set: it avoids a second
+full-crowd ranking and preserves the established order of significance.
+
+An unknown actor reports cost 0 and uses an initial estimate of **100us**.
+Samples must be finite integers 0–100,000us, total CPU budget 0–1,000,000us.
+Budget 0 disables this extra gate, reproducing the existing stable API.
+Input errors fail atomically; neither native nor fallback stores scene
+references or runs callbacks. Predicted cost **is not a hard deadline**:
+actual pose time can fluctuate, and slow frame times can still occur.
+
+In Albion After, `character_anim_modifier.gd` measures its *actual
+GDScript procedural modifier pass* with `Time.get_ticks_usec()` when the
+full-pose layer is active, and retains an integer 1/4 EWMA estimate for
+the next frame. The client passes one estimate per actor to the engine
+and scales the soft optional script-pose CPU cap by visual quality:
+Performance **0us** (tier-0 slots already disabled), Balanced **750us**,
+High **1500us**, Ultra **2750us**. Newly spawned actors use the 100us
+default until a full-pose update can be measured. Stock Godot and older
+Cgame builds use an equivalent deterministic GDScript fallback.
+
+**Measurement boundary:** the sample covers *only the scripted
+SkeletonModifier3D full-pose pass*. It does NOT measure GPU skinning,
+native FootPlacementModifier3D, AnimationMixer, server logic, or all
+skeleton update work. This is a partial step toward Unreal's
+Animation Budget Allocator, not a complete replacement. No actual
+FPS improvement is claimed without profiling a running game.
+
+Unreal documentation:
+https://dev.epicgames.com/documentation/unreal-engine/animation-budget-allocator-in-unreal-engine
+
 ## Safety and portability
 
 - At most 16,384 actors; priority flags must match distances 1:1.
