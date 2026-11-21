@@ -79,6 +79,7 @@ static func prioritized_victim(voices: Array, name: String, new_db: float,
 			return DROP_NEW
 		var priority: Variant = v.get("priority", 0)
 		if not (priority is int or priority is float) \
+				or (priority is float and not is_finite(float(priority))) \
 				or str(v["name"]).is_empty() or not is_finite(float(v["audibility"])) \
 				or not is_finite(float(v["age"])) or float(v["age"]) < 0.0 \
 				or int(priority) < 0 or int(priority) > 3:

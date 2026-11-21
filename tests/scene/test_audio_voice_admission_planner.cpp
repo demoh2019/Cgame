@@ -71,7 +71,7 @@ TEST_CASE("[AudioVoiceAdmissionPlanner] Same-sound caps and original quietest-ag
 	CHECK(planner->select_victim(all, "hit", -90.0, 0, 24, 2) == AudioVoiceAdmissionPlanner::DROP_NEW);
 	all.clear();
 	for (int i = 0; i < 24; i++) {
-		all.push_back(voice("s" + itos(i), -10.0 - i, double(i)));
+		all.push_back(voice(String("s") + itos(i), -10.0 - i, double(i)));
 	}
 	CHECK(planner->select_victim(all, "new", -10.0, 0) == 23);
 	CHECK(planner->select_victim(all, "new", -80.0, 0) == AudioVoiceAdmissionPlanner::DROP_NEW);
@@ -90,6 +90,10 @@ TEST_CASE("[AudioVoiceAdmissionPlanner] Malformed data never stops an existing s
 	CHECK(planner->select_victim(all, "hit", -10.0, 1, 24, 0) == AudioVoiceAdmissionPlanner::DROP_NEW);
 	all.push_back(voice("other", Math::INF, 0.0));
 	CHECK(planner->select_victim(all, "hit", -10.0, 1) == AudioVoiceAdmissionPlanner::DROP_NEW);
+	all.clear();
+	all.push_back(voice("hit", -5.0, 0.0));
+	all[0] = voice("hit", -5.0, 0.0, 2);
+	CHECK(planner->select_victim(all, "hit", -10.0, 1, 1, 1) == AudioVoiceAdmissionPlanner::DROP_NEW);
 	all.clear();
 	all.push_back(voice("hit", -5.0, -1.0));
 	CHECK(planner->select_victim(all, "hit", -10.0, 1) == AudioVoiceAdmissionPlanner::DROP_NEW);

@@ -78,6 +78,9 @@ int AudioVoiceAdmissionPlanner::select_victim(const Array &p_voices,
 		v.name = n;
 		v.db = double(db);
 		v.age = double(age);
+		if (priority.get_type() == Variant::FLOAT && !Math::is_finite(double(priority))) {
+			return DROP_NEW;
+		}
 		v.priority = int(priority);
 		if (v.name.is_empty() || !Math::is_finite(v.db) ||
 				!Math::is_finite(v.age) || v.age < 0.0 ||
