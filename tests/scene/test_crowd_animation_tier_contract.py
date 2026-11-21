@@ -331,6 +331,56 @@ class TestCrowdPlanner(unittest.TestCase):
         self.assertTrue(any(method.get("name") == "cap_full_pose_cost"
                             for method in xml.find("methods")))
 
+    def test_native_foot_ik_telemetry_api_and_game_cost_pipeline(self):
+        foot_header = (ROOT / "scene/3d/foot_placement_modifier_3d.h").read_text()
+        foot_cpp = (ROOT / "scene/3d/foot_placement_modifier_3d.cpp").read_text()
+        foot_xml = ET.parse(ROOT / "doc/classes/FootPlacementModifier3D.xml").getroot()
+        model = (ROOT / "game/scripts/client/character_model.gd").read_text()
+        game = GAME.read_text()
+        game_tests = GAME_TEST.read_text()
+        self.assertIn("bool profiling_enabled = false", foot_header)
+        self.assertIn("get_estimated_process_cost_us", foot_header)
+        self.assertIn("get_process_sample_count", foot_header)
+        self.assertIn("smooth_process_cost_us(int p_previous_us", foot_cpp)
+        self.assertIn('D_METHOD("get_estimated_process_cost_us")', foot_cpp)
+        self.assertIn('D_METHOD("set_profiling_enabled"', foot_cpp)
+        self.assertIn("Time::get_singleton()->get_ticks_usec()", foot_cpp)
+        self.assertEqual(foot_cpp.count("_record_process_sample(started_us);"), 3)
+        self.assertIn("profiling_enabled", [
+            member.get("name") for member in foot_xml.find("members")])
+        self.assertTrue(any(method.get("name") == "smooth_process_cost_us"
+                            for method in foot_xml.find("methods")))
+        self.assertIn("func estimated_full_pose_cost_us()", model)
+        self.assertIn('get_estimated_process_cost_us', model)
+        self.assertIn('set("active", tier == 0 and not _dead)', model)
+        self.assertIn('set("active", _lod_tier == 0 and not _dead)', model)
+        self.assertIn('full_pose_cost_us.append(model.estimated_full_pose_cost_us())', game)
+        self.assertIn("native FootPlacement IK cost joins scripted", game_tests)
+        self.assertIn("tiers = cap_full_pose_cost(tiers, distances", game)
+
+    def test_native_foot_ik_sample_ema_reference(self):
+        def smooth(previous, sample):
+            if not 0 <= previous <= 100000 or not 1 <= sample <= 100000:
+                return -1
+            return sample if previous == 0 else (3 * previous + sample + 2) // 4
+
+        self.assertEqual(smooth(0, 100), 100)
+        self.assertEqual(smooth(400, 100), 325)
+        self.assertEqual(smooth(325, 100), 269)
+        self.assertEqual(smooth(100000, 100000), 100000)
+        for previous, sample in ((-1, 100), (0, 0), (100001, 1), (0, 100001)):
+            self.assertEqual(smooth(previous, sample), -1)
+        rng = random.Random(20261121)
+        for _ in range(2000):
+            previous = rng.randint(0, 100000)
+            sample = rng.randint(1, 100000)
+            value = smooth(previous, sample)
+            self.assertGreaterEqual(value, 1)
+            self.assertLessEqual(value, 100000)
+            if previous > 0:
+                self.assertGreaterEqual(value, min(previous, sample))
+                self.assertLessEqual(value, max(previous, sample))
+
     def test_reject_corrupt_inputs(self):
         self.assertEqual(plan([1, 2], [1], 1, 1), [])
         self.assertEqual(plan([float("nan")], [1], 1, 1), [])
