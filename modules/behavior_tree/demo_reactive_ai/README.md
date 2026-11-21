@@ -8,6 +8,8 @@ A self-contained 2D sandbox for this fork's **resource-backed** behavior-tree ru
 ./bin/godot.linuxbsd.editor.x86_64 --path modules/behavior_tree/demo_reactive_ai
 ```
 
+**Per-node debugger:** tracing is enabled in the demo by default. Press **T** to toggle its bounded runtime task history independently of **P** profiling. The HUD reports how many task nodes were entered on the latest AI tick and the active nested node path; the full detached timeline is available through `brain.get_trace_snapshot()`. The native engine records the precise Resource task type, status and inclusive CPU microseconds for each node. The automatic smoke test checks the root and nested chase branch.
+
 Move the blue survivor with **arrow keys**, press **F** to shout, **Space** near the infected to attack, **P** to enable/disable and reset AI CPU profiling, **R** to restart. The demo enables profiling initially so the bottom HUD line displays average/max behavior-tree decision time in microseconds. All other game NPCs default to unprofiled operation. Movement emits quieter footsteps. The wall blocks sight and attenuates sound. The NPC follows paths around the wall, remembers the player's last visible position, and investigates the last heard sound.
 
 Navigation replans are immediately triggered when switching actions; while chasing a moving target, A* refreshes on the NPC's designated one-in-four AI tick. HUD shows how many real path queries ran, their mean CPU time and the ticks until the next slot. The canonical game uses the same scheduler for large infected groups; see `game/docs/AI_UPDATE_SCHEDULING.md`.
