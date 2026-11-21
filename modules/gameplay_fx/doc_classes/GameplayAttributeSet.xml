@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GameplayAttributeSet" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Bounded numerical attributes and source-keyed modifiers inspired by Unreal Gameplay Ability System.
+	</brief_description>
+	<description>
+		An attribute stores a base value and minimum/maximum bounds. Modifiers identified by (source, attribute) each contribute an additive amount and percentage bonus. Evaluation is [code]clamp((base + sum(additive)) * max(0, 1 + sum(percent)), min, max)[/code], independent of modifier insertion order. Results are cached until any change. Instances have at most 64 attributes and 256 modifiers. Numerical input is checked for overflow and non-finite values. Server simulation must remain authoritative for gameplay; clients may aggregate presentation values from replicated snapshots.
+	</description>
+	<methods>
+		<method name="set_base_value">
+			<return type="bool" />
+			<param index="0" name="attribute" type="StringName" />
+			<param index="1" name="value" type="float" />
+			<description>Creates or updates an attribute's base value. Absolute values must be at most one billion.</description>
+		</method>
+		<method name="set_bounds">
+			<return type="bool" />
+			<param index="0" name="attribute" type="StringName" />
+			<param index="1" name="minimum" type="float" />
+			<param index="2" name="maximum" type="float" />
+			<description>Sets inclusive value bounds on an existing attribute. The minimum must not exceed the maximum.</description>
+		</method>
+		<method name="set_modifier">
+			<return type="bool" />
+			<param index="0" name="source" type="StringName" />
+			<param index="1" name="attribute" type="StringName" />
+			<param index="2" name="additive" type="float" default="0.0" />
+			<param index="3" name="percent" type="float" default="0.0" />
+			<description>Sets a modifier identified by its source and attribute. Reapplying the same pair replaces it rather than stacking invisibly. Percent must be between -1 and 8. Returns false for invalid input or missing attribute.</description>
+		</method>
+		<method name="remove_modifier">
+			<return type="bool" />
+			<param index="0" name="source" type="StringName" />
+			<param index="1" name="attribute" type="StringName" />
+			<description>Removes exactly one source/attribute modifier, returning whether it existed.</description>
+		</method>
+		<method name="clear_source">
+			<return type="int" />
+			<param index="0" name="source" type="StringName" />
+			<description>Removes all modifiers from this source and returns their number.</description>
+		</method>
+		<method name="get_value" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="attribute" type="StringName" />
+			<description>Returns the computed, bounded value of an attribute, or zero if absent.</description>
+		</method>
+		<method name="get_base_value" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="attribute" type="StringName" />
+			<description>Returns the original base value, without any modifiers.</description>
+		</method>
+		<method name="has_attribute" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="attribute" type="StringName" />
+			<description>Whether the exact attribute exists.</description>
+		</method>
+		<method name="get_attribute_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns the number of attributes.</description>
+		</method>
+		<method name="get_modifier_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns the number of source/attribute modifiers.</description>
+		</method>
+		<method name="get_snapshot" qualifiers="const">
+			<return type="Dictionary" />
+			<description>Returns an independent snapshot with attributes (tag keys mapped to base/min/max dictionaries) and modifiers (an array of source/attribute/additive/percent dictionaries).</description>
+		</method>
+		<method name="replace_snapshot">
+			<return type="bool" />
+			<param index="0" name="snapshot" type="Dictionary" />
+			<description>Atomically replaces all attributes and modifiers after validating every entry. An invalid snapshot leaves previous state and cached values unchanged.</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>Clears all attributes, modifiers and cached values.</description>
+		</method>
+	</methods>
+</class>

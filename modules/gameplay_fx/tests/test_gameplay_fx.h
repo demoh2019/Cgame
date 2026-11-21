@@ -29,6 +29,7 @@
 /**************************************************************************/
 #pragma once
 
+#include "../gameplay_attribute_set.h"
 #include "../gameplay_effect_timeline.h"
 #include "../radial_force_field_3d.h"
 #include "../sound_concurrency.h"
@@ -350,4 +351,61 @@ TEST_CASE("[GameplayFX] scoped effect snapshots keep independent periodic pulses
 	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(0.95));
 }
 
+TEST_CASE("[GameplayFX] GameplayAttributeSet additive and percentage modifiers") {
+	Ref<GameplayAttributeSet> a;
+	a.instantiate();
+	CHECK(a->set_base_value("Vital.Health", 80.0));
+	CHECK(a->set_bounds("Vital.Health", 0.0, 100.0));
+	CHECK(a->get_value("Vital.Health") == doctest::Approx(80.0));
+	CHECK(a->set_modifier("Status.Fortified", "Vital.Health", 10.0, 0.25));
+	CHECK(a->get_value("Vital.Health") == doctest::Approx(100.0)); // bounded
+	CHECK(a->set_modifier("Status.Weakened", "Vital.Health", -30.0, -0.10));
+	CHECK(a->get_value("Vital.Health") == doctest::Approx(69.0)); // (80+10-30)*1.15
+	CHECK(a->get_value("Vital.Health") == doctest::Approx(69.0)); // cached
+	CHECK(a->get_base_value("Vital.Health") == doctest::Approx(80.0));
+	CHECK(a->set_modifier("Status.Weakened", "Vital.Health", -10.0, -0.10));
+	CHECK(a->get_value("Vital.Health") == doctest::Approx(92.0));
+	CHECK(a->remove_modifier("Status.Fortified", "Vital.Health"));
+	CHECK(a->get_value("Vital.Health") == doctest::Approx(63.0));
+	CHECK(a->clear_source("Status.Weakened") == 1);
+	CHECK(a->get_value("Vital.Health") == doctest::Approx(80.0));
+	CHECK(a->get_modifier_count() == 0);
+}
+
+TEST_CASE("[GameplayFX] GameplayAttributeSet transaction validation and snapshot isolation") {
+	Ref<GameplayAttributeSet> a;
+	a.instantiate();
+	CHECK(a->set_base_value("Visual.HitResponse", 1.0));
+	CHECK(a->set_bounds("Visual.HitResponse", 0.5, 1.75));
+	CHECK(a->set_modifier("Rank.Elite", "Visual.HitResponse", 0.2));
+	CHECK(a->set_modifier("Status.Sunder", "Visual.HitResponse", 0.25));
+	CHECK(a->get_value("Visual.HitResponse") == doctest::Approx(1.45));
+	Dictionary snapshot = a->get_snapshot();
+	Ref<GameplayAttributeSet> b;
+	b.instantiate();
+	CHECK(b->replace_snapshot(snapshot));
+	CHECK(b->get_value("Visual.HitResponse") == doctest::Approx(1.45));
+	Dictionary attrs = snapshot["attributes"];
+	Dictionary original = attrs[StringName("Visual.HitResponse")];
+	original["base"] = 600.0;
+	CHECK(a->get_value("Visual.HitResponse") == doctest::Approx(1.45));
+	CHECK(b->get_value("Visual.HitResponse") == doctest::Approx(1.45));
+	CHECK_FALSE(a->set_base_value("Untrusted", Math::NaN));
+	CHECK_FALSE(a->set_modifier("Bad", "Visual.HitResponse", 0.0, Math::INF));
+	CHECK_FALSE(a->set_bounds("Visual.HitResponse", 2.0, 1.0));
+	CHECK_FALSE(a->set_modifier("Bad", "Missing", 1.0));
+	Dictionary bad_snapshot = b->get_snapshot();
+	Array bad_mods = bad_snapshot["modifiers"];
+	Dictionary invalid;
+	invalid["source"] = StringName("Status.Invalid");
+	invalid["attribute"] = StringName("Missing");
+	invalid["additive"] = 1.0;
+	invalid["percent"] = 0.0;
+	bad_mods.push_back(invalid);
+	CHECK_FALSE(b->replace_snapshot(bad_snapshot));
+	CHECK(b->get_value("Visual.HitResponse") == doctest::Approx(1.45));
+	CHECK(b->get_modifier_count() == 2);
+	CHECK(a->clear_source("Rank.Elite") == 1);
+	CHECK(a->get_value("Visual.HitResponse") == doctest::Approx(1.25));
+}
 } // namespace TestGameplayFX

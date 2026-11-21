@@ -13,6 +13,7 @@ def get_doc_classes():
         "SoundPropagation",
         "RadialForceField3D",
         "GameplayEffectTimeline",
+        "GameplayAttributeSet",
     ]
 
 
