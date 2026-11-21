@@ -1,3 +1,4 @@
+@tool
 extends Node
 ## Plays a cinematic_sequence.gd timeline onto bound nodes.
 ## Bindings map track / camera names to Node3D / Camera3D / AnimationPlayer.

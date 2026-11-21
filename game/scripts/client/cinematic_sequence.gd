@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 ## Sequencer-style cinematic timeline data model: multi-shot camera cuts,
 ## transform / float / event / animation tracks, sampling and serialization.
