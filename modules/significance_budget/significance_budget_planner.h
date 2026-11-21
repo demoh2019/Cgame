@@ -29,6 +29,11 @@ public:
 
 	// Stable-ID top-K for temporal presentation budgets. Prior selection gets
 	// only a distance bonus; objects outside max_distance cannot be retained.
+	// Niagara-like per-type quotas, globally sorted by importance then range.
+	PackedInt32Array select_effects(const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_priorities, const PackedByteArray &p_categories,
+			const PackedInt32Array &p_category_caps, int p_budget, double p_max_distance) const;
+
 	PackedInt32Array select_top_stable(const PackedFloat64Array &p_distances,
 			const PackedInt64Array &p_ids, const PackedInt64Array &p_retained_ids,
 			int p_budget, double p_max_distance, double p_hysteresis = 0.0) const;
