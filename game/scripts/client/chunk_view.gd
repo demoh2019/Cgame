@@ -1350,6 +1350,10 @@ func get_streaming_cache_cost_bytes() -> int:
 	bytes += _grass_tiles.size() * 262144
 	bytes += _groups.size() * 1048576
 	bytes += _decor_tasks.size() * 256
+	if _hlod_stone_proxy != null and is_instance_valid(_hlod_stone_proxy) and \
+			_hlod_stone_proxy.mesh != null:
+		# Conservative estimate for static faceted vertex+normal buffer.
+		bytes += _hlod_stone_proxy.mesh.surface_get_array_len(0) * 32
 	bytes += get_child_count() * 16384
 	return maxi(1, bytes)
 
@@ -1359,6 +1363,7 @@ func get_streaming_cache_cost_bytes() -> int:
 func on_streaming_cache_restored() -> void:
 	_grass_lod_elapsed = GRASS_LOD_INTERVAL
 	_grass_last_eye = Vector2.INF
+	_density_lod_elapsed = DENSITY_LOD_INTERVAL
 	_shadow_timer = SHADOW_INTERVAL
 	_shadow_last_eye = Vector2.INF
 	_streaming_tick_accumulated = _streaming_tick_interval
