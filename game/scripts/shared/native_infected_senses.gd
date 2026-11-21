@@ -9,6 +9,7 @@ const DEFAULT_SOUND_MEMORY := 3.5
 
 var _vision: Variant = null
 var _hearing: Variant = null
+var _history: Variant = null
 var _ranked_hearing_available: bool = false
 
 
@@ -18,6 +19,8 @@ func _init() -> void:
         if _vision != null:
             _vision.set_field_of_view_degrees(360.0)
             _vision.set_memory_duration(DEFAULT_SIGHT_MEMORY)
+    if ClassDB.class_exists("AIStimulusHistory2D"):
+        _history = ClassDB.instantiate("AIStimulusHistory2D")
     if ClassDB.class_exists("AIHearingSensor2D"):
         _hearing = ClassDB.instantiate("AIHearingSensor2D")
         if _hearing != null:
@@ -37,8 +40,12 @@ func has_ranked_hearing() -> bool:
     return _ranked_hearing_available
 
 
+func has_native_history() -> bool:
+    return _history != null
+
+
 func record_confirmed_sight(observer: Vector2, position: Vector2, radius: float,
-        visible: bool, delta: float) -> void:
+        visible: bool, delta: float, source_id: int = -1) -> void:
     if _vision == null or not observer.is_finite() or not position.is_finite():
         return
     if not is_finite(radius) or radius <= 0.0:
@@ -47,9 +54,14 @@ func record_confirmed_sight(observer: Vector2, position: Vector2, radius: float,
     _vision.set_lose_sight_radius(radius)
     # Already authoritative cover/visibility is passed in by infected_sight.gd.
     _vision.observe(observer, Vector2.RIGHT, position, visible, maxf(delta, 0.0))
+    # Do not record a new position while the target is hidden or outside
+    # the already-validated native sight radius.
+    if visible and _vision.is_target_visible() and _history != null:
+        _history.record_stimulus(0, position, 1.0, DEFAULT_SIGHT_MEMORY, source_id)
 
 
-func record_confirmed_sound(listener: Vector2, source: Vector2, radius: float) -> bool:
+func record_confirmed_sound(listener: Vector2, source: Vector2, radius: float,
+        source_id: int = -1) -> bool:
     if _hearing == null or not listener.is_finite() or not source.is_finite():
         return false
     if not is_finite(radius) or radius <= 0.0:
@@ -58,9 +70,16 @@ func record_confirmed_sound(listener: Vector2, source: Vector2, radius: float) -
     # InfectedHearing.audible() has already checked occlusion, wind, and noise.
     # A weaker but valid sound must not erase a louder/closer remembered
     # source merely because another player's dictionary entry was visited.
+    var accepted: bool
     if _ranked_hearing_available:
-        return bool(_hearing.report_noise_ranked(listener, source, 1.0))
-    return bool(_hearing.report_noise(listener, source, 1.0))
+        accepted = bool(_hearing.report_noise_ranked(listener, source, 1.0))
+    else:
+        accepted = bool(_hearing.report_noise(listener, source, 1.0))
+    if accepted and _history != null:
+        # The 2D history receives ONLY already-audible world events.
+        var strength := clampf(1.0 - listener.distance_to(source) / radius, 0.001, 1.0)
+        _history.record_stimulus(1, source, strength, DEFAULT_SOUND_MEMORY, source_id)
+    return accepted
 
 
 func advance_time(delta: float) -> void:
@@ -68,6 +87,8 @@ func advance_time(delta: float) -> void:
         _vision.advance_time(maxf(delta, 0.0))
     if _hearing != null:
         _hearing.advance_time(maxf(delta, 0.0))
+    if _history != null:
+        _history.advance_time(maxf(delta, 0.0))
 
 
 func remembers_sight() -> bool:
@@ -90,12 +111,29 @@ func last_heard_position() -> Vector2:
     return Vector2.ZERO
 
 
+func best_confirmed_stimulus(sense: int) -> Dictionary:
+    if _history == null:
+        return {}
+    return _history.get_best(sense)
+
+
+func get_recent_confirmed_stimuli(limit: int = 8) -> Array:
+    if _history == null:
+        return []
+    return _history.get_recent(limit)
+
+
 func get_debug_snapshot() -> Dictionary:
     # An on-demand diagnostic view. Do not replicate to ordinary clients:
     # target-memory positions belong to the authoritative server.
     return {
         "native_vision": has_native_vision(),
         "native_hearing": has_native_hearing(),
+        "native_stimulus_history": has_native_history(),
+        "stimulus_count": int(_history.get_event_count()) if _history != null else 0,
+        "best_sight_stimulus": best_confirmed_stimulus(0),
+        "best_sound_stimulus": best_confirmed_stimulus(1),
+        "recent_stimuli": get_recent_confirmed_stimuli(),
         "ranked_hearing": has_ranked_hearing(),
         "remembers_sight": remembers_sight(),
         "remembers_sound": remembers_sound(),
@@ -112,3 +150,5 @@ func reset() -> void:
         _vision.reset()
     if _hearing != null:
         _hearing.reset()
+    if _history != null:
+        _history.reset()

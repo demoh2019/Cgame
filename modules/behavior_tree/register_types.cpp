@@ -32,6 +32,7 @@
 
 #include "ai_execution_profiler.h"
 #include "ai_hearing_sensor_2d.h"
+#include "ai_stimulus_history_2d.h"
 #include "ai_simulation_lod_2d.h"
 #include "ai_update_scheduler.h"
 #include "ai_visual_sensor_2d.h"
@@ -42,6 +43,7 @@
 #ifdef TESTS_ENABLED
 #include "tests/test_ai_visual_sensor_2d.h"
 #include "tests/test_ai_hearing_sensor_2d.h"
+#include "tests/test_ai_stimulus_history_2d.h"
 #include "tests/test_reactive_behavior_tree.h"
 #include "tests/test_blackboard_compare.h"
 #include "tests/test_ai_execution_profiler.h"
@@ -68,6 +70,7 @@ void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(BehaviorTreeRunner);
 	GDREGISTER_CLASS(AIVisualSensor2D);
 	GDREGISTER_CLASS(AIHearingSensor2D);
+	GDREGISTER_CLASS(AIStimulusHistory2D);
 	GDREGISTER_CLASS(AIExecutionProfiler);
 	GDREGISTER_CLASS(AISimulationLOD2D);
 	GDREGISTER_CLASS(AIUpdateScheduler);
