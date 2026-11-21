@@ -146,6 +146,89 @@ bool GameplayEffectTimeline::replace_snapshot(const Dictionary &p_effects) {
 	return true;
 }
 
+// Exact or descendant match only; a Runtime branch must not capture RuntimeExtra.
+static bool _effect_tag_in_branch(const StringName &p_tag, const StringName &p_branch) {
+	const String tag = p_tag;
+	const String branch = p_branch;
+	return tag == branch || (tag.length() > branch.length() && tag.begins_with(branch) && tag[branch.length()] == '.');
+}
+
+bool GameplayEffectTimeline::replace_effect_branch(const StringName &p_branch, const Dictionary &p_effects) {
+	if (!_valid_tag(p_branch) || p_effects.size() > MAX_EFFECTS) {
+		return false;
+	}
+
+	// Validate all entries and normalized keys before touching the live timeline.
+	// Zero-duration entries count as seen to reject mixed String/StringName aliases.
+	Vector<Effect> validated;
+	Vector<StringName> seen;
+	for (const Variant &key : p_effects) {
+		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
+			return false;
+		}
+		const StringName tag = key;
+		if (!_valid_tag(tag) || !_effect_tag_in_branch(tag, p_branch) || seen.has(tag)) {
+			return false;
+		}
+		seen.push_back(tag);
+		const Variant value = p_effects[key];
+		if (value.get_type() != Variant::DICTIONARY) {
+			return false;
+		}
+		const Dictionary state = value;
+		if (!state.has("remaining") || !state.has("stacks")) {
+			return false;
+		}
+		const Variant raw_remaining = state["remaining"];
+		const Variant raw_stacks = state["stacks"];
+		if ((raw_remaining.get_type() != Variant::FLOAT && raw_remaining.get_type() != Variant::INT) ||
+				raw_stacks.get_type() != Variant::INT) {
+			return false;
+		}
+		const double remaining = double(raw_remaining);
+		const int64_t stacks = int64_t(raw_stacks);
+		if (!_valid_duration(remaining) || stacks < 1 || stacks > MAX_STACKS) {
+			return false;
+		}
+		if (remaining > 0.0) {
+			Effect effect;
+			effect.tag = tag;
+			effect.remaining = remaining;
+			effect.stacks = int(stacks);
+			validated.push_back(effect);
+		}
+	}
+
+	Vector<Effect> next;
+	for (const Effect &effect : effects) {
+		if (!_effect_tag_in_branch(effect.tag, p_branch)) {
+			next.push_back(effect);
+		}
+	}
+	if (next.size() + validated.size() > MAX_EFFECTS) {
+		return false;
+	}
+	for (const Effect &effect : validated) {
+		next.push_back(effect);
+	}
+
+	// Idempotent repeated snapshots do not rebuild the timeline.
+	bool unchanged = effects.size() == next.size();
+	if (unchanged) {
+		for (int i = 0; i < next.size(); i++) {
+			if (effects[i].tag != next[i].tag || effects[i].stacks != next[i].stacks ||
+					effects[i].remaining != next[i].remaining) {
+				unchanged = false;
+				break;
+			}
+		}
+	}
+	if (!unchanged) {
+		effects = next;
+	}
+	return true;
+}
+
 Dictionary GameplayEffectTimeline::get_snapshot() const {
 	Dictionary result;
 	for (const Effect &effect : effects) {
@@ -196,6 +279,7 @@ void GameplayEffectTimeline::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remove_effect", "tag"), &GameplayEffectTimeline::remove_effect);
 	ClassDB::bind_method(D_METHOD("clear"), &GameplayEffectTimeline::clear);
 	ClassDB::bind_method(D_METHOD("replace_snapshot", "effects"), &GameplayEffectTimeline::replace_snapshot);
+	ClassDB::bind_method(D_METHOD("replace_effect_branch", "branch", "effects"), &GameplayEffectTimeline::replace_effect_branch);
 	ClassDB::bind_method(D_METHOD("get_snapshot"), &GameplayEffectTimeline::get_snapshot);
 	ClassDB::bind_method(D_METHOD("tick", "delta"), &GameplayEffectTimeline::tick);
 	ClassDB::bind_method(D_METHOD("get_remaining", "tag"), &GameplayEffectTimeline::get_remaining);
