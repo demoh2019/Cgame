@@ -32,6 +32,7 @@
 
 #include "ai_execution_profiler.h"
 #include "ai_hearing_sensor_2d.h"
+#include "ai_stimulus_history_2d.h"
 #include "ai_simulation_lod_2d.h"
 #include "ai_update_scheduler.h"
 #include "ai_visual_sensor_2d.h"
