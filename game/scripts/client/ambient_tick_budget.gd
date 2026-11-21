@@ -24,6 +24,8 @@ var _pressure: float = 0.0
 var _time_budget_us: int = 2500
 var _frame_cost_us: int = 0
 var _previous_frame_cost_us: int = 0
+var _lane_frame_cost_us: Dictionary = {}
+var _lane_previous_frame_cost_us: Dictionary = {}
 var _updated_total: int = 0
 var _skipped_total: int = 0
 var _last_updated: int = 0
@@ -36,6 +38,10 @@ func begin_frame(delta: float, quality: int) -> void:
 	_quality = safe_quality
 	_previous_frame_cost_us = _frame_cost_us
 	_frame_cost_us = 0
+	# Mirror the native fixed-size frame rotation without a dictionary copy.
+	for lane in LANES:
+		_lane_previous_frame_cost_us[lane] = int(_lane_frame_cost_us.get(lane, 0))
+		_lane_frame_cost_us[lane] = 0
 	_spent = 0
 	_last_updated = 0
 	_last_skipped = 0
@@ -136,6 +142,8 @@ func reset() -> void:
 	_pressure = 0.0
 	_frame_cost_us = 0
 	_previous_frame_cost_us = 0
+	_lane_frame_cost_us.clear()
+	_lane_previous_frame_cost_us.clear()
 	_budget = 1
 	_spent = 0
 	_last_updated = 0
@@ -186,6 +194,8 @@ func record_cost(lane: String, elapsed_us: int) -> bool:
 		_estimates[lane] = elapsed_us if previous == 0 else \
 			int((3 * previous + elapsed_us + 2) / 4)
 	_frame_cost_us = mini(1000000000, _frame_cost_us + elapsed_us)
+	_lane_frame_cost_us[lane] = mini(1000000000,
+		int(_lane_frame_cost_us.get(lane, 0)) + elapsed_us)
 	return true
 
 
@@ -225,6 +235,11 @@ func set_lane_importance(lane: String, importance: float) -> bool:
 
 func get_lane_importance(lane: String) -> float:
 	return float(_importance.get(lane, 1.0)) if LANES.has(lane) else -1.0
+
+
+## Caller-measured CPU microseconds from the previous completed frame.
+func get_lane_last_frame_cost_us(lane: String) -> int:
+	return int(_lane_previous_frame_cost_us.get(lane, 0)) if LANES.has(lane) else -1
 
 
 func get_lane_estimated_cost_us(lane: String) -> int:

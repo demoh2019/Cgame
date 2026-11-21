@@ -311,3 +311,56 @@ func run(t) -> void:
 		"sunlit insects update more frequently than daytime bats")
 	for lane in AmbientTickBudget.LANES:
 		t.check(int(rate_counts[lane]) >= 20, "%s still gets regular updates" % lane)
+
+
+	t.current = "per-lane completed-frame CPU profiler parity"
+	var samples := AmbientTickBudget.new()
+	var native_samples: Object = null
+	if ClassDB.class_exists("FrameUpdateBudget"):
+		var candidate_samples: Object = ClassDB.instantiate("FrameUpdateBudget")
+		if candidate_samples != null and candidate_samples.has_method("get_lane_last_frame_cost_us"):
+			native_samples = candidate_samples
+			for lane in AmbientTickBudget.LANES:
+				t.check(bool(native_samples.call("register_lane", StringName(lane))),
+					"native per-lane profiler registers %s" % lane)
+	samples.begin_frame(0.01, 3)
+	if native_samples != null:
+		native_samples.call("begin_frame", 0.01, 3)
+	for lane in AmbientTickBudget.LANES:
+		samples.consume(lane, 0.01)
+		if native_samples != null:
+			native_samples.call("consume", StringName(lane), 0.01)
+	for report in [["dust_devils", 120], ["dust_devils", 45], ["dragonflies", 70]]:
+		t.check(samples.record_cost(str(report[0]), int(report[1])), "script CPU sample accepted")
+		if native_samples != null:
+			t.check(bool(native_samples.call("record_cost", StringName(str(report[0])), int(report[1]))),
+				"native CPU sample accepted")
+	t.eq(samples.get_lane_last_frame_cost_us("dust_devils"), 0,
+		"partial current-frame costs are hidden")
+	t.eq(samples.get_lane_last_frame_cost_us("missing"), -1, "unknown lane reports -1")
+	samples.begin_frame(0.01, 3)
+	if native_samples != null:
+		native_samples.call("begin_frame", 0.01, 3)
+	for lane in AmbientTickBudget.LANES:
+		var measured: int = samples.get_lane_last_frame_cost_us(lane)
+		t.eq(measured, 165 if lane == "dust_devils" else (70 if lane == "dragonflies" else 0),
+			"correct completed CPU cost for %s" % lane)
+		if native_samples != null:
+			t.eq(int(native_samples.call("get_lane_last_frame_cost_us", StringName(lane))), measured,
+				"native/script per-lane CPU parity for %s" % lane)
+	samples.begin_frame(0.01, 3)
+	if native_samples != null:
+		native_samples.call("begin_frame", 0.01, 3)
+	for lane in AmbientTickBudget.LANES:
+		t.eq(samples.get_lane_last_frame_cost_us(lane), 0, "idle CPU sample clears for %s" % lane)
+		if native_samples != null:
+			t.eq(int(native_samples.call("get_lane_last_frame_cost_us", StringName(lane))), 0,
+				"native idle sample clears for %s" % lane)
+	samples.record_cost("dust_devils", 200)
+	samples.reset()
+	t.eq(samples.get_lane_last_frame_cost_us("dust_devils"), 0, "reset clears lane telemetry")
+	if native_samples != null:
+		native_samples.call("record_cost", &"dust_devils", 200)
+		native_samples.call("reset")
+		t.eq(int(native_samples.call("get_lane_last_frame_cost_us", &"dust_devils")), 0,
+			"native reset clears lane telemetry")

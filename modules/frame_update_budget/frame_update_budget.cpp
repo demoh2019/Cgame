@@ -22,6 +22,7 @@ void FrameUpdateBudget::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_lane_rate_scale", "lane"), &FrameUpdateBudget::get_lane_rate_scale);
 	ClassDB::bind_method(D_METHOD("get_lane_importance", "lane"), &FrameUpdateBudget::get_lane_importance);
 	ClassDB::bind_method(D_METHOD("get_lane_estimated_cost_us", "lane"), &FrameUpdateBudget::get_lane_estimated_cost_us);
+	ClassDB::bind_method(D_METHOD("get_lane_last_frame_cost_us", "lane"), &FrameUpdateBudget::get_lane_last_frame_cost_us);
 	ClassDB::bind_method(D_METHOD("get_reserved_estimated_cost_us"), &FrameUpdateBudget::get_reserved_estimated_cost_us);
 	ClassDB::bind_method(D_METHOD("current_frame_cost_us"), &FrameUpdateBudget::current_frame_cost_us);
 	ClassDB::bind_method(D_METHOD("last_frame_cost_us"), &FrameUpdateBudget::last_frame_cost_us);
@@ -104,6 +105,7 @@ bool FrameUpdateBudget::record_cost(const StringName &p_lane, int64_t p_elapsed_
 					(3 * lane.estimated_cost_us + p_elapsed_us + 2) / 4;
 		}
 		frame_cost_us = MIN(int64_t(1000000000), frame_cost_us + p_elapsed_us);
+		lane.frame_cost_us = MIN(int64_t(1000000000), lane.frame_cost_us + p_elapsed_us);
 		return true;
 	}
 	return false;
@@ -162,6 +164,15 @@ int64_t FrameUpdateBudget::get_lane_estimated_cost_us(const StringName &p_lane) 
 	return -1;
 }
 
+int64_t FrameUpdateBudget::get_lane_last_frame_cost_us(const StringName &p_lane) const {
+	for (int i = 0; i < lanes.size(); i++) {
+		if (lanes[i].name == p_lane) {
+			return lanes[i].previous_frame_cost_us;
+		}
+	}
+	return -1;
+}
+
 void FrameUpdateBudget::begin_frame(double p_delta, int p_quality) {
 	const int next_quality = CLAMP(p_quality, 0, 3);
 	quality_changed = profile_dirty || next_quality != quality;
@@ -170,6 +181,12 @@ void FrameUpdateBudget::begin_frame(double p_delta, int p_quality) {
 	spent = 0;
 	previous_frame_cost_us = frame_cost_us;
 	frame_cost_us = 0;
+	// Rotate the at-most-64 completed CPU samples without heap allocations.
+	for (int i = 0; i < lanes.size(); i++) {
+		Lane &lane = lanes.write[i];
+		lane.previous_frame_cost_us = lane.frame_cost_us;
+		lane.frame_cost_us = 0;
+	}
 	last_updated = 0;
 	last_skipped = 0;
 	reserved_estimated_cost_us = 0;
@@ -298,6 +315,8 @@ void FrameUpdateBudget::reset() {
 	for (int i = 0; i < lanes.size(); i++) {
 		lanes.write[i].elapsed = 0.0;
 		lanes.write[i].overdue_frames = 0;
+		lanes.write[i].frame_cost_us = 0;
+		lanes.write[i].previous_frame_cost_us = 0;
 	}
 	quality = -1;
 	quality_changed = true;

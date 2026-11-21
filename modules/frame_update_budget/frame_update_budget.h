@@ -24,6 +24,8 @@ class FrameUpdateBudget : public RefCounted {
 		double importance = 1.0;
 		double rate_scale = 1.0; // Frequency multiplier; 1.0 keeps the tier baseline.
 		int64_t estimated_cost_us = 0;
+		int64_t frame_cost_us = 0; // CPU microseconds reported during this frame.
+		int64_t previous_frame_cost_us = 0; // Completed-frame sample; zero if idle.
 		int overdue_frames = 0;
 	};
 
@@ -70,6 +72,7 @@ public:
 	double get_lane_rate_scale(const StringName &p_lane) const;
 	double get_lane_importance(const StringName &p_lane) const;
 	int64_t get_lane_estimated_cost_us(const StringName &p_lane) const;
+	int64_t get_lane_last_frame_cost_us(const StringName &p_lane) const;
 	int64_t get_reserved_estimated_cost_us() const { return reserved_estimated_cost_us; }
 	int64_t current_frame_cost_us() const { return frame_cost_us; }
 	int64_t last_frame_cost_us() const { return previous_frame_cost_us; }
