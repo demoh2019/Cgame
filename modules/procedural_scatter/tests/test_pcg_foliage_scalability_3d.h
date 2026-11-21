@@ -18,7 +18,8 @@ TEST_CASE("[PCGFoliageScalability3D] stable bit-reversed distributed prefixes") 
 	CHECK(budget->spread_indices(10) == expected);
 	CHECK(budget->spread_indices(10) == expected); // Idempotent; no RNG.
 	CHECK(budget->spread_indices(0).is_empty());
-	CHECK(budget->spread_indices(1) == PackedInt32Array({ 0 }));
+	const PackedInt32Array one = { 0 };
+	CHECK(budget->spread_indices(1) == one);
 	CHECK(budget->spread_indices(-1).is_empty());
 	CHECK(budget->spread_indices(65537).is_empty());
 	const PackedInt32Array max_order = budget->spread_indices(65536);
@@ -43,19 +44,18 @@ TEST_CASE("[PCGFoliageScalability3D] reversible density tiers and smooth distanc
 	budget.instantiate();
 	const PackedInt32Array counts = { 100, 100, 100, 0, 1 };
 	const PackedFloat32Array distances = { 18, 71.5f, 125, 70, 125 };
-	CHECK(budget->plan_visible_counts(counts, distances, 0) ==
-			PackedInt32Array({ 42, 31, 20, 0, 1 }));
-	CHECK(budget->plan_visible_counts(counts, distances, 1) ==
-			PackedInt32Array({ 68, 55, 42, 0, 1 }));
-	CHECK(budget->plan_visible_counts(counts, distances, 2) ==
-			PackedInt32Array({ 88, 79, 70, 0, 1 }));
+	const PackedInt32Array performance = { 42, 31, 20, 0, 1 };
+	CHECK(budget->plan_visible_counts(counts, distances, 0) == performance);
+	const PackedInt32Array balanced = { 68, 55, 42, 0, 1 };
+	CHECK(budget->plan_visible_counts(counts, distances, 1) == balanced);
+	const PackedInt32Array high = { 88, 79, 70, 0, 1 };
+	CHECK(budget->plan_visible_counts(counts, distances, 2) == high);
 	CHECK(budget->plan_visible_counts(counts, distances, 3) == counts);
 	CHECK(budget->plan_visible_counts(counts, distances, 1) ==
 			budget->plan_visible_counts(counts, distances, 1));
-	CHECK(budget->plan_visible_counts({ 100, 100 }, { 0, 1000 }, 0) ==
-			PackedInt32Array({ 42, 20 }));
-	CHECK(budget->plan_visible_counts({ 100, 100 }, { 10, 30 }, 0, 10, 30) ==
-			PackedInt32Array({ 42, 20 }));
+	const PackedInt32Array near_and_far = { 42, 20 };
+	CHECK(budget->plan_visible_counts({ 100, 100 }, { 0, 1000 }, 0) == near_and_far);
+	CHECK(budget->plan_visible_counts({ 100, 100 }, { 10, 30 }, 0, 10, 30) == near_and_far);
 }
 
 TEST_CASE("[PCGFoliageScalability3D] atomic validation and bounded cluster counts") {
