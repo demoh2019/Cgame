@@ -96,6 +96,22 @@ bool GameplayTagContainer::replace_tag_branch(const StringName &p_query, const P
 		replacements.push_back(StringName(value));
 	}
 
+	// Frequent network snapshots often repeat the same state. Avoid allocating a
+	// second tag vector or firing resource change notifications for a no-op.
+	int matched = 0;
+	bool unchanged = true;
+	for (const StringName &tag : tags) {
+		if (!tag_matches(tag, p_query)) {
+			continue;
+		}
+		if (matched >= replacements.size() || tag != replacements[matched]) {
+			unchanged = false;
+		}
+		matched++;
+	}
+	if (unchanged && matched == replacements.size()) {
+		return true;
+	}
 	Vector<StringName> next;
 	for (const StringName &tag : tags) {
 		if (!tag_matches(tag, p_query)) {
