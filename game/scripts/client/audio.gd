@@ -17,6 +17,7 @@ const CONCURRENCY_GROUPS := {"enemy_hurt": 4, "coin": 3, "blaster": 4, "blaster_
 var _concurrency: Node = null
 var _concurrency_tried := false
 var _native_voice_admission: Object = null
+var _voice_hold_rejections: int = 0
 var _sfx_bus := -1
 var _sfx_lowpass := -1
 var _rain: AudioStreamPlayer
@@ -216,14 +217,20 @@ func play_gore(bone: bool, position: Vector3, volume_db: float = -6.0) -> void:
 	player.finished.connect(player.queue_free)
 
 
-## Native C++ when available, stock Godot retains the identical script policy.
+## Native anti-thrashing planner when available. Older engine builds use
+## the equivalent GDScript policy rather than an unprotected legacy API.
 func _choose_voice_victim(snapshot: Array, sound_name: String,
 		loudness: float, priority: int) -> int:
-	if _native_voice_admission != null and _native_voice_admission.has_method("select_victim"):
-		return int(_native_voice_admission.call("select_victim",
+	if _native_voice_admission != null and _native_voice_admission.has_method("select_victim_stable"):
+		return int(_native_voice_admission.call("select_victim_stable",
 			snapshot, sound_name, loudness, priority,
-			AudioVoices.MAX_VOICES, AudioVoices.SAME_SOUND_MAX))
-	return AudioVoices.prioritized_victim(snapshot, sound_name, loudness, priority)
+			AudioVoices.MAX_VOICES, AudioVoices.SAME_SOUND_MAX,
+			AudioVoices.STEAL_HOLD_SECONDS, AudioVoices.STEAL_EARLY_OVERRIDE_DB))
+	return AudioVoices.prioritized_victim_stable(snapshot, sound_name, loudness, priority)
+
+
+func get_voice_hold_rejections() -> int:
+	return _voice_hold_rejections
 
 
 func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> void:
@@ -244,6 +251,10 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 			"priority": int(v.get("priority", 0))})
 	var cull: int = _choose_voice_victim(snapshot, sound_name, loudness, priority)
 	if cull == AudioVoices.DROP_NEW:
+		# Count only voice holds, not ordinary too-quiet or malformed requests.
+		# This comparison is evaluated only on rejection, not the hot play path.
+		if AudioVoices.prioritized_victim(snapshot, sound_name, loudness, priority) >= 0:
+			_voice_hold_rejections += 1
 		return
 	var player := AudioStreamPlayer3D.new()
 	player.stream = stream
