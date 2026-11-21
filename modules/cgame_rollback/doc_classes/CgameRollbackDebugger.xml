@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameRollbackDebugger" inherits="RefCounted" api_type="core" keywords="rollback,debug,netcode,desync" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Debug view over a [CgameRollbackNetcode] that records rollbacks, prediction misses and desyncs.
+	</brief_description>
+	<description>
+		[CgameRollbackDebugger] records every rollback (from and to frame, number of resimulated frames, the player whose late input caused it), the per-player prediction miss rate, desync frames together with a state diff, and can produce a text report.
+		Drive the netcode through this wrapper ([method add_remote_input], [method advance], [method process]) so that inputs can be classified; the netcode itself is not modified.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_local_input">
+			<return type="int" />
+			<param index="0" name="player_id" type="int" />
+			<param index="1" name="input" type="Dictionary" />
+			<description>
+				Forwards to [method CgameRollbackNetcode.add_local_input].
+			</description>
+		</method>
+		<method name="add_remote_input">
+			<return type="void" />
+			<param index="0" name="player_id" type="int" />
+			<param index="1" name="frame" type="int" />
+			<param index="2" name="input" type="Dictionary" />
+			<description>
+				Forwards to [method CgameRollbackNetcode.add_remote_input] and classifies the input: it counts as late when the frame was already simulated, and as a misprediction when it differed from the input that was used. The player that causes a rollback is remembered as its cause.
+			</description>
+		</method>
+		<method name="advance">
+			<return type="bool" />
+			<description>
+				Calls [method CgameRollbackNetcode.advance], records the resulting state in a bounded history and records any rollback that happened.
+			</description>
+		</method>
+		<method name="attach">
+			<return type="void" />
+			<param index="0" name="net" type="CgameRollbackNetcode" />
+			<description>
+				Attaches the debugger to [param net] and starts listening to its [signal CgameRollbackNetcode.desync_detected] signal.
+			</description>
+		</method>
+		<method name="attach_remote_state">
+			<return type="Array" />
+			<param index="0" name="frame" type="int" />
+			<param index="1" name="remote_state" type="Dictionary" />
+			<description>
+				Provides the remote peer's state for a desync at [param frame] and returns the sorted key paths at which it differs from the local state (see [method diff_states]). The diff is stored in the desync record.
+			</description>
+		</method>
+		<method name="diff_states" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="a" type="Variant" />
+			<param index="1" name="b" type="Variant" />
+			<param index="2" name="path" type="String" default="&quot;&quot;" />
+			<description>
+				Returns the sorted key paths (for example [code]"players.1.x"[/code] or [code]"items[2]"[/code]) at which [param a] and [param b] differ.
+			</description>
+		</method>
+		<method name="get_net" qualifiers="const">
+			<return type="CgameRollbackNetcode" />
+			<description>
+				Returns the attached netcode.
+			</description>
+		</method>
+		<method name="miss_rate" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="player_id" type="int" />
+			<description>
+				Returns mispredicted inputs divided by late inputs of [param player_id], or [code]0.0[/code] if none arrived late.
+			</description>
+		</method>
+		<method name="process">
+			<return type="void" />
+			<description>
+				Calls [method CgameRollbackNetcode.process] and records any rollback that happened.
+			</description>
+		</method>
+		<method name="report" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns a multi-line text report with frame counters, rollbacks, per-player miss rates and desyncs.
+			</description>
+		</method>
+		<method name="state_history" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="frame" type="int" />
+			<description>
+				Returns the state recorded when [param frame] was reached (it may be mispredicted if a rollback followed), or an empty dictionary.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="desyncs" type="Array" setter="" getter="get_desyncs" default="[]">
+			Desync records [code]{frame, local_checksum, remote_checksum, local_state, diff}[/code].
+		</member>
+		<member name="late_inputs" type="Dictionary" setter="" getter="get_late_inputs" default="{}">
+			Per player, the number of remote inputs that arrived for an already simulated frame.
+		</member>
+		<member name="mispredictions" type="Dictionary" setter="" getter="get_mispredictions" default="{}">
+			Per player, the number of late inputs that differed from the prediction.
+		</member>
+		<member name="net" type="CgameRollbackNetcode" setter="attach" getter="get_net">
+			The attached netcode.
+		</member>
+		<member name="rollbacks" type="Array" setter="" getter="get_rollbacks" default="[]">
+			Rollback records [code]{from_frame, to_frame, frames_resimulated, cause}[/code].
+		</member>
+	</members>
+</class>

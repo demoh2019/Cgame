@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgamePhysicsRollback" inherits="RefCounted" api_type="core" keywords="physics,rollback,lag compensation,netcode" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Connects a [CgameDeterministicPhysics] world to a [CgameRollbackNetcode] and provides lag-compensated ray casts.
+	</brief_description>
+	<description>
+		[CgamePhysicsRollback] owns a [CgameDeterministicPhysics] world ([member world]) and acts as the native step provider of a [CgameRollbackNetcode], so rollback and resimulation of physics run without any script call. The state handed to the netcode is [code]{"phys": PackedByteArray, "tick": int}[/code]. Player inputs are dictionaries [code]{"force": Vector3}[/code]; each player owns one body (see [method bind_player]) and the input is applied as a force clamped to [member max_force] for that step.
+		Lag compensation: every simulated state is also kept in a bounded ring (tick to snapshot) so that [method rewind_query] can pose all bodies as they were at a past time, interpolating between the two bracketing snapshots (lerp for positions, slerp for rotations), and cast a ray against that past world. The ring is keyed by tick, so resimulation after a rollback overwrites mispredicted entries with corrected ones.
+		[codeblock]
+		var physics := CgamePhysicsRollback.new()
+		physics.world.add_body(1, CgameDeterministicPhysics.SHAPE_SPHERE, 1.0, Vector3(0, 1, 0), Vector3(0.5, 0, 0))
+		physics.bind_player(10, 1)
+		var net := CgameRollbackNetcode.new()
+		physics.setup_net(net, [10, 20], [10], 1.0 / 60.0, 2, 8)
+		# Server side lag compensation:
+		var hit := physics.rewind_query(shot_time, muzzle, direction)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="bind_player">
+			<return type="void" />
+			<param index="0" name="player_id" type="int" />
+			<param index="1" name="body_id" type="int" />
+			<description>
+				Assigns the body that is controlled by [param player_id].
+			</description>
+		</method>
+		<method name="get_dt" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the time step passed to [method setup_net].
+			</description>
+		</method>
+		<method name="get_player_bodies" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the mapping from player id to body id.
+			</description>
+		</method>
+		<method name="history_size" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of ticks held in the lag-compensation ring.
+			</description>
+		</method>
+		<method name="initial_state">
+			<return type="Dictionary" />
+			<description>
+				Returns the initial netcode state built from the current world and seeds the lag-compensation ring.
+			</description>
+		</method>
+		<method name="newest_time" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the simulation time of the newest stored tick, in seconds.
+			</description>
+		</method>
+		<method name="oldest_time" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the simulation time of the oldest stored tick, in seconds.
+			</description>
+		</method>
+		<method name="rewind_query">
+			<return type="Dictionary" />
+			<param index="0" name="time" type="float" />
+			<param index="1" name="ray_origin" type="Vector3" />
+			<param index="2" name="ray_direction" type="Vector3" />
+			<param index="3" name="max_distance" type="float" default="1000.0" />
+			<description>
+				Casts a ray against the world as it was at [param time] (seconds of simulation time, clamped to the stored history). Returns [code]{"hit": bool, "id": int, "t": float, "point": Vector3, "alpha": float, "tick": int}[/code], where [code]tick[/code] is the earlier of the two snapshots that were blended and [code]alpha[/code] the blend factor.
+			</description>
+		</method>
+		<method name="setup_net">
+			<return type="void" />
+			<param index="0" name="net" type="CgameRollbackNetcode" />
+			<param index="1" name="players" type="Array" />
+			<param index="2" name="local_players" type="Array" />
+			<param index="3" name="dt" type="float" default="0.0166667" />
+			<param index="4" name="input_delay" type="int" default="0" />
+			<param index="5" name="max_prediction" type="int" default="8" />
+			<description>
+				Configures [param net] to simulate this physics world, using the native step. The netcode keeps a reference to this object.
+			</description>
+		</method>
+		<method name="state_checksum" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="state" type="Dictionary" />
+			<description>
+				Returns a checksum of the physics snapshot inside [param state].
+			</description>
+		</method>
+		<method name="step_state">
+			<return type="Dictionary" />
+			<param index="0" name="state" type="Dictionary" />
+			<param index="1" name="inputs" type="Dictionary" />
+			<param index="2" name="dt" type="float" />
+			<description>
+				The pure, deterministic step the netcode uses: restores the snapshot in [param state], applies the player forces in sorted player order, steps the world and returns the new state. It can also be passed as a [Callable] to [method CgameRollbackNetcode.setup].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="history_capacity" type="int" setter="set_history_capacity" getter="get_history_capacity" default="120">
+			The number of ticks kept for lag compensation.
+		</member>
+		<member name="max_force" type="float" setter="set_max_force" getter="get_max_force" default="60.0">
+			Player input forces are clamped to this length.
+		</member>
+		<member name="world" type="CgameDeterministicPhysics" setter="" getter="get_world">
+			The physics world simulated by this adapter.
+		</member>
+	</members>
+</class>

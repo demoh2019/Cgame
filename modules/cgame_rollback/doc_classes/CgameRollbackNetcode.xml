@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameRollbackNetcode" inherits="RefCounted" api_type="core" keywords="rollback,netcode,ggpo,prediction,multiplayer" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		GGPO-style rollback netcode core with input prediction, resimulation and desync detection.
+	</brief_description>
+	<description>
+		[CgameRollbackNetcode] runs a deterministic simulation for a fixed set of players and keeps it consistent between peers. Local inputs are applied immediately (optionally delayed by [member input_delay] frames), missing remote inputs are predicted by repeating the last known input, and when a real input arrives that differs from the prediction the simulation is restored from a bounded snapshot ring and resimulated up to the present.
+		Frame semantics: the snapshot for frame [code]f[/code] is the state at the start of frame [code]f[/code], before that frame's inputs. [method advance] simulates the current frame [code]f[/code] to [code]f + 1[/code]. A frame is confirmed once real inputs of every player are known for it and all earlier frames. When the simulation is more than [member max_prediction] frames ahead of the confirmed frame, [method advance] stalls and returns [code]false[/code]. A [member max_prediction] of [code]0[/code] therefore behaves like deterministic lockstep.
+		The step is either a [Callable] with the signature [code]func(state: Dictionary, inputs: Dictionary, dt: float) -> Dictionary[/code] or a native step provider (see [CgamePhysicsRollback]). The step receives a deep copy of the state and may mutate and return it; [code]inputs[/code] maps player id to the input [Dictionary] in sorted player order. The step must be deterministic. Player ids are integers.
+		Transport glue is up to the caller: send the entries of [method drain_outgoing] to the other peers, feed received entries to [method add_remote_input], and optionally exchange [method get_checksum_report] results and feed them to [method add_remote_checksum] to detect desyncs.
+		[codeblock]
+		var net := CgameRollbackNetcode.new()
+		net.setup(step_function, initial_state, [1, 2], [1], 1.0 / 60.0, 2, 8)
+		# Every tick:
+		net.add_local_input(1, {"dx": 1})
+		for entry in net.drain_outgoing():
+		    send_to_peer(entry)
+		net.advance()
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_local_input">
+			<return type="int" />
+			<param index="0" name="player_id" type="int" />
+			<param index="1" name="input" type="Dictionary" />
+			<description>
+				Schedules [param input] for frame (current local frame + [member input_delay]) and returns that frame. The input is also queued for [method drain_outgoing]. Returns [code]-1[/code] if [param player_id] is not a local player.
+			</description>
+		</method>
+		<method name="add_remote_checksum">
+			<return type="void" />
+			<param index="0" name="frame" type="int" />
+			<param index="1" name="checksum" type="int" />
+			<description>
+				Feeds a checksum reported by a remote peer for [param frame]. If the local checksum of that frame differs once the frame is final, [signal desync_detected] is emitted.
+			</description>
+		</method>
+		<method name="add_remote_input">
+			<return type="void" />
+			<param index="0" name="player_id" type="int" />
+			<param index="1" name="frame" type="int" />
+			<param index="2" name="input" type="Dictionary" />
+			<description>
+				Feeds the real input of a remote player for [param frame]. Duplicates, unknown players and frames older than the retained history are ignored. If the frame was already simulated with a different predicted input, a rollback is scheduled and applied by the next [method process] or [method advance].
+			</description>
+		</method>
+		<method name="advance">
+			<return type="bool" />
+			<description>
+				Applies a pending rollback (if any), then simulates one frame. Returns [code]false[/code] when the prediction window is exhausted ([method is_stalled]) or the step failed.
+			</description>
+		</method>
+		<method name="checksum_of" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="frame" type="int" />
+			<description>
+				Returns the checksum of the state at the start of [param frame] (from the snapshot ring or the retained checksums of pruned final frames), or [code]0[/code] if it is unknown.
+			</description>
+		</method>
+		<method name="drain_outgoing">
+			<return type="Array" />
+			<description>
+				Returns and clears the queued local inputs as entries [code]{player, frame, input}[/code]. The input delay prefill frames are included.
+			</description>
+		</method>
+		<method name="get_checksum_report">
+			<return type="Array" />
+			<description>
+				Returns new entries [code]{frame, checksum}[/code] for frames that became final since the last call. Pending rollbacks are applied first so that reports never come from mispredicted snapshots.
+			</description>
+		</method>
+		<method name="get_input_floor" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="player_id" type="int" />
+			<description>
+				Returns the first frame for which inputs of [param player_id] are still stored.
+			</description>
+		</method>
+		<method name="get_pending_rollback" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the earliest frame a scheduled rollback will restore, or [code]-1[/code] if none is pending.
+			</description>
+		</method>
+		<method name="get_snapshot" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="frame" type="int" />
+			<description>
+				Returns a deep copy of the state snapshot at the start of [param frame], or an empty dictionary if it is not in the ring.
+			</description>
+		</method>
+		<method name="get_state" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the current simulation state.
+			</description>
+		</method>
+		<method name="get_used_input" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="player_id" type="int" />
+			<param index="1" name="frame" type="int" />
+			<description>
+				Returns the input that was actually simulated for [param player_id] at [param frame] (real or predicted), or an empty dictionary.
+			</description>
+		</method>
+		<method name="has_desync" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if at least one desync was detected.
+			</description>
+		</method>
+		<method name="has_native_step" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the simulation is stepped by a native step provider instead of a [Callable].
+			</description>
+		</method>
+		<method name="has_real_input" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="player_id" type="int" />
+			<param index="1" name="frame" type="int" />
+			<description>
+				Returns [code]true[/code] if a real (not predicted) input is stored for [param player_id] at [param frame].
+			</description>
+		</method>
+		<method name="has_snapshot" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="frame" type="int" />
+			<description>
+				Returns [code]true[/code] if the snapshot ring holds the state at the start of [param frame].
+			</description>
+		</method>
+		<method name="has_used_input" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="player_id" type="int" />
+			<param index="1" name="frame" type="int" />
+			<description>
+				Returns [code]true[/code] if an input for [param player_id] was already simulated at [param frame].
+			</description>
+		</method>
+		<method name="input_for" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="player_id" type="int" />
+			<param index="1" name="frame" type="int" />
+			<description>
+				Returns the input that was or will be used for [param player_id] at [param frame]: the real input if known, otherwise the prediction (the last known input is repeated).
+			</description>
+		</method>
+		<method name="is_stalled" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the simulation is [member max_prediction] frames or more ahead of the confirmed frame.
+			</description>
+		</method>
+		<method name="process">
+			<return type="void" />
+			<description>
+				Resolves a pending rollback caused by late or corrected inputs without simulating a new frame.
+			</description>
+		</method>
+		<method name="rollback_to">
+			<return type="bool" />
+			<param index="0" name="frame" type="int" />
+			<description>
+				Restores the snapshot at [param frame] and resimulates up to the current frame. Returns [code]false[/code] if [param frame] is in the future or no longer in the snapshot ring.
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="step" type="Callable" />
+			<param index="1" name="initial_state" type="Dictionary" />
+			<param index="2" name="players" type="Array" />
+			<param index="3" name="local_players" type="Array" />
+			<param index="4" name="dt" type="float" default="0.0166667" />
+			<param index="5" name="input_delay" type="int" default="0" />
+			<param index="6" name="max_prediction" type="int" default="8" />
+			<param index="7" name="snapshot_capacity" type="int" default="0" />
+			<description>
+				Resets the netcode. [param step] is the deterministic step function (it may be an invalid [Callable] when a native step provider is attached afterwards, see [method CgamePhysicsRollback.setup_net]). [param players] lists all player ids, [param local_players] the ones controlled on this peer. Local players receive [param input_delay] empty prefill inputs. [param snapshot_capacity] is raised to at least [code]max_prediction + 3[/code].
+			</description>
+		</method>
+		<method name="snapshot_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of snapshots currently held in the ring.
+			</description>
+		</method>
+		<method name="state_checksum" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="state" type="Dictionary" />
+			<description>
+				Returns a checksum of [param state] computed from its serialized representation.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="confirmed_frame" type="int" setter="" getter="get_confirmed_frame" default="-1">
+			The highest frame for which real inputs of every player are known for it and all earlier frames, or [code]-1[/code].
+		</member>
+		<member name="desync_frames" type="Array" setter="" getter="get_desync_frames" default="[]">
+			Frames at which a checksum mismatch with a remote peer was detected.
+		</member>
+		<member name="dt" type="float" setter="" getter="get_dt" default="0.0166667">
+			The fixed time step passed to the step function.
+		</member>
+		<member name="frame" type="int" setter="" getter="get_frame" default="0">
+			The current simulation frame.
+		</member>
+		<member name="input_delay" type="int" setter="" getter="get_input_delay" default="0">
+			Number of frames local inputs are delayed to hide latency.
+		</member>
+		<member name="local_players" type="Array" setter="" getter="get_local_players" default="[]">
+			Player ids controlled on this peer.
+		</member>
+		<member name="max_prediction" type="int" setter="" getter="get_max_prediction" default="8">
+			Maximum number of frames simulated ahead of the confirmed frame.
+		</member>
+		<member name="players" type="Array" setter="" getter="get_players" default="[]">
+			All player ids in sorted order.
+		</member>
+		<member name="resimulated_frames" type="int" setter="" getter="get_resimulated_frames" default="0">
+			Total number of frames resimulated by rollbacks.
+		</member>
+		<member name="rollbacks" type="int" setter="" getter="get_rollbacks" default="0">
+			Number of rollbacks performed.
+		</member>
+		<member name="snapshot_capacity" type="int" setter="" getter="get_snapshot_capacity" default="16">
+			Maximum number of snapshots kept in the ring.
+		</member>
+		<member name="stall_count" type="int" setter="" getter="get_stall_count" default="0">
+			Number of times [method advance] stalled because the prediction window was exhausted.
+		</member>
+	</members>
+	<signals>
+		<signal name="desync_detected">
+			<param index="0" name="frame" type="int" />
+			<param index="1" name="local_checksum" type="int" />
+			<param index="2" name="remote_checksum" type="int" />
+			<description>
+				Emitted when the checksum of a final frame differs from the one reported by a remote peer.
+			</description>
+		</signal>
+	</signals>
+</class>

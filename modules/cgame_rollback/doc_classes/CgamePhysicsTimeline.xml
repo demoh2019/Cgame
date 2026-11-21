@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgamePhysicsTimeline" inherits="RefCounted" api_type="core" keywords="physics,profiler,trace,timeline" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Per-step physics profiler with phase timings and Chrome trace export.
+	</brief_description>
+	<description>
+		[CgamePhysicsTimeline] records, for every [CgameDeterministicPhysics] step, the wall-clock time spent in the phases [code]broadphase[/code], [code]narrowphase[/code], [code]solve[/code] and [code]integrate[/code], together with contact, pair, sleeping and body counters. Records are kept in a bounded ring buffer of [member capacity] steps. [method report] aggregates them and [method export_json] produces a trace in the Chrome Trace Event Format that can be opened in [code]chrome://tracing[/code] or Perfetto.
+		Attach it with [method CgameDeterministicPhysics.set_timeline]. Timings are wall-clock values and are never part of the simulation state, so profiling cannot affect determinism.
+		[codeblock]
+		var timeline := CgamePhysicsTimeline.new()
+		world.timeline = timeline
+		# ... run the simulation ...
+		print(timeline.report_text())
+		FileAccess.open("user://physics_trace.json", FileAccess.WRITE).store_string(timeline.export_json())
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="begin_phase">
+			<return type="void" />
+			<param index="0" name="phase" type="String" />
+			<description>
+				Starts timing a phase. Called automatically when the timeline is attached to a physics world; scripts can use it to time their own phases.
+			</description>
+		</method>
+		<method name="begin_step">
+			<return type="void" />
+			<param index="0" name="step_index" type="int" />
+			<description>
+				Starts a new step record.
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Removes all records.
+			</description>
+		</method>
+		<method name="end_phase">
+			<return type="void" />
+			<description>
+				Ends the current phase and appends it to the current step record.
+			</description>
+		</method>
+		<method name="end_step">
+			<return type="void" />
+			<param index="0" name="stats" type="Dictionary" />
+			<description>
+				Finishes the current step record. [param stats] may contain the integer counters [code]contacts[/code], [code]pairs[/code], [code]sleeping[/code] and [code]bodies[/code].
+			</description>
+		</method>
+		<method name="export_json" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns [method to_trace] serialized as JSON.
+			</description>
+		</method>
+		<method name="get_phases" qualifiers="static">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the names of the profiled phases.
+			</description>
+		</method>
+		<method name="phase_us" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="record" type="Dictionary" />
+			<param index="1" name="phase" type="String" />
+			<description>
+				Returns the total microseconds spent in [param phase] during one record returned by [method records].
+			</description>
+		</method>
+		<method name="record_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of recorded steps.
+			</description>
+		</method>
+		<method name="records" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the recorded steps as dictionaries with the keys [code]step[/code], [code]start_us[/code], [code]dur_us[/code], [code]phases[/code] (an array of [code]{name, start_us, dur_us}[/code]), [code]contacts[/code], [code]pairs[/code], [code]sleeping[/code] and [code]bodies[/code].
+			</description>
+		</method>
+		<method name="report" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns aggregated statistics: [code]steps[/code], [code]avg_step_us[/code], [code]max_step_us[/code], [code]phases[/code] (per phase [code]avg_us[/code], [code]max_us[/code], [code]total_us[/code]), [code]avg_contacts[/code], [code]max_contacts[/code], [code]max_sleeping[/code] and [code]last[/code].
+			</description>
+		</method>
+		<method name="report_text" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns [method report] formatted as text.
+			</description>
+		</method>
+		<method name="to_trace" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns a Chrome trace object [code]{"traceEvents": [...]}[/code]. Timestamps are microseconds relative to the oldest recorded step.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="capacity" type="int" setter="set_capacity" getter="get_capacity" default="240">
+			Maximum number of step records kept; the oldest are dropped first.
+		</member>
+	</members>
+</class>

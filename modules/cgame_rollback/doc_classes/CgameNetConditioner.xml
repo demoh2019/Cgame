@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameNetConditioner" inherits="RefCounted" api_type="core" keywords="network,latency,jitter,packet loss,simulator" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Network condition simulator with latency, jitter, loss, duplication, reordering and a bandwidth cap.
+	</brief_description>
+	<description>
+		[CgameNetConditioner] simulates a single FIFO link. Each packet goes through a loss roll, a bandwidth queue (serialization delay, dropped when the backlog exceeds [code]max_queue_ms[/code]), a delay of latency plus uniform jitter in [code][-jitter, +jitter][/code] (never negative), an optional reorder hold and an optional duplicate copy. A per-packet log and a timeline allow inspecting why a packet took the time it did.
+		Time stamps passed to [method send] and [method receive] and all [code]*_at[/code] values are in seconds; latency and jitter are in milliseconds. The simulation is deterministic: the same seed and the same send sequence always produce the same log.
+		[codeblock]
+		var link := CgameNetConditioner.new()
+		link.configure({"latency_ms": 80.0, "jitter_ms": 15.0, "loss": 0.02, "seed": 7})
+		link.send(0, packet_bytes, now)
+		for p in link.receive(now):
+		    handle(p["bytes"])
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="configure">
+			<return type="void" />
+			<param index="0" name="config" type="Dictionary" />
+			<description>
+				Applies a configuration and clears the log and the pending queue. Recognized keys: [code]latency_ms[/code], [code]jitter_ms[/code], [code]loss[/code], [code]duplicate[/code], [code]reorder[/code] (probabilities in [code][0, 1][/code]), [code]bandwidth_kbps[/code] ([code]0[/code] is unlimited), [code]max_queue_ms[/code] and [code]seed[/code].
+			</description>
+		</method>
+		<method name="delay_cause" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="packet_id" type="int" />
+			<description>
+				Returns a human-readable breakdown of why a packet took the time it did, or why it was dropped.
+			</description>
+		</method>
+		<method name="packet" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the log entry of packet [param id] (keys [code]id[/code], [code]channel[/code], [code]size[/code], [code]sent_at[/code], [code]delivered_at[/code], [code]dropped[/code], [code]reason[/code], [code]duplicated[/code], [code]reordered[/code], [code]base_ms[/code], [code]jitter_ms[/code], [code]queue_ms[/code], [code]tx_ms[/code], [code]reorder_ms[/code]), or an empty dictionary for an unknown id.
+			</description>
+		</method>
+		<method name="packet_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of packets sent so far.
+			</description>
+		</method>
+		<method name="pending_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of packets (including duplicates) still in flight.
+			</description>
+		</method>
+		<method name="receive">
+			<return type="Array" />
+			<param index="0" name="now" type="float" />
+			<description>
+				Removes and returns the packets due by [param now], ordered by delivery time, as dictionaries [code]{id, channel, bytes, sent_at, delivered_at}[/code].
+			</description>
+		</method>
+		<method name="send">
+			<return type="int" />
+			<param index="0" name="channel" type="Variant" />
+			<param index="1" name="bytes" type="PackedByteArray" />
+			<param index="2" name="now" type="float" />
+			<description>
+				Submits a packet at time [param now] (seconds) and returns its packet id.
+			</description>
+		</method>
+		<method name="stats" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns aggregate statistics: [code]sent[/code], [code]delivered[/code], [code]dropped[/code], [code]dropped_loss[/code], [code]dropped_bandwidth[/code], [code]duplicated[/code], [code]reordered[/code], [code]avg_latency_ms[/code], [code]p95_latency_ms[/code] and [code]throughput_bps[/code].
+			</description>
+		</method>
+		<method name="timeline" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="t0" type="float" />
+			<param index="1" name="t1" type="float" />
+			<description>
+				Returns the log entries whose send or delivery time falls in [code][t0, t1][/code], ordered by send time.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="bandwidth_kbps" type="float" setter="" getter="get_bandwidth_kbps" default="0.0">
+			Link bandwidth in kilobits per second; [code]0[/code] means unlimited.
+		</member>
+		<member name="duplicate" type="float" setter="" getter="get_duplicate" default="0.0">
+			Probability that a delivered packet is duplicated.
+		</member>
+		<member name="jitter_ms" type="float" setter="" getter="get_jitter_ms" default="0.0">
+			Maximum random deviation of the delay, in milliseconds.
+		</member>
+		<member name="latency_ms" type="float" setter="" getter="get_latency_ms" default="0.0">
+			Base one-way delay in milliseconds.
+		</member>
+		<member name="loss" type="float" setter="" getter="get_loss" default="0.0">
+			Probability that a packet is dropped.
+		</member>
+		<member name="max_queue_ms" type="float" setter="" getter="get_max_queue_ms" default="1000.0">
+			Packets are dropped when the bandwidth backlog exceeds this many milliseconds.
+		</member>
+		<member name="reorder" type="float" setter="" getter="get_reorder" default="0.0">
+			Probability that a packet is held back so that later packets overtake it.
+		</member>
+	</members>
+</class>

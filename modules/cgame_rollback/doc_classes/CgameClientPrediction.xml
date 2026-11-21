@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameClientPrediction" inherits="RefCounted" api_type="core" keywords="prediction,reconciliation,netcode,client" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Server-authoritative client movement prediction with reconciliation and visual error smoothing.
+	</brief_description>
+	<description>
+		[CgameClientPrediction] applies inputs locally at once and keeps them with sequence numbers. When the server acknowledges a sequence number together with its authoritative state, [method reconcile] drops the acknowledged inputs and replays the remaining ones on top of the server state. The difference between the old and the re-predicted position is not snapped but folded into a visual offset that decays exponentially; errors above [member error_threshold] snap instantly.
+		The apply callable has the signature [code]func(state: Dictionary, input: Dictionary, dt: float) -> Dictionary[/code] and must match the server's movement code. The entry named by [member position_key] may be a [float], [Vector2], [Vector3] or [Vector4] and is used for error measurement and smoothing.
+		[codeblock]
+		var prediction := CgameClientPrediction.new()
+		prediction.setup(apply_movement, {"pos": Vector2.ZERO}, "pos", 2.0, 10.0)
+		var seq := prediction.predict({"dir": Vector2.RIGHT}, delta)
+		# Later, when the server acknowledges input `seq`:
+		prediction.reconcile(server_state, seq)
+		# Every rendered frame:
+		prediction.update(delta)
+		sprite.position = prediction.visual_state()["pos"]
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="offset_magnitude" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the magnitude of the current visual correction offset.
+			</description>
+		</method>
+		<method name="pending_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of predicted inputs not yet acknowledged by the server.
+			</description>
+		</method>
+		<method name="predict">
+			<return type="int" />
+			<param index="0" name="input" type="Dictionary" />
+			<param index="1" name="dt" type="float" />
+			<description>
+				Applies [param input] locally and queues it. Returns its sequence number, which should be sent to the server.
+			</description>
+		</method>
+		<method name="reconcile">
+			<return type="float" />
+			<param index="0" name="server_state" type="Dictionary" />
+			<param index="1" name="last_processed_seq" type="int" />
+			<description>
+				Processes a server acknowledgement. Returns the position error (magnitude) between the old prediction and the server-corrected re-prediction. Stale acknowledgements (older than the last one) are ignored and return [code]0.0[/code].
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="apply" type="Callable" />
+			<param index="1" name="initial_state" type="Dictionary" />
+			<param index="2" name="position_key" type="String" default="&quot;pos&quot;" />
+			<param index="3" name="error_threshold" type="float" default="2.0" />
+			<param index="4" name="smoothing_rate" type="float" default="10.0" />
+			<description>
+				Resets the prediction with the given movement function and initial state.
+			</description>
+		</method>
+		<method name="update">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>
+				Decays the visual correction offset. Call once per rendered frame.
+			</description>
+		</method>
+		<method name="visual_state" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the predicted state with the smoothed correction offset applied to the position entry.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="error_threshold" type="float" setter="set_error_threshold" getter="get_error_threshold" default="2.0">
+			Position errors above this value snap to the corrected position instead of being smoothed.
+		</member>
+		<member name="last_acked_seq" type="int" setter="" getter="get_last_acked_seq" default="0">
+			The highest sequence number acknowledged so far.
+		</member>
+		<member name="last_error" type="float" setter="" getter="get_last_error" default="0.0">
+			The error measured by the last [method reconcile] call.
+		</member>
+		<member name="max_pending" type="int" setter="set_max_pending" getter="get_max_pending" default="256">
+			Maximum number of unacknowledged inputs kept; older ones are dropped.
+		</member>
+		<member name="next_seq" type="int" setter="" getter="get_next_seq" default="1">
+			The sequence number the next predicted input receives.
+		</member>
+		<member name="position_key" type="String" setter="" getter="get_position_key" default="&quot;pos&quot;">
+			The state entry used for error measurement and smoothing.
+		</member>
+		<member name="smoothing_rate" type="float" setter="set_smoothing_rate" getter="get_smoothing_rate" default="10.0">
+			The visual offset decays as [code]exp(-smoothing_rate * delta)[/code].
+		</member>
+		<member name="snaps" type="int" setter="" getter="get_snaps" default="0">
+			Number of corrections that exceeded [member error_threshold].
+		</member>
+		<member name="state" type="Dictionary" setter="" getter="get_state" default="{}">
+			The predicted state.
+		</member>
+		<member name="visual_offset" type="Variant" setter="" getter="get_visual_offset" default="0.0">
+			The current visual correction offset, of the same type as the position entry.
+		</member>
+	</members>
+</class>

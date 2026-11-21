@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameDeterministicPhysics" inherits="RefCounted" api_type="core" keywords="physics,rigid body,deterministic,rollback,sat" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Small deterministic rigid-body solver for spheres and boxes with snapshot and restore.
+	</brief_description>
+	<description>
+		[CgameDeterministicPhysics] is a self-contained rigid-body simulation built to be stepped inside a rollback netcode loop (see [CgamePhysicsRollback]). It supports spheres and boxes with friction, restitution, a sequential-impulse contact solver with accumulated impulses and Baumgarte position bias, SAT box-box collision with incident-face clipping, group sleeping, and ray casts.
+		Determinism rules: the simulation runs in IEEE double precision with a fixed operation order, bodies are kept sorted by id, the broadphase sweep and the contact pairs are sorted with id tie-breaks, nothing iterates a hash map during a step, the solver runs a fixed number of iterations and contacts are rebuilt each step (no warm starting). [method snapshot] therefore serializes the complete simulation state, and identical inputs give identical bytes on the same build and platform. Bit-identical results between different compilers or CPU architectures are not guaranteed.
+		A body with a mass of [code]0[/code] or less is static. A sphere uses [code]size.x[/code] as its radius; a box uses [code]size[/code] as its half extents. Contact normals point from the body with the lower id to the one with the higher id. Forces and impulses applied through [method apply_force] affect the next [method step] only and are not part of the snapshot.
+		[codeblock]
+		var world := CgameDeterministicPhysics.new()
+		world.add_body(0, CgameDeterministicPhysics.SHAPE_BOX, 0.0, Vector3(0, -1, 0), Vector3(50, 1, 50))
+		world.add_body(1, CgameDeterministicPhysics.SHAPE_BOX, 1.0, Vector3(0, 3, 0), Vector3(0.5, 0.5, 0.5))
+		for i in 120:
+		    world.step(1.0 / 60.0)
+		print(world.get_position(1), world.checksum())
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_body">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="shape" type="int" enum="CgameDeterministicPhysics.Shape" />
+			<param index="2" name="mass" type="float" />
+			<param index="3" name="position" type="Vector3" />
+			<param index="4" name="size" type="Vector3" />
+			<param index="5" name="rotation" type="Quaternion" default="Quaternion(0, 0, 0, 1)" />
+			<param index="6" name="friction" type="float" default="0.5" />
+			<param index="7" name="restitution" type="float" default="0.0" />
+			<description>
+				Adds a body and returns [code]true[/code], or returns [code]false[/code] if a body with the same [param id] already exists. A [param mass] of [code]0[/code] or less makes the body static.
+			</description>
+		</method>
+		<method name="apply_force">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="force" type="Vector3" />
+			<description>
+				Accumulates a force applied during the next [method step] only, and wakes the body. Ignored for static bodies.
+			</description>
+		</method>
+		<method name="apply_impulse">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="impulse" type="Vector3" />
+			<description>
+				Applies a linear impulse immediately and wakes the body. Ignored for static bodies.
+			</description>
+		</method>
+		<method name="body_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of bodies.
+			</description>
+		</method>
+		<method name="body_ids" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>
+				Returns the ids of all bodies in ascending order.
+			</description>
+		</method>
+		<method name="checksum" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns a checksum of the current [method snapshot].
+			</description>
+		</method>
+		<method name="get_body_info" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the state of a body as a dictionary with the keys [code]id[/code], [code]shape[/code], [code]mass[/code], [code]size[/code], [code]friction[/code], [code]restitution[/code], [code]position[/code], [code]rotation[/code], [code]velocity[/code], [code]angular_velocity[/code], [code]asleep[/code] and [code]static[/code], or an empty dictionary if there is no such body.
+			</description>
+		</method>
+		<method name="get_position" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the position of a body, or [constant Vector3.ZERO] if there is no such body.
+			</description>
+		</method>
+		<method name="get_rotation" qualifiers="const">
+			<return type="Quaternion" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the rotation of a body, or the identity if there is no such body.
+			</description>
+		</method>
+		<method name="get_velocity" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns the linear velocity of a body, or [constant Vector3.ZERO] if there is no such body.
+			</description>
+		</method>
+		<method name="has_body" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns [code]true[/code] if a body with the given id exists.
+			</description>
+		</method>
+		<method name="is_asleep" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns [code]true[/code] if the body is sleeping. A group of touching bodies falls asleep together once all of them have been slow for half a second; touching an awake body or applying a force or impulse wakes a sleeper.
+			</description>
+		</method>
+		<method name="raycast" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="origin" type="Vector3" />
+			<param index="1" name="direction" type="Vector3" />
+			<param index="2" name="max_distance" type="float" default="1000.0" />
+			<description>
+				Casts a ray against all bodies and returns [code]{"hit": bool, "id": int, "t": float, "point": Vector3}[/code]. [param direction] does not need to be normalized; [code]t[/code] is the distance along the ray.
+			</description>
+		</method>
+		<method name="remove_body">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Removes a body.
+			</description>
+		</method>
+		<method name="restore">
+			<return type="bool" />
+			<param index="0" name="bytes" type="PackedByteArray" />
+			<description>
+				Restores the world from a [method snapshot]. Returns [code]false[/code] and leaves the world unchanged if [param bytes] is malformed.
+			</description>
+		</method>
+		<method name="set_pose">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="position" type="Vector3" />
+			<param index="2" name="rotation" type="Quaternion" />
+			<description>
+				Teleports a body to the given pose.
+			</description>
+		</method>
+		<method name="set_velocity">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="velocity" type="Vector3" />
+			<description>
+				Sets the linear velocity of a body and wakes it. Ignored for static bodies.
+			</description>
+		</method>
+		<method name="sleeping_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of sleeping bodies.
+			</description>
+		</method>
+		<method name="snapshot" qualifiers="const">
+			<return type="PackedByteArray" />
+			<description>
+				Serializes the complete simulation state to bytes (little-endian, bodies in id order).
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<param index="0" name="dt" type="float" />
+			<description>
+				Advances the simulation by [param dt] seconds: integrates forces, builds the sorted broadphase pairs, runs the narrowphase, solves contacts with a fixed number of iterations, integrates positions and updates sleeping.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="gravity" type="Vector3" setter="set_gravity" getter="get_gravity" default="Vector3(0, -9.81, 0)">
+			The gravity acceleration.
+		</member>
+		<member name="iterations" type="int" setter="set_iterations" getter="get_iterations" default="16">
+			The number of solver iterations per step. Must be identical on all peers.
+		</member>
+		<member name="last_contact_count" type="int" setter="" getter="get_last_contact_count" default="0">
+			The number of contact points generated by the last step.
+		</member>
+		<member name="last_pair_count" type="int" setter="" getter="get_last_pair_count" default="0">
+			The number of broadphase pairs of the last step.
+		</member>
+		<member name="last_sleeping_count" type="int" setter="" getter="get_last_sleeping_count" default="0">
+			The number of sleeping bodies after the last step.
+		</member>
+		<member name="step_count" type="int" setter="" getter="get_step_count" default="0">
+			The number of steps simulated so far (part of the snapshot).
+		</member>
+		<member name="timeline" type="CgamePhysicsTimeline" setter="set_timeline" getter="get_timeline">
+			The attached profiler.
+		</member>
+	</members>
+	<constants>
+		<constant name="SHAPE_SPHERE" value="0" enum="Shape">
+			A sphere; [code]size.x[/code] is the radius.
+		</constant>
+		<constant name="SHAPE_BOX" value="1" enum="Shape">
+			A box; [code]size[/code] holds the half extents.
+		</constant>
+	</constants>
+</class>
