@@ -60,7 +60,22 @@ func _ready() -> void:
 
     if global_position == Vector3.ZERO:
         global_position = WAYPOINTS[0]
+    if is_instance_valid(streamer) and streamer.has_signal("cell_navigation_state_changed"):
+        streamer.connect("cell_navigation_state_changed", Callable(self, "_on_navigation_gate_changed"))
     _reserve_route()
+
+func _on_navigation_gate_changed(cell: Vector2i, enabled: bool) -> void:
+    if cell != CELL_FROM and cell != CELL_TO:
+        return
+    if not enabled:
+        _release_route()
+        velocity = Vector3.ZERO
+        route_status = "Navigation gate closed"
+        route_retry_cooldown = 0.75
+        navigation_sync_frames = 3
+    elif patrol_enabled:
+        route_retry_cooldown = 0.0
+        _reserve_route()
 
 func _reserve_route() -> void:
     if streamer == null or not is_instance_valid(streamer) or not patrol_enabled:
@@ -107,6 +122,9 @@ func _physics_process(delta: float) -> void:
             _reserve_route()
         return
     if not is_instance_valid(streamer):
+        return
+    if not bool(streamer.call("is_cell_navigation_enabled", CELL_FROM)) or not bool(streamer.call("is_cell_navigation_enabled", CELL_TO)):
+        _on_navigation_gate_changed(CELL_TO, false)
         return
     if not bool(streamer.call("is_cell_loaded", CELL_FROM)) or not bool(streamer.call("is_cell_loaded", CELL_TO)):
         route_status = "Waiting for both navigation cells"

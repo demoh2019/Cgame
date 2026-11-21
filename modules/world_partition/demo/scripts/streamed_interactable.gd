@@ -2,13 +2,16 @@ extends Node3D
 
 # Reusable interactive component. The engine discovers it through a group,
 # not through a custom save method on the parent cell script.
-@export_enum("chest", "switch", "gate") var kind := "chest"
+@export_enum("chest", "switch", "gate", "patrol_gate") var kind := "chest"
 
 var active := false
+var default_active := false
 var use_count := 0
 
-func configure(p_kind: String) -> void:
+func configure(p_kind: String, p_default_active: bool = false) -> void:
     kind = p_kind
+    default_active = p_default_active
+    active = default_active
 
 func _ready() -> void:
     add_to_group("streaming_stateful")
@@ -56,11 +59,13 @@ func _refresh_visuals() -> void:
                 label.text = "ARENA SWITCH ON [E]" if active else "ARENA SWITCH OFF [E]"
             "gate":
                 label.text = "CHAMPION GATE OPEN" if active else "CHAMPION GATE LOCKED [E]"
+            "patrol_gate":
+                label.text = "AI PASS OPEN [E]" if active else "AI PASS CLOSED [E]"
 
 func interact() -> bool:
-    if kind != "switch" and active:
+    if kind != "switch" and kind != "patrol_gate" and active:
         return false
-    active = (not active) if kind == "switch" else true
+    active = (not active) if kind == "switch" or kind == "patrol_gate" else true
     use_count += 1
     _refresh_visuals()
     return true
@@ -69,6 +74,6 @@ func capture_streaming_object_state() -> Dictionary:
     return {"active": active, "uses": use_count}
 
 func restore_streaming_object_state(state: Dictionary) -> void:
-    active = bool(state.get("active", false))
+    active = bool(state.get("active", default_active))
     use_count = clampi(int(state.get("uses", 0)), 0, 1000000)
     _refresh_visuals()

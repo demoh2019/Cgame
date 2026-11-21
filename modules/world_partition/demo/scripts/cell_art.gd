@@ -10,6 +10,7 @@ const PROXY_STRIDE := 8
 const QUEST_HUB := Vector2i(0, 0)
 const COMBAT_ARENA := Vector2i(4, 2)
 const CHAMPION_SHRINE := Vector2i(5, 3)
+const PATROL_PASS := Vector2i(1, 0)
 const INTERACTABLE_SCRIPT := preload("res://scripts/streamed_interactable.gd")
 
 var cell_coords: Vector2i = Vector2i(9999, 9999)
@@ -86,12 +87,19 @@ func _ready() -> void:
             _add_champion_shrine()
             _create_interactable("ChampionGate", "gate")
             _refresh_landmark()
+        elif grid == PATROL_PASS:
+            # The link between two streamed regions is controlled by a
+            # reusable interactive switch in the destination cell.
+            _create_interactable("PatrolGate", "patrol_gate", true)
 
-func _create_interactable(node_name: String, object_kind: String) -> void:
+func _create_interactable(node_name: String, object_kind: String, default_active: bool = false) -> void:
     var interactable := INTERACTABLE_SCRIPT.new() as Node3D
     interactable.name = node_name
-    interactable.call("configure", object_kind)
-    interactable.position = Vector3(CELL_SIZE * 0.5 - 10.0, 0.0, CELL_SIZE * 0.5 + 9.0)
+    interactable.call("configure", object_kind, default_active)
+    interactable.position = (
+        Vector3(16.0, 0.0, CELL_SIZE * 0.5) if object_kind == "patrol_gate"
+        else Vector3(CELL_SIZE * 0.5 - 10.0, 0.0, CELL_SIZE * 0.5 + 9.0)
+    )
     add_child(interactable)
 
 func get_interactable() -> Node3D:
@@ -103,6 +111,8 @@ func get_interactable() -> Node3D:
         return get_node_or_null("ArenaSwitch") as Node3D
     if cell_coords == CHAMPION_SHRINE:
         return get_node_or_null("ChampionGate") as Node3D
+    if cell_coords == PATROL_PASS:
+        return get_node_or_null("PatrolGate") as Node3D
     return null
 
 func interact_world_object() -> bool:
