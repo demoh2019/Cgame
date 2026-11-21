@@ -2,6 +2,7 @@ extends RefCounted
 ## Regression suite for budgeted, client-only ambient simulation updates.
 
 const AmbientTickBudget = preload("res://scripts/client/ambient_tick_budget.gd")
+const AmbientRateProfile = preload("res://scripts/client/ambient_rate_profile.gd")
 
 
 func run(t) -> void:
@@ -166,3 +167,73 @@ func run(t) -> void:
 				"native CPU budget prevents extra work")
 			t.check(float(native_cpu.call("consume", &"dragonflies", 0.1, true)) > 0.0,
 				"native forced work bypasses soft limit")
+
+	t.current = "significance profiles follow world conditions"
+	var sun_flags: int = AmbientRateProfile.active_flags(
+		2, "plains", Vector2(0.5, 0.0), 0.8, 0.0, false)
+	t.eq(sun_flags, 7, "daylight, dry wind and plains favor visible ambient effects")
+	var night_flags: int = AmbientRateProfile.active_flags(
+		2, "plains", Vector2(0.5, 0.0), 0.2, 0.0, false)
+	t.eq(night_flags, 12, "night favors bats and rolling tumbleweeds")
+	t.eq(AmbientRateProfile.active_flags(
+		2, "plains", Vector2(0.5, 0.0), 0.8, 0.5, false), 4,
+		"storm suppresses dragonflies and dust devils")
+	t.eq(AmbientRateProfile.active_flags(
+		2, "plains", Vector2(0.5, 0.0), 0.8, 0.0, true), 0,
+		"no ambient effects are significant underground")
+	t.eq(AmbientRateProfile.active_flags(
+		0, "plains", Vector2(0.5, 0.0), 0.8, 0.0, false), 0,
+		"Performance tier does not prioritize disabled effects")
+	var sun_rates: Dictionary = AmbientRateProfile.scales_for_flags(sun_flags)
+	t.eq(float(sun_rates["dragonflies"]), 1.5, "visible day insect priority")
+	t.eq(float(sun_rates["dusk_bats"]), 0.75, "hidden day bat priority")
+	t.eq(AmbientRateProfile.scales_for_flags(night_flags)["dusk_bats"], 1.5,
+		"night bat update priority")
+
+	t.current = "per-lane rate validation and native fallback parity"
+	var script_rates := AmbientTickBudget.new()
+	t.eq(script_rates.get_lane_rate_scale("dust_devils"), 1.0, "default scale")
+	t.check(script_rates.set_lane_rate_scale("dust_devils", 1.5), "visible lane scale accepted")
+	t.check(script_rates.set_lane_rate_scale("dusk_bats", 0.75), "hidden lane scale accepted")
+	t.check(not script_rates.set_lane_rate_scale("dusk_bats", 0.5), "low scale rejected")
+	t.check(not script_rates.set_lane_rate_scale("dusk_bats", INF), "nonfinite scale rejected")
+	t.check(not script_rates.set_lane_rate_scale("unknown", 1.5), "unknown lane rejected")
+	t.eq(script_rates.get_lane_rate_scale("unknown"), -1.0, "unknown lane sentinel")
+	t.eq(script_rates.get_lane_rate_scale("dusk_bats"), 0.75, "invalid mutation is atomic")
+	script_rates.reset()
+	t.eq(script_rates.get_lane_rate_scale("dust_devils"), 1.5, "reset retains lane profile")
+
+	var scripted := AmbientTickBudget.new()
+	var native_rates: Object = null
+	if ClassDB.class_exists("FrameUpdateBudget"):
+		var candidate: Object = ClassDB.instantiate("FrameUpdateBudget")
+		if candidate != null and candidate.has_method("set_lane_rate_scale"):
+			native_rates = candidate
+			for lane in AmbientTickBudget.LANES:
+				t.check(bool(native_rates.call("register_lane", StringName(lane))),
+					"Native rate-aware scheduler registers %s" % lane)
+	var seen: Dictionary = {}
+	for lane in AmbientTickBudget.LANES:
+		seen[lane] = 0
+		var scale: float = float(sun_rates[lane])
+		t.check(scripted.set_lane_rate_scale(lane, scale), "Script lane profile accepts %s" % lane)
+		if native_rates != null:
+			t.check(bool(native_rates.call("set_lane_rate_scale", StringName(lane), scale)),
+				"Native lane profile accepts %s" % lane)
+	for frame in range(241):
+		scripted.begin_frame(1.0 / 60.0, 1)
+		if native_rates != null:
+			native_rates.call("begin_frame", 1.0 / 60.0, 1)
+		for lane in call_order:
+			var elapsed: float = scripted.consume(lane, 1.0 / 60.0)
+			if native_rates != null:
+				t.near(float(native_rates.call("consume", StringName(lane), 1.0 / 60.0)),
+					elapsed, 0.0000001, "Native/script significance parity %s frame %d" % [lane, frame])
+			if frame > 0 and elapsed > 0.0:
+				seen[lane] = int(seen[lane]) + 1
+		if frame > 0:
+			t.check(scripted.last_frame_counts().x <= 2, "Low-mid tier CPU slot cap")
+	t.check(int(seen["dragonflies"]) > int(seen["dusk_bats"]) + 8,
+		"Relevant dragonflies receive more updates than hidden bats")
+	for lane in AmbientTickBudget.LANES:
+		t.check(int(seen[lane]) >= 20, "%s is never starved by significance" % lane)
