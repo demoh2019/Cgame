@@ -72,6 +72,7 @@ const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
 const InfectedMeleeCover = preload("res://scripts/shared/infected_melee_cover.gd")
+const FlankSlotReservations = preload("res://scripts/shared/flank_slot_reservations.gd")
 const BarricadeBallistics = preload("res://scripts/shared/barricade_ballistics.gd")
 const SiegeCharge = preload("res://scripts/shared/siege_charge.gd")
 const SiegeDefusal = preload("res://scripts/shared/siege_defusal.gd")
@@ -372,6 +373,7 @@ const AI_STAGGER_MIN_POPULATION := 128
 const AI_STAGGER_SLOTS := 4
 const AI_BATCH_MAX_SIZE := 4096 # Match the native guard; larger populations use safe scalar calls.
 var _ai_update_scheduler: Variant = null
+var _flank_slot_reservations: Variant = null # Shared native AI Smart Object leases per server.
 var _pack_spatial_grid: Variant = null # Optional C++ radius broadphase; old-engine fallback below.
 var last_pack_query_stats: Dictionary = {"native": false, "population": 0, "sources": 0, "max_alerts": 12, "alerts_sent": 0}
 var last_ai_schedule_stats: Dictionary = {"enabled": false, "population": 0, "phase_due": 0, "phase_deferred": 0}
@@ -8093,6 +8095,12 @@ func _tick_zombies(delta: float) -> void:
 			# Only actual server wounds contribute; never trust client input.
 			"scent": BloodScent.detection_radius(player.survival.bleeding,
 				_alive(player), _is_safe(player.position), FieldScentMask.active(player.survival))}
+	# One server-owned claim table for the entire infected pack; simulation
+	# delta expires abandoned leases, including dead and despawned agents.
+	if _flank_slot_reservations == null:
+		_flank_slot_reservations = ClassDB.instantiate("SmartObjectSlotReservations") \
+			if ClassDB.class_exists("SmartObjectSlotReservations") else FlankSlotReservations.new()
+	_flank_slot_reservations.advance_time(delta)
 	# Activate spawns near players and put far-away zombies to sleep.
 	if tick_count % 20 == 1:
 		_manage_zombie_population()
@@ -8124,6 +8132,7 @@ func _tick_zombies(delta: float) -> void:
 		and due_mask.size() == ai_cohort.size()
 	for i in range(ai_cohort.size()):
 		var zombie = ai_cohort[i]
+		zombie.flank_reservations = _flank_slot_reservations
 		# One-shot root triggered by a living non-boss infected. All hit checks
 		# use authoritative zombie positions; players cannot submit target IDs.
 		for trap_id in infected_snares.keys():
