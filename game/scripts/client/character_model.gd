@@ -64,6 +64,7 @@ func setup(tint: Color, scale_factor: float, walk_speed: float = 1.0, model_name
 	_zombie = zombie
 	# A pooled/reconfigured model must never inherit its predecessor's IK slot.
 	set_meta("aa_full_ik_retained", false)
+	set_meta("aa_combat_pose_retained", false) # Pooled models cannot carry another actor's combat history.
 	# One GPU batch provides soft floor contact where real shadows are disabled.
 	# Register the actual live actor model, never model-template resources.
 	add_to_group("aa_grounded_characters")

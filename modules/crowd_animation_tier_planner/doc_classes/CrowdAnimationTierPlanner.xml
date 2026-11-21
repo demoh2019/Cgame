@@ -29,6 +29,19 @@
 			<param index="4" name="priority_budget" type="int" />
 			<description>Uses the same deterministic top-K budgets as [method plan_tiers], but characters with zero [param visible_flags] cannot consume costly tier-0 IK slots or combat-priority full-rate slots. Invisible characters receive at least tier 2 (30 Hz) and retain their distance-based tier 3/4 when farther away. Visible characters are ranked by distance and original index, so changing the camera immediately reallocates slots without changing any server or physics state. All three arrays must match in length (maximum 16,384); invalid input returns an empty result. Passing a mask of all ones reproduces [method plan_tiers] exactly. The caller computes visibility; no scene-tree, rendering, or physics queries occur in this class. This is not a GPU occlusion query or an adaptive milliseconds-based animation budget.</description>
 		</method>
+		<method name="plan_visible_tiers_temporal" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priority_flags" type="PackedByteArray" />
+			<param index="2" name="visible_flags" type="PackedByteArray" />
+			<param index="3" name="retained_full_flags" type="PackedByteArray" />
+			<param index="4" name="retained_priority_flags" type="PackedByteArray" />
+			<param index="5" name="full_budget" type="int" />
+			<param index="6" name="priority_budget" type="int" />
+			<param index="7" name="full_hysteresis" type="float" />
+			<param index="8" name="priority_hysteresis" type="float" />
+			<description>Separately applies up to 8m of ranking hysteresis to previous full-IK owners and up to 4m to previous on-screen combat-pose priority winners. Both budgets remain exact, deterministic and independent; actual distances must still qualify within 22m for full IK and below 90m for combat poses, and invisible actors never use either pool. Every mask must match the distance array (up to 16384 entries), and both hysteresis values must be finite and nonnegative. Invalid requests return an empty array. With priority_hysteresis zero, the result is exactly [method plan_visible_tiers_stable]. The caller owns all scene state and history, and no simulation, physics or renderer work is performed here.</description>
+		</method>
 		<method name="plan_tiers" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="distances" type="PackedFloat64Array" />

@@ -199,5 +199,70 @@ TEST_CASE("[CrowdAnimationTierPlanner] stable IK validates bounds and ties atomi
 	ERR_PRINT_ON
 }
 
+
+TEST_CASE("[CrowdAnimationTierPlanner] Separate combat retention avoids presentation slot thrash") {
+	Ref<CrowdAnimationTierPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distances = { 5.6, 5.4, 60.5, 60.3 };
+	const PackedByteArray priority = { 0, 0, 1, 1 };
+	const PackedByteArray visible = { 1, 1, 1, 1 };
+	const PackedByteArray full_retained = { 1, 0, 0, 0 };
+	const PackedByteArray combat_retained = { 0, 0, 1, 0 };
+	const PackedInt32Array old = planner->plan_visible_tiers_stable(
+			distances, priority, visible, full_retained, 1, 1, 1.5);
+	REQUIRE(old.size() == 4);
+	CHECK(old[0] == 0);
+	CHECK(old[2] == 3);
+	CHECK(old[3] == 1);
+	const PackedInt32Array stable = planner->plan_visible_tiers_temporal(
+			distances, priority, visible, full_retained, combat_retained, 1, 1, 1.5, 1.0);
+	REQUIRE(stable.size() == 4);
+	CHECK(stable[0] == 0); // Existing IK owner is unchanged.
+	CHECK(stable[1] == 1);
+	CHECK(stable[2] == 1); // Previously promoted distant telegraph persists.
+	CHECK(stable[3] == 3);
+	const PackedInt32Array outrun = planner->plan_visible_tiers_temporal(
+			{ 7.0, 5.4, 62.0, 60.3 }, priority, visible,
+			full_retained, combat_retained, 1, 1, 1.0, 1.0);
+	CHECK(outrun[0] == 1);
+	CHECK(outrun[1] == 0);
+	CHECK(outrun[2] == 3);
+	CHECK(outrun[3] == 1);
+	CHECK(planner->plan_visible_tiers_temporal(distances, priority, visible,
+			full_retained, combat_retained, 1, 1, 1.5, 0.0) == old);
+}
+
+TEST_CASE("[CrowdAnimationTierPlanner] Combat retention never crosses hard visibility and radius limits") {
+	Ref<CrowdAnimationTierPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distances = { 21.9, 22.1, 89.9, 90.1, 3.0 };
+	const PackedByteArray priority = { 0, 0, 1, 1, 1 };
+	const PackedByteArray visible = { 1, 1, 1, 1, 0 };
+	const PackedByteArray full_retained = { 1, 1, 0, 0, 1 };
+	const PackedByteArray combat_retained = { 0, 0, 1, 1, 1 };
+	const PackedInt32Array tiers = planner->plan_visible_tiers_temporal(
+			distances, priority, visible, full_retained, combat_retained, 1, 1, 4.0, 4.0);
+	REQUIRE(tiers.size() == 5);
+	CHECK(tiers[0] == 0);
+	CHECK(tiers[1] == 1); // IK remains strictly inside 22m.
+	CHECK(tiers[2] == 1); // One in-range visible combat slot.
+	CHECK(tiers[3] == 4); // 90m is not extended by hysteresis.
+	CHECK(tiers[4] == 2); // Invisible previous winners never use budgets.
+	const PackedInt32Array none = planner->plan_visible_tiers_temporal(
+			{ 2.0, 4.0 }, { 1, 1 }, { 0, 0 }, { 1, 1 }, { 1, 1 }, 2, 2, 1.5, 2.0);
+	const PackedInt32Array expected = { 2, 2 };
+	CHECK(none == expected);
+	ERR_PRINT_OFF
+	CHECK(planner->plan_visible_tiers_temporal({ 5.0 }, { 1 }, { 1 }, { 1 },
+			{}, 1, 1, 1.5, 1.0).is_empty());
+	CHECK(planner->plan_visible_tiers_temporal({ 5.0 }, { 1 }, { 1 }, { 1 },
+			{ 1 }, 1, 1, 1.5, -0.1).is_empty());
+	CHECK(planner->plan_visible_tiers_temporal({ 5.0 }, { 1 }, { 1 }, { 1 },
+			{ 1 }, 1, 1, 1.5, 4.1).is_empty());
+	CHECK(planner->plan_visible_tiers_temporal({ 5.0 }, { 1 }, { 1 }, { 1 },
+			{ 1 }, 1, 1, 1.5, std::numeric_limits<double>::quiet_NaN()).is_empty());
+	ERR_PRINT_ON
+}
+
 } // namespace TestCrowdAnimationTierPlanner
 #endif // MODULE_CROWD_ANIMATION_TIER_PLANNER_ENABLED
