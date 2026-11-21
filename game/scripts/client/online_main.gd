@@ -130,7 +130,7 @@ var _visual_weather_wind := Vector2.ZERO
 var _visual_biome := "plains"
 var atmosphere
 var _ambient_motes
-var _ambient_budget = AmbientTickBudget.new()
+var _ambient_budget: Variant = AmbientTickBudget.new()
 var _ambient_was_underground := false
 var _ambient_monitors: Array[StringName] = []
 var _ambient_birds
@@ -229,6 +229,17 @@ func _exit_tree() -> void:
 
 func _ready() -> void:
 	Engine.physics_ticks_per_second = 30
+	# Prefer the native Godot scheduler when the fork exposes it. Standard
+	# Godot builds retain the same pure GDScript behaviour automatically.
+	if EngineFeatures.has("FrameUpdateBudget"):
+		var native_budget: Object = EngineFeatures.make("FrameUpdateBudget")
+		if native_budget != null:
+			var registered_all := true
+			for lane in AmbientTickBudget.LANES:
+				if not bool(native_budget.call("register_lane", StringName(lane))):
+					registered_all = false
+			if registered_all:
+				_ambient_budget = native_budget
 	# Client-side cosmetic update budget, exposed to Godot's built-in profiler.
 	for monitor in [
 		[&"Albion/AmbientUpdates", Callable(_ambient_budget, "updated_total")],
