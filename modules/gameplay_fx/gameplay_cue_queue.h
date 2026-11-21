@@ -55,6 +55,9 @@ private:
 	static bool _valid_priority(int p_priority);
 	static int _find_active(const Vector<ActiveCue> &p_active, const StringName &p_tag);
 	static bool _enqueue(Vector<PendingCue> &r_queue, const StringName &p_tag, EventType p_type, int p_stacks, double p_magnitude, int p_priority);
+	static bool _enqueue_lifecycle(Vector<PendingCue> &r_queue, const StringName &p_tag,
+			EventType p_type, int p_stacks, int p_priority, bool p_admit, int &r_evictions);
+	bool _replace_active_internal(const Dictionary &p_snapshot, int p_priority, bool p_admit);
 	static const char *_event_label(EventType p_type);
 
 protected:
@@ -71,6 +74,10 @@ public:
 	// Replace the active set transactionally, emitting started/updated/stopped
 	// events only for changed tags. Invalid input preserves state and events.
 	bool replace_active(const Dictionary &p_snapshot, int p_priority = 0);
+	// Important status start/stop/stack changes can atomically make room by
+	// evicting lower-priority transient cues. Existing lifecycle cues and
+	// equal/higher-priority transients are never evicted; all-or-nothing.
+	bool replace_active_resilient(const Dictionary &p_snapshot, int p_priority = 0);
 	Dictionary get_active_snapshot() const;
 	int get_active_stacks(const StringName &p_tag) const;
 	bool is_active(const StringName &p_tag) const { return get_active_stacks(p_tag) > 0; }

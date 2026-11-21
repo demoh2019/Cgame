@@ -1,0 +1,34 @@
+name: Gameplay Cue lifecycle overload contract
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/gameplay_cue_queue.*'
+      - 'modules/gameplay_fx/tests/test_gameplay_fx.h'
+      - 'modules/gameplay_fx/doc_classes/GameplayCueQueue.xml'
+      - 'game/scripts/client/gameplay_cues.gd'
+      - 'game/tests/test_gameplay_cues.gd'
+      - 'tests/scene/test_gameplay_cue_lifecycle_contract.py'
+      - '.github/workflows/gameplay-cue-lifecycle-contract.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/gameplay_cue_queue.*'
+      - 'modules/gameplay_fx/tests/test_gameplay_fx.h'
+      - 'game/scripts/client/gameplay_cues.gd'
+      - 'game/tests/test_gameplay_cues.gd'
+      - 'tests/scene/test_gameplay_cue_lifecycle_contract.py'
+      - '.github/workflows/gameplay-cue-lifecycle-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate atomic lifecycle and gameplay source contracts
+        run: python3 -m unittest tests/scene/test_gameplay_cue_lifecycle_contract.py -v
