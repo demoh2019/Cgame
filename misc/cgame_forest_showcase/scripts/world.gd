@@ -370,8 +370,22 @@ func _quest_hud_text() -> String:
         return "Задание: все реликвии собраны"
     var distance: float = QuestNavigation.horizontal_distance(player.global_position, quest_target.global_position)
     var direction: String = QuestNavigation.heading(player, quest_target.global_position)
-    return "Задание: реликвия %d   %.1f м   %s   доп. источники: %d" % [
-        quest_target_id + 1, distance, direction,
+    var route_label: String = "н/д"
+    if is_instance_valid(world_partition):
+        var route: Array = QuestNavigation.cell_route(
+            world_partition, player.global_position, quest_target.global_position)
+        if route.is_empty():
+            route_label = "нет коридора"
+        else:
+            route_label = "%d сек." % (route.size() - 1)
+            # For a multi-cell walk, guide the compass through the next
+            # registered corridor instead of pointing through empty gaps.
+            if route.size() > 2:
+                var waypoint: Vector3 = QuestNavigation.next_cell_waypoint(
+                    world_partition, route)
+                direction = QuestNavigation.heading(player, waypoint)
+    return "Задание: реликвия %d   %.1f м   %s   маршрут: %s   источники: %d" % [
+        quest_target_id + 1, distance, direction, route_label,
         world_partition.get_streaming_source_count() if is_instance_valid(world_partition) else 0]
 
 
