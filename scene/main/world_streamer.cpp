@@ -386,6 +386,41 @@ void WorldStreamer::_trim_cached_chunks() {
 	}
 }
 
+void WorldStreamer::_expire_cached_chunks() {
+	if (cached_chunk_retention_seconds <= real_t(0.0) || cached_chunks.size() == 0) {
+		return;
+	}
+	// The cache is already capped at 16 roots. Gather keys before erasing.
+	LocalVector<Vector3i> expired;
+	for (const KeyValue<Vector3i, CachedChunk> &entry : cached_chunks) {
+		if (cached_chunk_elapsed_seconds - entry.value.retained_at_seconds >= double(cached_chunk_retention_seconds)) {
+			expired.push_back(entry.key);
+		}
+	}
+	for (const Vector3i &cell : expired) {
+		const CachedChunk *entry = cached_chunks.getptr(cell);
+		if (entry == nullptr) {
+			continue;
+		}
+		const ObjectID id = entry->node_id;
+		cached_chunk_bytes -= entry->estimated_bytes;
+		cached_chunks.erase(cell);
+		Node *chunk = Object::cast_to<Node>(ObjectDB::get_instance(id));
+		if (chunk && !chunk->is_queued_for_deletion()) {
+			// Cached nodes are detached: actually free their ownership, even
+			// if this streamer is running a headless/manual refresh.
+			if (chunk->get_parent() == nullptr) {
+				memdelete(chunk);
+			} else {
+				chunk->queue_free();
+			}
+		}
+		if (cache_expirations < INT32_MAX) {
+			++cache_expirations;
+		}
+	}
+}
+
 void WorldStreamer::_discard_cached_chunks() {
 	for (const KeyValue<Vector3i, CachedChunk> &entry : cached_chunks) {
 		Node *chunk = Object::cast_to<Node>(ObjectDB::get_instance(entry.value.node_id));
@@ -401,8 +436,10 @@ void WorldStreamer::_discard_cached_chunks() {
 void WorldStreamer::clear_cached_chunks() {
 	_discard_cached_chunks();
 	cache_clock = 0;
+	cached_chunk_elapsed_seconds = 0.0;
 	cache_hits = 0;
 	cache_evictions = 0;
+	cache_expirations = 0;
 }
 
 void WorldStreamer::set_max_cached_chunks(int p_count) {
@@ -412,6 +449,28 @@ void WorldStreamer::set_max_cached_chunks(int p_count) {
 	}
 	max_cached_chunks = bounded;
 	_trim_cached_chunks();
+}
+
+void WorldStreamer::set_cached_chunk_retention_seconds(real_t p_seconds) {
+	if (!Math::is_finite(p_seconds)) {
+		return;
+	}
+	const real_t bounded = CLAMP(p_seconds, real_t(0.0), real_t(120.0));
+	if (Math::is_equal_approx(cached_chunk_retention_seconds, bounded)) {
+		return;
+	}
+	cached_chunk_retention_seconds = bounded;
+	_expire_cached_chunks(); // Shrinking the TTL must release old roots now.
+}
+
+void WorldStreamer::advance_cached_chunk_retention(real_t p_delta_seconds) {
+	if (cached_chunk_retention_seconds <= real_t(0.0) || cached_chunks.size() == 0 ||
+			!Math::is_finite(p_delta_seconds) || p_delta_seconds <= real_t(0.0)) {
+		return;
+	}
+	// Huge/corrupt frame deltas cannot poison the floating point clock.
+	cached_chunk_elapsed_seconds += MIN(double(p_delta_seconds), 120.0);
+	_expire_cached_chunks();
 }
 
 void WorldStreamer::set_max_cached_chunk_bytes(int64_t p_bytes) {
@@ -508,6 +567,7 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell, bool p_allow_cache) {
 			entry.node_id = chunk->get_instance_id();
 			entry.age = ++cache_clock;
 			entry.estimated_bytes = estimated_bytes;
+			entry.retained_at_seconds = cached_chunk_elapsed_seconds;
 			cached_chunks[p_cell] = entry;
 			cached_chunk_bytes += estimated_bytes;
 			_trim_cached_chunks();
@@ -1273,6 +1333,9 @@ void WorldStreamer::_notification(int p_what) {
 			// Grow the requested area before reconciling the current queue.
 			// The ordinary streamer cadence still caps scheduling work.
 			advance_loading_range_ramp(get_process_delta_time());
+			// Expire stale detached scenes even while the focus is stationary
+			// and the ordinary streaming refresh has no pending work.
+			advance_cached_chunk_retention(get_process_delta_time());
 			// One budget and wall-clock deadline are shared by threaded
 			// scene finalization and procedural world generation this frame.
 			if (adaptive_chunk_budget_enabled) {
@@ -1831,6 +1894,10 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_max_cached_chunk_bytes", "bytes"), &WorldStreamer::set_max_cached_chunk_bytes);
 	ClassDB::bind_method(D_METHOD("get_max_cached_chunk_bytes"), &WorldStreamer::get_max_cached_chunk_bytes);
 	ClassDB::bind_method(D_METHOD("get_cached_chunk_bytes"), &WorldStreamer::get_cached_chunk_bytes);
+	ClassDB::bind_method(D_METHOD("set_cached_chunk_retention_seconds", "seconds"), &WorldStreamer::set_cached_chunk_retention_seconds);
+	ClassDB::bind_method(D_METHOD("get_cached_chunk_retention_seconds"), &WorldStreamer::get_cached_chunk_retention_seconds);
+	ClassDB::bind_method(D_METHOD("advance_cached_chunk_retention", "delta_seconds"), &WorldStreamer::advance_cached_chunk_retention);
+	ClassDB::bind_method(D_METHOD("get_chunk_cache_expiration_count"), &WorldStreamer::get_chunk_cache_expiration_count);
 	ClassDB::bind_method(D_METHOD("get_cached_chunk_count"), &WorldStreamer::get_cached_chunk_count);
 	ClassDB::bind_method(D_METHOD("get_chunk_cache_hit_count"), &WorldStreamer::get_chunk_cache_hit_count);
 	ClassDB::bind_method(D_METHOD("get_chunk_cache_eviction_count"), &WorldStreamer::get_chunk_cache_eviction_count);
@@ -1888,6 +1955,7 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_concurrent_loads", PROPERTY_HINT_RANGE, "1,64,1,or_greater"), "set_max_concurrent_loads", "get_max_concurrent_loads");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cached_chunks", PROPERTY_HINT_RANGE, "0,16,1"), "set_max_cached_chunks", "get_max_cached_chunks");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cached_chunk_bytes", PROPERTY_HINT_RANGE, "0,268435456,1048576,suffix:B"), "set_max_cached_chunk_bytes", "get_max_cached_chunk_bytes");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cached_chunk_retention_seconds", PROPERTY_HINT_RANGE, "0,120,0.1,suffix:s"), "set_cached_chunk_retention_seconds", "get_cached_chunk_retention_seconds");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_instantiations_per_frame", PROPERTY_HINT_RANGE, "1,16,1,or_greater"), "set_max_instantiations_per_frame", "get_max_instantiations_per_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_unloads_per_update", PROPERTY_HINT_RANGE, "0,64,1"), "set_max_unloads_per_update", "get_max_unloads_per_update");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_unload_work_usec", PROPERTY_HINT_RANGE, "0,1000000,100,suffix:us"), "set_max_unload_work_usec", "get_max_unload_work_usec");

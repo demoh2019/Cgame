@@ -67,6 +67,11 @@ static func streamed_chunk_cache_bytes_for_quality(value: int) -> int:
 	return [8, 16, 24, 32][clampi(value, 0, 3)] * 1048576
 
 
+## Bound how long detached scenery retains memory while player is idle.
+static func streamed_chunk_cache_retention_for_quality(value: int) -> float:
+	return [3.0, 5.0, 8.0, 12.0][clampi(value, 0, 3)]
+
+
 ## Startup only: Unreal World Partition-style area ramp. Preserve a safe
 ## nearby terrain area and gradually request the configured full range.
 ## Fractions scale area, not distance, on our 2D XZ streaming grid.
@@ -441,6 +446,10 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 			var cache_bytes: int = streamed_chunk_cache_bytes_for_quality(_level)
 			if int(streamer.call("get_max_cached_chunk_bytes")) != cache_bytes:
 				streamer.call("set_max_cached_chunk_bytes", cache_bytes)
+		if streamer.has_method("set_cached_chunk_retention_seconds"):
+			var retention: float = streamed_chunk_cache_retention_for_quality(_level)
+			if not is_equal_approx(float(streamer.call("get_cached_chunk_retention_seconds")), retention):
+				streamer.call("set_cached_chunk_retention_seconds", retention)
 		# One expensive scene detach must not consume a whole frame of
 		# subsequent cleanup. Older native builds remain fully compatible.
 		if streamer.has_method("set_max_unload_work_usec"):

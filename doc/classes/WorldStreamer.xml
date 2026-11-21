@@ -162,6 +162,11 @@
 				Returns the loaded chunk of [param cell], or [code]null[/code] if that cell is not loaded.
 			</description>
 		</method>
+		<method name="advance_cached_chunk_retention">
+			<return type="void" />
+			<param index="0" name="delta_seconds" type="float" />
+			<description>Advances the opt-in time-to-live clock for detached cached procedural scene roots. Called automatically once per engine internal process frame; headless tests may call it on a detached streamer with positive game-time seconds. Negative, zero and non-finite deltas are ignored; each step is bounded to 120 seconds. Only cached nodes can expire; loaded world residents are not affected.</description>
+		</method>
 		<method name="get_cached_chunk_bytes" qualifiers="const">
 			<return type="int" />
 			<description>Total game-reported estimated bytes retained in detached cached procedural chunks, excluding shared assets, pending frees and runtime GPU allocation. Count-only legacy entries contribute zero. Not actual measured RAM/VRAM.</description>
@@ -173,6 +178,10 @@
 		<method name="get_chunk_cache_hit_count" qualifiers="const">
 			<return type="int" />
 			<description>Count of cached scene roots successfully reattached instead of recreated by the procedural generator. A cache hit still uses a normal main-thread integration slot.</description>
+		</method>
+		<method name="get_chunk_cache_expiration_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of detached procedural scenes retired due to the optional age limit, separate from capacity-based cache evictions. Reset by [method clear_cached_chunks].</description>
 		</method>
 		<method name="get_chunk_cache_eviction_count" qualifiers="const">
 			<return type="int" />
@@ -371,6 +380,9 @@
 		</member>
 		<member name="max_concurrent_loads" type="int" setter="set_max_concurrent_loads" getter="get_max_concurrent_loads" default="4">
 			Maximum number of chunks loading in the background at the same time.
+		</member>
+		<member name="cached_chunk_retention_seconds" type="float" setter="set_cached_chunk_retention_seconds" getter="get_cached_chunk_retention_seconds" default="0.0">
+			Optional maximum retention time for detached, immutable procedural scene roots, clamped to 0–120 game-time seconds. Zero disables expiry for legacy projects. A positive limit releases cached roots when old, even while the player stands still and the count/estimated-byte budgets are not full. This does not unload active world cells, server/physics/quest entities or additional streaming sources. A cache hit before expiry retains normal scene adoption and work budgets; an expired cell is regenerated on the next request. The engine automatically advances time while running; [method advance_cached_chunk_retention] can drive deterministic headless tests. Use [method get_chunk_cache_expiration_count] to monitor expired roots separately from capacity evictions.
 		</member>
 		<member name="max_cached_chunk_bytes" type="int" setter="set_max_cached_chunk_bytes" getter="get_max_cached_chunk_bytes" default="0">
 			Optional estimated memory budget for detached procedural scene roots, clamped to 0–268435456 bytes (256 MiB). Zero preserves original count-only caching. A positive value requires each opted-in chunk to implement [code]get_streaming_cache_cost_bytes() -&gt; int[/code] and return a positive estimate no greater than the cap. Unknown, invalid and oversized values decline caching; overbudget caches evict oldest unrequested roots first. These gameplay estimates do not guarantee physical RAM/VRAM, include shared assets or track pending queued frees. Decreasing the budget immediately trims detached roots and never touches active/authoritative world residency.
