@@ -56,6 +56,8 @@ class SpatialRelevancyGrid2D : public RefCounted {
 	bool indexed_mode = false;
 	uint64_t rebuild_count = 0;
 	uint64_t query_count = 0;
+	uint64_t batch_calls = 0;
+	uint64_t batch_viewers = 0;
 	uint64_t candidate_checks = 0;
 	uint64_t bucket_lookups = 0;
 	uint64_t fallback_scans = 0;
@@ -70,6 +72,9 @@ protected:
 public:
 	bool rebuild(const PackedInt64Array &p_ids, const PackedVector2Array &p_positions);
 	PackedInt64Array query_ids(const Vector2 &p_center, double p_radius);
+	// Each array entry corresponds to one viewer, preserving source entity
+	// order. One script/native boundary crossing for an entire broadcast.
+	Array query_many(const PackedVector2Array &p_centers, double p_radius);
 	Dictionary get_stats() const;
 	void clear();
 	void set_cell_size(double p_size);

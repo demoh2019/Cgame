@@ -36,6 +36,7 @@
 void SpatialRelevancyGrid2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("rebuild", "ids", "positions"), &SpatialRelevancyGrid2D::rebuild);
 	ClassDB::bind_method(D_METHOD("query_ids", "center", "radius"), &SpatialRelevancyGrid2D::query_ids);
+	ClassDB::bind_method(D_METHOD("query_many", "centers", "radius"), &SpatialRelevancyGrid2D::query_many);
 	ClassDB::bind_method(D_METHOD("get_stats"), &SpatialRelevancyGrid2D::get_stats);
 	ClassDB::bind_method(D_METHOD("clear"), &SpatialRelevancyGrid2D::clear);
 	ClassDB::bind_method(D_METHOD("set_cell_size", "size"), &SpatialRelevancyGrid2D::set_cell_size);
@@ -154,12 +155,33 @@ PackedInt64Array SpatialRelevancyGrid2D::query_ids(const Vector2 &p_center, doub
 	return result;
 }
 
+Array SpatialRelevancyGrid2D::query_many(const PackedVector2Array &p_centers, double p_radius) {
+	// Defensively cap the number of per-connection arrays allocated in one
+	// call. An empty result signals failure to the caller, which must use
+	// the existing full-scan fallback rather than omit replicated actors.
+	if (p_centers.size() > 4096 ||
+			int64_t(p_centers.size()) * int64_t(entries.size()) > 2097152) {
+		return Array();
+	}
+	batch_calls++;
+	batch_viewers += p_centers.size();
+	Array results;
+	for (int i = 0; i < p_centers.size(); i++) {
+		// Keep the established scalar method as the sole authority for
+		// radius boundaries, invalid data and source ordering.
+		results.push_back(query_ids(p_centers[i], p_radius));
+	}
+	return results;
+}
+
 Dictionary SpatialRelevancyGrid2D::get_stats() const {
 	Dictionary result;
 	result["entities"] = entries.size();
 	result["cells"] = buckets.size();
 	result["rebuilds"] = rebuild_count;
 	result["queries"] = query_count;
+	result["batch_calls"] = batch_calls;
+	result["batch_viewers"] = batch_viewers;
 	result["candidates"] = candidate_checks;
 	result["buckets"] = bucket_lookups;
 	result["fallback_scans"] = fallback_scans;
@@ -188,6 +210,8 @@ void SpatialRelevancyGrid2D::clear() {
 	buckets.clear();
 	indexed_mode = false;
 	query_count = 0;
+	batch_calls = 0;
+	batch_viewers = 0;
 	candidate_checks = 0;
 	bucket_lookups = 0;
 	fallback_scans = 0;
