@@ -36,9 +36,9 @@ uint64_t AIUpdateScheduler::hash_agent_id(int64_t p_agent_id) {
 	// SplitMix64 finalizer: reproducible across machines and runs, without
 	// signed integer overflow. Stable ID -> stable slot, independent of
 	// iteration order and random-number-generator state.
-	uint64_t x = uint64_t(p_agent_id) + UINT64_C(0x9e3779b97f4a7c15);
-	x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
-	x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
+	uint64_t x = uint64_t(p_agent_id) + 0x9e3779b97f4a7c15ULL;
+	x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+	x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
 	return x ^ (x >> 31);
 }
 
