@@ -38,6 +38,79 @@
 #include "scene/3d/node_3d.h"
 #include "scene/resources/packed_scene.h"
 
+
+void WorldStreamer::_record_failure(const Vector3i &p_cell, const String &p_reason) {
+	failed.insert(p_cell);
+	if (max_auto_retries > 0) {
+		RetryState &state = retry_states[p_cell];
+		if (state.attempts < max_auto_retries) {
+			// Bounded exponential backoff; exactly max_auto_retries more requests.
+			const real_t multiplier = real_t(1 << state.attempts);
+			const real_t seconds = MIN(retry_max_delay, retry_initial_delay * multiplier);
+			state.next_retry_usec = OS::get_singleton()->get_ticks_usec() + uint64_t(seconds * 1000000.0);
+			state.attempts++;
+		} else {
+			state.next_retry_usec = 0; // Exhausted until refresh(true) or leaving the area.
+		}
+	}
+	emit_signal(SNAME("chunk_load_failed"), p_cell, p_reason);
+}
+
+void WorldStreamer::_update_retries(const Vector3 &p_focus, real_t p_keep_radius) {
+	if (retry_states.is_empty()) {
+		return;
+	}
+	const uint64_t now = OS::get_singleton()->get_ticks_usec();
+	LocalVector<Vector3i> forget;
+	LocalVector<Vector3i> ready;
+	for (const KeyValue<Vector3i, RetryState> &entry : retry_states) {
+		const bool beyond_focus = WorldStreamingGrid::distance_to_cell(p_focus, entry.key, cell_size, _grid_axes()) > p_keep_radius;
+		const bool auxiliary_keeps = _auxiliary_is_near_focus(p_focus) &&
+				WorldStreamingGrid::distance_to_cell(auxiliary_source_position, entry.key, cell_size, _grid_axes()) <= _auxiliary_effective_radius();
+		if (beyond_focus && !auxiliary_keeps) {
+			forget.push_back(entry.key);
+		} else if (entry.value.next_retry_usec != 0 && now >= entry.value.next_retry_usec) {
+			ready.push_back(entry.key);
+		}
+	}
+	for (const Vector3i &cell : forget) {
+		retry_states.erase(cell);
+		failed.erase(cell);
+	}
+	for (const Vector3i &cell : ready) {
+		// The attempt is picked up by the usual bounded generation/load queue.
+		failed.erase(cell);
+		retry_states[cell].next_retry_usec = 0;
+	}
+}
+
+int WorldStreamer::get_retry_pending_count() const {
+	int count = 0;
+	for (const KeyValue<Vector3i, RetryState> &entry : retry_states) {
+		if (entry.value.next_retry_usec != 0) {
+			count++;
+		}
+	}
+	return count;
+}
+
+void WorldStreamer::set_max_auto_retries(int p_count) {
+	max_auto_retries = CLAMP(p_count, 0, 8);
+	if (max_auto_retries == 0) {
+		retry_states.clear();
+	}
+}
+
+void WorldStreamer::set_retry_initial_delay(real_t p_seconds) {
+	ERR_FAIL_COND(!Math::is_finite(p_seconds));
+	retry_initial_delay = CLAMP(p_seconds, real_t(0.01), real_t(60.0));
+}
+
+void WorldStreamer::set_retry_max_delay(real_t p_seconds) {
+	ERR_FAIL_COND(!Math::is_finite(p_seconds));
+	retry_max_delay = CLAMP(p_seconds, real_t(0.01), real_t(60.0));
+}
+
 real_t WorldStreamer::_auxiliary_effective_radius() const {
 	// Limit the added residency to a tiny region (maximum two cell widths)
 	// no matter which game or editor script sets the auxiliary source.
@@ -178,6 +251,8 @@ bool WorldStreamer::_adopt_chunk(const Vector3i &p_cell, Node *p_chunk) {
 	Node *parent = _get_parent_for_chunks();
 	parent->add_child(p_chunk);
 	loaded[p_cell] = p_chunk->get_instance_id();
+	retry_states.erase(p_cell);
+	failed.erase(p_cell);
 	// Track optional visual continuation without delaying authoritative world
 	// ownership or adding extra load requests. Ordinary chunks remain ready.
 	if (p_chunk->has_method(SNAME("has_pending_visual_detail")) &&
@@ -234,19 +309,25 @@ void WorldStreamer::_run_generator_queue(int &r_instantiation_budget, uint64_t p
 		Callable::CallError error;
 		chunk_generator.callp(args, 1, result, error);
 		if (error.error != Callable::CallError::CALL_OK) {
-			failed.insert(cell);
-			emit_signal(SNAME("chunk_load_failed"), cell, String("generator call failed"));
+			_record_failure(cell, String("generator call failed"));
+			continue;
+		}
+		if (result.get_type() == Variant::NIL) {
+			missing.insert(cell); // Null is an intentionally empty cell, not a retryable error.
+			continue;
+		}
+		if (result.get_type() != Variant::OBJECT) {
+			_record_failure(cell, String("generator returned a non-Node value"));
 			continue;
 		}
 		Node *chunk = Object::cast_to<Node>(result.get_validated_object());
 		if (!chunk) {
-			missing.insert(cell); // The generator says there is nothing here.
+			_record_failure(cell, String("generator returned an unusable object"));
 			continue;
 		}
 		if (!_adopt_chunk(cell, chunk)) {
 			memdelete(chunk);
-			failed.insert(cell);
-			emit_signal(SNAME("chunk_load_failed"), cell, String("generator returned an unusable node"));
+			_record_failure(cell, String("generator returned an unusable node"));
 		}
 	}
 	if (consumed > 0) {
@@ -283,8 +364,7 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 	for (const Vector3i &cell : finished_failed) {
 		const String path = loading[cell];
 		loading.erase(cell);
-		failed.insert(cell);
-		emit_signal(SNAME("chunk_load_failed"), cell, path);
+		_record_failure(cell, path);
 	}
 
 	// Finished threaded scenes must use the same forward-biased priority as
@@ -326,8 +406,7 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 		r_instantiation_budget--;
 		loading.erase(cell);
 		if (!_finalize_chunk(cell, path)) {
-			failed.insert(cell);
-			emit_signal(SNAME("chunk_load_failed"), cell, path);
+			_record_failure(cell, path);
 		}
 	}
 }
@@ -340,6 +419,7 @@ void WorldStreamer::_update_streaming() {
 		return;
 	}
 	const real_t keep_radius = MAX(unload_radius, load_radius);
+	_update_retries(position, keep_radius);
 
 	LocalVector<Vector3i> to_unload;
 	HashSet<Vector3i> loaded_cells;
@@ -441,8 +521,7 @@ void WorldStreamer::_update_streaming() {
 			continue;
 		}
 		if (ResourceLoader::load_threaded_request(path, "PackedScene", true) != OK) {
-			failed.insert(cell);
-			emit_signal(SNAME("chunk_load_failed"), cell, path);
+			_record_failure(cell, path);
 			continue;
 		}
 		loading[cell] = path;
@@ -460,6 +539,7 @@ void WorldStreamer::_reset_state() {
 	// In-flight requests finish on their own; their results are released when polled.
 	missing.clear();
 	failed.clear();
+	retry_states.clear();
 	generate_queue.clear();
 	pending_visual_details.clear();
 	last_queued_view_direction = Vector3();
@@ -655,12 +735,14 @@ void WorldStreamer::set_chunk_path_template(const String &p_template) {
 	chunk_path_template = p_template;
 	missing.clear();
 	failed.clear();
+	retry_states.clear();
 }
 
 void WorldStreamer::set_chunk_provider(const Callable &p_provider) {
 	chunk_provider = p_provider;
 	missing.clear();
 	failed.clear();
+	retry_states.clear();
 }
 
 void WorldStreamer::set_chunk_generator(const Callable &p_generator) {
@@ -668,6 +750,7 @@ void WorldStreamer::set_chunk_generator(const Callable &p_generator) {
 	generate_queue.clear();
 	missing.clear();
 	failed.clear();
+	retry_states.clear();
 }
 
 void WorldStreamer::set_chunk_parent(const NodePath &p_parent) {
@@ -706,6 +789,7 @@ void WorldStreamer::refresh(bool p_retry) {
 	if (p_retry) {
 		missing.clear();
 		failed.clear();
+		retry_states.clear();
 		truncated_warned = false;
 	}
 	_poll_loading(refresh_budget, started_usec);
@@ -758,6 +842,13 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_instantiations_per_frame"), &WorldStreamer::get_max_instantiations_per_frame);
 	ClassDB::bind_method(D_METHOD("set_max_chunk_work_usec", "microseconds"), &WorldStreamer::set_max_chunk_work_usec);
 	ClassDB::bind_method(D_METHOD("get_max_chunk_work_usec"), &WorldStreamer::get_max_chunk_work_usec);
+	ClassDB::bind_method(D_METHOD("set_max_auto_retries", "count"), &WorldStreamer::set_max_auto_retries);
+	ClassDB::bind_method(D_METHOD("get_max_auto_retries"), &WorldStreamer::get_max_auto_retries);
+	ClassDB::bind_method(D_METHOD("set_retry_initial_delay", "seconds"), &WorldStreamer::set_retry_initial_delay);
+	ClassDB::bind_method(D_METHOD("get_retry_initial_delay"), &WorldStreamer::get_retry_initial_delay);
+	ClassDB::bind_method(D_METHOD("set_retry_max_delay", "seconds"), &WorldStreamer::set_retry_max_delay);
+	ClassDB::bind_method(D_METHOD("get_retry_max_delay"), &WorldStreamer::get_retry_max_delay);
+	ClassDB::bind_method(D_METHOD("get_retry_pending_count"), &WorldStreamer::get_retry_pending_count);
 	ClassDB::bind_method(D_METHOD("set_update_interval", "seconds"), &WorldStreamer::set_update_interval);
 	ClassDB::bind_method(D_METHOD("get_update_interval"), &WorldStreamer::get_update_interval);
 	ClassDB::bind_method(D_METHOD("set_chunk_path_template", "template"), &WorldStreamer::set_chunk_path_template);
@@ -806,6 +897,10 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_instantiations_per_frame", PROPERTY_HINT_RANGE, "1,16,1,or_greater"), "set_max_instantiations_per_frame", "get_max_instantiations_per_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_chunk_work_usec", PROPERTY_HINT_RANGE, "0,1000000,100,suffix:us"), "set_max_chunk_work_usec", "get_max_chunk_work_usec");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "update_interval", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater,suffix:s"), "set_update_interval", "get_update_interval");
+	ADD_GROUP("Recovery", "");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_auto_retries", PROPERTY_HINT_RANGE, "0,8,1"), "set_max_auto_retries", "get_max_auto_retries");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "retry_initial_delay", PROPERTY_HINT_RANGE, "0.01,60,0.01,suffix:s"), "set_retry_initial_delay", "get_retry_initial_delay");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "retry_max_delay", PROPERTY_HINT_RANGE, "0.01,60,0.01,suffix:s"), "set_retry_max_delay", "get_retry_max_delay");
 
 	ADD_SIGNAL(MethodInfo("chunk_loaded", PropertyInfo(Variant::VECTOR3I, "cell"), PropertyInfo(Variant::OBJECT, "chunk", PROPERTY_HINT_RESOURCE_TYPE, "Node")));
 	ADD_SIGNAL(MethodInfo("chunk_visual_details_ready", PropertyInfo(Variant::VECTOR3I, "cell")));
