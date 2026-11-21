@@ -197,6 +197,53 @@ func _smoke() -> void:
             push_error("PCG weighted visual variants changed after regeneration")
             ok = false
 
+    var trail := game.get_node_or_null("TrailMarkers") as MultiMeshInstance3D
+    if trail == null or trail.multimesh == null:
+        push_error("Missing native-sampled instanced trail stones")
+        ok = false
+    else:
+        var raw_stones: PackedVector3Array = trail.call("get_raw_samples")
+        var kept_stones: PackedVector3Array = trail.call("get_selected_positions")
+        var route: PackedVector3Array = trail.call("get_path_points")
+        if raw_stones.size() < 20 or raw_stones.size() > 192:
+            push_error("PCG polyline sampler failed to create a bounded visible route")
+            ok = false
+        elif (raw_stones[0].distance_to(route[0]) > 0.001
+                or raw_stones[raw_stones.size() - 1].distance_to(route[route.size() - 1]) > 0.001):
+            push_error("PCG fitted route did not include both endpoints")
+            ok = false
+        for i in range(1, raw_stones.size()):
+            if raw_stones[i].distance_to(raw_stones[i - 1]) > 1.351:
+                push_error("PCG polyline samples exceeded maximum arc spacing")
+                ok = false
+                break
+        if kept_stones.size() < 12 or kept_stones.size() > raw_stones.size():
+            push_error("PCG trail structure filtering removed the route")
+            ok = false
+        if trail.multimesh.instance_count != kept_stones.size():
+            push_error("PCG trail MultiMesh count does not match sampled positions")
+            ok = false
+        var trail_box_mins: PackedVector3Array = foliage.call("get_exclusion_box_mins")
+        var trail_box_maxs: PackedVector3Array = foliage.call("get_exclusion_box_maxs")
+        for stone in kept_stones:
+            for box_index in range(trail_box_mins.size()):
+                var lo: Vector3 = trail_box_mins[box_index]
+                var hi: Vector3 = trail_box_maxs[box_index]
+                if (stone.x >= lo.x - 0.5 and stone.x <= hi.x + 0.5
+                        and stone.y >= lo.y and stone.y <= hi.y
+                        and stone.z >= lo.z - 0.5 and stone.z <= hi.z + 0.5):
+                    push_error("PCG trail stones intersected a structural exclusion volume")
+                    ok = false
+                    break
+        if not bool(trail.call("verify_native_fallback_parity")):
+            push_error("Native PCG route sampling disagrees with the GDScript reference")
+            ok = false
+        trail.call("regenerate")
+        if (raw_stones != trail.call("get_raw_samples")
+                or kept_stones != trail.call("get_selected_positions")):
+            push_error("PCG trail route was not deterministic after regeneration")
+            ok = false
+
     var state = game.get("state")
     var pickups := get_nodes_in_group("days_after_pickup")
     if pickups.size() < 4:

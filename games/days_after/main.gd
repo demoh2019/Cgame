@@ -9,6 +9,7 @@ const RESOURCE_SCRIPT = preload("res://resource_node.gd")
 const ENEMY_SCRIPT = preload("res://enemy.gd")
 const DEBRIS_LOD_SCRIPT = preload("res://debris_lod.gd")
 const FOLIAGE_SCATTER_SCRIPT = preload("res://foliage_scatter.gd")
+const TRAIL_MARKERS_SCRIPT = preload("res://trail_markers.gd")
 
 var state = STATE_SCRIPT.new()
 var player
@@ -30,6 +31,11 @@ func _ready() -> void:
     var foliage = FOLIAGE_SCATTER_SCRIPT.new()
     foliage.name = "FoliageScatter"
     add_child(foliage)
+    var trail = TRAIL_MARKERS_SCRIPT.new()
+    trail.name = "TrailMarkers"
+    trail.configure(foliage.get_trail_points(),
+        foliage.get_exclusion_box_mins(), foliage.get_exclusion_box_maxs())
+    add_child(trail)
     _build_hud()
 
 
