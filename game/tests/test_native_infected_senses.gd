@@ -74,6 +74,53 @@ func run(t) -> void:
         t.check(not left_first.has_ranked_hearing(),
             "stock Godot and older Cgame retain legacy hearing safely")
 
+    t.current = "Native multi-source history only retains confirmed perceptions"
+    var history_senses := NativeSenses.new()
+    t.eq(history_senses.has_native_history(), ClassDB.class_exists("AIStimulusHistory2D"),
+        "multi-source history is detected through native class availability")
+    history_senses.record_confirmed_sight(Vector2.ZERO, Vector2(6, 0), 20.0,
+        true, 0.1, 101)
+    history_senses.record_confirmed_sight(Vector2.ZERO, Vector2(18, 0), 20.0,
+        false, 0.1, 101) # Occluded movement MUST NOT leak to stored history.
+    if history_senses.has_native_history() and history_senses.has_native_vision():
+        var best_sight: Dictionary = history_senses.best_confirmed_stimulus(0)
+        t.eq(best_sight.get("position"), Vector2(6, 0),
+            "visual memory stores only the last confirmed position")
+        t.eq(best_sight.get("source_id"), 101,
+            "native memory tags an authoritative server-known source ID")
+    else:
+        t.check(history_senses.best_confirmed_stimulus(0).is_empty(),
+            "stock Godot safely returns an empty visual history")
+
+    t.current = "Confirmed sound history preserves independent source lifetimes"
+    history_senses.record_confirmed_sound(Vector2.ZERO, Vector2(4, 0), 20.0, 11)
+    history_senses.advance_time(2.0)
+    history_senses.record_confirmed_sound(Vector2.ZERO, Vector2(16, 0), 20.0, 12)
+    history_senses.record_confirmed_sound(Vector2.ZERO, Vector2(80, 0), 20.0, 99)
+    if history_senses.has_native_history() and history_senses.has_native_hearing():
+        var first_sound: Dictionary = history_senses.best_confirmed_stimulus(1)
+        t.eq(first_sound.get("source_id"), 12,
+            "decayed sound strength favors recent confirmed stimuli")
+        history_senses.advance_time(1.6)
+        t.check(not history_senses.remembers_sound(),
+            "ranked primary sound memory expires even when weak noise remains")
+        var later_sound: Dictionary = history_senses.best_confirmed_stimulus(1)
+        t.eq(later_sound.get("source_id"), 12,
+            "a separately confirmed sound can outlive the primary ranked sound")
+        t.eq(later_sound.get("position"), Vector2(16, 0),
+            "secondary investigation location is still server-confirmed")
+        var recent: Array = history_senses.get_recent_confirmed_stimuli()
+        t.eq(recent.size(), 1, "all older sight and stronger sound signals expired")
+        var view: Dictionary = history_senses.get_debug_snapshot()
+        t.eq(view.get("stimulus_count"), 1,
+            "server diagnostic reports the bounded active event history")
+        history_senses.reset()
+        t.eq(history_senses.get_recent_confirmed_stimuli().size(), 0,
+            "reset clears all source-tagged events")
+    else:
+        t.eq(history_senses.get_recent_confirmed_stimuli().size(), 0,
+            "stock Godot has no additional native stimulus data")
+
     t.current = "Existing authoritative zombie hearing populates native memory"
     var height: float = WorldGen.HUB_HEIGHT
     var world := WorldGen.new(42)
