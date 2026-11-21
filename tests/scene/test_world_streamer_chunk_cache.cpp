@@ -15,6 +15,16 @@ TEST_CASE("[WorldStreamer] Procedural chunk cache is opt-in and bounded") {
 	CHECK(streamer->get_max_cached_chunks() == 0);
 	CHECK(streamer->get_max_cached_chunk_bytes() == 0);
 	CHECK(streamer->get_cached_chunk_bytes() == 0);
+	CHECK(streamer->get_cached_chunk_retention_seconds() == real_t(0.0));
+	CHECK(streamer->get_chunk_cache_expiration_count() == 0);
+	streamer->advance_cached_chunk_retention(100.0);
+	CHECK(streamer->get_chunk_cache_expiration_count() == 0);
+	streamer->set_cached_chunk_retention_seconds(-1.0);
+	CHECK(streamer->get_cached_chunk_retention_seconds() == real_t(0.0));
+	streamer->set_cached_chunk_retention_seconds(150.0);
+	CHECK(streamer->get_cached_chunk_retention_seconds() == real_t(120.0));
+	streamer->set_cached_chunk_retention_seconds(2.0);
+	CHECK(streamer->get_cached_chunk_retention_seconds() == real_t(2.0));
 	CHECK(streamer->get_cached_chunk_count() == 0);
 	CHECK(streamer->get_chunk_cache_hit_count() == 0);
 	CHECK(streamer->get_chunk_cache_eviction_count() == 0);
