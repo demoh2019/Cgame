@@ -13,6 +13,7 @@ const LootLabel = preload("res://scripts/shared/loot_label.gd")
 const Ragdoll = preload("res://scripts/client/ragdoll.gd")
 const CharacterAnim = preload("res://scripts/client/character_anim.gd")
 const SnapshotSmoothing = preload("res://scripts/client/network_snapshot_smoothing.gd")
+const NetworkJitterBuffer = preload("res://scripts/client/network_jitter_buffer.gd")
 const LootDropBounce = preload("res://scripts/client/loot_drop_bounce.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const EngineFeatures = preload("res://scripts/client/engine_features.gd")
@@ -50,7 +51,8 @@ var _wetness_step: int = 0
 var _snapshot_time := 0.0
 var _last_hp: Dictionary = {} # "player:id" / "zombie:id" -> last seen HP, for hit flashes.
 var _render_time := -1.0
-const INTERPOLATION_DELAY := 0.12 # A little more than one snapshot interval (10 per second).
+var _snapshot_buffer = NetworkJitterBuffer.new()
+const INTERPOLATION_DELAY := 0.12 # Baseline for 10 server snapshots per second.
 const TELEPORT_DISTANCE := 8.0
 
 
@@ -109,10 +111,22 @@ func set_wetness_step(step: int) -> void:
 
 
 func update_from(client) -> void:
-	# The render clock follows the server clock a fixed delay behind, gently, so it never jumps backwards.
-	_snapshot_time = float(client.server_time)
-	if _render_time < 0.0 or absf(_render_time - (_snapshot_time - INTERPOLATION_DELAY)) > 0.5:
-		_render_time = _snapshot_time - INTERPOLATION_DELAY
+	# This method runs every render frame, not on every network event.
+	# Only new *server timestamps* may update the measured arrival jitter.
+	var incoming_time: float = float(client.server_time)
+	if not is_finite(incoming_time) or incoming_time < 0.0:
+		return
+	if incoming_time < _snapshot_time:
+		if _snapshot_time - incoming_time <= 0.5:
+			return # Out-of-order sample: keep the newest authoritative pose.
+		# Reconnect to an earlier server epoch: flush visual history only.
+		_snapshot_buffer.reset()
+		_history.clear()
+		_render_time = -1.0
+	_snapshot_time = incoming_time
+	_snapshot_buffer.observe(_snapshot_time, float(Time.get_ticks_usec()) * 0.000001)
+	if _render_time < 0.0 or absf(_render_time - (_snapshot_time - _snapshot_buffer.delay)) > 0.5:
+		_render_time = _snapshot_time - _snapshot_buffer.delay
 	var seen: Dictionary = {}
 	for id in client.players:
 		_touch("player:%d" % id, "player", client.players[id], seen)
@@ -706,8 +720,10 @@ func _process(delta: float) -> void:
 	_update_corpses(delta)
 	var blend := 1.0 - exp(-14.0 * delta)
 	if _render_time >= 0.0:
-		_render_time += delta
-		_render_time += ((_snapshot_time - INTERPOLATION_DELAY) - _render_time) * clampf(delta * 2.0, 0.0, 1.0)
+		# One native/fallback visual clock serves every entity in this frame.
+		# Rate is always nonnegative and never predicts beyond server data.
+		_render_time = NetworkJitterBuffer.advance_clock(
+			_render_time, _snapshot_time, _snapshot_buffer.delay, delta, self)
 	var anim_models: Array = []
 	for key in _nodes:
 		var node: Node3D = _nodes[key]

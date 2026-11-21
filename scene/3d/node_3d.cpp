@@ -1411,6 +1411,34 @@ bool Node3D::_property_get_revert(const StringName &p_name, Variant &r_property)
 	return true;
 }
 
+real_t Node3D::advance_network_render_time(real_t p_render_time, real_t p_latest_server_time,
+		real_t p_delay, real_t p_delta) const {
+	// Simulated proxies draw between received snapshots. Invalid network
+	// timestamps must not contaminate transforms, velocities or motion vectors.
+	if (!Math::is_finite(p_latest_server_time) || p_latest_server_time < real_t(0.0) ||
+			!Math::is_finite(p_delay) || p_delay < real_t(0.0)) {
+		return Math::is_finite(p_render_time) ? p_render_time : real_t(0.0);
+	}
+	const real_t delay = CLAMP(p_delay, real_t(0.0), real_t(0.35));
+	const real_t target = p_latest_server_time - delay;
+	// Teleports, reconnects and changed world clocks explicitly rebase.
+	if (!Math::is_finite(p_render_time) || p_render_time < real_t(0.0) ||
+			Math::abs(target - p_render_time) > real_t(0.5)) {
+		return target;
+	}
+	if (!Math::is_finite(p_delta) || p_delta <= real_t(0.0)) {
+		return MIN(p_render_time, p_latest_server_time);
+	}
+	// Slow down while the adaptive jitter buffer grows; catch up gradually
+	// after recovery. Never reverse the clock, and never extrapolate beyond
+	// the last authoritative server timestamp on packet loss.
+	const real_t frame_step = MIN(p_delta, real_t(0.2));
+	const real_t error = target - p_render_time;
+	const real_t rate = CLAMP(real_t(1.0) + error * real_t(2.0),
+			real_t(0.4), real_t(1.6));
+	return MIN(p_latest_server_time, p_render_time + frame_step * rate);
+}
+
 Vector3 Node3D::interpolate_network_snapshot(const Vector3 &p_from, const Vector3 &p_to,
 		const Vector3 &p_from_velocity, const Vector3 &p_to_velocity,
 		real_t p_snapshot_delta, real_t p_fraction) const {
@@ -1491,6 +1519,7 @@ void Node3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_global_transform_interpolated"), &Node3D::get_global_transform_interpolated);
 	ClassDB::bind_method(D_METHOD("set_global_position", "position"), &Node3D::set_global_position);
 	ClassDB::bind_method(D_METHOD("get_global_position"), &Node3D::get_global_position);
+	ClassDB::bind_method(D_METHOD("advance_network_render_time", "render_time", "latest_server_time", "delay", "delta"), &Node3D::advance_network_render_time);
 	ClassDB::bind_method(D_METHOD("interpolate_network_snapshot", "from", "to", "from_velocity", "to_velocity", "snapshot_delta", "fraction"), &Node3D::interpolate_network_snapshot);
 	ClassDB::bind_method(D_METHOD("set_global_basis", "basis"), &Node3D::set_global_basis);
 	ClassDB::bind_method(D_METHOD("get_global_basis"), &Node3D::get_global_basis);
