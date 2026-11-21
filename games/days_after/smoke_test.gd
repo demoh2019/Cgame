@@ -105,6 +105,35 @@ func _smoke() -> void:
         if positions != foliage.call("get_selected_positions"):
             push_error("PCG foliage placement was not deterministic")
             ok = false
+        # The native density-remap policy must preserve the authored biome
+        # mask at default quality and react to game-side runtime quality.
+        if bool(foliage.call("set_density_ceiling", 1.5)) or \
+                bool(foliage.call("set_density_ceiling", NAN)):
+            push_error("PCG density cap accepted invalid quality input")
+            ok = false
+        if not bool(foliage.call("set_density_ceiling", 0.5)):
+            push_error("PCG runtime foliage density cap could not change")
+            ok = false
+        var low_quality: PackedFloat32Array = foliage.call("get_density_values")
+        if low_quality.size() != densities.size():
+            push_error("PCG density remap changed the number of source points")
+            ok = false
+        else:
+            for sample_index in range(densities.size()):
+                if absf(low_quality[sample_index] - densities[sample_index] * 0.5) > 0.00001:
+                    push_error("PCG runtime density remap diverged from the authored biome mask")
+                    ok = false
+                    break
+        if int(foliage.call("get_density_sampled_count")) > sampled_count:
+            push_error("Lowered PCG density cap admitted more source points")
+            ok = false
+        if not bool(foliage.call("verify_native_fallback_parity")):
+            push_error("Runtime density cap broke native/fallback placement parity")
+            ok = false
+        if not bool(foliage.call("set_density_ceiling", 1.0)) or \
+                positions != foliage.call("get_selected_positions"):
+            push_error("Restored PCG density cap did not restore stable vegetation")
+            ok = false
 
     var state = game.get("state")
     var pickups := get_nodes_in_group("days_after_pickup")
