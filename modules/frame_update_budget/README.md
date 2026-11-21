@@ -104,3 +104,29 @@ time alongside actual CPU measurements.
 preempted; predicted time is not a guarantee of rendered frame time, and the
 engine does not measure GPU cost. No authoritative server AI, combat, physics,
 save state or network synchronization is subject to this scheduler.
+
+## Per-lane relevance-driven update rates
+
+The native engine also supports `set_lane_rate_scale(lane, scale)` and
+`get_lane_rate_scale(lane)` for finite **0.75–2.0** frequency multipliers.
+Defaults are **1.0**. Unknown lanes and invalid values are rejected without
+mutating the lane, and a normal `reset()` preserves the configured rate.
+
+**Frequency vs. importance:** an update is eligible only after its own
+`1 / (quality_hz * rate_scale)` interval. Eligible lanes still use the
+existing significance priority, bounded starvation aging and measured
+CPU-cost forecast to compete for slots. This preserves the other engine
+work in `develop`, rather than replacing the learned-cost allocator.
+
+Albion After now maps the game's **existing** per-scene importance scores
+to rate multipliers through `AmbientTickBudget.rate_scale_for_importance()`:
+importance 0.25 maps to 0.75×, 1.0 to 1.0×, and 4.0 to 1.5×.
+The online world only calls the new native method when available; older
+custom engine binaries continue using the established importance-aware
+scheduler. Stock Godot uses identical GDScript logic. Cached profile values
+avoid redundant setter calls on unchanged weather/day-night conditions.
+
+C++ unit tests cover invalid input, reset, independent importance and
+frequency, non-starvation, and frame-slot limits. The headless game suite
+compares the native and scripted schedulers for 241 frames, with the
+same significance and rate configuration.
