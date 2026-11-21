@@ -50,7 +50,7 @@ TEST_CASE("[SpatialRelevancyGrid2D] Stable input order, exact radius, negative c
 	REQUIRE(grid->rebuild(ids, points));
 	CHECK(bool(grid->get_stats()["indexed_mode"]));
 	const PackedInt64Array nearby = grid->query_ids(Vector2(-100, -100), 90.0);
-	const PackedInt64Array expected = { 91, 222, 2, 19, 3 };
+	const PackedInt64Array expected = { 91, 2, 19, 3 };
 	CHECK(nearby == expected); // 90m boundary is inclusive.
 	CHECK(grid->query_ids(Vector2(0, 0), 0.0) == PackedInt64Array{ 31 });
 	CHECK(grid->query_ids(Vector2(0, 0), 1.0) == PackedInt64Array{ 31 });

@@ -8901,14 +8901,15 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	_refresh_daily(player)
 	var here := Vector2(player.position.x, player.position.z)
 	var nearby_players: Array = []
-	var player_candidates: Array = players.values()
+	var player_candidates: Array = []
 	if _snapshot_interest_prepared and _snapshot_interest_tick == tick_count:
-		player_candidates = []
 		var player_ids: PackedInt64Array = _snapshot_players_grid.query_ids(here, Defs.INTEREST_RADIUS)
 		for candidate_id in player_ids:
 			var candidate = players.get(candidate_id)
 			if candidate != null:
 				player_candidates.append(candidate)
+	else:
+		player_candidates = players.values()
 	for other in player_candidates:
 		if other.id == peer_id:
 			continue
@@ -8930,14 +8931,15 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"arena_tier": ArenaRating.tier(other.arena_rating)})
 	var nearby_zombies: Array = []
 	var party_flank_hint: Dictionary = {}
-	var zombie_candidates: Array = zombies.values()
+	var zombie_candidates: Array = []
 	if _snapshot_interest_prepared and _snapshot_interest_tick == tick_count:
-		zombie_candidates = []
 		var infected_ids: PackedInt64Array = _snapshot_zombies_grid.query_ids(here, Defs.INTEREST_RADIUS)
 		for candidate_id in infected_ids:
 			var candidate = zombies.get(candidate_id)
 			if candidate != null:
 				zombie_candidates.append(candidate)
+	else:
+		zombie_candidates = zombies.values()
 	for zombie in zombie_candidates:
 		var p: Vector3 = zombie.position
 		if zombie.is_alive() and here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:

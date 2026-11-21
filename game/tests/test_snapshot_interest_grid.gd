@@ -22,6 +22,8 @@ func run(t) -> void:
 		t.check(native.rebuild(player_ids, player_positions), "native index builds")
 		t.eq(native.query_ids(Vector2(-20, -20), 90.0),
 			PackedInt64Array([3, 7, 9, 90]), "ordered exact 90m relevance")
+		t.eq(native.query_ids(Vector2(700, 700), 90.0).size(), 0,
+			"empty distant query cannot reveal unrelated entities")
 		t.check(native.get_stats()["indexed_mode"], "large peer sets use buckets")
 		t.eq(native.query_ids(Vector2(-20, -20), 0.0),
 			PackedInt64Array([3]), "zero-radius picks the exact position")
