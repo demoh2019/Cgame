@@ -35,6 +35,8 @@
 #include "core/io/dir_access.h"
 #include "core/io/resource_saver.h"
 #include "core/math/math_funcs.h"
+
+#include <limits>
 #include "core/os/os.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
@@ -931,7 +933,7 @@ TEST_CASE("[WorldPartition3D] Native navigation tiles filter slopes and radius-a
 	PackedVector3Array blockers;
 	blockers.push_back(Vector3(2.0, 2.0, 0.1)); // Vector3(local_x, local_z, obstacle radius).
 	Ref<NavigationMesh> narrow = world->build_navigation_tile(flat, 4, blockers, 0.0, 45.0);
-	Ref<NavigationMesh> broad = world->build_navigation_tile(flat, 4, blockers, 0.75, 45.0);
+	Ref<NavigationMesh> broad = world->build_navigation_tile(flat, 4, blockers, 1.1, 45.0);
 	REQUIRE(narrow.is_valid());
 	REQUIRE(broad.is_valid());
 	CHECK(narrow->get_polygon_count() < complete->get_polygon_count());
@@ -958,7 +960,7 @@ TEST_CASE("[WorldPartition3D] Native navigation tiles filter slopes and radius-a
 	CHECK(high_limit->get_polygon_count() == 32);
 
 	PackedVector3Array non_finite = flat;
-	non_finite.set(0, Vector3(Math::INF, 0, 0));
+	non_finite.set(0, Vector3(std::numeric_limits<real_t>::infinity(), 0, 0));
 	PackedVector3Array bad_blocker;
 	bad_blocker.push_back(Vector3(1.0, 1.0, -1.0));
 	PackedVector3Array too_many_blockers;
