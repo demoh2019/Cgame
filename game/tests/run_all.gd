@@ -175,6 +175,7 @@ const SUITES := [
 	"res://tests/test_solo_slots.gd",
 	"res://tests/test_guild_holds.gd",
 	"res://tests/test_world_discovery.gd",
+	"res://tests/test_world_encounter_director.gd",
 	"res://tests/test_inventory.gd",
 	"res://tests/test_equipment_presets.gd",
 	"res://tests/test_encumbrance.gd",
