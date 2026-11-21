@@ -394,6 +394,10 @@ var last_crowd_separation_stats: Dictionary = {"enabled": false, "population": 0
 const AI_CUE_NATIVE_MIN_NPCS := 32
 const AI_CUE_NATIVE_MIN_SOURCES := 4
 var last_ai_cue_query_stats: Dictionary = {"native": false, "channel": "", "sources": 0, "cues": 0}
+# Mass-style per-agent sensing broadphase, never used for active combat.
+const AI_PERCEPTION_INTEREST_MIN_NPCS := 64
+const AI_PERCEPTION_INTEREST_MIN_PLAYERS := 8
+var last_perception_interest_stats: Dictionary = {"native": false, "sources": 0, "players": 0, "pairs": 0}
 # Native Mass-style cylinder counts for simultaneously armed camp sentries.
 var last_camp_alarm_query_stats: Dictionary = {"native": false, "centers": 0, "targets": 0}
 # Cross-set Mass/Chaos-style native broadphase for PvE snares; script owns exact hits.
@@ -8329,6 +8333,88 @@ func _budget_eqs_replans(cohort: Array, delta: float) -> void:
 		"deferred": eligible.size() - granted, "urgent": urgent_count}
 
 
+## An optional broadphase of *potential* nearby players for passive target
+## selection. Threat, forced targets and active combat always receive the
+## full authoritative player table. The native query cannot authorize sight,
+## hearing, blood scent, safe zones, or an attack.
+func get_perception_interest_stats() -> Dictionary:
+	return last_perception_interest_stats.duplicate(true)
+
+
+func _prepare_passive_target_candidates(cohort: Array, info: Dictionary,
+		delta: float) -> Dictionary:
+	last_perception_interest_stats = {"native": false, "sources": 0,
+		"players": 0, "pairs": 0}
+	if cohort.size() < AI_PERCEPTION_INTEREST_MIN_NPCS or cohort.size() > 4096 \
+			or info.size() < AI_PERCEPTION_INTEREST_MIN_PLAYERS \
+			or info.size() > 8192:
+		return {}
+	if _pack_spatial_grid == null and ClassDB.class_exists("AIProximityGrid2D"):
+		_pack_spatial_grid = ClassDB.instantiate("AIProximityGrid2D")
+	if _pack_spatial_grid == null or not _pack_spatial_grid.has_method(
+			"query_cross_variable_radius_batch"):
+		return {}
+	var player_ids: Array = []
+	var player_sites := PackedVector2Array()
+	for id in info:
+		var entry: Dictionary = info[id]
+		if not bool(entry.get("alive", false)) or bool(entry.get("safe", true)):
+			continue
+		var player_position: Vector3 = entry.get("position", Vector3.INF)
+		if not player_position.is_finite():
+			continue
+		player_ids.append(id)
+		player_sites.append(Vector2(player_position.x, player_position.z))
+	if player_sites.is_empty():
+		return {}
+	var agent_ids: Array = []
+	var agent_sites := PackedVector2Array()
+	var scan_radii := PackedFloat32Array()
+	for zombie in cohort:
+		# For these agents, Zombie._select_target() only needs currently
+		# eligible survivors inside their lose-leash plus the passive AI LOD
+		# far threshold (24m) plus its 4m hysteresis band. Further
+		# targets are behaviorally equivalent to infinite nearest distance.
+		if not zombie.is_alive() or zombie.raid_boss or zombie.target_id != -1 \
+				or zombie.forced_target_seconds > 0.0 or not zombie.threat.is_empty() \
+				or (zombie.state != Zombie.State.IDLE \
+				and zombie.state != Zombie.State.WANDER \
+				and zombie.state != Zombie.State.INVESTIGATE) \
+				or zombie.think_timer > delta or not zombie.position.is_finite():
+			continue
+		var lose: float = float(zombie.data.get("lose", NAN))
+		var radius: float = lose + 28.125 # 24m far + 4m hysteresis + float safety.
+		if not is_finite(radius) or radius <= 0.0 or radius > 256.0:
+			return {} # Avoid silently clipping any agent's detection or LOD.
+		agent_ids.append(zombie.id)
+		agent_sites.append(Vector2(zombie.position.x, zombie.position.z))
+		scan_radii.append(radius)
+	if agent_sites.is_empty():
+		return {}
+	var batches: Array = _pack_spatial_grid.query_cross_variable_radius_batch(
+		agent_sites, scan_radii, player_sites)
+	if batches.size() != agent_sites.size():
+		return {}
+	# Fail atomically: no partial player tables reach Zombie.think() if an
+	# outdated native module returns malformed indices.
+	for nearby_indices in batches:
+		for index in nearby_indices:
+			if index < 0 or index >= player_ids.size():
+				return {}
+	var relevant: Dictionary = {}
+	var total_pairs := 0
+	for i in range(agent_ids.size()):
+		var per_agent: Dictionary = {}
+		for index in batches[i]:
+			var pid: int = int(player_ids[index])
+			per_agent[pid] = info[pid] # Reuse server-authorized metadata exactly.
+			total_pairs += 1
+		relevant[agent_ids[i]] = per_agent
+	last_perception_interest_stats = {"native": true, "sources": agent_ids.size(),
+		"players": player_sites.size(), "pairs": total_pairs}
+	return relevant
+
+
 func _tick_zombies(delta: float) -> void:
 	var info: Dictionary = {}
 	for player in players.values():
@@ -8373,6 +8459,8 @@ func _tick_zombies(delta: float) -> void:
 	# of infected iterated below. Masks use array indices, never client IDs.
 	# Older engines or cohorts above the safety cap use the scalar native API.
 	var ai_cohort: Array = zombies.values()
+	var passive_player_interest: Dictionary = _prepare_passive_target_candidates(
+		ai_cohort, info, delta)
 	_budget_eqs_replans(ai_cohort, delta)
 	# A single native 3x3-cell query every five server ticks feeds gentle
 	# steering for noncombat infected only. Clear stale vectors immediately
@@ -8463,7 +8551,16 @@ func _tick_zombies(delta: float) -> void:
 				phase_due += 1
 			else:
 				phase_deferred += 1
-		var result: Dictionary = zombie.think(world, info, delta, rng)
+		# Only an unengaged passive agent uses the conservative spatial
+		# candidate table; active targets and combat keep the exact full info.
+		var perception_info: Dictionary = info
+		if zombie.target_id == -1 and zombie.forced_target_seconds <= 0.0 \
+				and zombie.threat.is_empty() and not zombie.raid_boss \
+				and (zombie.state == Zombie.State.IDLE \
+				or zombie.state == Zombie.State.WANDER \
+				or zombie.state == Zombie.State.INVESTIGATE):
+			perception_info = passive_player_interest.get(zombie.id, info)
+		var result: Dictionary = zombie.think(world, perception_info, delta, rng)
 		# These are authoritative native scorer timings only; never count
 		# script movement, physics, sleep, networking or claim handling.
 		eqs_cpu_us += zombie.flank_last_step_us
