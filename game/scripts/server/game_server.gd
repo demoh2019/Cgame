@@ -8536,7 +8536,13 @@ func _tick_zombies(delta: float) -> void:
 				phase_deferred += 1
 		# Only an unengaged passive agent uses the conservative spatial
 		# candidate table; active targets and combat keep the exact full info.
-		var perception_info: Dictionary = passive_player_interest.get(zombie.id, info)
+		var perception_info: Dictionary = info
+		if zombie.target_id == -1 and zombie.forced_target_seconds <= 0.0 \
+				and zombie.threat.is_empty() and not zombie.raid_boss \
+				and (zombie.state == Zombie.State.IDLE \
+				or zombie.state == Zombie.State.WANDER \
+				or zombie.state == Zombie.State.INVESTIGATE):
+			perception_info = passive_player_interest.get(zombie.id, info)
 		var result: Dictionary = zombie.think(world, perception_info, delta, rng)
 		# These are authoritative native scorer timings only; never count
 		# script movement, physics, sleep, networking or claim handling.
