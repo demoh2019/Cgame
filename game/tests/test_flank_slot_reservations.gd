@@ -172,6 +172,25 @@ func run(t) -> void:
 				"clearing the resource cap restores original stable EQS ordering")
 		else:
 			t.check(true, "older Cgame binary keeps the position-only EQS fallback")
+		if ClassDB.instantiate("EnvironmentQuery3D").has_method(
+				"begin_incremental_top_positions"):
+			var partial_pool = _pool(true)
+			var incremental_zombie := Zombie.new(2003, "walker",
+				Vector3(0, WorldGen.HUB_HEIGHT, 0))
+			incremental_zombie.target_id = 77
+			incremental_zombie.flank_reservations = partial_pool
+			incremental_zombie.flank_incremental_enabled = true
+			t.eq(incremental_zombie._flank_goal(here, target), target,
+				"unfinished native EQS cannot create a server Smart Object claim")
+			t.eq(partial_pool.get_claim_count(), 0, "first slice has not claimed a slot")
+			t.eq(incremental_zombie._flank_goal(here, target), target,
+				"second slice still rejects incomplete ranked candidate sets")
+			t.eq(partial_pool.get_claim_count(), 0, "second slice has not claimed a slot")
+			var final_spot := incremental_zombie._flank_goal(here, target)
+			t.check(final_spot.distance_to(target) > 2.3 and final_spot.distance_to(target) < 2.5,
+				"third slice can claim a completed ranked physical flank position")
+			t.eq(partial_pool.get_claim_count(), 1,
+				"completion acquires exactly one authoritative unique slot")
 		var first_spot: Vector2 = first._flank_goal(here, target)
 		var second_spot: Vector2 = second._flank_goal(here, target)
 		if first._flank_query != null and first._flank_query.has_method("query_random_best_positions"):

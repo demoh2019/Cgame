@@ -395,3 +395,51 @@ the original unlimited flank behavior, and the native scheduler does
 not add network state or reward changes.
 
 Unreal reference: https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/AIModule/FEnvQueryManagerConfig
+
+## Incremental top-K EQS (Unreal ExecuteOneStep-style query progression)
+
+Unlike the **per-tick query count** scheduler, these instance methods
+split an **individual** EQS query into bounded work over multiple calls:
+
+```gdscript
+query.begin_incremental_top_positions(8)
+# Each game tick, score at most 3 candidate items.
+if query.step_incremental_top_positions(3):
+    var source_indices: PackedInt32Array = query.get_incremental_top_indices()
+    query.cancel_incremental_top_positions()
+```
+
+The engine captures the full EQS scoring state and source candidates at
+`begin_incremental_top_positions(count)`. Changes to the live resource
+do not alter in-flight scores; cancelling or beginning a new query discards
+the old snapshot. Each step scores **at most 1–4096 source candidates**,
+including rejected ones. Results remain hidden until the final step, and
+match `query_top_positions` and `query_top_indices` (stable index ties,
+source identity, filters and `max_results`). On completion, the snapshot
+remains available until cancellation. Results are never copied out early.
+Work is O(K * candidates) overall and O(K) transient ranked storage; a
+snapshot also retains the source query's PackedVector3Array data by
+copy-on-write. The API does no physics, navigation, threading or timed
+callbacks and does not promise a CPU time deadline.
+
+`get_incremental_random_best_positions(best_percent, seed)` selects a seeded
+Random Best item from already scored top-K state in O(K), without a new
+full query. To match the original `query_random_best_positions` exactly,
+K must retain **all** eligible source items (the game uses K=8 for its
+eight flank-ring points). Truncating to a small top-K intentionally narrows
+the stochastic candidate pool. This avoids extra full rescoring on the
+final work slot.
+
+Albion After enables **three candidates per granted tick** when the
+server has 64+ infected. A pending infected flank query continues from
+its last candidate on each admitted AI work slot instead of recalculating
+all candidates; while pending, direct pursuit and combat continue.
+If the target changes or moves too far, the pending snapshot is cancelled,
+and the next permitted step starts with authoritative current context.
+The existing server-owned eight-regular-query budget still applies,
+and urgent displaced Smart Object lease recovery bypasses that count
+budget. Near-melee, bosses, dead infected and older native/stock Godot
+retain the old behavior. No intermediate candidate is ever allowed to
+reserve a server Smart Object slot.
+
+Reference: https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/AIModule/FEnvQueryInstance

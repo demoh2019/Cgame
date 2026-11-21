@@ -200,6 +200,46 @@ func run(t) -> void:
 		Vector2(2.0, 0.0), "close melee pursuit bypasses expensive flank scoring")
 	t.eq(flanker._flank_goal(Vector2.ZERO, Vector2(60.0, 0.0)),
 		Vector2(60.0, 0.0), "distant pursuit bypasses flank scoring")
+	t.current = "time-sliced EQS flank never uses a partial native ranking"
+	var sliced := Zombie.new(1460, "walker", Vector3.ZERO)
+	sliced.flank_incremental_enabled = true
+	var sliced_goal := Vector2(10.0, 0.0)
+	var first_step := sliced._flank_goal(Vector2.ZERO, sliced_goal)
+	if ClassDB.class_exists("EnvironmentQuery3D") and sliced._flank_query != null and \
+			sliced._flank_query.has_method("begin_incremental_top_positions"):
+		t.eq(first_step, sliced_goal, "first three candidate tests do not invent a partial flank")
+		t.check(sliced._flank_incremental_running, "EQS cursor persists across enemy AI ticks")
+		t.eq(int(sliced._flank_query.call("get_incremental_processed_count")), 3,
+			"first work slot tests exactly three source items")
+		sliced.flank_replan_allowed = false
+		t.eq(sliced._flank_goal(Vector2.ZERO, sliced_goal), sliced_goal,
+			"deferred EQS slot still pursues the survivor directly")
+		t.eq(int(sliced._flank_query.call("get_incremental_processed_count")), 3,
+			"denied work slot cannot advance a native in-flight cursor")
+		sliced.flank_replan_allowed = true
+		t.eq(sliced._flank_goal(Vector2.ZERO, sliced_goal), sliced_goal,
+			"six tested candidates still expose no partial ranked result")
+		t.eq(int(sliced._flank_query.call("get_incremental_processed_count")), 6,
+			"second work slot tests exactly three additional items")
+		var completed_goal := sliced._flank_goal(Vector2.ZERO, sliced_goal)
+		t.near(completed_goal.distance_to(sliced_goal), Zombie.FLANK_RING, 0.001,
+			"third step finishes and returns a server-compatible ranked flank")
+		t.check(not sliced._flank_incremental_running,
+			"completed work releases snapshot and returns to normal cached path")
+		var next_cached := sliced._flank_goal(Vector2(0.2, 0.0), sliced_goal)
+		t.eq(next_cached, completed_goal,
+			"completed incremental result still participates in stable flank cache")
+		# Changed targets invalidate a pending context before it can claim a slot.
+		sliced._flank_replan_remaining = 0.0
+		sliced._flank_goal(Vector2.ZERO, sliced_goal)
+		t.check(sliced._flank_incremental_running, "a later replan begins a fresh snapshot")
+		sliced._flank_goal(Vector2.ZERO, sliced_goal + Vector2(-8, 9))
+		t.eq(int(sliced._flank_query.call("get_incremental_processed_count")), 3,
+			"large target displacement cancels and restarts the snapshot")
+	else:
+		t.near(first_step.distance_to(sliced_goal), Zombie.FLANK_RING, 0.001,
+			"legacy engine retains original one-shot flanking")
+
 	t.current = "runner is faster"
 	var runner := Zombie.new(3, "runner", Vector3(0, ground, 0))
 	var walker := Zombie.new(4, "walker", Vector3(0, ground, 0))

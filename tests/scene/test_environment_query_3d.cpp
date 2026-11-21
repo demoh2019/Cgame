@@ -966,6 +966,102 @@ TEST_CASE("[EnvironmentQuery3D] EQS query budget invalid requests fail closed") 
 	CHECK(EnvironmentQuery3D::schedule_query_mask(4096, 0, 64).size() == 4096);
 }
 
+TEST_CASE("[EnvironmentQuery3D] Incremental top-K matches one-shot ranking and exact indices") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(3, 0, 0), Vector3(1, 0, 0), Vector3(3, 0, 0),
+		Vector3(8, 0, 0), Vector3(5, 0, 0), Vector3(NaN, 0, 0),
+		Vector3(4, 0, 0), Vector3(9, 0, 0)
+	});
+	q->set_max_distance(8);
+	q->set_max_results(3);
+	const PackedInt32Array expected_ids = q->query_top_indices(7);
+	const PackedVector3Array expected_positions = q->query_top_positions(7);
+	REQUIRE(expected_ids.size() == 3);
+	REQUIRE(q->begin_incremental_top_positions(7));
+	CHECK(!q->is_incremental_top_complete());
+	CHECK(!q->step_incremental_top_positions(2));
+	CHECK(q->get_incremental_processed_count() == 2);
+	CHECK(q->get_incremental_top_indices().is_empty());
+	CHECK(q->get_incremental_top_positions().is_empty());
+	CHECK(!q->step_incremental_top_positions(3));
+	CHECK(q->get_incremental_processed_count() == 5);
+	CHECK(q->step_incremental_top_positions(3));
+	CHECK(q->is_incremental_top_complete());
+	CHECK(q->get_incremental_processed_count() == 8);
+	CHECK(q->get_incremental_top_indices() == expected_ids);
+	CHECK(q->get_incremental_top_positions() == expected_positions);
+	CHECK(q->step_incremental_top_positions(1));
+	CHECK(q->get_incremental_top_indices() == expected_ids);
+	q->cancel_incremental_top_positions();
+	CHECK(!q->is_incremental_top_complete());
+	CHECK(q->get_incremental_top_indices().is_empty());
+	CHECK(q->get_incremental_processed_count() == 0);
+}
+
+TEST_CASE("[EnvironmentQuery3D] Incremental seeded random-best reuses completed scoring") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(2, 0, 0), Vector3(3, 0, 0), Vector3(-3, 0, 0), Vector3(4, 0, 0),
+		Vector3(-4, 0, 0), Vector3(5, 0, 0), Vector3(-5, 0, 0), Vector3(8, 0, 0)
+	});
+	q->set_max_distance(10);
+	REQUIRE(q->begin_incremental_top_positions(8));
+	CHECK(!q->step_incremental_top_positions(3));
+	CHECK(q->get_incremental_random_best_positions(25, 5).is_empty());
+	CHECK(!q->step_incremental_top_positions(3));
+	CHECK(q->step_incremental_top_positions(3));
+	for (int percent : { 0, 5, 25, 100 }) {
+		for (int seed = 0; seed < 32; seed++) {
+			CHECK(q->get_incremental_random_best_positions(percent, seed) ==
+					q->query_random_best_positions(percent, seed));
+		}
+	}
+	ERR_PRINT_OFF
+	CHECK(q->get_incremental_random_best_positions(-1, 3).is_empty());
+	CHECK(q->get_incremental_random_best_positions(101, 3).is_empty());
+	ERR_PRINT_ON
+	q->cancel_incremental_top_positions();
+	CHECK(q->get_incremental_random_best_positions(25, 5).is_empty());
+}
+
+TEST_CASE("[EnvironmentQuery3D] Incremental snapshot isolates live parameter mutation and restarts") {
+	Ref<EnvironmentQuery3D> q = make_query({ Vector3(1, 0, 0), Vector3(4, 0, 0), Vector3(8, 0, 0) });
+	const PackedVector3Array before = q->query_top_positions(2);
+	REQUIRE(q->begin_incremental_top_positions(2));
+	CHECK(!q->step_incremental_top_positions(1));
+	q->set_origin(Vector3(10, 0, 0));
+	q->set_candidates({ Vector3(100, 0, 0) });
+	CHECK(q->step_incremental_top_positions(2));
+	CHECK(q->get_incremental_top_positions() == before);
+	CHECK(q->begin_incremental_top_positions(2));
+	CHECK(q->get_incremental_processed_count() == 0);
+	CHECK(q->step_incremental_top_positions(1));
+	CHECK(q->get_incremental_top_positions() == q->query_top_positions(2));
+}
+
+TEST_CASE("[EnvironmentQuery3D] Incremental query handles empty and filtered scenes, invalid budgets") {
+	Ref<EnvironmentQuery3D> q = make_query();
+	REQUIRE(q->begin_incremental_top_positions(3));
+	CHECK(q->is_incremental_top_complete());
+	CHECK(q->get_incremental_top_positions().is_empty());
+	q->set_candidates({ Vector3(2, 0, 0), Vector3(5, 0, 0) });
+	q->set_min_distance(10);
+	REQUIRE(q->begin_incremental_top_positions(3));
+	CHECK(q->step_incremental_top_positions(1) == false);
+	CHECK(q->step_incremental_top_positions(1));
+	CHECK(q->get_incremental_top_indices().is_empty());
+	ERR_PRINT_OFF
+	CHECK(!q->begin_incremental_top_positions(0));
+	CHECK(!q->begin_incremental_top_positions(65));
+	CHECK(!q->step_incremental_top_positions(1));
+	CHECK(q->begin_incremental_top_positions(3));
+	CHECK(!q->step_incremental_top_positions(0));
+	CHECK(!q->step_incremental_top_positions(4097));
+	ERR_PRINT_ON
+	CHECK(q->get_incremental_processed_count() == 0);
+	CHECK(q->step_incremental_top_positions(2));
+	CHECK(q->get_incremental_top_indices().is_empty());
+}
+
 TEST_CASE("[EnvironmentQuery3D] Evaluation does not mutate input candidates") {
 	PackedVector3Array points = { Vector3(7, 0, 0), Vector3(1, 0, 0) };
 	Ref<EnvironmentQuery3D> q = make_query(points);

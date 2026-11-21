@@ -689,6 +689,7 @@ const FLANK_FROM := 3.5 # Closer than this, an infected goes straight for its ta
 const FLANK_RANGE := 14.0
 const FLANK_RING := 2.4
 const FLANK_REPLAN_SECONDS := 0.30
+const FLANK_INCREMENTAL_STEP := 3 # Hard bound on candidate tests per admitted AI tick.
 var _flank_query: Resource
 var _flank_goal_cached := Vector2.ZERO
 var _flank_here_cached := Vector2.INF
@@ -698,6 +699,11 @@ var _flank_target_id_cached: int = -1
 var _flank_slot_id_cached: int = 0 # Validate cached goal against current server lease.
 var flank_reservations: Variant = null # Shared server-owned smart-object lease pool.
 var flank_replan_allowed: bool = true # Only optional EQS geometry; combat remains unthrottled.
+var flank_incremental_enabled: bool = false # GameServer opts in for 64+ active infected.
+var _flank_incremental_running: bool = false
+var _flank_incremental_target_id: int = -1
+var _flank_incremental_here := Vector2.INF
+var _flank_incremental_target := Vector2.INF
 
 
 ## Where a chasing infected heads: a pack surrounds its prey instead of queueing behind one another. The engine's
@@ -708,10 +714,13 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 	var distance := here.distance_to(target)
 	if raid_boss or type == "brute" or distance < FLANK_FROM or distance > FLANK_RANGE \
 			or not ClassDB.class_exists("EnvironmentQuery3D"):
+		if _flank_incremental_running:
+			_flank_query.call("cancel_incremental_top_positions")
+			_flank_incremental_running = false
 		return target
 	# Tactical decisions cost more than movement; cache only while valid.
 	# Invalidate cached ring claims when the authoritative target changes.
-	if _flank_replan_remaining > 0.0 and _flank_target_id_cached == target_id and \
+	if not _flank_incremental_running and _flank_replan_remaining > 0.0 and _flank_target_id_cached == target_id and \
 			here.distance_squared_to(_flank_here_cached) <= 3.24 and \
 			target.distance_squared_to(_flank_target_cached) <= 1.0:
 		# New engine/portable pools expose current ownership. After an expiring
@@ -720,6 +729,14 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 		if flank_reservations == null or not flank_reservations.has_method("get_actor_slot") \
 				or int(flank_reservations.get_actor_slot(id)) == _flank_slot_id_cached:
 			return _flank_goal_cached
+	# Pending query results are tied to the original actor/target context.
+	# Discard when combat target changes or geometry becomes too stale.
+	if _flank_incremental_running and (not flank_incremental_enabled or \
+			_flank_incremental_target_id != target_id or \
+			here.distance_squared_to(_flank_incremental_here) > 196.0 or \
+			target.distance_squared_to(_flank_incremental_target) > 81.0):
+		_flank_query.call("cancel_incremental_top_positions")
+		_flank_incremental_running = false
 	# Server admission gates ONLY a costly fresh EQS lookup. Valid cached
 	# goals are handled above; stale/lost claims take the safe direct-chase
 	# path instead of reusing a slot owned by someone else.
@@ -729,7 +746,13 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 		_flank_query = ClassDB.instantiate("EnvironmentQuery3D")
 		_flank_query.set("horizontal_only", true)
 	var use_smart_slots: bool = flank_reservations != null and target_id > 0 and target_id < (1 << 40)
-	_flank_query.set("max_results", 8 if use_smart_slots else 3)
+	var incremental_available: bool = flank_incremental_enabled and \
+		_flank_query.has_method("begin_incremental_top_positions") and \
+		_flank_query.has_method("step_incremental_top_positions") and \
+		_flank_query.has_method("get_incremental_random_best_positions")
+	# Keep the complete eight-item score band so the final seeded selection
+	# is identical to Random Best 25% without a second full scoring pass.
+	_flank_query.set("max_results", 8 if use_smart_slots or incremental_available else 3)
 	_flank_query.set("origin", Vector3(here.x, 0.0, here.y))
 	# UE-style directional EQS context: select the sides or far side of
 	# the target instead of wasting a flank slot on its near-side approach.
@@ -750,28 +773,46 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 		Vector3(target.x, 0.0, target.y), FLANK_RING, 8,
 		0.0 if use_smart_slots else float(posmod(id, 8)) * 0.4)
 	_flank_query.set("candidates", ring)
-	# Preserve EQS item identities throughout ranking and exclusive leasing.
-	# The previous position-only path must rediscover original ring indices by
-	# fuzzy coordinate comparisons and cannot distinguish overlapping items.
-	# Old Cgame builds without the new API keep their previous fallback.
-	# Unreal Random Best 25% mode: stable near-best candidate for
-	# individual flanking, plus a first preference for server-owned slots.
-	# Never changes the authoritative occupancy/lease algorithm.
-	var preferred := PackedVector3Array()
-	if _flank_query.has_method("query_random_best_positions"):
-		preferred = _flank_query.call("query_random_best_positions", 25, id)
+	# The authoritative server grants each agent a per-tick EQS work slot.
+	# The native cursor scores at most THREE source candidates per admitted
+	# tick; never use partial rankings to claim a gameplay Smart Object.
 	var ranked_indices := PackedInt32Array()
 	var ranked := PackedVector3Array()
-	var top_count: int = 8 if use_smart_slots else 3
-	if not use_smart_slots and preferred.size() == 1:
-		ranked = preferred
-	elif _flank_query.has_method("query_top_indices"):
-		ranked_indices = _flank_query.call("query_top_indices", top_count)
-		for ring_index in ranked_indices:
-			if ring_index < 0 or ring_index >= ring.size():
+	var top_count: int = 8 if use_smart_slots or incremental_available else 3
+	var incremental: bool = incremental_available and \
+		_flank_query.has_method("get_incremental_top_indices")
+	var preferred := PackedVector3Array()
+	if incremental:
+		if not _flank_incremental_running:
+			if not bool(_flank_query.call("begin_incremental_top_positions", top_count)):
 				return target
+			_flank_incremental_running = true
+			_flank_incremental_target_id = target_id
+			_flank_incremental_here = here
+			_flank_incremental_target = target
+		if not bool(_flank_query.call("step_incremental_top_positions", FLANK_INCREMENTAL_STEP)):
+			return target
+		ranked_indices = _flank_query.call("get_incremental_top_indices")
+		preferred = _flank_query.call("get_incremental_random_best_positions", 25, id)
+		_flank_query.call("cancel_incremental_top_positions")
+		_flank_incremental_running = false
 	else:
-		ranked = _flank_query.call("query_top_positions", top_count)
+		# Small crowds and older engine builds keep the original synchronous
+		# path. Recent builds return exact source indices for duplicate items.
+		if _flank_query.has_method("query_top_indices"):
+			ranked_indices = _flank_query.call("query_top_indices", top_count)
+			for ring_index in ranked_indices:
+				if ring_index < 0 or ring_index >= ring.size():
+					return target
+		else:
+			ranked = _flank_query.call("query_top_positions", top_count)
+	# No additional candidate scoring after the incremental result
+	# completes. Legacy paths retain the existing immediate query.
+	if not incremental and _flank_query.has_method("query_random_best_positions"):
+		preferred = _flank_query.call("query_random_best_positions", 25, id)
+	if not use_smart_slots and preferred.size() == 1:
+		ranked_indices = PackedInt32Array()
+		ranked = preferred
 	if ranked_indices.is_empty() and ranked.is_empty():
 		return target
 	var spot: Vector3 = ring[ranked_indices[posmod(id, ranked_indices.size())]] \

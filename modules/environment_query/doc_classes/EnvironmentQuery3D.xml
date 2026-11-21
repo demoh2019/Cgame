@@ -35,6 +35,42 @@
 			<param index="1" name="seed" type="int" />
 			<description>Deterministically selects at most one position, analogous to Unreal EQS's Single Random Item from Best 5% or 25% run modes. First find the maximum score among candidates passing all the same distance, height, directional, threat and occupancy tests as [method query], then uniformly mix [param seed] with each eligible source index and select the strongest hash. Eligible positions must score at least [code]best_score * (1 - best_percent / 100)[/code]. [param best_percent] must be 0–100; 0 accepts only maximum-scoring ties, 100 accepts every valid candidate. Returns an empty array for invalid percent or when no position passes the tests. The chosen point is stable for the same seed, candidate order and query parameters, without consuming gameplay RNG. The result is limited to 0 or 1 element regardless of [member max_results]. Complexity is O(N) scoring with two passes and O(1) scratch storage; it performs no physics or navigation checks.</description>
 		</method>
+		<method name="begin_incremental_top_positions">
+			<return type="bool" />
+			<param index="0" name="count" type="int" />
+			<description>Begin a time-sliceable top-K EQS query with 1–64 results. Captures the current candidates, scoring parameters, filters, result limit and context as a stable internal snapshot. Starts over if another incremental query is already active. The snapshot is transient and not serialized. Returns false for an invalid result count.</description>
+		</method>
+		<method name="step_incremental_top_positions">
+			<return type="bool" />
+			<param index="0" name="candidate_budget" type="int" />
+			<description>Scores at most [param candidate_budget] unvisited snapshot candidates (1–4096), preserving the exact stable score/index ordering of [method query_top_indices]. Returns true only when the entire query is complete; false indicates more work is needed or an invalid call. May be invoked in different physics frames by the game. This is a candidate-count budget rather than a millisecond timer.</description>
+		</method>
+		<method name="is_incremental_top_complete" qualifiers="const">
+			<return type="bool" />
+			<description>True when the current incremental EQS query has evaluated every source candidate. No incomplete results are exposed.</description>
+		</method>
+		<method name="get_incremental_processed_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of source candidate items examined in the current incremental query (including those rejected by filters). Resets to zero on restart or cancellation.</description>
+		</method>
+		<method name="get_incremental_top_indices" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>Returns the ranked original candidate indices for the completed incremental query, including distinct source identities for duplicate world coordinates. Empty while incomplete or cancelled. Equivalent to [method query_top_indices] on the context snapshot.</description>
+		</method>
+		<method name="get_incremental_top_positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>Returns ranked candidate coordinates after the incremental query completes, using the stored snapshot even when the original query parameters have changed. Empty while incomplete or cancelled. Equivalent to [method query_top_positions] on the context snapshot.</description>
+		</method>
+		<method name="get_incremental_random_best_positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<param index="0" name="best_percent" type="int" />
+			<param index="1" name="seed" type="int" />
+			<description>Chooses one deterministic Random Best position among the [b]retained[/b] fully scored incremental top-K items, without scoring a source candidate again. When the requested top-K contains every eligible candidate (and [member max_results] does not truncate it), this exactly matches [method query_random_best_positions] for the same query snapshot, seed and percentage. Returns empty until completion, on invalid percentage or when no candidate passes.</description>
+		</method>
+		<method name="cancel_incremental_top_positions">
+			<return type="void" />
+			<description>Discard incremental progress, ranked candidates and the frozen query context. Safe to call repeatedly. Does not alter any normal EQS query parameters.</description>
+		</method>
 		<method name="query_top_positions" qualifiers="const">
 			<return type="PackedVector3Array" />
 			<param index="0" name="count" type="int" />
