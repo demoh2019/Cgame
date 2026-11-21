@@ -1300,6 +1300,21 @@ func _build_windmills(windmills: Array, origin: Vector2) -> void:
 ## WorldStreamer only requests cosmetic simulation changes. Terrain, collision,
 ## loot, and server-authoritative entities remain resident and unchanged.
 var _streaming_simulation_active := true
+var _streaming_tick_interval := 0.0
+var _streaming_tick_accumulated := 0.0
+
+
+## Native WorldStreamer can request a reduced cosmetic tick frequency for
+## distant but still simulation-active chunks. Physics/network/gameplay are
+## not controlled by this scene. Zero restores full frame-rate processing.
+func set_streaming_tick_interval(seconds: float) -> void:
+	if not is_finite(seconds):
+		return
+	var clamped: float = clampf(seconds, 0.0, 1.0)
+	if is_equal_approx(clamped, _streaming_tick_interval):
+		return
+	_streaming_tick_interval = clamped
+	_streaming_tick_accumulated = clamped
 
 
 ## Only immutable client-generated scenery may use WorldStreamer's optional
@@ -1315,6 +1330,7 @@ func on_streaming_cache_restored() -> void:
 	_grass_last_eye = Vector2.INF
 	_shadow_timer = SHADOW_INTERVAL
 	_shadow_last_eye = Vector2.INF
+	_streaming_tick_accumulated = _streaming_tick_interval
 	if _decor_next < _decor_tasks.size():
 		var queued := false
 		for reference in _decor_pending:
@@ -1332,11 +1348,21 @@ func set_streaming_simulation_active(active: bool) -> void:
 	_streaming_simulation_active = active
 	set_process(active)
 	if active:
-		# Re-evaluate blades immediately on the first near-field update.
+		# Re-evaluate blades and cosmetic rate immediately after LOD recovery.
 		_grass_lod_elapsed = GRASS_LOD_INTERVAL
+		_streaming_tick_accumulated = _streaming_tick_interval
 
 
 func _process(delta: float) -> void:
+	# A cheap accumulator skips expensive per-chunk grass/decor/shadow work.
+	# Accumulated elapsed time keeps windmill rotation speed correct.
+	# The near tier (interval = 0) remains exactly the original code path.
+	if _streaming_tick_interval > 0.0:
+		_streaming_tick_accumulated += delta
+		if _streaming_tick_accumulated < _streaming_tick_interval:
+			return
+		delta = _streaming_tick_accumulated
+		_streaming_tick_accumulated = 0.0
 	_service_decor(self)
 	_grow_grass()
 	_grass_lod_elapsed += delta

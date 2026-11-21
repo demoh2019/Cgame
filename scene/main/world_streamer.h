@@ -104,6 +104,12 @@ private:
 	real_t simulation_radius = -1.0; // Negative preserves legacy full simulation.
 	real_t simulation_hysteresis = 16.0;
 	int max_simulation_transitions_per_update = 4;
+	// Separate Unreal-style cosmetic tick-rate tier, opt-in and independent
+	// of simulation pause. Chunks decide how to throttle their own script.
+	real_t tick_throttle_radius = -1.0;
+	real_t tick_throttle_interval = 0.125;
+	real_t tick_throttle_hysteresis = 8.0;
+	int max_tick_throttle_transitions_per_update = 4;
 	// Opt-in adaptive backpressure. Defaults off to preserve existing games.
 	bool adaptive_chunk_budget_enabled = false;
 	double streaming_frame_pressure = 0.0;
@@ -140,6 +146,10 @@ private:
 	int cache_evictions = 0;
 	HashMap<Vector3i, bool> simulation_active_cells;
 	int simulation_inactive_count = 0;
+	// Only chunk roots actually implementing the callback are tracked.
+	// A zero/absent entry means full tick frequency.
+	HashMap<Vector3i, real_t> applied_tick_intervals;
+	int tick_throttled_count = 0;
 	// Optional cosmetic work is tracked separately from playable chunk residency.
 	HashSet<Vector3i> pending_visual_details;
 	HashMap<Vector3i, String> loading;
@@ -169,6 +179,8 @@ private:
 	void _forget_dead_chunks();
 	void _update_streaming();
 	void _update_simulation(const Vector3 &p_focus);
+	void _update_tick_intervals(const Vector3 &p_focus);
+	void _set_chunk_tick_interval(const Vector3i &p_cell, real_t p_seconds);
 	void _set_chunk_simulation_active(const Vector3i &p_cell, bool p_active);
 	void _poll_loading(int &r_instantiation_budget, uint64_t p_frame_started_usec);
 	bool _finalize_chunk(const Vector3i &p_cell, const String &p_path);
@@ -252,6 +264,19 @@ public:
 	int get_max_simulation_transitions_per_update() const { return max_simulation_transitions_per_update; }
 	bool is_cell_simulation_active(const Vector3i &p_cell) const;
 	int get_simulation_active_count() const;
+	// For opted-in script roots, set_streaming_tick_interval(seconds) is called
+	// at initial adoption and for later bounded near/far transitions.
+	// -1 disables; hysteresis only affects far-tier entry, not near recovery.
+	void set_tick_throttle_radius(real_t p_radius);
+	real_t get_tick_throttle_radius() const { return tick_throttle_radius; }
+	void set_tick_throttle_interval(real_t p_seconds);
+	real_t get_tick_throttle_interval() const { return tick_throttle_interval; }
+	void set_tick_throttle_hysteresis(real_t p_distance);
+	real_t get_tick_throttle_hysteresis() const { return tick_throttle_hysteresis; }
+	void set_max_tick_throttle_transitions_per_update(int p_count);
+	int get_max_tick_throttle_transitions_per_update() const { return max_tick_throttle_transitions_per_update; }
+	bool is_cell_tick_throttled(const Vector3i &p_cell) const;
+	int get_tick_throttled_count() const { return tick_throttled_count; }
 	int get_max_chunk_work_usec() const { return max_chunk_work_usec; }
 	void set_adaptive_chunk_budget_enabled(bool p_enabled);
 	bool is_adaptive_chunk_budget_enabled() const { return adaptive_chunk_budget_enabled; }
