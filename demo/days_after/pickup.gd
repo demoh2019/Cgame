@@ -32,6 +32,14 @@ func interact(player: Node) -> void:
         return
     if item_type != "food" and item_type != "water":
         return
-    collected = true
+    if float(player.get("health")) <= 0.0:
+        return
     player.call("collect_item", item_type, quantity)
-    queue_free()
+    set_collected_state(true)
+
+
+func set_collected_state(value: bool) -> void:
+    # Keep the world node so a loaded save can restore an uncollected crate.
+    collected = value
+    visible = not value
+    set_deferred("collision_layer", 0 if value else 1)

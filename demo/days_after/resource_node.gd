@@ -59,6 +59,15 @@ func interact(player: Node) -> void:
 
 
 func _restore() -> void:
-    depleted = false
-    visible = true
-    set_deferred("collision_layer", 1)
+    set_depleted_state(false, 0.0)
+
+
+func set_depleted_state(value: bool, remaining_seconds: float) -> void:
+    # Save/load preserves a node's remaining respawn time, not a new full timer.
+    if _respawn_timer != null:
+        _respawn_timer.stop()
+    depleted = value
+    visible = not value
+    set_deferred("collision_layer", 0 if value else 1)
+    if value and _respawn_timer != null:
+        _respawn_timer.start(maxf(0.01, remaining_seconds))

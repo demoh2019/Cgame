@@ -1,0 +1,60 @@
+name: Days After world persistence regression
+
+on:
+  pull_request:
+    paths:
+      - 'demo/days_after/**'
+      - '.github/workflows/days-after-world-saves.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'demo/days_after/**'
+      - '.github/workflows/days-after-world-saves.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  world-saves:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download verified Godot 4.7.2 compatibility editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum -c -
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+      - name: Import gameplay project and check scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./godot --headless --path demo/days_after --editor --import --quit 2>&1 | tee import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' import.log; then exit 1; fi
+      - name: Exercise world persistence, survivor compatibility and inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./godot --headless --path demo/days_after --script res://smoke_test_world_saves.gd 2>&1 | tee world.log
+          grep -F 'PASS: Days After survivor/world snapshot' world.log
+          timeout 120s ./godot --headless --path demo/days_after --script res://smoke_test_saves.gd 2>&1 | tee survivor.log
+          grep -F 'PASS: survivor save/load' survivor.log
+          timeout 120s ./godot --headless --path demo/days_after --script res://smoke_test_inventory.gd 2>&1 | tee inventory.log
+          grep -F 'PASS: Days After player, food, water' inventory.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed|ERROR:' world.log survivor.log inventory.log; then exit 1; fi
+      - name: Attach regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: days-after-world-persistence
+          if-no-files-found: ignore
+          path: |
+            import.log
+            world.log
+            survivor.log
+            inventory.log
