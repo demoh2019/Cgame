@@ -1651,19 +1651,19 @@ static func _ore_material(mesh: Mesh) -> Material:
 #   "rare":   a few single accents per chunk (boulders, a standing stone).
 # chance: share of anchors that get any; per: [min, max] pieces at such an anchor; ring: [min, max] metres from it.
 const DECOR := [
-	{"file": "Fern_1", "anchor": "tree", "chance": 0.55, "per": [1, 4], "ring": [0.8, 3.6], "scale": [0.6, 1.7], "biomes": ["forest", "swamp", "plains"], "range": 110.0},
-	{"file": "Bush_Common", "anchor": "tree", "chance": 0.3, "per": [1, 2], "ring": [1.4, 3.8], "scale": [0.8, 1.6], "biomes": ["forest", "plains", "swamp"], "range": 170.0},
-	{"file": "Plant_1_Big", "anchor": "tree", "chance": 0.08, "per": [1, 1], "ring": [1.0, 3.0], "scale": [0.8, 1.2], "biomes": ["forest", "swamp"], "range": 130.0},
-	{"file": "Mushroom_Common", "anchor": "tree", "chance": 0.22, "per": [1, 3], "ring": [0.5, 1.6], "scale": [0.7, 1.6], "biomes": ["forest", "swamp"], "range": 70.0},
-	{"file": "Mushroom_Laetiporus", "anchor": "tree", "chance": 0.08, "per": [1, 2], "ring": [0.4, 1.0], "scale": [0.8, 1.4], "biomes": ["forest", "swamp"], "range": 70.0},
+	{"file": "Fern_1", "anchor": "tree", "chance": 0.55, "per": [1, 4], "ring": [0.8, 3.6], "scale": [0.6, 1.7], "biomes": ["forest", "swamp", "plains"], "range": 110.0, "max_surface_slope": 42.0, "max_surface_height": 96.0},
+	{"file": "Bush_Common", "anchor": "tree", "chance": 0.3, "per": [1, 2], "ring": [1.4, 3.8], "scale": [0.8, 1.6], "biomes": ["forest", "plains", "swamp"], "range": 170.0, "max_surface_slope": 35.0, "max_surface_height": 96.0},
+	{"file": "Plant_1_Big", "anchor": "tree", "chance": 0.08, "per": [1, 1], "ring": [1.0, 3.0], "scale": [0.8, 1.2], "biomes": ["forest", "swamp"], "range": 130.0, "max_surface_slope": 40.0, "max_surface_height": 96.0},
+	{"file": "Mushroom_Common", "anchor": "tree", "chance": 0.22, "per": [1, 3], "ring": [0.5, 1.6], "scale": [0.7, 1.6], "biomes": ["forest", "swamp"], "range": 70.0, "max_surface_slope": 42.0, "max_surface_height": 100.0},
+	{"file": "Mushroom_Laetiporus", "anchor": "tree", "chance": 0.08, "per": [1, 2], "ring": [0.4, 1.0], "scale": [0.8, 1.4], "biomes": ["forest", "swamp"], "range": 70.0, "max_surface_slope": 42.0, "max_surface_height": 100.0},
 	{"file": "Pebble_Round_1", "anchor": "rock", "chance": 0.8, "per": [2, 6], "ring": [0.9, 2.8], "scale": [0.4, 2.2], "biomes": ["forest", "plains", "beach", "mountain", "swamp"], "range": 80.0},
 	{"file": "Pebble_Square_2", "anchor": "rock", "chance": 0.5, "per": [1, 3], "ring": [1.0, 3.0], "scale": [0.6, 1.8], "biomes": ["plains", "beach", "mountain"], "range": 80.0},
-	{"file": "Flower_3_Group", "anchor": "meadow", "chance": 1.0, "per": [10, 18], "ring": [0.0, 4.5], "scale": [0.8, 1.3], "biomes": ["plains", "forest"], "range": 95.0},
-	{"file": "Flower_4_Group", "anchor": "meadow", "chance": 0.8, "per": [8, 14], "ring": [0.0, 4.0], "scale": [0.8, 1.3], "biomes": ["plains"], "range": 95.0},
-	{"file": "Flower_3_Single", "anchor": "meadow", "chance": 1.0, "per": [8, 14], "ring": [1.5, 6.5], "scale": [0.8, 1.4], "biomes": ["plains", "forest", "beach"], "range": 70.0},
-	{"file": "Flower_4_Single", "anchor": "meadow", "chance": 0.8, "per": [6, 12], "ring": [1.5, 6.5], "scale": [0.8, 1.4], "biomes": ["plains"], "range": 70.0},
-	{"file": "Bush_Common_Flowers", "anchor": "meadow", "chance": 0.6, "per": [1, 2], "ring": [4.0, 7.0], "scale": [0.8, 1.4], "biomes": ["forest", "plains"], "range": 170.0},
-	{"file": "Grass_Wispy_Tall", "anchor": "meadow", "chance": 0.7, "per": [4, 8], "ring": [3.0, 7.5], "scale": [0.8, 2.0], "biomes": ["plains", "swamp", "beach"], "range": 95.0},
+	{"file": "Flower_3_Group", "anchor": "meadow", "chance": 1.0, "per": [10, 18], "ring": [0.0, 4.5], "scale": [0.8, 1.3], "biomes": ["plains", "forest"], "range": 95.0, "max_surface_slope": 30.0, "max_surface_height": 92.0},
+	{"file": "Flower_4_Group", "anchor": "meadow", "chance": 0.8, "per": [8, 14], "ring": [0.0, 4.0], "scale": [0.8, 1.3], "biomes": ["plains"], "range": 95.0, "max_surface_slope": 30.0, "max_surface_height": 92.0},
+	{"file": "Flower_3_Single", "anchor": "meadow", "chance": 1.0, "per": [8, 14], "ring": [1.5, 6.5], "scale": [0.8, 1.4], "biomes": ["plains", "forest", "beach"], "range": 70.0, "max_surface_slope": 30.0, "max_surface_height": 92.0},
+	{"file": "Flower_4_Single", "anchor": "meadow", "chance": 0.8, "per": [6, 12], "ring": [1.5, 6.5], "scale": [0.8, 1.4], "biomes": ["plains"], "range": 70.0, "max_surface_slope": 30.0, "max_surface_height": 92.0},
+	{"file": "Bush_Common_Flowers", "anchor": "meadow", "chance": 0.6, "per": [1, 2], "ring": [4.0, 7.0], "scale": [0.8, 1.4], "biomes": ["forest", "plains"], "range": 170.0, "max_surface_slope": 35.0, "max_surface_height": 96.0},
+	{"file": "Grass_Wispy_Tall", "anchor": "meadow", "chance": 0.7, "per": [4, 8], "ring": [3.0, 7.5], "scale": [0.8, 2.0], "biomes": ["plains", "swamp", "beach"], "range": 95.0, "max_surface_slope": 38.0, "max_surface_height": 96.0},
 	{"file": "Petal_1", "anchor": "meadow", "chance": 0.6, "per": [3, 6], "ring": [0.0, 3.5], "scale": [0.8, 1.6], "biomes": ["plains", "forest"], "range": 50.0},
 ]
 const MEADOWS_PER_CHUNK := 3
@@ -1835,6 +1835,20 @@ func _build_nature_decor_entry(entry: Dictionary) -> void:
 		var size := rng.randf_range(float(entry["scale"][0]), float(entry["scale"][1]))
 		var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * size)
 		transforms.append(Transform3D(basis, Vector3(at.x - origin.x, _world.height_at(at.x, at.y) - 0.02, at.y - origin.y)))
+	# Unreal PCG normal-to-density/slope filter: sample true terrain normals
+	# only for flora with an explicit slope policy. All transforms and seeded
+	# random draws are complete before rejecting any candidate. The shared
+	# native selector is pure-data; stock Godot uses the same deterministic
+	# policy. This does not alter gameplay vegetation or server spawns.
+	if entry.has("max_surface_slope"):
+		var surface_normals := PackedVector3Array()
+		for transform in transforms:
+			var world_at := origin + Vector2(transform.origin.x, transform.origin.z)
+			surface_normals.append(_world.normal_at(world_at.x, world_at.y))
+		transforms = SceneryBatches.filter_cosmetic_transforms_surface(
+			transforms, surface_normals, 0.0,
+			float(entry["max_surface_slope"]), -10000000.0,
+			float(entry.get("max_surface_height", 10000000.0)))
 	# Unreal PCG-inspired surface-spacing filter for visual clutter only.
 	# Transform generation (including seeded RNG draws) happens above, before
 	# thinning, so streamed chunks keep all later seeded categories unchanged.
