@@ -69,6 +69,37 @@ def plan_stable(distances, priority, visible, retained, full_budget,
     return tiers
 
 
+def cap_full_pose_cost(tiers, distances, retained_full, costs, budget_us,
+                       hysteresis=1.5):
+    """Independent reference model for the native cost-only post-planner."""
+    if (len(tiers) != len(distances) or len(tiers) != len(retained_full)
+            or len(tiers) != len(costs) or len(tiers) > 16384
+            or not isinstance(budget_us, int)
+            or not 0 <= budget_us <= 1000000
+            or not math.isfinite(hysteresis) or not 0 <= hysteresis <= 8
+            or any(t not in (0, 1, 2, 3, 4) for t in tiers)
+            or any(not math.isfinite(d) or d < 0 for d in distances)
+            or any(not isinstance(c, int) or not 0 <= c <= 100000
+                   for c in costs)
+            or sum(t == 0 for t in tiers) > 256):
+        return []
+    result = list(tiers)
+    if budget_us == 0:
+        return result
+    winners = sorted(
+        (i for i, tier in enumerate(tiers) if tier == 0),
+        key=lambda i: (max(0.0, distances[i] -
+                           (hysteresis if retained_full[i] else 0.0)), i))
+    reserved = 0
+    for i in winners:
+        predicted = costs[i] or 100
+        if reserved + predicted <= budget_us:
+            reserved += predicted
+        else:
+            result[i] = 1
+    return result
+
+
 class TestCrowdPlanner(unittest.TestCase):
     def test_native_source_api(self):
         header = (MODULE / "crowd_animation_tier_planner.h").read_text()
@@ -228,6 +259,77 @@ class TestCrowdPlanner(unittest.TestCase):
         self.assertIn('set_meta("aa_full_ik_retained", false)', model)
         self.assertIn('name="plan_visible_tiers_stable"', ET.tostring(
             xml.getroot(), encoding="unicode"))
+
+    def test_work_unit_cap_preserves_combat_and_full_ik_history(self):
+        d = [5.6, 5.4, 60.5, 60.3]
+        p = [0, 0, 1, 1]
+        v = [1, 1, 1, 1]
+        kept = [1, 0, 0, 0]
+        base = plan_stable(d, p, v, kept, 1, 1)
+        self.assertEqual(base, [0, 1, 3, 1])  # Nonretained combat priority.
+        # The real game uses the dual-retention plan with the same tiers.
+        dual_tiers = [0, 1, 1, 3]
+        self.assertEqual(cap_full_pose_cost(dual_tiers, d, kept,
+                                            [800, 90, 0, 0], 100),
+                         [1, 1, 1, 3])
+        self.assertEqual(cap_full_pose_cost(dual_tiers, d, kept,
+                                            [800, 90, 0, 0], 0),
+                         dual_tiers)
+        self.assertEqual(cap_full_pose_cost([0, 0, 0, 1, 2],
+                                            [2, 4, 10, 18, 55],
+                                            [0, 0, 0, 0, 0],
+                                            [500, 100, 100, 100, 0], 250),
+                         [1, 0, 0, 1, 2])
+        self.assertEqual(cap_full_pose_cost([0, 0, 1], [10, 10.4, 80],
+                                            [0, 1, 0], [0, 0, 0], 100),
+                         [1, 0, 1])
+        self.assertEqual(cap_full_pose_cost([0, 0], [1, 2],
+                                            [0, 1], [0], 100), [])
+        self.assertEqual(cap_full_pose_cost([0, 5], [1, 2],
+                                            [0, 1], [0, 0], 100), [])
+        self.assertEqual(cap_full_pose_cost([0, 0], [1, 2],
+                                            [0, 1], [-1, 0], 100), [])
+        self.assertEqual(cap_full_pose_cost([0, 0], [1, 2],
+                                            [0, 1], [0, 0], 1000001), [])
+
+    def test_work_unit_budget_deterministic_random_invariants(self):
+        for seed in range(20):
+            rng = random.Random(55000 + seed)
+            d = [rng.randrange(0, 1200) / 10 for _ in range(240)]
+            retained = [rng.randrange(0, 2) for _ in d]
+            costs = [rng.randrange(0, 900) for _ in d]
+            base_tiers = [0 if i % 7 == 0 else (i % 4) + 1
+                          for i in range(len(d))]
+            for allowance in (0, 100, 750, 2000):
+                result = cap_full_pose_cost(base_tiers, d, retained,
+                                             costs, allowance)
+                self.assertEqual(len(result), len(d))
+                self.assertTrue(all(x == y or (x == 0 and y == 1)
+                                    for x, y in zip(base_tiers, result)))
+                self.assertLessEqual(result.count(0), base_tiers.count(0))
+                if allowance:
+                    total = sum(costs[i] or 100 for i, x in enumerate(result)
+                                if x == 0)
+                    self.assertLessEqual(total, allowance)
+
+    def test_work_unit_native_game_wiring(self):
+        header = (MODULE / "crowd_animation_tier_planner.h").read_text()
+        cpp = CPP.read_text()
+        game = GAME.read_text()
+        modifier = (ROOT / "game/scripts/client/character_anim_modifier.gd").read_text()
+        xml = ET.parse(MODULE / "doc_classes/CrowdAnimationTierPlanner.xml").getroot()
+        self.assertIn("PackedInt32Array cap_full_pose_cost(", header)
+        self.assertIn('D_METHOD("cap_full_pose_cost"', cpp)
+        self.assertIn("reserved_us + predicted_us <= p_full_pose_budget_us", cpp)
+        self.assertIn("output.set(idx, 1)", cpp)
+        self.assertIn("static func cap_full_pose_cost(", game)
+        self.assertIn("tiers = cap_full_pose_cost(tiers, distances", game)
+        self.assertIn("retained_combat_mask, 1.5", game)
+        self.assertIn("full_pose_cost_us.append(", game)
+        self.assertIn("Time.get_ticks_usec()", modifier)
+        self.assertIn("estimated_full_pose_us", modifier)
+        self.assertTrue(any(method.get("name") == "cap_full_pose_cost"
+                            for method in xml.find("methods")))
 
     def test_reject_corrupt_inputs(self):
         self.assertEqual(plan([1, 2], [1], 1, 1), [])
