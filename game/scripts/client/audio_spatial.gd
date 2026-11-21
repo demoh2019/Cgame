@@ -45,6 +45,29 @@ static func obstruction_db(amount: float) -> float:
 	return OCCLUDED_GAIN_DB * weight
 
 
+# Attack/release time constants in seconds, matching native Cgame.
+# A covered source loses highs quickly; removing the muffling takes longer.
+const OBSTRUCTION_ATTACK_SECONDS := 0.08
+const OBSTRUCTION_RELEASE_SECONDS := 0.22
+
+
+## Stock Godot fallback for native AudioStreamPlayer3D.advance_obstruction_amount.
+## Exponential integration is independent of frame and physics tick rate.
+static func smooth_obstruction(current: float, target: float, delta: float,
+		attack_seconds: float = OBSTRUCTION_ATTACK_SECONDS,
+		release_seconds: float = OBSTRUCTION_RELEASE_SECONDS) -> float:
+	if not is_finite(current) or not is_finite(target) or not is_finite(delta) \
+			or not is_finite(attack_seconds) or not is_finite(release_seconds) \
+			or delta < 0.0 or attack_seconds <= 0.0 or release_seconds <= 0.0:
+		return current
+	var clamped: float = clampf(target, 0.0, 1.0)
+	if delta == 0.0 or clamped == current:
+		return current
+	var seconds: float = attack_seconds if clamped > current else release_seconds
+	var amount: float = current + (clamped - current) * (1.0 - exp(-delta / seconds))
+	return clamped if absf(clamped - amount) < 0.001 else amount
+
+
 ## Bus low-pass target for the listener: muffled underground, slightly dulled in a storm.
 static func listener_cutoff(underground: bool, storm: float) -> float:
 	if underground:

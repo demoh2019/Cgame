@@ -795,6 +795,28 @@ void AudioStreamPlayer3D::set_obstruction_amount(float p_amount) {
 	force_update_panning = true;
 }
 
+float AudioStreamPlayer3D::advance_obstruction_amount(float p_target, float p_delta, float p_attack_seconds, float p_release_seconds) {
+	// A frequency/volume transition should not click or depend on a fixed
+	// physics tick rate. Attenuate rapidly behind cover, release more gently
+	// when line of sight returns (Unreal-style occlusion interpolation).
+	if (!Math::is_finite(p_target) || !Math::is_finite(p_delta) ||
+			!Math::is_finite(p_attack_seconds) || !Math::is_finite(p_release_seconds) ||
+			p_delta < 0.0f || p_attack_seconds <= 0.0f || p_release_seconds <= 0.0f) {
+		return obstruction_amount;
+	}
+	const float target = CLAMP(p_target, 0.0f, 1.0f);
+	if (p_delta == 0.0f || target == obstruction_amount) {
+		return obstruction_amount;
+	}
+	const float response_time = target > obstruction_amount ? p_attack_seconds : p_release_seconds;
+	const float alpha = 1.0f - Math::exp(-p_delta / response_time);
+	const float value = obstruction_amount + (target - obstruction_amount) * alpha;
+	// Finish convergence exactly; otherwise an infinite tail of tiny values
+	// can mark the panning state dirty long after a wall/doorway has settled.
+	set_obstruction_amount(Math::abs(target - value) < 0.001f ? target : value);
+	return obstruction_amount;
+}
+
 float AudioStreamPlayer3D::get_obstruction_amount() const {
 	return obstruction_amount;
 }
@@ -940,6 +962,7 @@ void AudioStreamPlayer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_attenuation_filter_db"), &AudioStreamPlayer3D::get_attenuation_filter_db);
 	ClassDB::bind_method(D_METHOD("set_obstruction_amount", "amount"), &AudioStreamPlayer3D::set_obstruction_amount);
 	ClassDB::bind_method(D_METHOD("get_obstruction_amount"), &AudioStreamPlayer3D::get_obstruction_amount);
+	ClassDB::bind_method(D_METHOD("advance_obstruction_amount", "target", "delta", "attack_seconds", "release_seconds"), &AudioStreamPlayer3D::advance_obstruction_amount, DEFVAL(0.08f), DEFVAL(0.22f));
 
 	ClassDB::bind_method(D_METHOD("set_attenuation_model", "model"), &AudioStreamPlayer3D::set_attenuation_model);
 	ClassDB::bind_method(D_METHOD("get_attenuation_model"), &AudioStreamPlayer3D::get_attenuation_model);
