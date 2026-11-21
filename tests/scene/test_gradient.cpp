@@ -38,6 +38,48 @@ TEST_FORCE_LINK(test_gradient)
 
 namespace TestGradient {
 
+
+TEST_CASE("[Gradient] Batch sampling matches scalar interpolation and colorspaces") {
+	Ref<Gradient> gradient = memnew(Gradient);
+	gradient->set_offsets({ 0.0f, 0.3f, 0.7f, 1.0f });
+	gradient->set_colors({
+		Color(0.10f, 0.27f, 0.46f, 0.65f),
+		Color(0.34f, 0.58f, 0.20f, 0.70f),
+		Color(0.92f, 0.40f, 0.12f, 0.90f),
+		Color(0.16f, 0.74f, 0.95f, 1.00f),
+	});
+	const Vector<float> offsets = { 0.75f, -3.0f, 0.0f, 0.15f, 0.3f, 0.5f, 0.7f, 1.0f, 8.0f, 0.15f };
+	const Gradient::InterpolationMode modes[] = {
+		Gradient::GRADIENT_INTERPOLATE_LINEAR,
+		Gradient::GRADIENT_INTERPOLATE_CONSTANT,
+		Gradient::GRADIENT_INTERPOLATE_CUBIC,
+	};
+	const Gradient::ColorSpace spaces[] = {
+		Gradient::GRADIENT_COLOR_SPACE_SRGB,
+		Gradient::GRADIENT_COLOR_SPACE_LINEAR_SRGB,
+		Gradient::GRADIENT_COLOR_SPACE_OKLAB,
+	};
+	for (Gradient::InterpolationMode mode : modes) {
+		gradient->set_interpolation_mode(mode);
+		for (Gradient::ColorSpace space : spaces) {
+			gradient->set_interpolation_color_space(space);
+			const Vector<Color> colors = gradient->sample_batch(offsets);
+			REQUIRE_EQ(colors.size(), offsets.size());
+			for (int i = 0; i < offsets.size(); i++) {
+				CHECK(colors[i].is_equal_approx(gradient->get_color_at_offset(offsets[i])));
+			}
+		}
+	}
+	CHECK(gradient->sample_batch(Vector<float>()).is_empty());
+	// Validate that outputs retain the order of input offsets.
+	gradient->set_interpolation_mode(Gradient::GRADIENT_INTERPOLATE_LINEAR);
+	gradient->set_interpolation_color_space(Gradient::GRADIENT_COLOR_SPACE_SRGB);
+	const Vector<Color> reverse = gradient->sample_batch({ 1.0f, 0.0f });
+	REQUIRE_EQ(reverse.size(), 2);
+	CHECK(reverse[0].is_equal_approx(gradient->get_color_at_offset(1.0f)));
+	CHECK(reverse[1].is_equal_approx(gradient->get_color_at_offset(0.0f)));
+}
+
 TEST_CASE("[Gradient] Default gradient") {
 	// Black-white gradient.
 	Ref<Gradient> gradient = memnew(Gradient);
