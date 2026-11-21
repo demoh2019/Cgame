@@ -339,3 +339,49 @@ uses the same grouping principle: identical geometry is instanced together.
 Three different source meshes cost up to three draw batches here, rather than
 the former one draw batch, but avoid per-plant draw calls and node overhead.
 No unmeasured FPS gain is claimed.
+
+## Tangent-aligned sampled PCG transforms
+
+In addition to `sample_positions()`, the native
+`PCGPolylineSampler3D.sample_transforms(path_points, spacing,
+max_samples=4096, fit_to_path=true)` creates complete Godot
+`Transform3D` frames for **every sampled point**:
+
+```gdscript
+var pcg := PCGPolylineSampler3D.new()
+var frames: Array = pcg.sample_transforms(waypoints, 1.35, 192, true)
+for i in range(frames.size()):
+    multimesh.set_instance_transform(i, frames[i])
+```
+
+- The returned frame origins exactly match `sample_positions()`
+  for the same inputs; the same sample-count cap, argument validation,
+  interpolation, deterministic order and endpoint behavior apply.
+  Invalid input returns an empty array, never partial geometry.
+- Local **+Z** follows the full 3D tangent of the sampled path.
+  A centered finite difference between adjacent samples softens
+  orientation changes through corners; repeated points and exact
+  180-degree reversals use deterministic fallback directions.
+- The local X/Y/Z axes form an orthonormal, right-handed basis.
+  A near-vertical tangent uses an alternate reference-up axis,
+  avoiding NaNs and collapsed transforms. A completely degenerate
+  route gets a stable +Z-forward identity orientation.
+- No physics queries, node creation, global RNG mutations or GPU
+  allocations occur in the native sampler. It emits up to 4096 frames
+  with O(samples + waypoints) work; the caller handles instancing.
+- This is **polyline tangent alignment**, not full Unreal PCG
+  spline roll/twist interpolation or parallel-transport framing.
+  Long curved meshes may need a dedicated twist-minimizing frame
+  policy; for small prop instances these frames avoid manual yaw
+  reconstruction in game scripts.
+
+The live Days After `TrailMarkers` node consumes native frames
+to orient individual instanced stones, retaining the existing AABB
+clearance, uniform arc-length placement, one-MultiMesh batching and
+full GDScript fallback. New native doctests cover corners,
+vertical paths, U-turns, degenerate and single-point paths, output
+bounds and 4096-frame caps. `trail_frames_smoke_test.gd` checks
+the renderer instance transforms, frame orthogonality and native/
+fallback parity.
+
+Background: [Unreal PCG framework node reference](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).

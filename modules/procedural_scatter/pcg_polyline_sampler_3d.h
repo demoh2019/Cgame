@@ -23,7 +23,16 @@ public:
 	static constexpr double MIN_SPACING = 0.05;
 	static constexpr double MAX_SPACING = 10000.0;
 
+
 	PackedVector3Array sample_positions(const PackedVector3Array &p_path_points,
+			double p_spacing, int p_max_samples = MAX_SAMPLES,
+			bool p_fit_to_path = true) const;
+
+	// Position and orthonormal tangent-following frame, with local +Z
+	// along the route. Central differences soften sharp corners. Handles
+	// vertical legs and degenerate loops with deterministic up vectors.
+	// Returns no frames when sample_positions rejects the input batch.
+	Array sample_transforms(const PackedVector3Array &p_path_points,
 			double p_spacing, int p_max_samples = MAX_SAMPLES,
 			bool p_fit_to_path = true) const;
 };

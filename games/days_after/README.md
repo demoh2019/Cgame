@@ -212,3 +212,31 @@ godot --headless --path games/days_after --script res://smoke_test.gd
 The native and fallback tests verify exactly-once source mapping, count
 limits, variant-specific mesh types, per-instance colors, deterministic
 regeneration, invalid-input atomic rejection and no extra child nodes.
+
+## Trail stones use full native PCG transforms
+
+Trail stones now take their **orientation as well as position**
+directly from `PCGPolylineSampler3D.sample_transforms()`.
+The resulting basis is tangent-aligned in 3D, softly transitions at
+path corners and safely handles vertical segments and 180-degree
+U-turns. Previously the game recalculated horizontal yaw per
+instance; the new API also supports other procedural props needing
+full 3D orientation (fences, signposts, pipes, etc.).
+
+The complete path still renders as one `MultiMeshInstance3D`;
+`TrailMarkers` only filters stones around structure AABBs and
+adds a small height offset before submitting the native transforms.
+Stock Godot builds use a pure GDScript equivalent of the native
+frame math. No physics, navmesh, resource or server-authoritative
+gameplay changes are required.
+
+Run the focused native/fallback parity and rendered-orientation check:
+
+```sh
+godot --headless --path games/days_after --script res://trail_frames_smoke_test.gd
+```
+
+The native engine CI runs this after a complete editor build,
+alongside the original Days After gameplay smoke and existing
+`[PCGPolylineSampler3D]` C++ tests. Performance should be
+measured in a compiled game rather than assumed from the API.

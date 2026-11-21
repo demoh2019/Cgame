@@ -104,6 +104,13 @@ jobs:
           timeout 180s "$BIN" --headless --path games/days_after --script res://smoke_test.gd 2>&1 | tee pcg-days-after-smoke.log
           grep -F 'PASS: scene, bounded visual LOD, exclusion-safe PCG foliage,' pcg-days-after-smoke.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-days-after-smoke.log; then exit 1; fi
+      - name: Days After native PCG tangent frames and instancing parity
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path games/days_after --script res://trail_frames_smoke_test.gd 2>&1 | tee pcg-trail-frames.log
+          grep -F 'PCG TRAIL FRAMES: 0 failures' pcg-trail-frames.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-trail-frames.log; then exit 1; fi
       - name: Upload PCG logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -121,3 +128,4 @@ jobs:
             pcg-game.log
             pcg-days-after-import.log
             pcg-days-after-smoke.log
+            pcg-trail-frames.log

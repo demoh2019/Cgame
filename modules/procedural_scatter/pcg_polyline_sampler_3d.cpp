@@ -6,12 +6,15 @@
 #include "pcg_polyline_sampler_3d.h"
 
 #include "core/math/math_funcs.h"
+#include "core/math/transform_3d.h"
 #include "core/object/class_db.h"
 #include "core/templates/vector.h"
 
 void PCGPolylineSampler3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("sample_positions", "path_points", "spacing", "max_samples", "fit_to_path"),
 			&PCGPolylineSampler3D::sample_positions, DEFVAL(MAX_SAMPLES), DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("sample_transforms", "path_points", "spacing", "max_samples", "fit_to_path"),
+			&PCGPolylineSampler3D::sample_transforms, DEFVAL(MAX_SAMPLES), DEFVAL(true));
 }
 
 PackedVector3Array PCGPolylineSampler3D::sample_positions(
@@ -89,6 +92,58 @@ PackedVector3Array PCGPolylineSampler3D::sample_positions(
 				MAX(0.0, MIN(1.0, (target - distance_before_segment) / segment_length)) : 0.0;
 		result.push_back(p_path_points[segment].lerp(
 				p_path_points[segment + 1], real_t(fraction)));
+	}
+	return result;
+}
+
+Array PCGPolylineSampler3D::sample_transforms(const PackedVector3Array &p_path_points,
+		double p_spacing, int p_max_samples, bool p_fit_to_path) const {
+	Array result;
+	// Share all validation, arc-length spacing, caps and exact endpoints
+	// with sample_positions. No per-point scene nodes or physics queries.
+	const PackedVector3Array positions = sample_positions(p_path_points,
+			p_spacing, p_max_samples, p_fit_to_path);
+	if (positions.is_empty()) {
+		return result;
+	}
+	result.resize(positions.size());
+	for (int i = 0; i < positions.size(); ++i) {
+		const int previous = MAX(0, i - 1);
+		const int next = MIN(positions.size() - 1, i + 1);
+		// The centered secant approximates the tangent bisector at a bend,
+		// avoiding a hard yaw jump at exactly the shared waypoint.
+		Vector3 tangent = positions[next] - positions[previous];
+		if (tangent.length_squared() <= 1.0e-12) {
+			if (i + 1 < positions.size()) {
+				tangent = positions[i + 1] - positions[i];
+			}
+			if (tangent.length_squared() <= 1.0e-12 && i > 0) {
+				tangent = positions[i] - positions[i - 1];
+			}
+		}
+		// A fit-disabled short route can yield only one sample, and a
+		// closed U-turn can have equal neighboring positions. Fall back to
+		// the first usable original path edge, then a stable +Z default.
+		if (tangent.length_squared() <= 1.0e-12) {
+			for (int segment = 1; segment < p_path_points.size(); ++segment) {
+				tangent = p_path_points[segment] - p_path_points[segment - 1];
+				if (tangent.length_squared() > 1.0e-12) {
+					break;
+				}
+			}
+		}
+		if (tangent.length_squared() <= 1.0e-12) {
+			tangent = Vector3(0, 0, 1);
+		}
+		tangent.normalize();
+
+		// For nearly vertical routes Y cannot serve as the reference up;
+		// choosing +Z in that case gives a finite, right-handed frame.
+		const Vector3 up_reference = Math::abs(double(tangent.y)) >= 0.98 ?
+				Vector3(0, 0, 1) : Vector3(0, 1, 0);
+		const Vector3 right = up_reference.cross(tangent).normalized();
+		const Vector3 up = tangent.cross(right).normalized();
+		result[i] = Transform3D(Basis(right, up, tangent), positions[i]);
 	}
 	return result;
 }
