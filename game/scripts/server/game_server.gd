@@ -94,6 +94,7 @@ const ArcaneAbilities = preload("res://scripts/shared/arcane_abilities.gd")
 const Swimming = preload("res://scripts/shared/swimming.gd")
 const WorldIncidents = preload("res://scripts/shared/world_incidents.gd")
 const WorldEncounterDirector = preload("res://scripts/shared/world_encounter_director.gd")
+const PlayerPresenceGrid = preload("res://scripts/server/player_presence_grid.gd")
 const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const AntisepticEdge = preload("res://scripts/shared/antiseptic_edge.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
@@ -339,6 +340,7 @@ class Player:
 
 var players: Dictionary = {} # peer id -> Player
 var zombies: Dictionary = {} # zombie id -> Zombie
+var last_population_query_stats: Dictionary = {} # Last once-per-second maintenance broadphase counters.
 var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
 var next_supply_drop_at: float = SupplyDrops.INTERVAL_SECONDS # Server-owned session clock.
@@ -7532,13 +7534,19 @@ func _alert_infected_pack(player_info: Dictionary) -> void:
 
 func _manage_zombie_population() -> void:
 	var active_cells: Dictionary = {}
+	var player_positions: Array[Vector2] = []
 	for player in players.values():
-		if not _alive(player):
+		if not _alive(player) or not player.position.is_finite():
 			continue
+		player_positions.append(Vector2(player.position.x, player.position.z))
 		var cell := WorldGen.cell_of(player.position.x, player.position.z)
 		for dx in range(-2, 3):
 			for dz in range(-2, 3):
 				active_cells[Vector2i(cell.x + dx, cell.y + dz)] = true
+	# Reuse one authoritative index for spawn suppression and unload checks;
+	# retain exact 2D world-space radius semantics on cell boundaries.
+	var presence = PlayerPresenceGrid.new()
+	presence.rebuild(player_positions)
 	for cell in active_cells:
 		var data: Dictionary = world.chunk(cell)
 		for spawn in data["spawns"]:
@@ -7546,7 +7554,7 @@ func _manage_zombie_population() -> void:
 			spawn_state[spawn["id"]] = state
 			if state["zombie"] != -1 or time < float(state["next"]):
 				continue
-			if _nearest_player_distance(Vector2(spawn["x"], spawn["z"])) < 12.0:
+			if presence.any_within(Vector2(spawn["x"], spawn["z"]), 12.0, false):
 				continue # Never appear in front of a player.
 			var zombie_id := new_id()
 			var z := Zombie.new(zombie_id, spawn["type"], Vector3(spawn["x"], world.height_at(spawn["x"], spawn["z"]), spawn["z"]), spawn["id"])
@@ -7566,12 +7574,13 @@ func _manage_zombie_population() -> void:
 			continue # Guard stays loaded while its loot is alive: no lure-and-return exploit.
 		elif not night_horde.is_empty() and night_horde.get("ids", []).has(zombie.id):
 			continue # Prevent running away to unload an active horde and claim a win.
-		elif _nearest_player_distance(Vector2(zombie.position.x, zombie.position.z)) > ZOMBIE_ACTIVE_RADIUS:
+		elif not presence.any_within(Vector2(zombie.position.x, zombie.position.z), ZOMBIE_ACTIVE_RADIUS):
 			gone.append(zombie.id)
 			if spawn_state.has(zombie.spawn_id):
 				spawn_state[zombie.spawn_id] = {"zombie": -1, "next": 0.0}
 	for id in gone:
 		zombies.erase(id)
+	last_population_query_stats = presence.snapshot()
 
 
 func _nearest_player_distance(point: Vector2) -> float:
