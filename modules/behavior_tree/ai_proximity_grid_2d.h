@@ -85,7 +85,8 @@ public:
 	// sensing/leash radii. Result: one packed array of original target indices
 	// per source, in ascending index order (including duplicate positions).
 	// Zero-radius matches are exact. Invalid/oversized requests fail atomically.
-	// Bounds: <=4096 sources, <=8192 targets, <=32768 matching pairs.
+	// Bounds: <=4096 sources, <=8192 targets, <=32768 matching pairs,
+	// <=262144 distance evaluations in crowded hash cells.
 	Array query_cross_variable_radius_batch(const PackedVector2Array &p_sources,
 			const PackedFloat32Array &p_radii, const PackedVector2Array &p_targets) const;
 
