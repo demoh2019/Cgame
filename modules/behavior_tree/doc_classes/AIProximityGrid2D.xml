@@ -3,10 +3,19 @@
 	<brief_description>Deterministic, bounded spatial neighbor lookup for batches of 2D AI agents.</brief_description>
 	<description>
 		Computes radius-neighbor lists for a cohort of 2D points using a temporary uniform spatial grid, visiting at most nine cells per source when the cell size is at least the radius. The method is stateless and returns only input indices; it neither accesses scene nodes nor decides which actors can interact. Coordinates are interpreted in the caller's chosen plane (Albion After uses world XZ mapped to Vector2).
-		Each result is a PackedInt32Array of neighboring input indices in ascending input order; the source index is excluded. The result Array preserves the order and duplicates of source_indices. Distance uses inclusive Euclidean radius. Empty source input returns an empty result.
+		Each result is a PackedInt32Array of neighboring input indices in ascending input order; the source index is excluded. The result Array preserves the order and duplicates of source_indices. [method query_nearest_batch] optionally limits each source to the closest K neighbors; [method query_radius_batch] continues to return all neighbors unchanged. Distance uses inclusive Euclidean radius. Empty source input returns an empty result.
 		Positions are capped at 8192, sources at 1024; radius must be finite and in [0, 256], cell_size finite and in [max(1, radius), 256], source indices valid, and each position finite and within plus/minus one million on both axes. Invalid input returns an empty array. Do not equate this query with physics collision detection, visibility or a server trust decision.
 	</description>
 	<methods>
+		<method name="query_nearest_batch" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="positions" type="PackedVector2Array" />
+			<param index="1" name="source_indices" type="PackedInt32Array" />
+			<param index="2" name="radius" type="float" />
+			<param index="3" name="cell_size" type="float" />
+			<param index="4" name="max_neighbors" type="int" />
+			<description>Returns at most [param max_neighbors] nearest valid neighbors per source, using exact squared Euclidean distance within [param radius] (boundary inclusive), and original position index as the distance-tie breaker. Output indices remain ascending by original input index to preserve deterministic gameplay event order, not in distance order. The cap must be in [1, 64], and the other size, finiteness, and grid constraints are the same as [method query_radius_batch]. A capped query keeps only max_neighbors candidates while searching, without first storing every dense-crowd hit. Invalid input returns an empty Array; an empty valid source list also returns empty.</description>
+		</method>
 		<method name="query_radius_batch" qualifiers="const">
 			<return type="Array" />
 			<param index="0" name="positions" type="PackedVector2Array" />

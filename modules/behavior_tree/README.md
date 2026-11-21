@@ -277,3 +277,39 @@ CPU overhead justifies the reduction in script loops.
 
 References: spatial partitioning used in Unity-style entity proximity
 workflows and Unreal Engine Mass crowd processing; no code copied.
+
+## Bounded nearest-neighbor fanout for dense infected packs
+
+`AIProximityGrid2D.query_nearest_batch(positions, sources, radius, cell_size, max_neighbors)`
+selects a maximum of **1–64** closest points for each source (source itself
+excluded). Distance ties choose the smaller **original input index**. The
+returned indices are sorted by input index, preserving authoritative game
+event order irrespective of bucket iteration. Exact radius hits are included.
+
+Capped queries retain at most K candidates per source while scanning the
+same 3×3 spatial buckets. The original four-argument
+`query_radius_batch()` remains unchanged, with no neighbor limit.
+
+Albion After now alerts at most **12 nearest infected per active source**
+within the established **18-metre** awareness radius. This prevents sudden,
+unbounded mass wake-ups in dense crowds while retaining server-side
+`Zombie.receive_pack_alert()` checks for legitimate players, safe hubs,
+combat state, territory and pursuit limits. Sources are frozen before alerts
+so freshly recruited NPCs cannot relay alerts during the same pass.
+
+`game/scripts/shared/pack_neighbor_selection.gd` performs equivalent
+distance/radius/tie selection for stock Godot and older engine builds,
+using the existing 3×3 GDScript buckets. Server-only
+`last_pack_query_stats` reports the selected cap and number of successful
+notifications. The selection never permits a client to provide arbitrary
+target IDs, and does not modify networking or save formats.
+
+### Testing
+
+Native C++ tests verify equal-distance ties, stable ordering, inclusive
+radius, dense crowds, bounds and full backward compatibility of the
+uncapped API. Albion After server tests compare fallback/native behavior
+on an intentionally reverse-ordered 19-member group (12 wake, 6 remain
+unalerted). The scoped CI workflow builds the custom Godot engine and
+runs headless tests. Benchmark actual frame time on dense encounters before
+asserting performance gains.

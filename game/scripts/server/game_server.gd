@@ -98,6 +98,7 @@ const Swimming = preload("res://scripts/shared/swimming.gd")
 const WorldIncidents = preload("res://scripts/shared/world_incidents.gd")
 const WorldEncounterDirector = preload("res://scripts/shared/world_encounter_director.gd")
 const PlayerPresenceGrid = preload("res://scripts/server/player_presence_grid.gd")
+const PackNeighborSelection = preload("res://scripts/shared/pack_neighbor_selection.gd")
 const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const AntisepticEdge = preload("res://scripts/shared/antiseptic_edge.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
@@ -199,6 +200,7 @@ const SIEGE_DECLARE_MAX_REQUEST_ID := 2_147_483_647
 const ZOMBIE_ACTIVE_RADIUS := 130.0 # Zombies farther than this from every player are put to sleep.
 const ZOMBIE_PACK_ALERT_RADIUS := 18.0
 const ZOMBIE_PACK_BUCKET_SIZE := 18.0
+const ZOMBIE_PACK_MAX_ALERTS := 12 # Per-source crowd fanout; nearest eligible targets first.
 const BAG_LIFETIME := 300.0
 const MAX_NAME_LENGTH := 20
 const SNAPSHOT_REPEAT_SECONDS := 2.5
@@ -361,7 +363,7 @@ const AI_STAGGER_SLOTS := 4
 const AI_BATCH_MAX_SIZE := 4096 # Match the native guard; larger populations use safe scalar calls.
 var _ai_update_scheduler: Variant = null
 var _pack_spatial_grid: Variant = null # Optional C++ radius broadphase; old-engine fallback below.
-var last_pack_query_stats: Dictionary = {"native": false, "population": 0, "sources": 0}
+var last_pack_query_stats: Dictionary = {"native": false, "population": 0, "sources": 0, "max_alerts": 12, "alerts_sent": 0}
 var last_ai_schedule_stats: Dictionary = {"enabled": false, "population": 0, "phase_due": 0, "phase_deferred": 0}
 var last_population_query_stats: Dictionary = {} # Last once-per-second maintenance broadphase counters.
 var depleted: Dictionary = {} # node id -> time it comes back
@@ -7933,8 +7935,8 @@ func _howl(howler, player_info: Dictionary) -> void:
 
 
 func _alert_infected_pack(player_info: Dictionary) -> void:
-	# Build one immutable authoritative cohort before notifying anyone.
-	# A newly alerted zombie cannot become another source in this same pass.
+	# Freeze the authorized sources *before* notifying any infected. This
+	# prevents a source joining the chase from waking a whole crowd at once.
 	var alive: Array = []
 	var positions := PackedVector2Array()
 	var source_indices := PackedInt32Array()
@@ -7951,52 +7953,64 @@ func _alert_infected_pack(player_info: Dictionary) -> void:
 				source_indices.append(index)
 				alert_sources.append(infected)
 	last_pack_query_stats = {"native": false, "population": alive.size(),
-		"sources": alert_sources.size()}
+		"sources": alert_sources.size(), "max_alerts": ZOMBIE_PACK_MAX_ALERTS, "alerts_sent": 0}
 	if alert_sources.is_empty():
 		return
 
-	# Native broadphase only supplies indices. The authoritative
-	# receive_pack_alert() still validates pursuit range, safe hubs and
-	# current combat state. If unavailable/invalid, use the old script grid.
+	# New C++ builds select only the K nearest members in one bounded query.
+	# Physics, line-of-sight, safe zones, combat state and territorial checks
+	# remain inside the server-owned Zombie.receive_pack_alert().
 	if _pack_spatial_grid == null and ClassDB.class_exists("AIProximityGrid2D"):
 		_pack_spatial_grid = ClassDB.instantiate("AIProximityGrid2D")
-	if _pack_spatial_grid != null and _pack_spatial_grid.has_method("query_radius_batch") \
+	if _pack_spatial_grid != null and _pack_spatial_grid.has_method("query_nearest_batch") \
 			and alive.size() <= 8192 and source_indices.size() <= 1024:
-		var batches: Array = _pack_spatial_grid.query_radius_batch(
-			positions, source_indices, ZOMBIE_PACK_ALERT_RADIUS, ZOMBIE_PACK_BUCKET_SIZE)
+		var batches: Array = _pack_spatial_grid.query_nearest_batch(
+			positions, source_indices, ZOMBIE_PACK_ALERT_RADIUS,
+			ZOMBIE_PACK_BUCKET_SIZE, ZOMBIE_PACK_MAX_ALERTS)
 		if batches.size() == alert_sources.size():
+			var sent: int = 0
 			for i in range(batches.size()):
 				var source = alert_sources[i]
-				var nearby_indices: PackedInt32Array = batches[i]
-				for nearby_index in nearby_indices:
-					var nearby = alive[nearby_index]
+				var neighbor_indices: PackedInt32Array = batches[i]
+				for neighbor_index in neighbor_indices:
+					var nearby = alive[neighbor_index]
 					if nearby.id != source.id and nearby.state != Zombie.State.DEAD:
-						nearby.receive_pack_alert(source.target_id, player_info)
+						if nearby.receive_pack_alert(source.target_id, player_info):
+							sent += 1
 			last_pack_query_stats["native"] = true
+			last_pack_query_stats["alerts_sent"] = sent
 			return
 
-	# Stock Godot, older forks, invalid bounds: preserve the original
-	# 3x3-bucket GDScript search with exact XZ-distance verification.
+	# Stock Godot or older forks: same spatial buckets and the same nearest
+	# ranking, keeping the per-source cap independent of the engine binary.
 	var buckets: Dictionary = {}
-	for infected in alive:
-		var p: Vector3 = infected.position
-		var bucket := Vector2i(floori(p.x / ZOMBIE_PACK_BUCKET_SIZE), floori(p.z / ZOMBIE_PACK_BUCKET_SIZE))
+	for index in range(alive.size()):
+		var point: Vector2 = positions[index]
+		var bucket := Vector2i(floori(point.x / ZOMBIE_PACK_BUCKET_SIZE), floori(point.y / ZOMBIE_PACK_BUCKET_SIZE))
 		if not buckets.has(bucket):
 			buckets[bucket] = []
-		buckets[bucket].append(infected)
-	for source in alert_sources:
-		var p: Vector3 = source.position
-		var cell := Vector2i(floori(p.x / ZOMBIE_PACK_BUCKET_SIZE), floori(p.z / ZOMBIE_PACK_BUCKET_SIZE))
+		buckets[bucket].append(index)
+	var sent: int = 0
+	for source_slot in range(source_indices.size()):
+		var source = alert_sources[source_slot]
+		var source_index: int = source_indices[source_slot]
+		var origin: Vector2 = positions[source_index]
+		var cell := Vector2i(floori(origin.x / ZOMBIE_PACK_BUCKET_SIZE), floori(origin.y / ZOMBIE_PACK_BUCKET_SIZE))
+		var candidates: Array[int] = []
 		for dx in range(-1, 2):
 			for dz in range(-1, 2):
-				var neighbors: Array = buckets.get(cell + Vector2i(dx, dz), [])
-				for nearby in neighbors:
-					if nearby.id == source.id or nearby.state == Zombie.State.DEAD:
-						continue
-					var separation: Vector3 = nearby.position - p
-					separation.y = 0.0
-					if separation.length_squared() <= ZOMBIE_PACK_ALERT_RADIUS * ZOMBIE_PACK_ALERT_RADIUS:
-						nearby.receive_pack_alert(source.target_id, player_info)
+				var members: Array = buckets.get(cell + Vector2i(dx, dz), [])
+				for index in members:
+					candidates.append(int(index))
+		var chosen: PackedInt32Array = PackNeighborSelection.choose(
+			positions, source_index, candidates,
+			ZOMBIE_PACK_ALERT_RADIUS, ZOMBIE_PACK_MAX_ALERTS)
+		for neighbor_index in chosen:
+			var nearby = alive[neighbor_index]
+			if nearby.id != source.id and nearby.state != Zombie.State.DEAD:
+				if nearby.receive_pack_alert(source.target_id, player_info):
+					sent += 1
+	last_pack_query_stats["alerts_sent"] = sent
 
 func _manage_zombie_population() -> void:
 	var active_cells: Dictionary = {}
