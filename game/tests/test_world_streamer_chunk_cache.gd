@@ -234,6 +234,67 @@ func run(t) -> void:
 		"opt-out worlds never report time-based cache expirations")
 	unbounded_age.free()
 
+	t.current = "incremental TTL cache maintenance respects count budget"
+	generated.clear()
+	var sliced := _streamer("_make_cacheable")
+	sliced.max_cached_chunks = 4
+	sliced.max_cached_chunk_bytes = 20 * 1048576
+	sliced.cached_chunk_retention_seconds = 1.0
+	sliced.max_cached_expirations_per_frame = 1
+	sliced.refresh()
+	for focus_x in [40.0, 72.0, 104.0]:
+		sliced.focus_position = Vector3(focus_x, 0, 8)
+		sliced.refresh()
+	t.eq(sliced.get_cached_chunk_count(), 3,
+		"three distinct detached visual roots are initially retained")
+	sliced.advance_cached_chunk_retention(1.1)
+	t.eq(sliced.get_last_cached_expiration_count(), 1,
+		"one expired root is destroyed during the first limited frame")
+	t.eq(sliced.get_last_deferred_cached_expiration_count(), 2,
+		"two expired roots are deferred to later frames")
+	t.eq(sliced.get_cached_chunk_count(), 2,
+		"deferred roots stay detached instead of being reloaded")
+	t.eq(sliced.get_cached_chunk_bytes(), 8 * 1048576,
+		"first expiry decrements retained estimated cache bytes")
+	sliced.advance_cached_chunk_retention(0.01)
+	t.eq(sliced.get_last_cached_expiration_count(), 1,
+		"next frame retires one additional expired root")
+	t.eq(sliced.get_last_deferred_cached_expiration_count(), 1,
+		"one expired root waits after the second frame")
+	sliced.advance_cached_chunk_retention(0.01)
+	t.eq(sliced.get_cached_chunk_count(), 0,
+		"expiry backlog drains completely after three frames")
+	t.eq(sliced.get_chunk_cache_expiration_count(), 3,
+		"total expiration count includes all budgeted releases")
+	t.eq(sliced.get_last_deferred_cached_expiration_count(), 0,
+		"after draining, no expired cache roots remain deferred")
+	t.check(sliced.get_last_cached_expiration_work_usec() >= 0,
+		"native expiry CPU telemetry stays nonnegative")
+	sliced.advance_cached_chunk_retention(0.01)
+	t.eq(sliced.get_last_cached_expiration_count(), 0,
+		"empty maintenance frame resets the last expiry count")
+	t.eq(sliced.get_last_cached_expiration_work_usec(), 0,
+		"empty maintenance frame resets measured expiry cost")
+	sliced.free()
+
+	t.current = "soft CPU limit always retires at least one overdue scene"
+	var timed := _streamer("_make_cacheable")
+	timed.max_cached_chunks = 4
+	timed.cached_chunk_retention_seconds = 1.0
+	timed.max_cached_expiration_work_usec = 1
+	timed.refresh()
+	for focus_x in [40.0, 72.0, 104.0]:
+		timed.focus_position = Vector3(focus_x, 0, 8)
+		timed.refresh()
+	timed.advance_cached_chunk_retention(1.1)
+	t.check(timed.get_last_cached_expiration_count() >= 1,
+		"soft CPU deadline never prevents the first expired root release")
+	t.check(timed.get_cached_chunk_count() <= 2,
+		"at least one detached scene is reclaimed under a tiny budget")
+	t.check(timed.get_last_cached_expiration_work_usec() >= 0,
+		"the actual expiry CPU work is exported to diagnostics")
+	timed.free()
+
 	t.current = "estimated scene cache bytes trim roots beyond budget"
 	generated.clear()
 	var sized := _streamer("_make_cacheable")
@@ -336,6 +397,12 @@ func run(t) -> void:
 	view.free()
 	t.current = "graphics tiers and game profiler apply native cache budgets"
 	for tier in 4:
+		var slots: int = GraphicsQuality.streamed_cache_expirations_for_quality(tier)
+		var usec: int = GraphicsQuality.streamed_cache_expiration_usec_for_quality(tier)
+		t.check(slots > 0 and slots <= 16,
+			"graphics tiers select a valid per-frame expiry count")
+		t.check(usec > 0 and usec <= 1000000,
+			"graphics tiers select a valid soft expiry CPU-time budget")
 		var retention_seconds: float = GraphicsQuality.streamed_chunk_cache_retention_for_quality(tier)
 		t.check(retention_seconds > 0.0 and retention_seconds <= 120.0,
 			"each graphics tier selects a safe idle retention lifetime")
@@ -347,8 +414,14 @@ func run(t) -> void:
 		"graphics profile retunes engine estimated cache bytes")
 	t.check(graphics_source.contains("set_cached_chunk_retention_seconds"),
 		"quality changes also adjust the native cache TTL")
+	t.check(graphics_source.contains("set_max_cached_expirations_per_frame"),
+		"quality changes reconfigure native per-frame expiry limits")
 	var online_source := FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
 	t.check(online_source.contains("Albion/StreamCacheEstimatedBytes"),
 		"game profiler exposes estimated cache occupancy")
 	t.check(online_source.contains("Albion/StreamCacheExpired"),
 		"game profiler exports age-based native cache releases")
+	t.check(online_source.contains("Albion/StreamCacheExpiryCPUus"),
+		"native cache expiry CPU cost is visible in game profiler")
+	t.check(online_source.contains("Albion/StreamCacheExpiryDeferred"),
+		"deferred expiry backlog is visible in game profiler")

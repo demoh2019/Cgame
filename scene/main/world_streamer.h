@@ -168,6 +168,12 @@ private:
 	int cache_hits = 0;
 	int cache_evictions = 0;
 	int cache_expirations = 0;
+	// Opt-in incremental cache expiration, preserving legacy semantics at zero.
+	int max_cached_expirations_per_frame = 0;
+	int max_cached_expiration_work_usec = 0;
+	int last_cached_expiration_count = 0;
+	int last_deferred_cached_expiration_count = 0;
+	int64_t last_cached_expiration_work_usec = 0;
 	HashMap<Vector3i, bool> simulation_active_cells;
 	int simulation_inactive_count = 0;
 	// Only chunk roots actually implementing the callback are tracked.
@@ -216,7 +222,7 @@ private:
 	void _unload_cell(const Vector3i &p_cell, bool p_allow_cache = true);
 	bool _restore_cached_chunk(const Vector3i &p_cell);
 	void _trim_cached_chunks();
-	void _expire_cached_chunks();
+	void _expire_cached_chunks(bool p_ignore_budget = false);
 	void _discard_cached_chunks();
 	void _reset_state();
 	void _record_failure(const Vector3i &p_cell, const String &p_reason);
@@ -361,6 +367,13 @@ public:
 	real_t get_cached_chunk_retention_seconds() const { return cached_chunk_retention_seconds; }
 	void advance_cached_chunk_retention(real_t p_delta_seconds);
 	int get_chunk_cache_expiration_count() const { return cache_expirations; }
+	void set_max_cached_expirations_per_frame(int p_count);
+	int get_max_cached_expirations_per_frame() const { return max_cached_expirations_per_frame; }
+	void set_max_cached_expiration_work_usec(int p_usec);
+	int get_max_cached_expiration_work_usec() const { return max_cached_expiration_work_usec; }
+	int get_last_cached_expiration_count() const { return last_cached_expiration_count; }
+	int get_last_deferred_cached_expiration_count() const { return last_deferred_cached_expiration_count; }
+	int64_t get_last_cached_expiration_work_usec() const { return last_cached_expiration_work_usec; }
 	int get_cached_chunk_count() const { return int(cached_chunks.size()); }
 	int get_chunk_cache_hit_count() const { return cache_hits; }
 	int get_chunk_cache_eviction_count() const { return cache_evictions; }

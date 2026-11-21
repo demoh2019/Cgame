@@ -72,6 +72,15 @@ static func streamed_chunk_cache_retention_for_quality(value: int) -> float:
 	return [3.0, 5.0, 8.0, 12.0][clampi(value, 0, 3)]
 
 
+## Time-slice ordinary expiration of detached cosmetic chunks.
+static func streamed_cache_expirations_for_quality(value: int) -> int:
+	return [1, 1, 2, 2][clampi(value, 0, 3)]
+
+
+static func streamed_cache_expiration_usec_for_quality(value: int) -> int:
+	return [350, 500, 750, 1000][clampi(value, 0, 3)]
+
+
 ## Startup only: Unreal World Partition-style area ramp. Preserve a safe
 ## nearby terrain area and gradually request the configured full range.
 ## Fractions scale area, not distance, on our 2D XZ streaming grid.
@@ -450,6 +459,14 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 			var retention: float = streamed_chunk_cache_retention_for_quality(_level)
 			if not is_equal_approx(float(streamer.call("get_cached_chunk_retention_seconds")), retention):
 				streamer.call("set_cached_chunk_retention_seconds", retention)
+		# Prevent a busy frame when several detached scenes expire together.
+		if streamer.has_method("set_max_cached_expirations_per_frame"):
+			var expiry_slots: int = streamed_cache_expirations_for_quality(_level)
+			var expiry_usec: int = streamed_cache_expiration_usec_for_quality(_level)
+			if int(streamer.call("get_max_cached_expirations_per_frame")) != expiry_slots:
+				streamer.call("set_max_cached_expirations_per_frame", expiry_slots)
+			if int(streamer.call("get_max_cached_expiration_work_usec")) != expiry_usec:
+				streamer.call("set_max_cached_expiration_work_usec", expiry_usec)
 		# One expensive scene detach must not consume a whole frame of
 		# subsequent cleanup. Older native builds remain fully compatible.
 		if streamer.has_method("set_max_unload_work_usec"):
