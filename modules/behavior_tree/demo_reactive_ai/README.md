@@ -17,7 +17,7 @@ The game uses:
 - Godot `AStarGrid2D` with an inflated four-way grid for obstacle navigation;
 - a `StaticBody2D` and `PhysicsRayQueryParameters2D` for line-of-sight.
 
-**AI priorities**: retreat (low health) → chase (visible) → investigate last seen → investigate sound → patrol. The reactive selector rechecks higher priorities every AI tick. On any terminal result the demo resets the `BehaviorTreeRunner` before its next tick, because this API caches terminal status. Blackboard writes are applied by native `BehaviorTreeBlackboardSet` resources.
+**AI priorities**: retreat (numeric HP <= Blackboard threshold) → chase (visible) → investigate last seen → investigate sound → patrol. The retreat guard uses a native `BehaviorTreeBlackboardCompare` resource to compare the live `health` key against `retreat_at_or_below`, rather than an external GDScript Boolean. The reactive selector rechecks higher priorities every AI tick. On any terminal result the demo resets the `BehaviorTreeRunner` before its next tick, because this API caches terminal status. Blackboard writes are applied by native `BehaviorTreeBlackboardSet` resources.
 
 ## Automatic tests
 
