@@ -19,6 +19,13 @@ func run(t) -> void:
 	tags = EngineFeatures.runtime_tags("zombie", infected)
 	t.check(tags.has("Runtime.Life.Dead") and not tags.has("Runtime.Life.Alive"), "death replaces life state")
 	t.check(not tags.has("Runtime.Status.Staggered"), "expired status removed by tag synthesis")
+	infected["resolve_seconds"] = 5.0
+	infected["resolve_stacks"] = 1
+	t.check(not EngineFeatures.runtime_tags("zombie", infected).has("Runtime.Status.Resolve"),
+		"resolve requires both duration and minimum stacks")
+	infected["resolve_stacks"] = 2
+	t.check(EngineFeatures.runtime_tags("zombie", infected).has("Runtime.Status.Resolve"),
+		"active resolve tag requires two stacks")
 
 	t.current = "player movement state tags"
 	var player := {"alive": true, "mounted": true, "outlaw": true, "crouching": false}
@@ -47,4 +54,5 @@ func run(t) -> void:
 			t.check(EngineFeatures.runtime_has(actor, "Runtime.Status.Staggered"), "new status applied")
 	else:
 		t.check(not EngineFeatures.runtime_has(actor, "Runtime.Life.Dead"), "stock Godot skips native tags")
+		t.check(EngineFeatures.runtime_has(actor, "Runtime.Status.Staggered", true), "fallback remains functional")
 	actor.free()
