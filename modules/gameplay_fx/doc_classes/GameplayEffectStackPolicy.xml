@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GameplayEffectStackPolicy" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Deterministic Gameplay Effect stacking, overflow and reapplication policies.
+	</brief_description>
+	<description>
+		A reusable, stateless Gameplay Ability System-inspired policy for previewing effect applications. An instance holds a bounded multiplier table and policies, not live effects or timers. [method preview_application] receives the authoritative previous stack count and remaining seconds and returns an application decision without mutating the world. Duration factors are selected by prior stack count, holding the last factor for subsequent applications. Maximum 32 stacks and seven-day durations; all inputs must be finite. A server remains responsible for effect ownership, tick, damage, and replication.
+	</description>
+	<methods>
+		<method name="configure">
+			<return type="bool" />
+			<param index="0" name="max_stacks" type="int" />
+			<param index="1" name="stack_factors" type="PackedFloat32Array" />
+			<param index="2" name="overflow_policy" type="int" default="0" />
+			<param index="3" name="reapply_policy" type="int" default="0" />
+			<description>Sets up this policy atomically. At most 32 stacks; factors may be zero to eight, finite and nonempty. A shorter factor table repeats its last element.</description>
+		</method>
+		<method name="calculate_magnitude" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="base_duration" type="float" />
+			<param index="1" name="prior_stacks" type="int" />
+			<param index="2" name="target_scale" type="float" default="1.0" />
+			<description>Returns the bounded effect duration after stack and target modifiers, or zero for invalid input. This method ignores overflow policy and clamps the multiplier-table index.</description>
+		</method>
+		<method name="preview_application" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="base_duration" type="float" />
+			<param index="1" name="prior_stacks" type="int" />
+			<param index="2" name="current_remaining" type="float" />
+			<param index="3" name="target_scale" type="float" default="1.0" />
+			<description>Returns a decision dictionary containing accepted, stacks, remaining, applied_duration, overflow, reason. Rejected application preserves the prior stack count and remaining time. Overflow policies clamp, reject or restart a stack cycle; reapplication policies can replace only when stronger, refresh, extend or keep the existing effect.</description>
+		</method>
+		<method name="get_config" qualifiers="const">
+			<return type="Dictionary" />
+			<description>Returns an independent snapshot with max_stacks, stack_factors, overflow_policy, and reapply_policy.</description>
+		</method>
+		<method name="replace_config">
+			<return type="bool" />
+			<param index="0" name="config" type="Dictionary" />
+			<description>Transactionally restores configuration after strict type and range validation; invalid input never changes the previous policy.</description>
+		</method>
+		<method name="get_max_stacks" qualifiers="const">
+			<return type="int" />
+			<description>Maximum stacks for the configured policy.</description>
+		</method>
+		<method name="get_overflow_policy" qualifiers="const">
+			<return type="int" />
+			<description>Current overflow policy.</description>
+		</method>
+		<method name="get_reapply_policy" qualifiers="const">
+			<return type="int" />
+			<description>Current reapplication policy.</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="OVERFLOW_CLAMP" value="0">Continue refresh attempts while capping the stack count.</constant>
+		<constant name="OVERFLOW_REJECT" value="1">Reject further applications when the stack cap is reached.</constant>
+		<constant name="OVERFLOW_RESET" value="2">Restart from stack one after reaching the cap.</constant>
+		<constant name="REAPPLY_IF_STRONGER" value="0">Replace only if the new duration is longer than the current remaining duration.</constant>
+		<constant name="REAPPLY_REFRESH" value="1">Always refresh the remaining duration with the new duration.</constant>
+		<constant name="REAPPLY_EXTEND" value="2">Add the duration to the current remaining time, bounded by seven days.</constant>
+		<constant name="REAPPLY_KEEP" value="3">Retain a currently active effect and reject its reapplication.</constant>
+	</constants>
+</class>

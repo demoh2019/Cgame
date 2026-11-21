@@ -18,6 +18,302 @@ The scheduler's tick index comes from the authoritative `GameServer.tick_count`.
 
 The concurrently developed `AISimulationLOD2D` remains active. It controls the passive target-scan interval (near, medium, or far) according to viewer distance. **AIUpdateScheduler** operates later: when a scan timer becomes eligible during a very large encounter, it assigns that scan to a deterministic frame phase. Thus these systems are complementary, not replacements. The first passive LOD delay and all existing urgent combat overrides are preserved.
 
+## Stable passive LOD with native hysteresis
+
+Inspired by [Unreal Significance Manager](https://dev.epicgames.com/documentation/en-us/unreal-engine/significance-manager-in-unreal-engine)
+and [Mass LOD](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Plugins/MassLOD).
+`AISimulationLOD2D.get_hysteretic_interval(distance, near_distance, far_distance,
+previous_interval, hysteresis, urgent=false)` keeps the per-agent scheduling
+decision stable when a viewer oscillates around a tier boundary.
+
+Albion After calls the shared **stateless** native policy for passive, unengaged
+infected only and remembers the nominal interval locally per zombie. The
+near boundary is **asymmetric for safety**: as soon as any eligible survivor
+enters the original pursuit leash, scanning reverts immediately to 0.25s.
+Leaving near can retain 0.25s for up to 4 extra metres. Medium-to-far and
+far-to-medium transitions require crossing a 4m margin. An urgent request
+always uses the near interval. The existing one-time 16-bin startup spread,
+4-slot large-crowd scheduler, movement, attacks, effects, and combat
+authoritative checks are untouched.
+
+The API rejects invalid/uninitialized previous intervals and oversized or
+nonfinite hysteresis margins by returning the ordinary interval. There is no
+native per-agent allocation, no random input, and no network payload.
+Older fork binaries fall back to their previous `get_interval()` API; stock
+Godot continues its original 0.25s passive AI scans. Native unit tests and
+`game/tests/test_ai_update_scheduler.gd` verify distance flapping, urgent
+overrides, startup phasing and real survivor reacquisition.
+
+## Native crowd separation for idle packs
+
+Inspired by the data-oriented neighborhood steering in Unreal Engine
+[Mass Avoidance](https://dev.epicgames.com/documentation/en-us/unreal-engine/mass-avoidance-overview-in-unreal-engine),
+the existing `AIProximityGrid2D` has a new stateless native method:
+
+```gdscript
+var steering: PackedVector2Array = grid.query_separation_batch(
+    zombie_xz_positions, passive_indices, 2.5, 3.0, 8)
+```
+
+It performs the same bounded 3×3 hashed-cell, closest-eight-neighbor
+selection used by native pack alerts. Each source gets one deterministic,
+finite repulsion vector with length at most one; overlapping NPC positions
+use stable source indices to choose opposite directions instead of a
+random nudge. Malformed requests return an empty array, never partial results.
+
+The canonical multiplayer server shares this native grid with pack alerts.
+For 32–1,024 infected it samples passive crowd avoidance **once per five
+simulation ticks** (4Hz at the game's 20Hz tick), and only for
+`WANDER`/`INVESTIGATE` infected. Nearby active infected are still
+obstacles but never receive avoidance-driven combat movement. The game
+blends at most 35% repulsion into these two passive movement directions,
+using the existing world collision sweep and wounded movement speeds;
+it never alters attack checks, target selection, chase, bosses, snares,
+knockback, network packets or authoritative player data.
+
+Stock Godot and older Cgame binaries leave previous movement unchanged,
+and the server immediately clears steering when the population drops below
+32. `GameServer.get_crowd_separation_stats()` is a server-only,
+read-only diagnostic snapshot of active calculation and source counts;
+it is not sent to connected players.
+
+Native regression tests cover coincident and negative coordinates,
+deterministic repeatability, distant NPCs, neighbor limits and invalid
+input. `test_ai_update_scheduler.gd` exercises real `GameServer`
+batch calculation, threshold cleanup and noncombat-only steering.
+An actual compiled Cgame editor is necessary to run the new C++ logic;
+no unmeasured FPS or CPU benefit is claimed.
+
+## Predictive Mass-style passive crowd steering
+
+The native `AIProximityGrid2D.query_predictive_separation_batch(
+positions, velocities, source_indices, radius, cell_size, max_neighbors,
+horizon)` adds a **short forward prediction** to the previous static
+nearest-neighbor separation. It builds the same bounded 3×3 spatial
+grid on the desired position `position + velocity * horizon` and scores
+only the closest `max_neighbors` future neighbors. When two future
+positions coincide or pass very closely because of opposing velocities,
+deterministic perpendicular steering guides agents to opposite sides
+instead of pushing them backward. Stationary exact overlaps still use stable
+index-based tie breaking.
+
+The horizon is limited to **0..2 seconds**, velocities to 50 m/s and
+the old radius, source, coordinate and neighbor limits remain in
+force. Nonfinite and excessive inputs fail atomically. Horizon zero
+returns the previous static method's result exactly; no scene or
+physics mutation occurs in C++.
+
+Albion After's actual `GameServer` now derives desired velocities
+from each `WANDER` or `INVESTIGATE` actor's existing destination and
+movement speed, and queries **0.75 seconds ahead** in its already
+existing four-times-per-second crowd pass. Rooted/staggered infected
+and active combatants have zero predicted velocity; only passive,
+non-boss infected receive steering. The same existing 35% mixing and
+world collision sweep apply. Combat, AI targets, player positions,
+attacks, authority and networking remain unchanged.
+
+The server retains `query_separation_batch` as an opt-in fallback
+for older Cgame binaries or invalid predictive requests. Stock Godot
+leaves movement untouched. `get_crowd_separation_stats()` now reports
+a server-only `predictive` boolean. Native tests verify head-on
+sidestepping, zero-horizon parity, moving-apart behavior, stationary
+overlaps and invalid inputs. The game test runs a real 32-NPC server
+tick with opposing passive destinations.
+
+References: [Unreal Mass Avoidance](https://dev.epicgames.com/documentation/unreal-engine/mass-avoidance-overview-in-unreal-engine)
+and [Unreal Avoidance Manager's prediction horizon](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Engine/UAvoidanceManager).
+
+No measured FPS or CPU improvement is claimed without runtime benchmarks.
+
+## Native nearest-EQS query for multiple sensory sources
+
+Following [Unreal's EQS distance-based item selection](https://dev.epicgames.com/documentation/unreal-engine/eqs-node-reference-tests-in-unreal-engine)
+and its data-oriented
+[Mass Entity queries](https://dev.epicgames.com/documentation/unreal-engine/overview-of-mass-entity-in-unreal-engine),
+the reusable Cgame `AIProximityGrid2D` now supports:
+
+```gdscript
+var indices: PackedInt32Array = grid.query_cross_nearest_batch(
+    observer_positions, cue_positions, persistent_cue_ids, 23.0, 23.0)
+# indices[i] is the ORIGINAL cue index or -1 when no cue is nearby.
+```
+
+The method builds a 2D spatial hash for the candidate cues and performs
+at most nine cell visits per observer. The exact inclusive radius is checked
+before selecting the closest item; **equal-distance candidates are ordered
+by their persistent world ID**, then the original input index. This keeps
+the returned identity stable when two separate cues share a location.
+It does not allocate a Dictionary for each result, query scene nodes,
+perform line-of-sight tests, change any target, or authorize an attack.
+
+All inputs are validated before selecting results. Bounds: at most 4,096
+observers and 8,192 cues, finite coordinates within ±1,000,000 units,
+radius 0..256m, and cell edge 1..256m with edge >= radius. An invalid
+request yields an **empty** packed array; a valid unmatched source gets
+an index of **-1**. This distinction allows a safe GDScript fallback.
+
+Albion After's canonical server now uses the same C++ selector for
+three independently authorized stimulus categories:
+
+- **Thrown noise decoys**: already validated as active and audible.
+- **Corpse blood scent**: only server-confirmed death bags, unlooted
+  and before both expiry deadlines.
+- **Night campfire light**: only current, active nighttime light sources.
+
+The existing GDScript cell indices still validate expiry and eligibility.
+When there are **32..4096 infected and at least 4 active cues** in the
+specific sense, the server chooses one closest source for every living
+non-boss infected in a single C++ call. The last-mile gameplay behavior is
+still `Zombie.investigate_decoy`: combat priority, investigation lock,
+pursuit leash, and boss immunity are unchanged. The query never invents
+a player source or conveys private world state to clients.
+
+If the C++ method is unavailable, the cohort or cue count is small, or
+the request is invalid, each category retains the existing authoritative
+GDScript nearest-bucket selection. A server-only
+`GameServer.get_ai_cue_query_stats()` report records which channel used
+the native path and how many sources/cues were considered.
+
+Native doctests cover equal distances, duplicate target positions and
+IDs, negative cells, exact zero and positive radii, duplicate observers,
+missing matches and oversized/malformed inputs. The live game regression
+compares all **three** sensory channels between native and forced scalar
+fallback on the same 32-zombie encounter, including a boss, a chasing
+infected, two equal-distance sources and a distant bystander.
+
+No latency, FPS or CPU improvement is claimed without a compiled native
+engine and repeatable benchmarks.
+
+## Batched vertical-cylinder presence for camp sentries (Mass-style)
+
+Inspired by Unreal's data-oriented [Mass Entity processors](https://dev.epicgames.com/documentation/unreal-engine/overview-of-mass-entity-in-unreal-engine), Cgame exposes a new spatial-hash primitive that handles many 3D proximity counts in one native call:
+
+```gdscript
+var counts: PackedInt32Array = grid.query_cylinder_counts_batch(
+    alarm_world_centers, living_infected_positions,
+    21.0, 8.0, 5)
+```
+
+The query hashes **target XZ coordinates once**, then visits the target
+cell and at most its eight adjacent cells per source. Each match
+must lie within the inclusive horizontal radius **and** the inclusive
+absolute Y difference. The result is a packed array of counts in
+source order, clamped to `max_count`, with no entity IDs or private
+coordinates in the result. It does not alter scene state or trigger
+physics or gameplay events.
+
+Bounds: 1..4096 source cylinders, 0..8192 targets, finite coordinate
+magnitudes no greater than 1,000,000, radius 0..256, height 0..256,
+and a count cap in 1..64. An empty target set yields valid all-zero
+counts; malformed or oversized requests return an **empty** array,
+distinct from successful zero detections. Zero radius supports
+coincident XZ positions, and exact height/radius boundaries match.
+
+### Live Albion After integration
+
+The canonical multiplayer `GameServer._tick_world()` batches counts
+when at least 32 infected and four armed, scan-due, player-owned camp
+alarms coexist (up to 8192 infected / 4096 alarm centers). Its query
+snapshot contains only living infected with finite positions; **raid
+bosses are counted**, matching previous alarm rules. A server-only
+`get_camp_alarm_query_stats()` reports whether this optimization ran.
+
+The old `CampAlarm.scan(fire, zombies, now)` is still the authoritative
+timer, fuel and alert-cooldown gate. It accepts an *optional* precomputed
+count only when provided by the server's valid native batch; otherwise
+the same 3D exhaustive loop runs unchanged. A native result is fully
+validated for size and count range before any game state is mutated.
+Weather dousing, expired fires, missing alarm owners and disconnected
+players still suppress notifications. A single alarm reports at most
+five nearby infected and preserves its two-second scan interval and
+24-second alert cooldown.
+
+Tests include C++ cylinder queries (boundary distance, vertical floors,
+negative cells, no enemies, zero radius, duplicate observers, caps and
+malformed arrays), plus a real `GameServer._tick_world()` scenario with
+four alarms and 32 infected. The game regression compares native and
+forced old-engine paths for identical event counts, authoritative
+per-alarm schedules, boss presence and altitude exclusion.
+
+This optimization is an additive Cgame API, **not a port of Unreal
+engine code**. No measured CPU or FPS improvement is claimed without
+native compilation and repeatable benchmarks.
+
+## Mass-style per-agent perception broadphase for large PvE crowds
+
+Unreal Engine's [AI Perception](https://dev.epicgames.com/documentation/en-us/unreal-engine/ai-perception-in-unreal-engine)
+provides actor-specific sensing distances, while [Mass Entity](https://dev.epicgames.com/documentation/unreal-engine/overview-of-mass-entity-in-unreal-engine)
+emphasizes batch queries over whole actor cohorts. Cgame now adds a
+native, **variable-radius two-cohort** spatial query to reduce wasted
+faraway player checks during Albion After's authoritative passive
+infected target-selection passes:
+
+```gdscript
+var nearby: Array = grid.query_cross_variable_radius_batch(
+    infected_positions, each_infected_sensing_radius, player_positions)
+# One PackedInt32Array of original player indices per infected, sorted.
+```
+
+This differs from `query_cross_radius_batch`, which uses one common
+radius. The new API builds a single spatial hash over target positions,
+with its cell size set to the largest source radius (minimum 1m), then
+visits at most nine cells per source and applies that **source's own**
+inclusive distance threshold. It preserves original target indices,
+even for duplicate positions. A valid empty player set produces one
+empty packed array per source, distinct from malformed input.
+
+Limits: 4096 source points, 8192 target points, 32768 returned pairs,
+and **262144 maximum candidate distance tests** to protect crowded cells,
+finite coordinates within ±1,000,000 units, and a separate finite
+radius within 0..256m per source. Malformed arrays or a result exceeding
+the pair or distance-test budgets fail atomically with `[]`, permitting a full-scan fallback.
+There are no scene queries, physics changes, game target assignments,
+raycasts, or per-neighbor Dictionaries in this native API.
+
+### Actual Albion After use
+
+At the start of `GameServer._tick_zombies()`, the server snapshots
+already-authorized **alive, outside-safe-zone** player positions.
+For large worlds (64–4096 infected, 8–8192 players), it builds one
+native query for passive, non-boss, unengaged NPCs whose target scan
+is due this tick. Each NPC's conservative radius is its normal
+`lose` pursuit range plus **24m**, plus the **4m passive LOD
+hysteresis margin** (and a 0.125m outward rounding margin). Any source radius
+exceeding 256m causes a full fallback rather than losing valid targets.
+
+Only those *still passive and unengaged when their turn arrives*
+receive a reduced view of the existing authoritative player-info
+Dictionary. Active chases, attacks, forced guardian taunts, combat
+threats, raid bosses and agents newly alerted **during the current
+server tick** always retain the complete original player-info map.
+
+Crucially, the native query is **only a broadphase**. The existing
+`Zombie._select_target` independently evaluates life, safe zones,
+territorial rules, wind-weighted sound, environmental hearing
+occlusion, blood scent, camouflage, rain, firelight, line-of-sight
+obstruction and combat-threshold prioritization. Player targets beyond
+the far LOD cutoff and its hysteresis margin cannot become detectable under the existing
+`lose - 1m` cap and are in the same far LOD tier. This new API
+neither changes combat logic nor updates network replication.
+
+A missing older Cgame API, stock Godot, small encounters, a malformed
+request or overly dense candidate output simply passes the entire
+original player-info map. The read-only server diagnostic
+`get_perception_interest_stats()` reports native admission, eligible
+source count, player count and candidate pairs; it is never sent
+to clients.
+
+Native doctests cover different observer ranges, duplicate targets,
+negative cells, exact zero-radius hits, missing targets, malformed
+input, dense output limits and repeatability. The game regression
+performs two genuine 64-infected/eight-player server ticks with
+identical world and RNG seeds, one using native spatial filtering and
+one forcing the old exhaustive path. It compares actor positions,
+target IDs, state transitions and passive AI LOD scan timers.
+
+**No performance gain is claimed without a compiled Cgame build and
+repeatable CPU-time benchmarks.**
+
 ## Inspect the real server
 
 The diagnostic `GameServer.get_ai_schedule_stats()` method returns a detached Dictionary:

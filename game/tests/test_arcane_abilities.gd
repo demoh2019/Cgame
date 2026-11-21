@@ -49,6 +49,59 @@ func run(t) -> void:
 	caster.combat_energy = Arcane.BOLT_ENERGY_COST - 1.0
 	t.eq(sim.cmd_arcane_bolt(31, 1, 0).get("reason", ""), "no_energy", "bolt needs energy")
 
+	t.current = "native bounded nearest-K ranking and exact fallbacks"
+	var native_grid: Object = null
+	if ClassDB.class_exists("SpatialRelevancyGrid2D"):
+		var candidate_grid: Object = ClassDB.instantiate("SpatialRelevancyGrid2D")
+		if candidate_grid != null and candidate_grid.has_method("query_nearest_ids"):
+			native_grid = candidate_grid
+			var points: PackedVector2Array = PackedVector2Array([
+				Vector2(0, 0), Vector2(2, 0), Vector2(-2, 0), Vector2(0, 0),
+				Vector2(0, -2), Vector2(100, 100), Vector2(1, 0),
+				Vector2(10, 10), Vector2(-10, -10), Vector2(999, 0)
+			])
+			var ids: PackedInt64Array = PackedInt64Array([50, 8, 90, 3, 15, 600, 29, 70, 11, 12])
+			t.check(native_grid.rebuild(ids, points), "native nearest-K grid rebuilds")
+			t.eq(native_grid.query_nearest_ids(Vector2.ZERO, 2.0, 5),
+				PackedInt64Array([3, 50, 29, 8, 15]),
+				"distance then ID tie-break returns five nearest actors")
+			t.eq(native_grid.query_nearest_ids(Vector2.ZERO, 0.0, 3),
+				PackedInt64Array([3, 50]),
+				"zero-radius inclusive query keeps coincident actors")
+			t.eq(native_grid.query_nearest_ids(Vector2.ZERO, 2.0, 0).size(), 0,
+				"no zero-sized top-K result can allocate an unbounded list")
+			t.eq(native_grid.query_nearest_ids(Vector2.ZERO, 2.0, 129).size(), 0,
+				"top-K request over 128 is rejected")
+			t.eq(native_grid.query_nearest_ids(Vector2.ZERO, 1000.0, 3),
+				PackedInt64Array([3, 50, 29]),
+				"large-radius fallback still returns nearest three")
+			var random := RandomNumberGenerator.new()
+			random.seed = 44103
+			for iteration in 80:
+				var point_list := PackedVector2Array()
+				var id_list := PackedInt64Array()
+				for i in 70:
+					point_list.append(Vector2(random.randf_range(-200, 200),
+						random.randf_range(-200, 200)))
+					id_list.append(10000 + i)
+				t.check(native_grid.rebuild(id_list, point_list),
+					"random nearest index can rebuild safely")
+				var origin := Vector2(random.randf_range(-200, 200),
+					random.randf_range(-200, 200))
+				var radius: float = [0.0, 7.0, 64.0, 256.0][iteration % 4]
+				var brute: Array = []
+				for i in id_list.size():
+					var distance: float = origin.distance_squared_to(point_list[i])
+					if distance <= radius * radius:
+						brute.append({"id": id_list[i], "d": distance})
+				brute.sort_custom(func(a, b): return float(a["d"]) < float(b["d"]) \
+					if float(a["d"]) != float(b["d"]) else int(a["id"]) < int(b["id"]))
+				var expected := PackedInt64Array()
+				for i in mini(brute.size(), 5):
+					expected.append(int(brute[i]["id"]))
+				t.eq(native_grid.query_nearest_ids(origin, radius, 5), expected,
+					"native top-K agrees with complete script sort at trial %d" % iteration)
+
 	t.current = "cataclysm ultimate"
 	caster.combat_energy = 100.0
 	caster.attack_timer = 0.0
@@ -77,3 +130,39 @@ func run(t) -> void:
 	caster.mounted = true
 	caster.combat_energy = 100.0
 	t.eq(sim.cmd_ultimate(31).get("reason", ""), "mounted", "no ultimate from the saddle")
+
+	t.current = "Cataclysm affects only the nearest capped targets even in a dense horde"
+	var crowd_sim := GameServer.new(world, 4412)
+	var crowd_mage = crowd_sim.add_player(91, "TopKSurvivor")
+	crowd_mage.position = Vector3(site.x, world.height_at(site.x, site.y), site.y)
+	crowd_mage.combat_energy = 100.0
+	crowd_mage.attack_timer = 0.0
+	var crowd: Array[Zombie] = []
+	var pre_health: Array[float] = []
+	for i in 16:
+		var range_m: float = 0.5 + float(i) * 0.34
+		var mob := _zombie(crowd_sim, world, site.x + range_m, site.y)
+		crowd.append(mob)
+		pre_health.append(mob.health)
+	var crowd_result: Dictionary = crowd_sim.cmd_ultimate(91)
+	t.check(bool(crowd_result.get("ok", false)), "densely packed ultimate is authorized")
+	t.eq(int(crowd_result.get("hits", 0)), Arcane.ULTIMATE_MAX_TARGETS,
+		"ultimate never applies more than 12 authoritative hit actions")
+	for i in crowd.size():
+		if i < Arcane.ULTIMATE_MAX_TARGETS:
+			t.check(crowd[i].health < pre_health[i] or not crowd[i].is_alive(),
+				"nearest target %d takes damage" % i)
+		else:
+			t.eq(crowd[i].health, pre_health[i],
+				"farther target %d stays unhurt under maximum target cap" % i)
+	var native_selected: bool = native_grid != null
+	t.eq(bool(crowd_sim.last_ultimate_spatial_stats["native"]), native_selected,
+		"real server uses native nearest-K when available and script otherwise")
+	t.eq(int(crowd_sim.last_ultimate_spatial_stats["selected"]), Arcane.ULTIMATE_MAX_TARGETS,
+		"server exposes exact selected count for engine integration diagnostics")
+	if native_selected:
+		t.eq(int(crowd_sim.last_ultimate_spatial_stats["grid"]["nearest_queries"]), 1,
+			"Cataclysm performs exactly one indexed nearest query per cast")
+		t.eq(crowd_sim._ultimate_spatial_grid.get_stats()["entities"], 0,
+			"native cached index is cleared after a cast to avoid stale positions")
+

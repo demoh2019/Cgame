@@ -7,6 +7,67 @@
 		Invalid inputs, mismatched sizes, non-finite or negative distances, or out-of-range budgets return an empty result. Budgets must be from 0 to 256.
 	</description>
 	<methods>
+		<method name="cap_full_pose_cost_grouped" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="tiers" type="PackedInt32Array" />
+			<param index="1" name="distances" type="PackedFloat64Array" />
+			<param index="2" name="retained_full_flags" type="PackedByteArray" />
+			<param index="3" name="full_pose_cost_us" type="PackedInt32Array" />
+			<param index="4" name="group_ids" type="PackedByteArray" />
+			<param index="5" name="group_weights" type="PackedFloat64Array" />
+			<param index="6" name="full_pose_budget_us" type="int" />
+			<param index="7" name="hysteresis" type="float" default="1.5" />
+			<description>
+				Post-processes an existing visible/temporal IK tier selection using an optional, soft, weighted per-actor-type CPU-work budget. Each tier-0 candidate belongs to one of four groups (IDs 0–3). The four finite significance weights (0.25–8) divide the total microsecond allowance between only groups that have existing tier-0 winners; a two-phase admission process first admits each group's affordable work within its weighted share, then spills unused work-unit allowances to other tier-0 winners ordered by retained effective distance divided by group importance. Stable ties use the original actor index. This avoids a dense crowd of one type spending another type's reserved IK budget when affordable candidates exist. It does not create any new tier-0 candidate, rerun visibility/combat selection, or change tier-1/2/3/4 poses. Only unadmitted tier-0 actors are demoted to tier 1, retaining full-rate locomotion and combat. Maximum 16384 actors, 256 tier-0 owners and four groups. Estimated costs must be 0–100000 microseconds (zero uses an initial 100us estimate); total work allowance 0–1000000us (zero disables the extra cap), hysteresis finite 0–8 metres. Arrays must match in length; malformed inputs fail atomically with an empty result. The returned array and all inputs are independent. Budgeting is predictive, not a hard deadline. One active group has access to the entire budget and behaves as [method cap_full_pose_cost].
+			</description>
+		</method>
+		<method name="cap_full_pose_cost" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="tiers" type="PackedInt32Array" />
+			<param index="1" name="distances" type="PackedFloat64Array" />
+			<param index="2" name="retained_full_flags" type="PackedByteArray" />
+			<param index="3" name="full_pose_cost_us" type="PackedInt32Array" />
+			<param index="4" name="full_pose_budget_us" type="int" />
+			<param index="5" name="hysteresis" type="float" default="1.5" />
+			<description>
+				Composes an additional estimated CPU budget with tiers from [method plan_visible_tiers_temporal], [method plan_visible_tiers_stable] or another validated planner. Only tier-0 optional full-pose IK owners are considered: they are visited in ascending effective camera distance with previous-IK retention discount and stable source-index ties. Owners whose estimated full-pose cost does not fit are demoted to tier 1 (still full-rate locomotion and combat animation). All other tiers, including independently retained combat poses, are left unchanged. The output is a copy and inputs are never mutated. Zero per-actor estimate uses an initial 100-microsecond assumption; [param full_pose_budget_us] equal to zero disables the additional cap. The four arrays must match, have at most 16,384 actors, 0..4 tiers, at most 256 tier-0 owners, finite nonnegative distances and 0..100,000 microsecond estimates. Total budget is 0..1,000,000 microseconds and [param hysteresis] must be finite 0..8 metres. Invalid input returns empty. This is a soft predictive admission gate, not real-time preemption, GPU timing or an animation mixer profiler.
+			</description>
+		</method>
+		<method name="plan_visible_tiers_stable" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priority_flags" type="PackedByteArray" />
+			<param index="2" name="visible_flags" type="PackedByteArray" />
+			<param index="3" name="retained_full_flags" type="PackedByteArray" />
+			<param index="4" name="full_budget" type="int" />
+			<param index="5" name="priority_budget" type="int" />
+			<param index="6" name="hysteresis" type="float" default="1.5" />
+			<description>
+				Temporally stable animation-IK budgeting, inspired by Unreal Animation Budget Allocator state-change throttling. Only visible characters strictly closer than 22m compete for [param full_budget] full-IK slots. Characters whose [param retained_full_flags] are nonzero receive a ranking discount of [code]min(distance, hysteresis)[/code] metres, reducing churn near the slot boundary. This discount never extends the 22m eligibility limit, never reserves slots for invisible actors and never changes the separate combat-priority pool, which is selected by actual distance. Effective-distance ties are resolved by original input index. [param hysteresis] must be finite and between 0 and 8m; zero disables retention and reproduces [method plan_visible_tiers]. All four packed arrays must have identical sizes (at most 16,384). Budgets are limited to 0–256. Input errors return an empty result without changing any scene state. The caller supplies retention masks and applies returned tiers; the engine planner keeps no object references or mutable history.
+			</description>
+		</method>
+		<method name="plan_visible_tiers" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priority_flags" type="PackedByteArray" />
+			<param index="2" name="visible_flags" type="PackedByteArray" />
+			<param index="3" name="full_budget" type="int" />
+			<param index="4" name="priority_budget" type="int" />
+			<description>Uses the same deterministic top-K budgets as [method plan_tiers], but characters with zero [param visible_flags] cannot consume costly tier-0 IK slots or combat-priority full-rate slots. Invisible characters receive at least tier 2 (30 Hz) and retain their distance-based tier 3/4 when farther away. Visible characters are ranked by distance and original index, so changing the camera immediately reallocates slots without changing any server or physics state. All three arrays must match in length (maximum 16,384); invalid input returns an empty result. Passing a mask of all ones reproduces [method plan_tiers] exactly. The caller computes visibility; no scene-tree, rendering, or physics queries occur in this class. This is not a GPU occlusion query or an adaptive milliseconds-based animation budget.</description>
+		</method>
+		<method name="plan_visible_tiers_temporal" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priority_flags" type="PackedByteArray" />
+			<param index="2" name="visible_flags" type="PackedByteArray" />
+			<param index="3" name="retained_full_flags" type="PackedByteArray" />
+			<param index="4" name="retained_priority_flags" type="PackedByteArray" />
+			<param index="5" name="full_budget" type="int" />
+			<param index="6" name="priority_budget" type="int" />
+			<param index="7" name="full_hysteresis" type="float" />
+			<param index="8" name="priority_hysteresis" type="float" />
+			<description>Separately applies up to 8m of ranking hysteresis to previous full-IK owners and up to 4m to previous on-screen combat-pose priority winners. Both budgets remain exact, deterministic and independent; actual distances must still qualify within 22m for full IK and below 90m for combat poses, and invisible actors never use either pool. Every mask must match the distance array (up to 16384 entries), and both hysteresis values must be finite and nonnegative. Invalid requests return an empty array. With priority_hysteresis zero, the result is exactly [method plan_visible_tiers_stable]. The caller owns all scene state and history, and no simulation, physics or renderer work is performed here.</description>
+		</method>
 		<method name="plan_tiers" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="distances" type="PackedFloat64Array" />
@@ -14,6 +75,16 @@
 			<param index="2" name="full_budget" type="int" />
 			<param index="3" name="priority_budget" type="int" />
 			<description>Returns the selected LOD tier for each actor, preserving input order. Validates the complete batch before producing a result.</description>
+		</method>
+		<method name="plan_tiers_stable" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priority_flags" type="PackedByteArray" />
+			<param index="2" name="previous_tiers" type="PackedInt32Array" />
+			<param index="3" name="full_budget" type="int" />
+			<param index="4" name="priority_budget" type="int" />
+			<param index="5" name="hysteresis_meters" type="float" />
+			<description>Computes the same bounded pose tiers but delays distance-LOD transitions until the new boundary is crossed by the specified hysteresis margin. Previously selected full-pose and combat-priority actors receive a bounded distance preference, never unlimited slots. Every input array must have the same actor order. Hysteresis must be finite in 0–4 metres; previous tiers must be 0–4. Empty output indicates an invalid request. At zero hysteresis, the result is identical to [method plan_tiers]. This is a numeric planner only; the game owns actor identity and animation playback.</description>
 		</method>
 	</methods>
 </class>

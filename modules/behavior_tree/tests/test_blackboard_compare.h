@@ -146,7 +146,7 @@ TEST_CASE("[BehaviorTree] Debug snapshot is detached from running execution memo
 	Dictionary snapshot = runner->get_debug_snapshot();
 	CHECK(snapshot["status"] == Variant(int(BehaviorTreeTask::RUNNING)));
 	CHECK(snapshot["finished"] == Variant(false));
-	CHECK(snapshot["root_task_class"] == String("BehaviorTreeWait"));
+	CHECK(snapshot["root_task_class"] == Variant(String("BehaviorTreeWait")));
 	Dictionary snapshot_bb = snapshot["blackboard"];
 	Dictionary snapshot_memory = snapshot["execution_memory"];
 	snapshot_bb["health"] = 1;

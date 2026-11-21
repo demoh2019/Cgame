@@ -19,6 +19,7 @@ accept any client-provided target or threat value.
 var tracker := AIThreatTable2D.new()
 var hate: Dictionary = {} # belongs to the AI agent, not the tracker
 tracker.record(hate, attacker_peer_id, confirmed_server_damage)
+tracker.scale(hate, medic_peer_id, 0.35) # authorized guardian-cover aggro reduction
 tracker.decay(hate, delta)
 var aggro := tracker.pick(hate, server_players, enemy_xz, pursuit_leash, current_peer_id)
 ```
@@ -30,6 +31,10 @@ var aggro := tracker.pick(hate, server_players, enemy_xz, pursuit_leash, current
   Score ties resolve to the lowest peer ID for stable server replay
   regardless of insertion order. The current target is retained when
   another player has the same or insufficiently higher score.
+- `scale()` changes only one existing peer's hate using a finite factor
+  in [0, 1]. Factor zero forgets that peer, and factor one leaves it unchanged.
+  Invalid factors or missing peer IDs are no-ops. Malformed stored entries are
+  removed without affecting other targets; aggro cannot be fabricated or raised.
 - `pick()` erases dead players, safe-zone entrants, disconnected IDs,
   invalid positions and actors outside the pursuit leash. Invalid
   selector origin/leash returns no target without mutating the table.
@@ -41,7 +46,10 @@ var aggro := tracker.pick(hate, server_players, enemy_xz, pursuit_leash, current
 `game/scripts/shared/threat.gd` now negotiates `AIThreatTable2D` once.
 Its existing `Threat.record/decay/pick` interface, call sites and
 `MAX_TARGETS`, `MAX_VALUE`, `DECAY_PER_SECOND`, `SWITCH_MARGIN`
-constants are unchanged. The fallback GDScript logic still runs on stock
+constants are unchanged. The additional `Threat.scale()` operation is used
+by `MedicCover.fade_threat()` to retain precisely 35% of the medic's existing
+hate after a server-approved guardian intervention. The fallback remains
+available when running on stock Godot. The fallback GDScript logic still runs on stock
 Godot and uses the same deterministic tie rules.
 
 `Zombie.take_damage()` and server-authorized healing aggro are the only

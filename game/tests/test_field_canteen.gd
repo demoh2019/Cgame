@@ -80,6 +80,7 @@ func run(t) -> void:
 	t.current = "server-controlled lake access and persistent shared cooldown"
 	var world := WorldGen.new(42)
 	var sim := GameServer.new(world, 42)
+	sim.craft_quality_enabled = false # This suite checks the item itself, not quality rolls.
 	var player = sim.add_player(843, "Water Gatherer")
 	t.eq(sim.cmd_refill_canteen(999).get("reason", ""), "dead",
 		"unknown client cannot ask for free bottles")

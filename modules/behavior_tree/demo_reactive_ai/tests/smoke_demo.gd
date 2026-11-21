@@ -89,6 +89,40 @@ func _run_checks() -> void:
         _fail("Small demo tree should fit inside its bounded node trace")
         return
 
+    # The full Resource graph includes branches skipped on the current tick.
+    var graph: Dictionary = demo.brain.get_tree_snapshot()
+    var graph_nodes: Array = graph.get("nodes", [])
+    if graph_nodes.size() < visited_nodes.size():
+        _fail("Full graph inspector must include all executed and skipped tasks")
+        return
+    var skipped_patrol := false
+    for raw_node in graph_nodes:
+        var task: Dictionary = raw_node
+        if task.get("path") == "root/4" and not bool(task.get("executed", true)):
+            skipped_patrol = true
+    if not skipped_patrol:
+        _fail("The unvisited patrol alternative must remain visible in the graph")
+        return
+    demo.call("_refresh_trace_tree_panel")
+    if demo.trace_tree == null or demo.trace_panel == null or not demo.trace_panel.visible:
+        _fail("Live AI hierarchy panel must be visible while tracing is enabled")
+        return
+    var visual_root: TreeItem = demo.trace_tree.get_root()
+    var first_task: TreeItem = visual_root.get_first_child() if visual_root != null else null
+    if first_task == null or first_task.get_text(0) != "ReactiveSelector":
+        _fail("The live hierarchical Tree must show the actual native root task")
+        return
+    if first_task.get_text(1) != "RUNNING":
+        _fail("The active root task must be highlighted as running")
+        return
+    demo.brain.trace_enabled = false
+    demo.call("_refresh_trace_tree_panel")
+    if demo.trace_panel.visible:
+        _fail("Disabling tracing must hide the live debug panel")
+        return
+    demo.brain.trace_enabled = true
+    demo.call("_refresh_trace_tree_panel")
+
     if demo.brain.get_blackboard().get("action") != "chase":
         _fail("Visible player must cause chase behavior")
         return
@@ -115,6 +149,40 @@ func _run_checks() -> void:
     if demo.brain.get_blackboard().get("action") != "retreat":
         _fail("Low health must preempt other tasks")
         return
+
+    # The sandbox retains replayable decisions instead of only the latest
+    # trace. The health retreat above differs from the previous investigation.
+    var replay_frames: Array = demo.brain.get_trace_history_frames()
+    if replay_frames.size() < 2 or replay_frames.size() > 16:
+        _fail("Playable AI debug history must keep bounded multi-tick decisions")
+        return
+    var changed_frames: Array = demo.brain.get_trace_history_frames(true)
+    if changed_frames.size() < 2:
+        _fail("Investigation and retreat must register different AI decisions")
+        return
+    var slow_nodes: Array = demo.brain.get_slowest_trace_nodes(1)
+    if slow_nodes.is_empty():
+        _fail("The real native AI decision should expose at least one CPU hotspot")
+        return
+    var slowest: Dictionary = slow_nodes[0]
+    if int(slowest.get("self_usec", -1)) < 0 or int(slowest.get("duration_usec", -1)) < int(slowest.get("self_usec", 0)):
+        _fail("Own-time hotspot must be nonnegative and bounded by inclusive time")
+        return
+
+    demo.call("_replay_previous")
+    if demo.trace_replay_tick < 0 or not demo.trace_title.text.contains("REPLAY"):
+        _fail("Previous must display a stored decision instead of the live tree")
+        return
+    demo.call("_replay_next")
+    demo.call("_replay_live")
+    if demo.trace_replay_tick != -1 or not demo.trace_title.text.contains("LIVE"):
+        _fail("Live must restore the latest native AI state")
+        return
+    demo.call("_set_replay_changes_only", true)
+    if not demo.trace_changes_only or not demo.trace_history_label.text.contains("changed-only"):
+        _fail("Changed-only replay toggle should filter identical decisions")
+        return
+    demo.call("_set_replay_changes_only", false)
 
     demo.sensor.reset()
     if demo.sensor.has_target_memory():

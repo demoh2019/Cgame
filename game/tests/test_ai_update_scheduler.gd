@@ -7,7 +7,76 @@ const Zombie = preload("res://scripts/shared/zombie.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 
 
+## The actual server tick receives either a conservative spatial shortlist
+## or the full original player info. World, RNG and all actor IDs are equal.
+static func _run_passive_interest_fixture(force_fallback: bool) -> Dictionary:
+    var world := WorldGen.new(827)
+    var server := GameServer.new(world, 827)
+    server.tick_count = 2 # Do not trigger population maintenance or cue scans.
+    if force_fallback:
+        server._pack_spatial_grid = RefCounted.new()
+    for j in range(8):
+        var px: float = 1150.0 + float(j) * 400.0
+        var pz := 850.0
+        var peer = server.add_player(2100 + j, "Perception %d" % j)
+        peer.position = Vector3(px, world.height_at(px, pz), pz)
+    for index in range(64):
+        var zx: float = 1150.0 + float(index) * 50.0
+        var zz := 850.0
+        var infected := Zombie.new(87500 + index, "walker",
+            Vector3(zx, world.height_at(zx, zz), zz))
+        infected.state = Zombie.State.IDLE
+        infected.think_timer = 0.0
+        infected._ai_has_selected_once = true
+        if index == 5:
+            # One survivor is two metres beyond far LOD, but still
+            # inside the 4m hysteresis band of a previous medium scan.
+            var hysteretic_x: float = 1150.0 + float(infected.data["lose"]) + 26.0
+            infected.position = Vector3(hysteretic_x,
+                world.height_at(hysteretic_x, zz), zz)
+            infected._ai_lod_previous_interval = 0.5
+            infected._ai_lod_staggered = true
+        if index == 3:
+            # Already pursuing targets must continue to see ALL player data.
+            infected.state = Zombie.State.CHASE
+            infected.target_id = 2100
+        if index == 4:
+            infected.raid_boss = true
+        server.zombies[infected.id] = infected
+    server._tick_zombies(0.05)
+    var states: Array = []
+    for index in range(64):
+        var agent = server.zombies[87500 + index]
+        states.append({"state": int(agent.state), "target": int(agent.target_id),
+            "position": agent.position, "think_timer": agent.think_timer,
+            "last_known": agent.last_known_target})
+    return {"states": states, "stats": server.get_perception_interest_stats()}
+
+
 func run(t) -> void:
+    t.current = "Mass-style native per-agent perception broadphase keeps server targeting"
+    var control: Dictionary = _run_passive_interest_fixture(true)
+    var accelerated: Dictionary = _run_passive_interest_fixture(false)
+    var variable_available: bool = ClassDB.class_exists("AIProximityGrid2D") \
+        and ClassDB.class_has_method("AIProximityGrid2D", "query_cross_variable_radius_batch")
+    t.eq(bool(control["stats"].get("native", false)), false,
+        "forcing older-engine behavior keeps authoritative full player scans")
+    t.eq(bool(accelerated["stats"].get("native", false)), variable_available,
+        "real 64-NPC server tick activates dynamic-radius sensing only with new C++ API")
+    t.eq(accelerated["states"], control["states"],
+        "native spatial culling cannot change target, movement or LOD timing")
+    if variable_available:
+        t.eq(int(accelerated["stats"]["sources"]), 62,
+            "active chasing infected and raid boss are not passively culled")
+        t.eq(int(accelerated["stats"]["players"]), 8,
+            "native query uses eight real server-owned living survivors")
+        t.check(int(accelerated["stats"]["pairs"]) < 62 * 8,
+            "far-away player checks are removed before passive AI target selection")
+    else:
+        t.eq(int(accelerated["stats"]["pairs"]), 0,
+            "stock and older engine binaries do not report native work")
+
+
     t.current = "Native time slots are stable, exhaustive and optional"
     var native_available := ClassDB.class_exists("AIUpdateScheduler")
     var scheduler: Variant = ClassDB.instantiate("AIUpdateScheduler") if native_available else null
@@ -59,6 +128,161 @@ func run(t) -> void:
             "single-slot scheduling never delays a survivor encounter")
         scheduler.set_slots_per_cycle(4)
 
+    t.current = "EQS work-budget rotation is bounded and never delays urgent recovery"
+    var budget_available: bool = ClassDB.class_exists("EnvironmentQuery3D") and \
+        ClassDB.class_has_method("EnvironmentQuery3D", "schedule_query_mask")
+    if budget_available:
+        var touched := PackedByteArray()
+        touched.resize(80)
+        for tick in range(10):
+            var mask: PackedByteArray = ClassDB.class_call_static("EnvironmentQuery3D",
+                "schedule_query_mask", 80, tick, 8)
+            t.eq(mask.size(), 80, "each tick returns a full index-preserving EQS admission mask")
+            var admits: int = 0
+            for idx in range(80):
+                if mask[idx] != 0:
+                    admits += 1
+                    t.eq(int(touched[idx]), 0, "stable cohort receives no duplicate grant in a rotation")
+                    touched[idx] = 1
+            t.eq(admits, 8, "exactly eight ordinary tactical queries admitted per tick")
+        for idx in range(80):
+            t.eq(int(touched[idx]), 1, "every active agent gets a regular turn")
+        var urgent_mask := PackedByteArray()
+        urgent_mask.resize(10)
+        urgent_mask[9] = 1
+        var selected: PackedByteArray = ClassDB.class_call_static("EnvironmentQuery3D",
+            "schedule_query_mask", 10, 0, 2, urgent_mask)
+        t.eq(selected[9], 1, "lost slot is admitted despite regular quota")
+        t.eq(selected.count(1), 3, "urgent work does not displace ordinary work")
+
+    t.current = "Large-crowd server enables incremental EQS only when natively supported"
+    var stepper_supported: bool = ClassDB.class_exists("EnvironmentQuery3D") and \
+        ClassDB.instantiate("EnvironmentQuery3D").has_method("begin_incremental_top_positions")
+    var step_server := GameServer.new(WorldGen.new(714), 714)
+    for index in range(64):
+        var step_mob := Zombie.new(99000 + index, "walker",
+            Vector3(100.0 + index, WorldGen.HUB_HEIGHT, 100.0))
+        step_server.zombies[step_mob.id] = step_mob
+    step_server._budget_eqs_replans(step_server.zombies.values(), 0.05)
+    for mob in step_server.zombies.values():
+        t.eq(mob.flank_incremental_enabled, stepper_supported,
+            "real server opts every large-cohort infected into native incremental work")
+    step_server.zombies.clear()
+    step_server._budget_eqs_replans([], 0.05)
+    t.check(not step_server.get_eqs_replan_stats()["enabled"],
+        "empty cohort disables the time-sliced work flag")
+
+    t.current = "Native shared time budget is initialized once and reused for all infected"
+    var ledger_supported: bool = ClassDB.class_exists("EnvironmentQueryTickBudget")
+    var shared_world := WorldGen.new(915)
+    var shared_server := GameServer.new(shared_world, 915)
+    for index in range(64):
+        var ledger_mob := Zombie.new(101000 + index, "walker",
+            Vector3(float(index), WorldGen.HUB_HEIGHT, 10.0))
+        shared_server.zombies[ledger_mob.id] = ledger_mob
+    shared_server.tick_count = 8
+    shared_server._budget_eqs_replans(shared_server.zombies.values(), 0.05)
+    var first_ledger: Variant = shared_server._eqs_tick_budget
+    if ledger_supported and budget_available and stepper_supported:
+        t.check(shared_server._eqs_tick_budget_active,
+            "large-crowd game server starts a shared native EQS ledger")
+        t.check(first_ledger != null, "native ledger is allocated once")
+        t.eq(int(first_ledger.get_remaining_us()), GameServer.AI_EQS_GLOBAL_QUOTA_US,
+            "regular work begins with the configured global CPU allowance")
+        t.eq(int(first_ledger.get_remaining_us(true)), GameServer.AI_EQS_GLOBAL_URGENT_US,
+            "urgent Smart Object recovery gets its own bounded CPU allowance")
+        for mob in shared_server.zombies.values():
+            t.check(mob.flank_tick_budget == first_ledger,
+                "all infected share one exact native ledger instance")
+        t.check(first_ledger.try_admit_step(),
+            "one ordinary EQS worker opens a grant")
+        t.check(first_ledger.record_step(GameServer.AI_EQS_GLOBAL_QUOTA_US),
+            "recorded native work charges the shared regular pool")
+        t.eq(int(first_ledger.get_remaining_us()), 0,
+            "ordinary EQS admission is exhausted across the whole group")
+        t.check(not first_ledger.try_admit_step(),
+            "second worker cannot bypass another worker's CPU debit")
+        t.check(first_ledger.try_admit_step(true),
+            "urgent recovery still admitted after ordinary pool exhaustion")
+        t.check(first_ledger.record_step(GameServer.AI_EQS_GLOBAL_URGENT_US),
+            "urgent charge closes only its own pool")
+        shared_server._budget_eqs_replans(shared_server.zombies.values(), 0.05)
+        t.eq(int(first_ledger.get_remaining_us()), 0,
+            "repeated scheduling in the SAME tick never refills a CPU pool")
+        shared_server.tick_count = 9
+        shared_server._budget_eqs_replans(shared_server.zombies.values(), 0.05)
+        t.check(shared_server._eqs_tick_budget == first_ledger,
+            "next tick reuses the native ledger without allocating a new one")
+        t.eq(int(first_ledger.get_remaining_us()), GameServer.AI_EQS_GLOBAL_QUOTA_US,
+            "new authoritative tick refreshes work quotas")
+    else:
+        t.check(not shared_server._eqs_tick_budget_active,
+            "old Cgame/stock Godot retains original unshared work admission")
+    shared_server.zombies.clear()
+    shared_server._budget_eqs_replans([], 0.05)
+    t.check(not shared_server._eqs_tick_budget_active,
+        "depopulation turns off shared EQS budgeting immediately")
+
+    t.current = "EQS throttling never defers pursuit or overwrites an old lease"
+    var gated := Zombie.new(867, "walker", Vector3.ZERO)
+    gated.flank_replan_allowed = false
+    var requested_goal := Vector2(10.0, 0.0)
+    t.eq(gated._flank_goal(Vector2.ZERO, requested_goal), requested_goal,
+        "denied optional EQS lookup returns direct pursuit instead")
+    t.check(gated._flank_query == null,
+        "deferred tactical query cannot construct native candidate resources")
+    gated.flank_replan_allowed = true
+    if ClassDB.class_exists("EnvironmentQuery3D"):
+        t.near(gated._flank_goal(Vector2.ZERO, requested_goal).distance_to(requested_goal),
+            Zombie.FLANK_RING, 0.001, "allowed EQS lookup still builds valid flank goals")
+
+    t.current = "Real server budgets flank replans for large crowds"
+    var eqs_server := GameServer.new(WorldGen.new(713), 713)
+    var eqs_target = eqs_server.add_player(88, "EQS target")
+    eqs_target.position = Vector3(900.0, WorldGen.HUB_HEIGHT, 900.0)
+    for index in range(80):
+        var infected := Zombie.new(82000 + index, "walker",
+            eqs_target.position + Vector3(10.0, 0.0, 0.0))
+        infected.target_id = eqs_target.id
+        infected.state = Zombie.State.CHASE
+        eqs_server.zombies[infected.id] = infected
+    var all_granted := {}
+    for step in range(10):
+        eqs_server.tick_count = step
+        eqs_server._budget_eqs_replans(eqs_server.zombies.values(), 0.05)
+        var diagnostics: Dictionary = eqs_server.get_eqs_replan_stats()
+        if budget_available:
+            t.eq(int(diagnostics["eligible"]), 80,
+                "all active chasers with expired goals enter authoritative EQS queue")
+            t.eq(int(diagnostics["granted"]), 8, "real server enforces eight regular replans")
+            t.eq(int(diagnostics["deferred"]), 72, "excess EQS work is deferred")
+        for infected in eqs_server.zombies.values():
+            if infected.flank_replan_allowed:
+                all_granted[infected.id] = true
+    if budget_available:
+        t.eq(all_granted.size(), 80,
+            "rotating EQS budget eventually admits every active chaser")
+    else:
+        t.eq(all_granted.size(), 80,
+            "stock Godot retains unthrottled tactical compatibility")
+    eqs_server.zombies.clear()
+    eqs_server._budget_eqs_replans([], 0.05)
+    t.check(not eqs_server.get_eqs_replan_stats()["enabled"],
+        "empty/depopulated server immediately disables optional EQS budgeting")
+
+    t.current = "Server-only EQS microsecond metrics exist after authoritative infected ticks"
+    var measured_world := WorldGen.new(887)
+    var measured_server := GameServer.new(measured_world, 887)
+    measured_server.tick_count = 2 # Avoid unrelated spawn maintenance.
+    measured_server._tick_zombies(0.05)
+    var measured: Dictionary = measured_server.get_eqs_replan_stats()
+    t.eq(int(measured.get("cpu_us", -1)), 0,
+        "empty simulation reports zero native EQS scorer microseconds")
+    t.eq(int(measured.get("scored_candidates", -1)), 0,
+        "empty simulation does not invent candidate evaluations")
+    t.eq(int(measured.get("timed_steps", -1)), 0,
+        "empty simulation does not invent timed native query calls")
+
     t.current = "Direct infected AI preserves first-contact and urgent selection"
     var world := WorldGen.new(42)
     var ground: float = WorldGen.HUB_HEIGHT
@@ -99,6 +323,148 @@ func run(t) -> void:
     else:
         t.eq(passive.think_timer, 0.25,
             "stock Godot retains the legacy passive scan rate")
+
+    t.current = "Passive infected hold stable LOD across small observer movement"
+    var lod_engine: Variant = Zombie._get_ai_lod_scheduler()
+    if lod_engine != null and lod_engine.has_method("get_hysteretic_interval"):
+        var stable := Zombie.new(702, "walker", Vector3(0.0, ground, 0.0))
+        var near_range: float = float(stable.data["lose"])
+        var far_range: float = near_range + 24.0
+        # Eligible but out of hearing/sight distance: never turns into a
+        # combat target and keeps ordinary server simulation each tick.
+        var viewers := {99: {"position": Vector3(far_range - 2.0, ground, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}}
+        stable.think(world, viewers, 0.1, rng)
+        t.eq(stable._ai_lod_previous_interval, 0.5,
+            "initial deterministic startup phase remembers the nominal medium LOD")
+        t.eq(stable.target_id, -1, "distant passive viewer is not an AI target")
+        stable.think_timer = 0.0
+        viewers[99] = {"position": Vector3(far_range + 2.0, ground, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}
+        stable.think(world, viewers, 0.1, rng)
+        t.eq(stable.think_timer, 0.5,
+            "2m boundary movement keeps medium scanning cadence")
+        stable.think_timer = 0.0
+        viewers[99] = {"position": Vector3(far_range + 6.0, ground, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}
+        stable.think(world, viewers, 0.1, rng)
+        t.eq(stable.think_timer, 1.0, "real movement admits far LOD")
+        stable.think_timer = 0.0
+        viewers[99] = {"position": Vector3(far_range - 2.0, ground, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}
+        stable.think(world, viewers, 0.1, rng)
+        t.eq(stable.think_timer, 1.0,
+            "small return movement cannot cause far/medium flapping")
+        stable.think_timer = 0.0
+        viewers[99] = {"position": Vector3(far_range - 6.0, ground, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}
+        stable.think(world, viewers, 0.1, rng)
+        t.eq(stable.think_timer, 0.5, "significant approach restores medium cadence")
+        stable.think_timer = 0.0
+        viewers[99] = {"position": Vector3(2.0, ground, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}
+        stable.think(world, viewers, 0.1, rng)
+        t.eq(stable.target_id, 99, "close survivor still causes immediate acquisition")
+        t.eq(stable.think_timer, 0.25,
+            "first contact retains legacy near/combat decision cadence")
+    else:
+        t.check(lod_engine == null or not lod_engine.has_method("get_hysteretic_interval"),
+            "stock and older Cgame retain existing AI LOD behavior")
+
+    t.current = "Native crowd separation steers only passive infected"
+    var walker := Zombie.new(704, "walker", Vector3(0.0, ground, 0.0))
+    walker.state = Zombie.State.WANDER
+    walker.set_passive_crowd_separation(Vector2(-1.0, 0.0))
+    walker._move_toward(world, Vector2.ZERO, Vector2(0.0, 10.0), 1.0, 0.033)
+    t.check(walker.yaw < 0.0,
+        "wandering direction includes gentle native separation")
+    var attacker := Zombie.new(705, "walker", Vector3(0.0, ground, 0.0))
+    attacker.state = Zombie.State.CHASE
+    attacker.set_passive_crowd_separation(Vector2(-1.0, 0.0))
+    attacker._move_toward(world, Vector2.ZERO, Vector2(0.0, 10.0), 1.0, 0.033)
+    t.near(attacker.yaw, 0.0, 0.0001,
+        "combat chase ignores ambient crowd steering")
+    walker.set_passive_crowd_separation(Vector2.INF)
+    t.eq(walker._passive_crowd_separation, Vector2.ZERO,
+        "invalid native vectors cannot affect movement")
+    walker.set_passive_crowd_separation(Vector2(100.0, 0.0))
+    t.eq(walker._passive_crowd_separation, Vector2.RIGHT,
+        "movement receives only bounded steering magnitudes")
+
+    t.current = "Authoritative server batches passive crowd avoidance at low frequency"
+    var crowd := GameServer.new(WorldGen.new(113), 113)
+    crowd.tick_count = 5 # Native steering refresh; no spawn-maintenance pass.
+    var crowd_mobs: Array = []
+    for index in range(32):
+        var cx: float = 0.0 if index == 0 else (
+            1.0 if index == 1 else float(index * 10))
+        var passive_mob := Zombie.new(60000 + index, "walker",
+            Vector3(cx, ground, 0.0))
+        passive_mob.state = Zombie.State.WANDER
+        passive_mob.wander_target = Vector2(cx, 20.0)
+        passive_mob.think_timer = 100.0
+        crowd.zombies[passive_mob.id] = passive_mob
+        crowd_mobs.append(passive_mob)
+    crowd._tick_zombies(1.0 / 30.0)
+    var crowd_available: bool = ClassDB.class_exists("AIProximityGrid2D") \
+        and ClassDB.instantiate("AIProximityGrid2D").has_method("query_separation_batch")
+    var crowd_stats: Dictionary = crowd.get_crowd_separation_stats()
+    t.eq(bool(crowd_stats.get("enabled", false)), crowd_available,
+        "native crowd steering is enabled only where API exists")
+    if crowd_available:
+        t.eq(int(crowd_stats.get("sources", -1)), 32,
+            "one spatial batch covers every eligible passive infected")
+        t.check(crowd_mobs[0]._passive_crowd_separation.x < 0.0,
+            "first member receives a safe repulsion from close neighbor")
+        t.check(crowd_mobs[1]._passive_crowd_separation.x > 0.0,
+            "second member receives the opposite repulsion")
+        t.eq(crowd_mobs[31]._passive_crowd_separation, Vector2.ZERO,
+            "distant infected has no spurious avoidance")
+        crowd.zombies.erase(crowd_mobs[31].id)
+        crowd.tick_count = 6 # Below 32: clear even between refresh ticks.
+        crowd._tick_zombies(1.0 / 30.0)
+        t.check(not crowd.get_crowd_separation_stats()["enabled"],
+            "falling below threshold immediately disables crowd steering")
+        t.eq(crowd_mobs[0]._passive_crowd_separation, Vector2.ZERO,
+            "stale steering never persists after crowd despawns")
+    else:
+        t.eq(crowd_mobs[0]._passive_crowd_separation, Vector2.ZERO,
+            "stock and older Godot use unchanged movement")
+
+    t.current = "Real server predicts head-on passive agents before collision"
+    var mass := GameServer.new(WorldGen.new(114), 114)
+    mass.tick_count = 5 # Same 4Hz separation phase used in the actual game.
+    var probe := Zombie.new(61000, "walker", Vector3(0.0, ground, 0.0))
+    var walking_speed: float = float(probe.data["speed"]) * 0.4
+    var meeting_distance: float = walking_speed * 2.0 * GameServer.AI_CROWD_LOOKAHEAD_SECONDS + 0.2
+    for index in range(32):
+        var px: float = 0.0 if index == 0 else (
+            meeting_distance if index == 1 else 1000.0 + float(index) * 20.0)
+        var actor := Zombie.new(61000 + index, "walker", Vector3(px, ground, 0.0))
+        actor.state = Zombie.State.WANDER
+        actor.wander_target = Vector2(100.0, 0.0) if index == 0 else (
+            Vector2(-100.0, 0.0) if index == 1 else Vector2(px, 100.0))
+        actor.think_timer = 100.0
+        mass.zombies[actor.id] = actor
+    mass._tick_zombies(1.0 / 30.0)
+    var predicted_available: bool = ClassDB.class_exists("AIProximityGrid2D") \
+        and ClassDB.instantiate("AIProximityGrid2D").has_method(
+            "query_predictive_separation_batch")
+    var moving_stats: Dictionary = mass.get_crowd_separation_stats()
+    t.eq(bool(moving_stats.get("predictive", false)), predicted_available,
+        "real server selects native desired-velocity lookahead when available")
+    if predicted_available:
+        var first_move: Vector2 = mass.zombies[61000]._passive_crowd_separation
+        var second_move: Vector2 = mass.zombies[61001]._passive_crowd_separation
+        t.check(first_move.y > 0.1 and second_move.y < -0.1,
+            "approaching infected sidestep in opposite directions before meeting")
+        t.check(absf(first_move.x) < 0.1 and absf(second_move.x) < 0.1,
+            "future head-on overlap does not cause backwards steering")
+        t.eq(mass.zombies[61002]._passive_crowd_separation, Vector2.ZERO,
+            "distant passive agent retains zero steering")
+    else:
+        t.check(not bool(moving_stats.get("predictive", false)),
+            "stock and older Cgame retain existing passive separation")
 
     t.current = "GameServer uses native staggering only for large crowds"
     var sim := GameServer.new(WorldGen.new(112), 112)

@@ -1,4 +1,5 @@
 extends RefCounted
+const GameplayCues = preload("res://scripts/client/gameplay_cues.gd")
 ## Runtime detection of optional native engine classes, so scripts run on older editor binaries too.
 ## Everything touching a custom class goes through ClassDB.instantiate / set / call, so scripts parse without it.
 
@@ -22,6 +23,9 @@ static func tag_node(node: Node, tags: Array) -> void:
 		node.set_meta("tag_stacks", ClassDB.instantiate("GameplayTagStackContainer"))
 	if has("GameplayEffectTimeline"):
 		node.set_meta("effect_timeline", ClassDB.instantiate("GameplayEffectTimeline"))
+	if has("GameplayAttributeSet"):
+		node.set_meta("attributes", ClassDB.instantiate("GameplayAttributeSet"))
+	GameplayCues.attach(node)
 
 
 ## Creates an engine class by name and applies properties; returns null when the binary lacks it.
@@ -127,10 +131,39 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 				stack_container.call("replace_stack_branch", StringName("Runtime"), counts)
 			else:
 				stack_container.call("replace_stacks", counts)
+	# Replicated status transitions produce cosmetic cue lifecycle events.
+	GameplayCues.sync(node, kind, snapshot)
+	# Attribute snapshots are read-only presentation mirrors, never combat authority.
+	var attrs: Object = node.get_meta("attributes", null) as Object
+	if attrs != null and attrs.has_method("replace_snapshot"):
+		var attribute_data: Dictionary = runtime_attribute_snapshot(kind, snapshot)
+		# Server-owned Runtime modifiers should not erase Local / FX visual sources.
+		# Older Cgame binaries retain the legacy complete replacement path.
+		if attrs.has_method("replace_snapshot_branch"):
+			attrs.call("replace_snapshot_branch", StringName("Runtime"), attribute_data)
+		else:
+			attrs.call("replace_snapshot", attribute_data)
 	# Render-only native timers are independent from counted tag branches.
 	var timeline: Object = node.get_meta("effect_timeline", null) as Object
-	if timeline != null and timeline.has_method("replace_snapshot"):
-		timeline.call("replace_snapshot", runtime_effect_snapshot(kind, snapshot))
+	if timeline != null:
+		var effects: Dictionary = runtime_effect_snapshot(kind, snapshot)
+		var applied := false
+		# Repeated server snapshots must not erase already accrued cosmetic
+		# pulses for the same ongoing status. Native reconciliation discards
+		# pulses only when that status ends or its periodic phase is redefined.
+		if timeline.has_method("reconcile_effect_branch"):
+			applied = bool(timeline.call("reconcile_effect_branch", StringName("Runtime"), effects))
+		elif timeline.has_method("replace_effect_branch"):
+			# Older Cgame binaries keep their existing snapshot semantics.
+			applied = bool(timeline.call("replace_effect_branch", StringName("Runtime"), effects))
+		elif timeline.has_method("replace_snapshot"):
+			applied = bool(timeline.call("replace_snapshot", effects))
+		if applied and timeline.has_method("set_periodic"):
+			# Only cosmetic pulses: gameplay and timer ownership remain server-side.
+			if effects.has(StringName("Runtime.Status.Sundered")):
+				timeline.call("set_periodic", StringName("Runtime.Status.Sundered"), 0.75, false)
+			if effects.has(StringName("Runtime.Status.Resolve")):
+				timeline.call("set_periodic", StringName("Runtime.Status.Resolve"), 1.1, false)
 
 
 ## Presentation-only stack counts. The server remains authoritative for combat.
@@ -160,12 +193,22 @@ static func runtime_effect_snapshot(kind: String, snapshot: Dictionary) -> Dicti
 	return effects
 
 
-static func tick_runtime_effects(node: Node, delta: float) -> void:
+static func tick_runtime_effects(node: Node, delta: float) -> Dictionary:
 	if node == null or not is_finite(delta) or delta <= 0.0:
-		return
+		return {}
 	var timeline: Object = node.get_meta("effect_timeline", null) as Object
-	if timeline != null and timeline.has_method("tick"):
-		timeline.call("tick", delta)
+	if timeline != null:
+		# One engine boundary crossing per actor/frame instead of a tick()
+		# followed by take_periodic_pulses(). Cosmetic callers do not use the
+		# expired tag array, so native code can omit that temporary entirely.
+		if timeline.has_method("tick_and_take_periodic_pulses"):
+			return timeline.call("tick_and_take_periodic_pulses", delta) as Dictionary
+		# Preserve the existing behavior for older Cgame engine binaries.
+		if timeline.has_method("tick"):
+			timeline.call("tick", delta)
+			if timeline.has_method("take_periodic_pulses"):
+				return timeline.call("take_periodic_pulses") as Dictionary
+	return {}
 
 
 static func runtime_effect_remaining(node: Node, tag: String, fallback: float = 0.0) -> float:
@@ -177,6 +220,56 @@ static func runtime_effect_remaining(node: Node, tag: String, fallback: float = 
 	return maxf(0.0, fallback) if is_finite(fallback) else 0.0
 
 
+## Derive read-only client attributes from the server-owned actor snapshot.
+## Effect sources are replaced atomically, so expired modifiers cannot persist.
+static func runtime_attribute_snapshot(kind: String, state: Dictionary) -> Dictionary:
+	var result: Dictionary = {"attributes": {}, "modifiers": []}
+	if kind != "zombie" and kind != "player":
+		return result
+	var health: float = float(state.get("hp", 0.0))
+	if not is_finite(health):
+		health = 0.0
+	var maximum: float = float(state.get("max_hp", maxf(1.0, health)))
+	if not is_finite(maximum):
+		maximum = 1.0
+	maximum = clampf(maximum, 1.0, 1000000000.0)
+	health = clampf(health, 0.0, maximum)
+	var attributes: Dictionary = {
+		StringName("Vital.Health"): {"base": health, "min": 0.0, "max": maximum},
+		StringName("Vital.MaxHealth"): {"base": maximum, "min": 1.0, "max": 1000000000.0},
+		StringName("Visual.HitResponse"): {"base": 1.0, "min": 0.5, "max": 1.75}
+	}
+	result["attributes"] = attributes
+	var modifiers: Array = []
+	if kind == "zombie":
+		var visual_bonuses: Dictionary = {
+			"Rank.Elite": 0.2 if bool(state.get("elite", false)) else 0.0,
+			"Rank.Boss": 0.15 if bool(state.get("raid_boss", false)) else 0.0,
+			"Status.Sundered": 0.25 if float(state.get("sunder_seconds", 0.0)) > 0.0 else 0.0,
+			"Status.Resolve": -0.15 if int(state.get("resolve_stacks", 0)) >= 2 and
+				float(state.get("resolve_seconds", 0.0)) > 0.0 else 0.0
+		}
+		for source in visual_bonuses:
+			var additive: float = float(visual_bonuses[source])
+			if additive != 0.0:
+				modifiers.append({
+					"source": StringName("Runtime." + str(source)),
+					"attribute": StringName("Visual.HitResponse"),
+					"additive": additive, "percent": 0.0
+				})
+	result["modifiers"] = modifiers
+	return result
+
+
+static func runtime_attribute_value(node: Node, name: String, fallback: float = 0.0) -> float:
+	if node != null:
+		var attribute_set: Object = node.get_meta("attributes", null) as Object
+		if attribute_set != null and attribute_set.has_method("has_attribute") \
+				and bool(attribute_set.call("has_attribute", StringName(name))):
+			return float(attribute_set.call("get_value", StringName(name)))
+	return fallback if is_finite(fallback) else 0.0
+
+
 static func runtime_stack_count(node: Node, tag: String, fallback: int = 0) -> int:
 	if node != null and node.has_meta("tag_stacks"):
 		var stack_container: Object = node.get_meta("tag_stacks") as Object
@@ -185,9 +278,72 @@ static func runtime_stack_count(node: Node, tag: String, fallback: int = 0) -> i
 	return maxi(0, fallback)
 
 
+## Independently active crowd controls from server snapshots. A native
+## distinct-query match is used when available; stock Godot reads timers.
+static func zombie_control_count(node: Node, snapshot: Dictionary) -> int:
+	if node != null and node.has_meta("tags"):
+		var container: Object = node.get_meta("tags") as Object
+		if container != null and container.has_method("count_matching_queries"):
+			return int(container.call("count_matching_queries", PackedStringArray([
+				"Runtime.Status.Staggered", "Runtime.Status.Snared", "Runtime.Status.Sundered"]), true))
+	return int(float(snapshot.get("stagger_seconds", 0.0)) > 0.0) \
+		+ int(float(snapshot.get("snared_seconds", 0.0)) > 0.0) \
+		+ int(float(snapshot.get("sunder_seconds", 0.0)) > 0.0)
+
+
 static func runtime_has(node: Node, tag: String, fallback: bool = false) -> bool:
 	if node != null and node.has_meta("tags"):
 		var container: Object = node.get_meta("tags") as Object
 		if container != null and container.has_method("replace_tag_branch") and container.has_method("has_tag"):
 			return bool(container.call("has_tag", StringName(tag), true))
 	return fallback
+
+
+static var _resolve_visual_query: Object = null # Native >=2 Resolve stack query, built once.
+static var _resolve_query_checked := false
+
+
+## Resolve visual gate: two or more Resolve stacks (native threshold query when available).
+static func runtime_has_resolve(node: Node, fallback_stacks: int = 0) -> bool:
+	if node != null and node.has_meta("tag_stacks"):
+		var stacks: Object = node.get_meta("tag_stacks") as Object
+		if stacks != null and stacks.has_method("get_stack_count"):
+			if not _resolve_query_checked:
+				_resolve_query_checked = true
+				if has("GameplayTagQuery") and ClassDB.class_has_method("GameplayTagQuery", "matches_stacks"):
+					var query: Object = ClassDB.instantiate("GameplayTagQuery")
+					if query != null and query.has_method("set_min_stack_count"):
+						query.call("set_all_tags", PackedStringArray(["Runtime.Status.Resolve"]))
+						query.call("set_min_stack_count", 2)
+						_resolve_visual_query = query
+			if _resolve_visual_query != null:
+				return bool(_resolve_visual_query.call("matches_stacks", stacks))
+	return runtime_stack_count(node, "Runtime.Status.Resolve", fallback_stacks) >= 2
+
+## Cosmetic only: stackable native hit feedback for rapid consecutive hits.
+## The Local.Visual namespace is never authoritative gameplay state.
+static func hit_feedback_strength(node: Node, base_strength: float) -> float:
+	if not is_finite(base_strength) or base_strength <= 0.0:
+		return 0.0
+	var scale: float = runtime_attribute_value(node, "Visual.HitResponse", 1.0)
+	var timeline: Object = null
+	if node != null:
+		timeline = node.get_meta("effect_timeline", null) as Object
+	if timeline != null and timeline.has_method("apply_effect") and timeline.has_method("get_stacks"):
+		var tag := StringName("Local.Visual.RecentHit")
+		var applied := false
+		var tag_container: Object = node.get_meta("tags", null) as Object
+		if timeline.has_method("apply_effect_with_tag_requirements") and tag_container != null \
+				and tag_container.has_method("get_tags"):
+			# Native GAS-style target requirements: avoid stacking visual hit
+			# cues on a server-confirmed dead actor. No combat logic runs here.
+			var active_tags: PackedStringArray = tag_container.call("get_tags")
+			applied = bool(timeline.call("apply_effect_with_tag_requirements",
+				tag, 0.22, active_tags, PackedStringArray(["Runtime.Life.Alive"]),
+				PackedStringArray(["Runtime.Life.Dead", "Runtime.Status.Immune.Hit"]), 1, 4, 0))
+		else:
+			applied = bool(timeline.call("apply_effect", tag, 0.22, 1, 4, 0))
+		if applied:
+			var hits: int = int(timeline.call("get_stacks", tag))
+			return base_strength * scale * (1.0 + 0.12 * float(clampi(hits, 1, 4) - 1))
+	return base_strength * scale

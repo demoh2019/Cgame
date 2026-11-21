@@ -52,6 +52,7 @@ func run(t) -> void:
 	t.current = "server requires actual materials, station and profession"
 	var world := WorldGen.new(2345)
 	var server := GameServer.new(world, 2345)
+	server.craft_quality_enabled = false # This suite checks the item itself, not quality rolls.
 	var player = server.add_player(777, "Smasher")
 	player.inventory = Inventory.new()
 	player.inventory.add("plank_1", 1)

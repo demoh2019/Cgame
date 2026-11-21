@@ -1,4 +1,5 @@
 extends CanvasLayer
+const UiSafeArea = preload("res://scripts/client/ui_safe_area.gd")
 ## All of the interface, built in code: vitals, zone, inventory, crafting and a message log.
 
 const Defs = preload("res://scripts/shared/defs.gd")
@@ -40,6 +41,7 @@ const EquipmentPresets = preload("res://scripts/shared/equipment_presets.gd")
 var client
 var _bars: Dictionary = {}
 var _zone_label: Label
+var world_streaming_notice := ""
 var _info_label: Label
 var _vendor_water_button: Button
 var _vendor_food_button: Button
@@ -143,9 +145,12 @@ func _build() -> void:
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for side in ["left", "top", "right", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 14)
+	# Base 14 px plus the display's unsafe area (notches, overscan, handheld bezels).
+	UiSafeArea.apply(margin, UiSafeArea.current(get_viewport()))
 	add_child(margin)
+	get_viewport().size_changed.connect(func() -> void:
+		if is_instance_valid(margin):
+			UiSafeArea.apply(margin, UiSafeArea.current(get_viewport())))
 
 
 	var radar := SurvivalRadar.new()
@@ -1882,7 +1887,7 @@ func _effect_icon(effect: Array, value: float) -> Control:
 	if amount != "":
 		var label := Label.new()
 		label.text = amount
-		label.add_theme_font_size_override("font_size", 9)
+		label.add_theme_font_size_override("font_size", 12)
 		label.add_theme_constant_override("outline_size", 3)
 		label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 		label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, -2)
@@ -2225,7 +2230,7 @@ func _section_label(text: String, hint: String) -> Control:
 	if hint != "":
 		var small := Label.new()
 		small.text = hint
-		small.add_theme_font_size_override("font_size", 11)
+		small.add_theme_font_size_override("font_size", 12)
 		small.add_theme_color_override("font_color", UiTheme.INK_SOFT)
 		column.add_child(small)
 	return column
@@ -3649,6 +3654,8 @@ func _process(_delta: float) -> void:
 		float(client.you.get("guardian_cooldown", 0.0)),
 		float(client.you.get("guardian_brace", 0.0))
 	]
+	if not world_streaming_notice.is_empty():
+		_info_label.text += "\n" + world_streaming_notice
 	var combat_stress: float = float(client.you.get("combat_stress", 0.0))
 	if combat_stress >= CombatStress.HUD_THRESHOLD:
 		_info_label.text += "\nINFECTED PRESSURE: %d/100 | passive stamina recovery -%d%%. Regroup or find shelter." % [
@@ -4518,7 +4525,7 @@ func _card_badge(text: String, color: Color, corner: int) -> Label:
 	var badge := Label.new()
 	badge.text = text
 	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	badge.add_theme_font_size_override("font_size", 10)
+	badge.add_theme_font_size_override("font_size", 12)
 	badge.add_theme_color_override("font_color", color)
 	badge.add_theme_constant_override("outline_size", 0)
 	var pill := StyleBoxFlat.new()
@@ -4793,7 +4800,7 @@ func _refresh_crafting() -> void:
 			var amount := Label.new()
 			amount.text = "%d/%d" % [mini(have, 999), need]
 			amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			amount.add_theme_font_size_override("font_size", 10)
+			amount.add_theme_font_size_override("font_size", 12)
 			amount.add_theme_color_override("font_color", UiTheme.INK_SOFT if have >= need else Color(0.7, 0.15, 0.1))
 			part.add_child(amount)
 			parts.add_child(part)

@@ -63,6 +63,17 @@
 				The operation may result in an outer polygon (boundary) and inner polygon (hole) produced which could be distinguished by calling [method is_polygon_clockwise].
 			</description>
 		</method>
+		<method name="prune_points_min_distance">
+			<return type="PackedInt32Array" />
+			<param index="0" name="points" type="PackedVector2Array" />
+			<param index="1" name="min_distance" type="float" />
+			<param index="2" name="max_kept" type="int" default="-1" />
+			<description>
+				Cgame extension: performs deterministic greedy 2D point self-pruning, returning indices of kept points in their original order. Each point is kept only when it is at least [param min_distance] away from [b]every previously kept point[/b]; exactly equal distances are allowed. The first candidate is always retained when [param max_kept] is positive or unlimited. This is an ordered filter, not a stochastic Poisson-disk generator or a reorder/sort operation. [param max_kept] limits the result count; -1 keeps all qualifying points.
+				Ordinary inputs use a 2D spatial hash with a 3×3 neighborhood query. Extreme coordinate-to-radius ratios fall back to an exact full scan rather than overflowing grid coordinates. The entire input is validated before pruning: at most 8192 finite points, finite nonnegative [param min_distance] with a finite squared value, and [param max_kept] between -1 and 8192. Invalid input returns an empty array. A zero minimum distance retains all points, including duplicates, up to the requested maximum. The input array is not modified.
+				Useful for procedural scatter placement, vegetation, props, decals and candidate collision filtering. Does not inspect actual mesh bounds or physics bodies.
+			</description>
+		</method>
 		<method name="get_nearest_neighbors">
 			<return type="PackedInt32Array[]" />
 			<param index="0" name="points" type="PackedVector2Array" />
@@ -81,6 +92,63 @@
 			<description>
 				Returns the nearest point on a collection of independent 2D line segments. [param segment_endpoints] stores pairs of endpoints in order: [code][a0, b0, a1, b1, ...][/code]. A zero-length segment is treated as a point. Returns a [Dictionary] with [code]point[/code] ([Vector2]), [code]distance[/code] ([float]), [code]segment_index[/code] ([int], zero-based), and [code]t[/code] ([float], from 0 at the first endpoint to 1 at the second). Equal-distance results deterministically choose the first matching segment.
 				Returns an empty dictionary for an empty set, an odd number of endpoints, a nonfinite coordinate or more than 32768 segments. Values are checked before any search. This is a linear CPU search; callers handling many queries should partition segments spatially.
+			</description>
+		</method>
+		<method name="bake_heightfield_curvature_colors">
+			<return type="PackedColorArray" />
+			<param index="0" name="padded_heights" type="PackedFloat32Array" />
+			<param index="1" name="size" type="Vector2i" />
+			<param index="2" name="cell_spacing" type="float" />
+			<param index="3" name="cavity_start" type="float" default="0.015" />
+			<param index="4" name="cavity_end" type="float" default="0.32" />
+			<param index="5" name="ridge_start" type="float" default="0.015" />
+			<param index="6" name="ridge_end" type="float" default="0.42" />
+			<description>
+				Cgame extension: bakes terrain cavity (red) and ridge (green) color attributes for a regular heightfield, with blue and alpha set to 1.0. The input [param padded_heights] is row-major with dimensions [code](size.x + 2) * (size.y + 2)[/code]; it must contain exactly one sample of terrain height around each edge of the unpadded output. The four padded corner samples are accepted but never used. For output pixel [code](x, y)[/code], the discrete four-neighbor Laplacian is [code](left + right + up + down - 4 * center) / (cell_spacing * cell_spacing)[/code]. Positive curvature means cavities and negative curvature means ridges. Curvature is converted to two independent [code]smoothstep[/code] ramps using the four optional threshold parameters, all in world-height units per squared world distance. Supplying the true neighboring height samples at chunk boundaries avoids color seams between streamed landscape cells.
+				Output dimensions must be 1–2046 per axis, input heights must be finite and sized correctly, spacing and inverse squared spacing must be positive and representable, and ramp intervals must be finite, increasing and nonnegative. An invalid input yields an empty array. Only CPU colors are returned; upload them separately with [method ChunkedTerrain3D.set_color_data] or another mesh API. This is a reusable curvature attribute baker, not a GPU distance field or screen-space AO effect.
+			</description>
+		</method>
+		<method name="sample_scalar_grid_wrapped">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="grid" type="PackedFloat32Array" />
+			<param index="1" name="size" type="Vector2i" />
+			<param index="2" name="uvs" type="PackedVector2Array" />
+			<param index="3" name="smooth" type="bool" default="true" />
+			<description>
+				Cgame extension: sample a periodic row-major scalar grid at a batch of normalized [param uvs]. Each integer change in U or V repeats the same data, so negative and greater-than-one UVs are supported. The 4 closest lattice values are interpolated bilinearly, wrapping both axes; if [param smooth] is [code]true[/code], each fractional coordinate is first mapped through the cubic [code]t*t*(3-2*t)[/code] smoothstep ease. If [code]false[/code], ordinary bilinear weights are used. The grid represents lattice vertices at normalized integer texel locations, not samples shifted by half a texel.
+				Returns one float per queried coordinate, in the original query order. The input grid and coordinates are not modified. Width and height must each be between 1 and 2048, the grid length must equal width times height, all grid values and UVs must be finite, and at most 65536 UVs can be queried per call. Zero queries return an empty array. Invalid data or non-representable results return an empty array and report an error. This is a CPU batch sampler, not a GPU image texture or a full PCG graph.
+			</description>
+		</method>
+		<method name="heightfield_gradients">
+			<return type="PackedVector2Array" />
+			<param index="0" name="heights" type="PackedFloat32Array" />
+			<param index="1" name="size" type="Vector2i" />
+			<param index="2" name="cell_spacing" type="float" />
+			<description>
+				Cgame extension: computes the two first-order height derivatives for a row-major, regularly spaced heightmap. Returns one [Vector2] per sample: its X component is [code]dheight/dx[/code] and its Y component is [code]dheight/dy[/code]. Each component uses centered differences between adjacent samples, divided by twice [param cell_spacing]. Neighbor coordinates are clamped to the image edge, so outermost samples use the repeated border height and have half the corresponding one-sided slope. Dimensions of 1 are supported, producing zero derivative along that axis.
+				The gradient can be converted to a normalized terrain-facing normal using [code]Vector3(-gradient.x, 1, -gradient.y).normalized()[/code], or used directly for hillshade, slope filtering and procedural landscape masks. This is a CPU-only utility (not a normal-map image encoder or a GPU terrain renderer).
+				[code]size.x[/code] and [code]size.y[/code] must be in the range 1–2048, and [param heights] must contain exactly [code]size.x * size.y[/code] finite values. [param cell_spacing] and its half inverse must be positive, finite and representable. Invalid input or non-representable output gradients returns an empty array. The source heightmap remains unchanged.
+			</description>
+		</method>
+		<method name="max_filter_mask">
+			<return type="PackedByteArray" />
+			<param index="0" name="mask" type="PackedByteArray" />
+			<param index="1" name="size" type="Vector2i" />
+			<param index="2" name="radius" type="int" />
+			<description>
+				Cgame extension: performs an 8-bit, row-major, square-window maximum filter (grayscale dilation) over a mask. Each output pixel is the maximum source value within [param radius] horizontal and vertical pixels of its location; samples outside the image are ignored. For binary data this grows the occupied area in the eight-connected/Chebyshev metric. For soft masks, the full 0–255 values are preserved by the local maximum rather than thresholding.
+				The implementation uses two separable O(width × height) sliding-window monotone-deque passes with memory proportional to the raster size, independent of [param radius]. Valid image dimensions are between 1 and 2048 inclusive; [param radius] must be in 0–64; and the byte count must equal [code]size.x * size.y[/code]. Invalid arguments return an empty array; zero radius returns the unmodified mask via copy-on-write.
+				This is a CPU image-processing primitive useful for PCG exclusion, road-shoulder clearance and hit-mask padding, not a GPU shader, physics query, or persistent spatial index. A chunk-local mask has no knowledge of neighboring tiles unless the caller includes a border.
+			</description>
+		</method>
+		<method name="distance_transform_8">
+			<return type="PackedByteArray" />
+			<param index="0" name="mask" type="PackedByteArray" />
+			<param index="1" name="size" type="Vector2i" />
+			<param index="2" name="max_distance" type="int" />
+			<description>
+				Cgame extension: produces a row-major 8-bit [i]chessboard/Chebyshev[/i] distance field from a binary [param mask]. Every nonzero mask pixel is a feature with distance 0, and all other pixels receive their minimum number of horizontal, vertical or diagonal grid steps to a feature. Uses two linear-time 8-neighbor raster passes; no Euclidean-distance or signed-distance approximation is implied. Diagonal steps cost one pixel just like cardinal steps, and feature positions outside the image are not considered.
+				Values within [param max_distance] (inclusive) are returned as integers; 255 denotes no feature within the requested radius. A zero radius returns zeros for feature pixels and 255 elsewhere. [param size] must have both dimensions between 1 and 2048, the [param mask] must contain exactly [code]size.x * size.y[/code] bytes, and [param max_distance] must be between 0 and 254. Invalid input returns an empty array and reports an error. The input mask remains unchanged. This API operates on CPU data, not a GPU texture.
 			</description>
 		</method>
 		<method name="rasterize_segments_mask">

@@ -23,7 +23,10 @@ static func step(world, position: Vector3, input: Dictionary, delta: float) -> V
 	var result: Vector3 = _step_on_foot(world, position, input, delta)
 	# Survivors on foot float in deep water; crouching dives. Bikes never enter it.
 	if not bool(input.get("mounted", false)) and result.is_finite() and Swimming.is_swimming(world, result.x, result.z):
-		result.y = Swimming.body_y(world, result.x, result.z, bool(input.get("crouch", false)))
+		if bool(input.get("raft", false)):
+			result.y = Defs.WATER_LEVEL - 0.15 # Sitting on the raft, on the surface.
+		else:
+			result.y = Swimming.body_y(world, result.x, result.z, bool(input.get("crouch", false)))
 	return result
 
 
@@ -60,6 +63,10 @@ static func _step_on_foot(world, position: Vector3, input: Dictionary, delta: fl
 	var base_speed: float = (Defs.WALK_SPEED * Mounts.SPEED_FACTOR
 		if mounted else (Defs.SPRINT_SPEED if sprint else Defs.WALK_SPEED))
 	var speed := base_speed * factor * injury_factor * (1.0 + bonus)
+	if not mounted and Swimming.is_swimming(world, position.x, position.z) and bool(input.get("raft", false)):
+		# Paddling a raft (carried, server-checked): fast across the surface; sprint pulls harder.
+		var paddle: float = Defs.WALK_SPEED * (2.1 if bool(input.get("sprint", false)) else 1.6) * factor * injury_factor
+		return move(world, position, direction, paddle, delta, true)
 	if not mounted and Swimming.is_swimming(world, position.x, position.z):
 		# Swimming: no sprint, roads or mud; diving is slower still.
 		var swim_speed: float = Defs.WALK_SPEED * factor * injury_factor * (1.0 + bonus) * Swimming.speed_factor(crouching)

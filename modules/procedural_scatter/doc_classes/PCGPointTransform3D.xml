@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PCGPointTransform3D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Deterministic, stable-ID procedural rotation and scale for 3D point transforms.
+	</brief_description>
+	<description>
+		A data-only, bounded subset of Unreal PCG Transform Points. Each input point retains its exact position, while its local Y-axis rotation and horizontal/vertical scale are deterministically randomized from a nonnegative stable ID and seed. Random streams do not use global or instance RNG state. The result can be used in instanced scene geometry without creating nodes or meshes.
+	</description>
+	<methods>
+		<method name="generate_transforms" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="1" name="stable_ids" type="PackedInt64Array" />
+			<param index="2" name="seed" type="int" default="0" />
+			<param index="3" name="max_yaw" type="float" default="6.283185307179586" />
+			<param index="4" name="horizontal_min" type="float" default="0.85" />
+			<param index="5" name="horizontal_max" type="float" default="1.15" />
+			<param index="6" name="vertical_min" type="float" default="0.85" />
+			<param index="7" name="vertical_max" type="float" default="1.15" />
+			<description>
+				Returns one Transform3D per source position. The position is unchanged; yaw is selected from [-max_yaw/2, max_yaw/2], horizontal scale affects X and Z equally, and vertical scale affects Y independently. Three salted 32-bit avalanche hashes use the point's stable ID and seed; reordered inputs with the same IDs retain identical yaw and scale. Coordinates must be finite and within +/-10000000, IDs and seed must be within [0, 2147483647], arrays must match and contain at most 16384 points. Max yaw must be finite in [0, 2*pi]; scale range endpoints finite in [0.01, 10] with minimum not exceeding maximum. Invalid input yields an empty Array without partial output. Valid empty inputs also yield empty. Does not alter placement, physics, scene objects, global RNG, or GPU resources.
+			</description>
+		</method>
+	</methods>
+</class>

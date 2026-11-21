@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/math/vector2.h"
 #include "core/object/ref_counted.h"
 
 // Stateless per-agent simulation LOD policy. Games supply distances to their
@@ -57,6 +58,22 @@ public:
 	// Distances are metres in the caller's 2D world. Positive infinity means
 	// there are no eligible viewers; invalid inputs fail closed to near rate.
 	real_t get_interval(real_t p_distance, real_t p_near_distance, real_t p_far_distance, bool p_urgent = false) const;
+
+	// Stable simulation LOD for moving viewers. The caller stores the last
+	// chosen nominal interval; the engine itself stays stateless and sharable.
+	// Entering the near range immediately restores full responsiveness.
+	real_t get_hysteretic_interval(real_t p_distance, real_t p_near_distance, real_t p_far_distance,
+			real_t p_previous_interval, real_t p_hysteresis, bool p_urgent = false) const;
+
+	// One native call for the full passive scan decision. x = nominal tier
+	// interval, y = scheduled delay (one-time ID phase or hysteretic tier).
+	// The server owns p_already_staggered and must mark the first distant
+	// scan itself; no per-agent state is retained inside this shared policy.
+	// Combat/movement/attack work must never be driven by this API.
+	Vector2 plan_passive_scan(int64_t p_agent_id, real_t p_distance,
+			real_t p_near_distance, real_t p_far_distance,
+			real_t p_previous_interval, real_t p_hysteresis,
+			bool p_already_staggered, bool p_urgent = false) const;
 
 	// One-time deterministic startup phase for distant inactive agents, spread
 	// over 16 bins based on a stable non-negative ID. Do not call every tick.

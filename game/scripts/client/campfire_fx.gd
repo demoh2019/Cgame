@@ -1,4 +1,5 @@
 extends Node3D
+const GraphicsAreaLights = preload("res://scripts/client/graphics_area_lights.gd")
 ## AAA-style campfire: animated HDR flame (bloom-driven), flickering warm light with
 ## soft shadows on high-end, rising ember particles and screen-space heat haze.
 ## Unreal/Unity fires combine exactly these four layers. Purely visual, client-only.
@@ -55,6 +56,8 @@ func build(level: int, rendering_method: String) -> void:
 	light.omni_attenuation = 1.4
 	light.shadow_enabled = rich
 	light.shadow_blur = 2.0
+	# Burning logs are a ~35 cm emitter: PCSS softens their shadows on High/Ultra.
+	GraphicsAreaLights.register(light, 0.35)
 	# Engine-native flicker when available (no per-frame script work).
 	if "light_flicker" in light:
 		light.set("light_flicker", 0.35)

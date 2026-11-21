@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="ObjectDBRuntimeProfiler" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Lightweight on-demand native object population census for debug builds.
+	</brief_description>
+	<description>
+		This Cgame diagnostic API is inspired by Unreal Engine's object statistics and MemReport. Unlike a full ObjectDB debug snapshot, it does not collect properties, serialize game objects, hold references, or traverse the scene tree. It counts up to 32 explicitly selected exact native classes and the total registered ObjectDB population in a single synchronized pass. Only available in engine builds with debug features and the objectdb_profiler module. It is for manually requested development diagnostics, not per-frame telemetry. Class counts are exact native types, not inheritance-inclusive; increasing object counts are not proof of memory leaks.
+	</description>
+	<methods>
+		<method name="sample_classes" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="class_names" type="PackedStringArray" />
+			<description>
+				Returns [code]{ "total": int, "classes": Dictionary }[/code], where each requested native class name maps to its live instance count, including zero for absent classes. The total covers all ObjectDB entries from the same locked scan. The input must contain 1 to 32 unique, nonempty strings without leading or trailing whitespace, each no longer than 128 characters. Invalid input returns an empty dictionary before scanning. Each call iterates ObjectDB once with lookup time proportional to the number of live objects; use it only on demand, for example when inspecting leaked streamed visuals during debugging. Never expose internal object references or properties in the result.
+			</description>
+		</method>
+	</methods>
+</class>

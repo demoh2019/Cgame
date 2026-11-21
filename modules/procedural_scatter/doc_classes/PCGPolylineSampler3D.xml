@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PCGPolylineSampler3D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Bounded, deterministic arc-length point sampling along a 3D polyline for procedural path props.
+	</brief_description>
+	<description>
+		Produces equally spaced points measured along the full 3D arc length of a polyline. Unlike [PCGPathFalloff3D], this class generates points on the route for procedural cobblestones, trail markers, cables and fence posts; it does not modify density outside the route. It is inspired by Unreal Engine PCG spline sampling but operates on straight polyline segments, not curved spline interpolation. No physics, scene nodes, RNG or mesh allocation occur in this data-only native operation. The caller owns instancing, occlusion and terrain projection.
+		The input must have 1–256 finite 3D positions, each coordinate within +/-10,000,000. The spacing must be finite and in the range 0.05–10,000, and max_samples must be 1–4096. Invalid values or a requested sample count exceeding the cap reject the whole batch with no partial output. A completely degenerate path yields one sample. The algorithm computes segment lengths once and walks them monotonically, O(waypoints + samples). The output order follows route direction.
+	</description>
+	<methods>
+		<method name="sample_positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<param index="0" name="path_points" type="PackedVector3Array" />
+			<param index="1" name="spacing" type="float" />
+			<param index="2" name="max_samples" type="int" default="4096" />
+			<param index="3" name="fit_to_path" type="bool" default="true" />
+			<description>
+				Returns positions at uniform arc-length intervals. With fit_to_path enabled, the number of intervals is ceil(total_length / spacing); actual spacing is shortened equally so that both endpoints are included. With fit_to_path disabled, points are emitted every spacing units from the beginning; the last waypoint is emitted only when it coincides with an interval. A path with one control point, or with all zero-length segments, returns its first point. Zero-length segments inside an otherwise nondegenerate path are ignored during traversal. A batch requiring more than max_samples entries returns an empty array rather than truncating or overflowing. Does not edit the input path.
+			</description>
+		</method>
+		<method name="sample_transforms" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="path_points" type="PackedVector3Array" />
+			<param index="1" name="spacing" type="float" />
+			<param index="2" name="max_samples" type="int" default="4096" />
+			<param index="3" name="fit_to_path" type="bool" default="true" />
+			<description>
+				Returns an array of Transform3D values with exactly the same origins, spacing and endpoint policy as [method sample_positions], plus a right-handed orthonormal basis at every sampled point. The local +Z axis follows the 3D path tangent; a centered secant across adjacent samples softens corners. The local +Y axis is derived from world up, with an alternative axis for near-vertical segments to prevent invalid bases. U-turns, degenerate segments, completely collapsed polylines and single-point results receive finite deterministic fallback orientations. Invalid and over-budget inputs return an empty Array without partial transforms. This is CPU data-only; the caller decides whether to use the transforms for MultiMesh instances, fences, signs or other scene objects.
+			</description>
+		</method>
+	</methods>
+</class>

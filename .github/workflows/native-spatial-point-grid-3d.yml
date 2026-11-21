@@ -1,0 +1,95 @@
+name: Native 3D spatial proximity and Albion PvE pressure parity
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'scene/main/spatial_point_grid_3d.*'
+      - 'scene/register_scene_types.cpp'
+      - 'doc/classes/SpatialPointGrid3D.xml'
+      - 'tests/scene/test_spatial_point_grid_3d.cpp'
+      - 'tests/scene/test_spatial_point_grid_3d_contract.py'
+      - 'game/scripts/shared/world_encounter_director.gd'
+      - 'game/tests/test_world_encounter_director.gd'
+      - 'game/tests/run_native_spatial_3d.gd'
+      - '.github/workflows/native-spatial-point-grid-3d.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/main/spatial_point_grid_3d.*'
+      - 'scene/register_scene_types.cpp'
+      - 'doc/classes/SpatialPointGrid3D.xml'
+      - 'tests/scene/test_spatial_point_grid_3d.cpp'
+      - 'tests/scene/test_spatial_point_grid_3d_contract.py'
+      - 'game/scripts/shared/world_encounter_director.gd'
+      - 'game/tests/test_world_encounter_director.gd'
+      - 'game/tests/run_native_spatial_3d.gd'
+      - '.github/workflows/native-spatial-point-grid-3d.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  spatial-3d-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Spatial hash code and exact volumetric reference model
+        run: python3 -m unittest tests/scene/test_spatial_point_grid_3d_contract.py -v
+
+  native-and-game:
+    needs: spatial-3d-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native C++ indexed and direct 3D query tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --test --test-case="*[SpatialPointGrid3D]*" --no-colors 2>&1 | tee spatial-3d-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' spatial-3d-native.log; then exit 1; fi
+      - name: Import Albion After with custom native engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee spatial-3d-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' spatial-3d-import.log; then exit 1; fi
+      - name: Real server incident and volumetric fallback parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_native_spatial_3d.gd 2>&1 | tee spatial-3d-game.log
+          grep -Eq '^SPATIAL 3D TOTAL: [0-9]+ checks, 0 failures$' spatial-3d-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' spatial-3d-game.log; then exit 1; fi
+      - name: Full Albion After headless game regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 900s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee spatial-3d-full-game.log
+          grep -Eq '^TOTAL [0-9]+ checks, 0 failures$' spatial-3d-full-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' spatial-3d-full-game.log; then exit 1; fi
+      - name: Keep all diagnostic outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spatial-point-grid-3d-tests
+          if-no-files-found: ignore
+          path: |
+            spatial-3d-native.log
+            spatial-3d-import.log
+            spatial-3d-game.log
+            spatial-3d-full-game.log

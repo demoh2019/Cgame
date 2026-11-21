@@ -25,7 +25,88 @@ func _at(world, at: Vector2) -> Vector3:
 	return Vector3(at.x, world.height_at(at.x, at.y), at.y)
 
 
+## Exercises the real server tick, preserving exactly the same trap
+## placement/expiry/one-shot state between accelerated and scalar execution.
+static func _run_dense_snare_tick(force_fallback: bool) -> Dictionary:
+	var sim := GameServer.new(WorldGen.new(778), 778)
+	sim.tick_count = 2 # No population or steering rebuild this tick.
+	if force_fallback:
+		# A valid old-engine substitute has no new cross-set query method.
+		sim._pack_spatial_grid = RefCounted.new()
+	for i in range(32):
+		var x: float = 350.0 if i <= 2 else (390.0 if i == 3 else (
+			470.0 if i == 5 else 1000.0 + float(i) * 20.0))
+		var z: float = 350.0 if i <= 3 or i == 5 else 1000.0
+		var infected := Zombie.new(60000 + i, "walker",
+			Vector3(x, WorldGen.HUB_HEIGHT, z))
+		infected.think_timer = 100.0
+		infected._ai_has_selected_once = true
+		infected.raid_boss = i == 0
+		sim.zombies[infected.id] = infected
+	for j in range(8):
+		var point := Vector2(350.0, 350.0) if j == 0 else (
+			Vector2(390.0, 350.0) if j == 1 else (
+			Vector2(470.0, 350.0) if j == 2 else
+			Vector2(5000.0 + float(j) * 10.0, 6000.0)))
+		sim.infected_snares[70000 + j] = {
+			"id": 70000 + j, "x": point.x, "z": point.y,
+			"expires": 0.0 if j == 2 else 100.0,
+		}
+	sim._tick_zombies(0.05)
+	var fired: Array = []
+	for event in sim.events:
+		if event.get("type", "") == "snare_triggered":
+			fired.append({"id": int(event["id"]), "zombie": int(event["zombie"])})
+	return {
+		"fired": fired, "remaining": sim.infected_snares.keys(),
+		"stats": sim.get_snare_query_stats(),
+		"first_root": sim.zombies[60001].snared_seconds,
+		"duplicate_root": sim.zombies[60002].snared_seconds,
+		"second_root": sim.zombies[60003].snared_seconds,
+		"boss_root": sim.zombies[60000].snared_seconds,
+		"expired_root": sim.zombies[60005].snared_seconds,
+	}
+
+
 func run(t) -> void:
+	t.current = "Native cross-set snare broadphase keeps scalar authoritative results"
+	var scalar: Dictionary = _run_dense_snare_tick(true)
+	var accelerated: Dictionary = _run_dense_snare_tick(false)
+	var cross_available: bool = ClassDB.class_exists("AIProximityGrid2D") \
+		and ClassDB.instantiate("AIProximityGrid2D").has_method("query_cross_radius_batch")
+	t.eq(bool(scalar["stats"]["native"]), false,
+		"old-engine control always uses the exhaustive trap loop")
+	t.eq(bool(accelerated["stats"]["native"]), cross_available,
+		"real dense encounter automatically selects native cross-set broadphase")
+	t.eq(accelerated["fired"], scalar["fired"],
+		"spatial optimization preserves actual one-shot trap event order")
+	t.eq(accelerated["remaining"], scalar["remaining"],
+		"native candidates cannot consume additional or expired traps")
+	t.eq(accelerated["fired"], [
+		{"id": 70000, "zombie": 60001}, {"id": 70001, "zombie": 60003}
+	], "bosses cannot trip snares and first eligible infected owns each hit")
+	t.check(float(accelerated["first_root"]) > 0.0 \
+		and float(accelerated["second_root"]) > 0.0,
+		"both real infected are rooted only after authoritative catches")
+	t.eq(accelerated["duplicate_root"], 0.0,
+		"later infected never consume an already removed trap")
+	t.eq(accelerated["boss_root"], 0.0,
+		"raid boss is not rooted even when the native grid returns its position")
+	t.eq(accelerated["expired_root"], 0.0,
+		"expired spatial candidates fail final authoritative trigger rules")
+	if cross_available:
+		t.eq(int(accelerated["stats"]["population"]), 32,
+			"native batch includes the actual simulation cohort")
+		t.eq(int(accelerated["stats"]["traps"]), 8,
+			"native batch includes every server-owned trap")
+		t.check(int(accelerated["stats"]["candidates"]) < 32 * 8,
+			"native broadphase prunes distant checks before exact trigger evaluation")
+	else:
+		t.eq(int(accelerated["stats"]["candidates"]), 0,
+			"older engine binaries expose no fabricated native statistics")
+
+	t.current = "Original placement, ownership and lifetime regressions"
+
 	t.current = "craftable trap catalog and inventory transaction"
 	t.check(Defs.is_item(InfectedSnare.ITEM_ID), "tripwire is a real item")
 	t.eq(Defs.item(InfectedSnare.ITEM_ID).get("kind", ""), "deployable",

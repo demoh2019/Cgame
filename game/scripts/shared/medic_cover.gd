@@ -4,6 +4,7 @@ extends RefCounted
 ## Infected not already fighting/aware of the medic are never provoked.
 const Defs = preload("res://scripts/shared/defs.gd")
 const GuardianTaunt = preload("res://scripts/shared/guardian_taunt.gd")
+const Threat = preload("res://scripts/shared/threat.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 
 const RADIUS := 8.0
@@ -108,8 +109,6 @@ static func can_redirect(infected, medic, guardian, world) -> bool:
 ## Fold only the medic's existing, finite hate. Zombie.force_taunt adds its
 ## own bounded guardian threat and a short target-lock; no fabricated heals.
 static func fade_threat(infected, medic_id: int) -> void:
-	var value: float = float(infected.threat.get(medic_id, 0.0))
-	if is_finite(value) and value > 0.0:
-		infected.threat[medic_id] = value * RETAINED_THREAT
-	else:
-		infected.threat.erase(medic_id)
+	# The same bounded native primitive is used by the stock-Godot fallback.
+	# No server-unverified target or new threat is introduced here.
+	Threat.scale(infected.threat, medic_id, RETAINED_THREAT)

@@ -58,7 +58,10 @@ jobs:
           assert 'D_METHOD("set_obstruction_amount"' in cpp
           assert "float obstruction_amount = 0.0f;" in header
           assert "OBSTRUCTION_RAYS_PER_TICK := 3" in game
-          assert "state.intersect_ray(ray)" in game
+          assert "AudioSpatial.trace_rays(state, probe_queries)" in game
+          assert "rays += 1" in game
+          assert "static func trace_rays" in spatial
+          assert 'space.call("intersect_ray", ray)' in spatial
           assert "player.has_method(\"set_obstruction_amount\")" in game
           assert "AudioSpatial.obstruction_cutoff" in game
           assert "static func obstruction_db" in spatial

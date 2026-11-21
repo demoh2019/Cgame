@@ -135,6 +135,8 @@ func run(t) -> void:
 	t.near(before_health - second.health, Combat.weapon_damage("bow_1"),
 		0.001, "unprepared ranged hit reverts to standard damage")
 	hunter.attack_timer = 0.0
+	hunter.combat_tag_until = 0.0 # Fights now set a short combat tag; preparing waits for it.
+	hunter.skill_timer = 0.0
 	t.check(bool(server.cmd_use(130, FieldSightingKit.ITEM_ID).get("ok", false)),
 		"remaining kit can prepare after charges are spent")
 	hunter.inventory.add("crossbow_1", 1)

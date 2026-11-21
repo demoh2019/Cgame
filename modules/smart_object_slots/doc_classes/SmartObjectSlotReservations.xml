@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="SmartObjectSlotReservations" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Server-owned, exclusive smart-object slot reservations with bounded leases and deterministic preference order.
+	</brief_description>
+	<description>
+		A data-only claim allocator inspired by Unreal Engine Smart Objects slots. Intended for a server to allocate independently validated interaction positions among agents without sharing the same slot. Claimants provide 1 to 16 unique positive slot IDs in preference order, a positive actor ID, and a finite lease duration from zero (exclusive) to 5 seconds. A maximum of 2,048 actor claims can coexist; each actor may own at most one slot, with a claim renewed in place if the same slot is still among requested candidates. Failed claims never revoke existing claims. A priority-aware variant may preempt lower-priority claimed but unoccupied slots; only the owner may mark occupancy. The caller advances lease time explicitly and controls all positions, tags, eligibility, authoritative movement, and damage. There are no scene-tree, collision, or networking calls.
+	</description>
+	<methods>
+		<method name="try_claim_first">
+			<return type="int" />
+			<param index="0" name="slot_ids" type="PackedInt64Array" />
+			<param index="1" name="actor_id" type="int" />
+			<param index="2" name="lease_seconds" type="float" />
+			<description>Returns an exclusively claimed slot ID, or zero if all requested slots are occupied or any argument is invalid. Reclaims an actor-owned candidate first even when not ranked first, and renews its lease; otherwise atomically transfers the actor to the first unoccupied candidate. Candidate count 1 to 16, lease (0, 5] seconds, positive unique slot IDs and actor IDs required.</description>
+		</method>
+		<method name="try_claim_first_priority">
+			<return type="int" />
+			<param index="0" name="slot_ids" type="PackedInt64Array" />
+			<param index="1" name="actor_id" type="int" />
+			<param index="2" name="lease_seconds" type="float" />
+			<param index="3" name="priority" type="int" />
+			<description>Attempts to renew an actor-owned slot, then a free slot, then preempts a strictly lower-priority (0 to 3) CLAIMED but not OCCUPIED candidate. Occupied slots and equal or higher priorities cannot be preempted. Returns zero if all candidates are blocked or any input is invalid, without losing an actor's existing claim.</description>
+		</method>
+		<method name="refresh_claim">
+			<return type="bool" />
+			<param index="0" name="slot_id" type="int" />
+			<param index="1" name="actor_id" type="int" />
+			<param index="2" name="lease_seconds" type="float" />
+			<param index="3" name="occupied" type="bool" />
+			<description>O(1) cached Smart Object lease heartbeat using indexed slot and actor lookup. Atomically validates both positive IDs, current exact owner/slot identity, and a finite lease in (0, 5] seconds; only on success renews the lease and marks the slot occupied or unoccupied. Returns false without changing anything when a cached claim has expired, been preempted, released or is owned by someone else, or if any argument is invalid. A true occupied slot cannot be preempted by any priority; clearing occupation allows the existing strict priority rule again. Repeated heartbeats prevent expiry only when actively issued by the authoritative server; abandoned slots still expire through [method advance_time], even if previously marked occupied. Does not move agents, perform collision queries, or change slot priority. Designed for Unreal-style claim/use lifecycle where a tactical AI reuses an already planned destination without re-running EQS.</description>
+		</method>
+		<method name="set_slot_occupied">
+			<return type="bool" />
+			<param index="0" name="slot_id" type="int" />
+			<param index="1" name="actor_id" type="int" />
+			<param index="2" name="occupied" type="bool" />
+			<description>Only the current owner can mark a claimed slot as actively occupied or return it to a preemptible claimed state. Returns true for an authorized update; expired or transferred claims cannot be modified by the former owner.</description>
+		</method>
+		<method name="is_slot_occupied" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="slot_id" type="int" />
+			<description>Returns true only when a live slot claim has been marked occupied. A free slot returns false.</description>
+		</method>
+		<method name="release_slot">
+			<return type="bool" />
+			<param index="0" name="slot_id" type="int" />
+			<param index="1" name="actor_id" type="int" />
+			<description>Only the actor owning the slot may release it. Returns whether that reservation was removed.</description>
+		</method>
+		<method name="release_actor">
+			<return type="int" />
+			<param index="0" name="actor_id" type="int" />
+			<description>Removes all claims held by an actor (normally zero or one). Useful for explicit despawn cleanup.</description>
+		</method>
+		<method name="advance_time">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>Advances leases once per authoritative simulation tick. Ignores invalid or nonpositive deltas.</description>
+		</method>
+		<method name="get_owner" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="slot_id" type="int" />
+			<description>Returns the owner actor ID, or zero if this slot is free.</description>
+		</method>
+		<method name="get_actor_slot" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="actor_id" type="int" />
+			<description>Returns an actor's currently claimed slot ID, or zero if absent. Uses the engine's indexed claim lookup. A cached AI goal may be reused only while its slot is still owned; this read does not claim or renew a slot.</description>
+		</method>
+		<method name="get_claim_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns the active claim count (at most 2048).</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>Removes all reservations. No client state or saved data are changed.</description>
+		</method>
+	</methods>
+</class>

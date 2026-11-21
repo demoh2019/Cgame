@@ -7,10 +7,27 @@ const Zombie = preload("res://scripts/shared/zombie.gd")
 const Net = preload("res://scripts/shared/net.gd")
 
 
-class FlatWorld:
+class RidgeWorld:
 	extends RefCounted
 	var world_seed: int = 721
 	func zone_at(x: float, _z: float) -> int:
+		return 2 if x > 100.0 else 0
+	func is_safe(x: float, _z: float) -> bool:
+		return x <= 100.0
+	func is_water(_x: float, _z: float) -> bool:
+		return false
+	func height_at(x: float, _z: float) -> float:
+		return 11.0 if x > 215.0 else 3.0
+	func blockers_near(_x: float, _z: float, _r: float) -> Array:
+		return []
+
+
+class FlatWorld:
+	extends RefCounted
+	var world_seed: int = 721
+	var queried_sites: Array[Vector2] = []
+	func zone_at(x: float, z: float) -> int:
+		queried_sites.append(Vector2(x, z))
 		return 2 if x > 100.0 else 0
 	func is_safe(x: float, _z: float) -> bool:
 		return x <= 100.0
@@ -38,6 +55,53 @@ func run(t) -> void:
 	t.eq(RaidReinforcements.kinds(2).size(), 2, "final wave is bounded")
 
 
+	t.current = "native EQS Donut generator and portable ring-source parity"
+	var ring_center := Vector2(215.0, 200.0)
+	for phase_id in [1, 2]:
+		var scripted_ring: PackedVector2Array = RaidReinforcements.candidate_ring_points(
+			ring_center, phase_id, false)
+		var native_ring: PackedVector2Array = RaidReinforcements.candidate_ring_points(
+			ring_center, phase_id, true)
+		t.eq(scripted_ring.size(), RaidReinforcements.RADII.size() * RaidReinforcements.ANGLES,
+			"portable raid sampling retains every original site in every encounter phase")
+		t.eq(native_ring.size(), scripted_ring.size(),
+			"native EQS donut path preserves the exact candidate budget")
+		for index in scripted_ring.size():
+			t.check(native_ring[index].distance_to(scripted_ring[index]) < 0.001,
+				"all ring candidate coordinates and their phase-rotated source indices agree")
+			var ring_index: int = index / RaidReinforcements.ANGLES
+			t.near(native_ring[index].distance_to(ring_center),
+				float(RaidReinforcements.RADII[ring_index]), 0.001,
+				"candidates retain the correct server-owned raid distance band")
+	t.eq(RaidReinforcements.candidate_ring_points(Vector2(INF, 0), 1).size(), 0,
+		"nonfinite raid centers cannot generate native or script candidates")
+	t.eq(RaidReinforcements.candidate_ring_points(ring_center, 3).size(), 0,
+		"invalid raid phase cannot generate positions")
+
+	t.current = "EQS Cone forward-sector parity and bounded geometry"
+	var cone_center := Vector2(215.0, 200.0)
+	var cone_axis := Vector2(4.0, 1.0)
+	var script_cone := RaidReinforcements.candidate_cone_points(cone_center, cone_axis, false)
+	var native_cone := RaidReinforcements.candidate_cone_points(cone_center, cone_axis, true)
+	t.eq(script_cone.size(), RaidReinforcements.CONE_RINGS * RaidReinforcements.CONE_RAYS,
+		"portable cone has the exact bounded candidate count")
+	t.eq(native_cone.size(), script_cone.size(),
+		"native and stock Godot use the same cone sampling budget")
+	var cone_centerline := cone_axis.normalized()
+	for index in script_cone.size():
+		t.check(native_cone[index].distance_to(script_cone[index]) <= 0.001,
+			"native sector positions match the stock Godot fallback")
+		var displacement: Vector2 = (native_cone[index] - cone_center)
+		var expected_radius: float = float(RaidReinforcements.RADII[0]) if index < RaidReinforcements.CONE_RAYS else float(RaidReinforcements.RADII[-1])
+		t.near(displacement.length(), expected_radius, 0.001,
+			"all cone candidates remain within authoritative raid rings")
+		t.check(displacement.normalized().dot(cone_centerline) >= cos(deg_to_rad(RaidReinforcements.CONE_DEGREES / 2.0)) - 0.001,
+			"sector points stay inside the designated forward arc")
+	t.eq(RaidReinforcements.candidate_cone_points(cone_center, Vector2.ZERO).size(), 0,
+		"undefined cone heading cannot create spawn points")
+	t.eq(RaidReinforcements.candidate_cone_points(Vector2(INF, 0), Vector2.RIGHT).size(), 0,
+		"nonfinite cone center fails closed")
+	
 	t.current = "bounded deterministic spread ranking"
 	var candidates: Array[Vector2] = [
 		Vector2(8, 0), Vector2(8, 1), Vector2(16, 0),
@@ -61,6 +125,27 @@ func run(t) -> void:
 	t.eq(no_threats[0], Vector2(8, 0), "no threats preserves source order")
 	t.eq(no_threats[1], Vector2(16, 0), "empty threats still respects spacing")
 
+
+	t.current = "server EQS height-filtered spawn candidate parity"
+	var site_heights: Array[float] = [0.0, 0.0, 8.0, 2.0, -5.0]
+	var from_native: Array[Vector2] = RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true,
+		[], 0.0, site_heights, 0.0, 2.0)
+	var from_script: Array[Vector2] = RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, false,
+		[], 0.0, site_heights, 0.0, 2.0)
+	t.eq(from_native, from_script, "native and fallback height filters agree")
+	t.eq(from_script, [Vector2(16, 1), Vector2(8, 1)],
+		"elevated/deep shelf sites are excluded before spreading")
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true,
+		[], 0.0, [0.0], 0.0, 2.0), [], "truncated heights fail closed")
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true,
+		[], 0.0, site_heights, NAN, 2.0), [], "nonfinite origin elevation rejected")
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true,
+		[], 0.0, site_heights, 0.0, INF), [], "nonfinite height limit rejected")
 
 	t.current = "native occupancy contexts exclude all living infected without bypassing guards"
 	var blocked: Array[Vector2] = [Vector2(25, 0)]
@@ -107,6 +192,42 @@ func run(t) -> void:
 	var sites := RaidReinforcements.sites(world, server.players,
 		server.zombies, boss.position, 1, 2)
 	t.eq(sites.size(), 2, "clear dangerous terrain permits two adds")
+	# Second phase augments the old donut with a real forward cone, while
+	# retaining the exact same zone, terrain and occupancy validation.
+	world.queried_sites.clear()
+	var phase_two_sites := RaidReinforcements.sites(
+		world, server.players, server.zombies, boss.position, 2, 2)
+	t.eq(phase_two_sites.size(), 2, "forward-sector wave still finds two safe spawn sites")
+	var closest_player_axis := Vector2(ally.position.x - boss.position.x,
+		ally.position.z - boss.position.z)
+	var cone_wave_points := RaidReinforcements.candidate_cone_points(
+		Vector2(boss.position.x, boss.position.z), closest_player_axis)
+	var cone_visited := false
+	for sample in cone_wave_points:
+		for checked in world.queried_sites:
+			if checked.distance_to(sample) <= 0.001:
+				cone_visited = true
+				break
+		if cone_visited:
+			break
+	t.check(cone_visited,
+		"second raid phase actually submits native/fallback cone candidates to server terrain validation")
+	for site in phase_two_sites:
+		t.check(site.distance_to(Vector2(fighter.position.x, fighter.position.z)) >=
+			RaidReinforcements.MIN_PLAYER_DISTANCE,
+			"forward sector does not permit spawning on the frontline player")
+		t.check(site.distance_to(Vector2(ally.position.x, ally.position.z)) >=
+			RaidReinforcements.MIN_PLAYER_DISTANCE,
+			"forward sector does not permit spawning on the closest ally")
+
+	var ridge := RidgeWorld.new()
+	var ridge_sites: Array[Vector2] = RaidReinforcements.sites(
+		ridge, server.players, server.zombies, boss.position, 1, 2)
+	t.check(not ridge_sites.is_empty(), "raid sites remain available on low ground")
+	for site in ridge_sites:
+		t.check(absf(ridge.height_at(site.x, site.y) - boss.position.y) <=
+			RaidReinforcements.MAX_RAID_HEIGHT_DIFFERENCE,
+			"high shelves never receive server-owned raid adds")
 	if sites.size() >= 2:
 		t.check(sites[0].distance_to(sites[1]) >= RaidReinforcements.MIN_BETWEEN_ADDS,
 			"live raid wave positions maintain separation")

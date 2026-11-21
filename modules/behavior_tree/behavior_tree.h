@@ -320,7 +320,15 @@ public:
 	void set_trace_enabled(bool p_enabled);
 	bool is_trace_enabled() const { return trace_enabled; }
 	Dictionary get_trace_snapshot() const;
+	// On-demand hierarchy: all Resource tasks plus latest per-path trace status.
+	// Unvisited nodes remain visible with status=-1 and executed=false.
+	Dictionary get_tree_snapshot() const;
 	void reset_trace();
+	// Replay is opt-in even when trace_enabled; 0 retains only current tick.
+	void set_trace_history_capacity(int p_capacity);
+	int get_trace_history_capacity() const;
+	Array get_trace_history_frames(bool p_changes_only = false) const;
+	Array get_slowest_trace_nodes(int p_limit = 8) const;
 
 	BehaviorTreeRunner();
 };

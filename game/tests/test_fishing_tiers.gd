@@ -73,6 +73,7 @@ func run(t) -> void:
 	t.current = "authoritative tiered crafting and fish economy"
 	var world := WorldGen.new(57)
 	var server := GameServer.new(world, 57)
+	server.craft_quality_enabled = false # This suite checks the item itself, not quality rolls.
 	var survivor = server.add_player(925, "Coast Crafter")
 	var hub: Vector2 = GameServer.WORKBENCH_POSITION
 	survivor.position = Vector3(hub.x, world.height_at(hub.x, hub.y), hub.y)
