@@ -674,6 +674,116 @@ TEST_CASE("[GameplayFX] CooldownTracker snapshot rollback and frame-rate indepen
 	CHECK(other->get_cooldown_count() == 2);
 }
 
+
+TEST_CASE("[GameplayFX] CueQueue batch validates, coalesces and preserves priority") {
+	Ref<GameplayCueQueue> queue;
+	queue.instantiate();
+	Array batch;
+	Dictionary low;
+	low["tag"] = "GameplayCue.Status.Sundered";
+	low["magnitude"] = 2.0;
+	low["priority"] = 4;
+	Dictionary high;
+	high["tag"] = StringName("GameplayCue.Status.Resolve");
+	high["magnitude"] = 4.0;
+	high["priority"] = 6;
+	Dictionary repeat = low.duplicate();
+	repeat["magnitude"] = 3.0;
+	batch.push_back(low);
+	batch.push_back(high);
+	batch.push_back(repeat);
+	CHECK(queue->emit_cues_batch(batch));
+	CHECK(queue->get_pending_count() == 2);
+	Array events = queue->take_events();
+	REQUIRE(events.size() == 2);
+	CHECK(String(events[0]["tag"]) == "GameplayCue.Status.Resolve");
+	CHECK(int(events[0]["priority"]) == 6);
+	CHECK(String(events[1]["tag"]) == "GameplayCue.Status.Sundered");
+	CHECK(int(events[1]["count"]) == 2);
+	CHECK(double(events[1]["magnitude"]) == doctest::Approx(3.0));
+	CHECK(queue->get_evicted_transient_count() == 0);
+	CHECK(queue->get_rejected_transient_count() == 0);
+	CHECK(queue->emit_cues_batch(Array())); // Empty batch is a no-op success.
+	CHECK(queue->get_pending_count() == 0);
+}
+
+TEST_CASE("[GameplayFX] CueQueue invalid batches roll back without changing lifecycle") {
+	Ref<GameplayCueQueue> queue;
+	queue.instantiate();
+	CHECK(queue->set_active("GameplayCue.Status.Snared", 1, 2));
+	CHECK(queue->emit_cue("GameplayCue.Ambient.Rain", 1.0, 0));
+	Dictionary valid;
+	valid["tag"] = "GameplayCue.Status.Resolve";
+	valid["magnitude"] = 3.0;
+	valid["priority"] = 6;
+	Dictionary invalid = valid.duplicate();
+	invalid["tag"] = "Bad.Tag";
+	Array batch;
+	batch.push_back(valid);
+	batch.push_back(invalid);
+	CHECK_FALSE(queue->emit_cues_batch(batch));
+	CHECK(queue->get_pending_count() == 2);
+	CHECK(queue->get_active_stacks("GameplayCue.Status.Snared") == 1);
+	batch.remove_at(1);
+	invalid["tag"] = "GameplayCue.Status.Resolve";
+	invalid["priority"] = 8;
+	batch.push_back(invalid);
+	CHECK_FALSE(queue->emit_cues_batch(batch));
+	CHECK(queue->get_pending_count() == 2);
+	batch.remove_at(1);
+	invalid["priority"] = 6;
+	invalid["magnitude"] = Math::NaN;
+	batch.push_back(invalid);
+	CHECK_FALSE(queue->emit_cues_batch(batch));
+	Array oversized;
+	for (int i = 0; i < 33; ++i) {
+		oversized.push_back(valid);
+	}
+	CHECK_FALSE(queue->emit_cues_batch(oversized));
+	CHECK(queue->get_pending_count() == 2);
+	CHECK(queue->get_rejected_transient_count() == 0);
+	CHECK(queue->get_evicted_transient_count() == 0);
+	Array events = queue->take_events();
+	REQUIRE(events.size() == 2);
+	CHECK(String(events[0]["event"]) == "started");
+	CHECK(String(events[1]["tag"]) == "GameplayCue.Ambient.Rain");
+}
+
+TEST_CASE("[GameplayFX] CueQueue batch significance evictions commit together or not at all") {
+	Ref<GameplayCueQueue> queue;
+	queue.instantiate();
+	for (int i = 0; i < GameplayCueQueue::MAX_PENDING; ++i) {
+		CHECK(queue->emit_cue(StringName(String("GameplayCue.Ambient.") + itos(i)), 1.0, 1));
+	}
+	CHECK(queue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	Dictionary high;
+	high["tag"] = "GameplayCue.Status.Resolve";
+	high["magnitude"] = 4.0;
+	high["priority"] = 6;
+	Dictionary low;
+	low["tag"] = "GameplayCue.Status.Sundered";
+	low["magnitude"] = 2.0;
+	low["priority"] = 0;
+	Array impossible;
+	impossible.push_back(high); // Would evict one ambience if committed.
+	impossible.push_back(low); // Cannot evict priority=1 ambience.
+	CHECK_FALSE(queue->emit_cues_batch(impossible));
+	CHECK(queue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(queue->get_evicted_transient_count() == 0);
+	CHECK(queue->get_rejected_transient_count() == 0);
+	low["priority"] = 4;
+	Array admitted;
+	admitted.push_back(high);
+	admitted.push_back(low);
+	CHECK(queue->emit_cues_batch(admitted));
+	CHECK(queue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(queue->get_evicted_transient_count() == 2);
+	Array first = queue->take_events(2);
+	REQUIRE(first.size() == 2);
+	CHECK(String(first[0]["tag"]) == "GameplayCue.Status.Resolve");
+	CHECK(String(first[1]["tag"]) == "GameplayCue.Status.Sundered");
+}
+
 TEST_CASE("[GameplayFX] CueQueue active lifecycle, priorities and deduplication") {
 	Ref<GameplayCueQueue> cue;
 	cue.instantiate();
