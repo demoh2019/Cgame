@@ -330,6 +330,10 @@ void WorldStreamer::_forget_dead_chunks() {
 			--simulation_inactive_count;
 		}
 		simulation_active_cells.erase(cell);
+		if (applied_tick_intervals.has(cell)) {
+			applied_tick_intervals.erase(cell);
+			--tick_throttled_count;
+		}
 		pending_visual_details.erase(cell);
 		emit_signal(SNAME("chunk_unloaded"), cell);
 	}
@@ -451,6 +455,10 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell, bool p_allow_cache) {
 		--simulation_inactive_count;
 	}
 	simulation_active_cells.erase(p_cell);
+	if (applied_tick_intervals.has(p_cell)) {
+		applied_tick_intervals.erase(p_cell);
+		--tick_throttled_count;
+	}
 	pending_visual_details.erase(p_cell);
 	if (chunk) {
 		// Only generator-owned roots that opt in may remain cached. Packed
@@ -535,6 +543,77 @@ void WorldStreamer::_update_simulation(const Vector3 &p_focus) {
 	}
 }
 
+void WorldStreamer::_set_chunk_tick_interval(const Vector3i &p_cell, real_t p_seconds) {
+	Node *chunk = get_chunk(p_cell);
+	if (chunk == nullptr || !chunk->has_method(SNAME("set_streaming_tick_interval"))) {
+		return;
+	}
+	const real_t *old_ptr = applied_tick_intervals.getptr(p_cell);
+	const real_t old_value = old_ptr ? *old_ptr : real_t(0.0);
+	if (old_value == p_seconds) {
+		return;
+	}
+	chunk->call(SNAME("set_streaming_tick_interval"), p_seconds);
+	if (old_value > real_t(0.0)) {
+		--tick_throttled_count;
+	}
+	if (p_seconds > real_t(0.0)) {
+		applied_tick_intervals[p_cell] = p_seconds;
+		++tick_throttled_count;
+	} else {
+		applied_tick_intervals.erase(p_cell);
+	}
+	emit_signal(SNAME("chunk_tick_interval_changed"), p_cell, p_seconds);
+}
+
+void WorldStreamer::_update_tick_intervals(const Vector3 &p_focus) {
+	if (tick_throttle_radius < real_t(0.0) && tick_throttled_count == 0) {
+		return; // Legacy worlds never scan chunks for rate throttling.
+	}
+	int remaining = max_tick_throttle_transitions_per_update;
+	// Restore near-cell responsiveness first; throttle distant cosmetic
+	// work second. Each transition consumes exactly one scheduler slot.
+	for (int pass = 0; pass < 2 && remaining > 0; ++pass) {
+		const bool restore_near = pass == 0;
+		while (remaining > 0) {
+			bool found = false;
+			Vector3i best;
+			real_t best_distance = 0.0;
+			real_t best_interval = 0.0;
+			for (const KeyValue<Vector3i, ObjectID> &entry : loaded) {
+				Node *chunk = Object::cast_to<Node>(ObjectDB::get_instance(entry.value));
+				if (chunk == nullptr || !chunk->has_method(SNAME("set_streaming_tick_interval"))) {
+					continue;
+				}
+				const real_t *current_ptr = applied_tick_intervals.getptr(entry.key);
+				const real_t current = current_ptr ? *current_ptr : real_t(0.0);
+				const real_t distance = WorldStreamingGrid::distance_to_cell(p_focus, entry.key, cell_size, _grid_axes());
+				const bool far = tick_throttle_radius >= real_t(0.0) && tick_throttle_interval > real_t(0.0) &&
+						distance > tick_throttle_radius + (current > real_t(0.0) ? real_t(0.0) : tick_throttle_hysteresis);
+				const real_t desired = far ? tick_throttle_interval : real_t(0.0);
+				if (current == desired || (desired == real_t(0.0)) != restore_near) {
+					continue;
+				}
+				const Vector3i &cell = entry.key;
+				const bool tie_before = cell.x < best.x ||
+						(cell.x == best.x && (cell.y < best.y || (cell.y == best.y && cell.z < best.z)));
+				if (!found || (restore_near ? distance < best_distance : distance > best_distance) ||
+						(distance == best_distance && tie_before)) {
+					best = cell;
+					best_distance = distance;
+					best_interval = desired;
+					found = true;
+				}
+			}
+			if (!found) {
+				break;
+			}
+			_set_chunk_tick_interval(best, best_interval);
+			--remaining;
+		}
+	}
+}
+
 bool WorldStreamer::_adopt_chunk(const Vector3i &p_cell, Node *p_chunk) {
 	if (!p_chunk) {
 		return false;
@@ -557,9 +636,26 @@ bool WorldStreamer::_adopt_chunk(const Vector3i &p_cell, Node *p_chunk) {
 	if (simulation_radius >= real_t(0.0) && p_chunk->has_method(SNAME("set_streaming_simulation_active"))) {
 		p_chunk->call(SNAME("set_streaming_simulation_active"), simulation_active);
 	}
+	// Initial cosmetic rate is selected before entering the scene tree.
+	// A new chunk is already charged to the normal generation work budget.
+	real_t initial_tick_interval = 0.0;
+	if (tick_throttle_radius >= real_t(0.0) && tick_throttle_interval > real_t(0.0) &&
+			p_chunk->has_method(SNAME("set_streaming_tick_interval"))) {
+		Vector3 tick_focus;
+		if (_get_focus_position(tick_focus) &&
+				WorldStreamingGrid::distance_to_cell(tick_focus, p_cell, cell_size, _grid_axes()) >
+					tick_throttle_radius + tick_throttle_hysteresis) {
+			initial_tick_interval = tick_throttle_interval;
+		}
+		p_chunk->call(SNAME("set_streaming_tick_interval"), initial_tick_interval);
+	}
 	Node *parent = _get_parent_for_chunks();
 	parent->add_child(p_chunk);
 	loaded[p_cell] = p_chunk->get_instance_id();
+	if (initial_tick_interval > real_t(0.0)) {
+		applied_tick_intervals[p_cell] = initial_tick_interval;
+		++tick_throttled_count;
+	}
 	if (simulation_radius >= real_t(0.0)) {
 		simulation_active_cells[p_cell] = simulation_active;
 		if (!simulation_active) {
@@ -896,6 +992,7 @@ void WorldStreamer::_update_streaming() {
 	}
 
 	_update_simulation(position);
+	_update_tick_intervals(position);
 
 	LocalVector<Vector3i> wanted;
 	bool truncated = false;
@@ -1048,6 +1145,8 @@ void WorldStreamer::_reset_state() {
 	generate_queue.clear();
 	pending_visual_details.clear();
 	simulation_active_cells.clear();
+	applied_tick_intervals.clear();
+	tick_throttled_count = 0;
 	cache_ineligible_nodes.clear();
 	last_unload_count = 0;
 	last_deferred_unload_count = 0;
@@ -1082,6 +1181,8 @@ void WorldStreamer::_notification(int p_what) {
 				last_deferred_unload_count = 0;
 				cache_ineligible_nodes.clear();
 				simulation_active_cells.clear();
+				applied_tick_intervals.clear();
+				tick_throttled_count = 0;
 				simulation_inactive_count = 0;
 				pending_visual_details.clear();
 			} else {
@@ -1393,6 +1494,44 @@ int WorldStreamer::get_simulation_active_count() const {
 	return int(loaded.size()) - simulation_inactive_count;
 }
 
+void WorldStreamer::set_tick_throttle_radius(real_t p_radius) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_radius), "Tick throttle radius must be finite.");
+	const real_t value = p_radius < real_t(0.0) ? real_t(-1.0) : MIN(p_radius, real_t(100000.0));
+	if (tick_throttle_radius == value) {
+		return;
+	}
+	tick_throttle_radius = value;
+	time_since_update = MAX(time_since_update, update_interval);
+}
+
+void WorldStreamer::set_tick_throttle_interval(real_t p_seconds) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_seconds), "Tick throttle interval must be finite.");
+	const real_t value = CLAMP(p_seconds, real_t(0.0), real_t(1.0));
+	if (tick_throttle_interval == value) {
+		return;
+	}
+	tick_throttle_interval = value;
+	time_since_update = MAX(time_since_update, update_interval);
+}
+
+void WorldStreamer::set_tick_throttle_hysteresis(real_t p_distance) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_distance), "Tick throttle hysteresis must be finite.");
+	const real_t value = CLAMP(p_distance, real_t(0.0), real_t(1000.0));
+	if (tick_throttle_hysteresis == value) {
+		return;
+	}
+	tick_throttle_hysteresis = value;
+	time_since_update = MAX(time_since_update, update_interval);
+}
+
+void WorldStreamer::set_max_tick_throttle_transitions_per_update(int p_count) {
+	max_tick_throttle_transitions_per_update = CLAMP(p_count, 1, 64);
+}
+
+bool WorldStreamer::is_cell_tick_throttled(const Vector3i &p_cell) const {
+	return loaded.has(p_cell) && applied_tick_intervals.has(p_cell);
+}
+
 void WorldStreamer::set_enabled(bool p_enabled) {
 	enabled = p_enabled;
 }
@@ -1503,6 +1642,16 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_simulation_transitions_per_update"), &WorldStreamer::get_max_simulation_transitions_per_update);
 	ClassDB::bind_method(D_METHOD("is_cell_simulation_active", "cell"), &WorldStreamer::is_cell_simulation_active);
 	ClassDB::bind_method(D_METHOD("get_simulation_active_count"), &WorldStreamer::get_simulation_active_count);
+	ClassDB::bind_method(D_METHOD("set_tick_throttle_radius", "radius"), &WorldStreamer::set_tick_throttle_radius);
+	ClassDB::bind_method(D_METHOD("get_tick_throttle_radius"), &WorldStreamer::get_tick_throttle_radius);
+	ClassDB::bind_method(D_METHOD("set_tick_throttle_interval", "seconds"), &WorldStreamer::set_tick_throttle_interval);
+	ClassDB::bind_method(D_METHOD("get_tick_throttle_interval"), &WorldStreamer::get_tick_throttle_interval);
+	ClassDB::bind_method(D_METHOD("set_tick_throttle_hysteresis", "distance"), &WorldStreamer::set_tick_throttle_hysteresis);
+	ClassDB::bind_method(D_METHOD("get_tick_throttle_hysteresis"), &WorldStreamer::get_tick_throttle_hysteresis);
+	ClassDB::bind_method(D_METHOD("set_max_tick_throttle_transitions_per_update", "count"), &WorldStreamer::set_max_tick_throttle_transitions_per_update);
+	ClassDB::bind_method(D_METHOD("get_max_tick_throttle_transitions_per_update"), &WorldStreamer::get_max_tick_throttle_transitions_per_update);
+	ClassDB::bind_method(D_METHOD("is_cell_tick_throttled", "cell"), &WorldStreamer::is_cell_tick_throttled);
+	ClassDB::bind_method(D_METHOD("get_tick_throttled_count"), &WorldStreamer::get_tick_throttled_count);
 	ClassDB::bind_method(D_METHOD("get_max_chunk_work_usec"), &WorldStreamer::get_max_chunk_work_usec);
 	ClassDB::bind_method(D_METHOD("set_adaptive_chunk_budget_enabled", "enabled"), &WorldStreamer::set_adaptive_chunk_budget_enabled);
 	ClassDB::bind_method(D_METHOD("is_adaptive_chunk_budget_enabled"), &WorldStreamer::is_adaptive_chunk_budget_enabled);
@@ -1575,6 +1724,11 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "simulation_radius", PROPERTY_HINT_RANGE, "-1,100000,0.1,suffix:m"), "set_simulation_radius", "get_simulation_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "simulation_hysteresis", PROPERTY_HINT_RANGE, "0,1000,0.1,suffix:m"), "set_simulation_hysteresis", "get_simulation_hysteresis");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_simulation_transitions_per_update", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_simulation_transitions_per_update", "get_max_simulation_transitions_per_update");
+	ADD_GROUP("Cosmetic Tick LOD", "");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tick_throttle_radius", PROPERTY_HINT_RANGE, "-1,100000,0.1,suffix:m"), "set_tick_throttle_radius", "get_tick_throttle_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tick_throttle_interval", PROPERTY_HINT_RANGE, "0,1,0.005,suffix:s"), "set_tick_throttle_interval", "get_tick_throttle_interval");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tick_throttle_hysteresis", PROPERTY_HINT_RANGE, "0,1000,0.1,suffix:m"), "set_tick_throttle_hysteresis", "get_tick_throttle_hysteresis");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_tick_throttle_transitions_per_update", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_tick_throttle_transitions_per_update", "get_max_tick_throttle_transitions_per_update");
 	ADD_GROUP("Budget", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_concurrent_loads", PROPERTY_HINT_RANGE, "1,64,1,or_greater"), "set_max_concurrent_loads", "get_max_concurrent_loads");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cached_chunks", PROPERTY_HINT_RANGE, "0,16,1"), "set_max_cached_chunks", "get_max_cached_chunks");
@@ -1591,6 +1745,7 @@ void WorldStreamer::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("chunk_visual_details_ready", PropertyInfo(Variant::VECTOR3I, "cell")));
 	ADD_SIGNAL(MethodInfo("chunk_unloaded", PropertyInfo(Variant::VECTOR3I, "cell")));
 	ADD_SIGNAL(MethodInfo("chunk_simulation_changed", PropertyInfo(Variant::VECTOR3I, "cell"), PropertyInfo(Variant::BOOL, "active")));
+	ADD_SIGNAL(MethodInfo("chunk_tick_interval_changed", PropertyInfo(Variant::VECTOR3I, "cell"), PropertyInfo(Variant::FLOAT, "seconds")));
 	ADD_SIGNAL(MethodInfo("chunk_load_failed", PropertyInfo(Variant::VECTOR3I, "cell"), PropertyInfo(Variant::STRING, "path")));
 
 	BIND_ENUM_CONSTANT(AXES_XZ);
