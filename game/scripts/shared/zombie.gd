@@ -16,6 +16,7 @@ const InfectedResolve = preload("res://scripts/shared/infected_resolve.gd")
 const InfectedSight = preload("res://scripts/shared/infected_sight.gd")
 const InfectedMeleeCover = preload("res://scripts/shared/infected_melee_cover.gd")
 const NativeSenses = preload("res://scripts/shared/native_infected_senses.gd")
+const EffectRules = preload("res://scripts/shared/effect_application_rules.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
@@ -720,7 +721,7 @@ func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: floa
 ## Confirmed crowd control gets weaker on repeated successful applications.
 ## Failed attempts cannot build immunity, refresh timers or cancel acid windups.
 func apply_stagger(seconds: float) -> bool:
-	if not is_alive() or raid_boss:
+	if not EffectRules.can_apply(EffectRules.STAGGER, is_alive(), raid_boss):
 		return false
 	var stacks: int = stagger_resolve_stacks if stagger_resolve_seconds > 0.0 else 0
 	var effective: float = InfectedResolve.duration(seconds, stacks, elite)
@@ -761,7 +762,7 @@ func apply_knockback(world, attacker_position: Vector3, meters: float) -> float:
 ## Debuff from an actual server-resolved axe hit. Refreshing cannot stack
 ## magnitude or extend beyond a single duration from this point in time.
 func apply_sunder(now: float, seconds: float) -> bool:
-	if not is_alive() or not is_finite(now) or now < 0.0 or 			not is_finite(seconds) or seconds <= 0.0 or seconds > SunderMark.DURATION:
+	if not EffectRules.can_apply(EffectRules.SUNDER, is_alive(), raid_boss) or not is_finite(now) or now < 0.0 or 			not is_finite(seconds) or seconds <= 0.0 or seconds > SunderMark.DURATION:
 		return false
 	sunder_until = maxf(sunder_until, now + seconds)
 	return true
@@ -769,7 +770,7 @@ func apply_sunder(now: float, seconds: float) -> bool:
 
 ## Server-only trap application; cannot target a boss or expired/dead zombie.
 func apply_snare(seconds: float) -> bool:
-	if not is_alive() or raid_boss or not is_finite(seconds) or seconds <= 0.0 or seconds > 3.0:
+	if not EffectRules.can_apply(EffectRules.SNARE, is_alive(), raid_boss) or not is_finite(seconds) or seconds <= 0.0 or seconds > 3.0:
 		return false
 	snared_seconds = maxf(snared_seconds, seconds)
 	stuck_time = 0.0

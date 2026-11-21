@@ -39,6 +39,7 @@ const SUITES := [
 	"res://tests/test_engine_runtime_tags.gd",
 	"res://tests/test_runtime_effect_timeline.gd",
 	"res://tests/test_gameplay_cues.gd",
+	"res://tests/test_effect_application_rules.gd",
 	"res://tests/test_gameplay_attributes.gd",
 	"res://tests/test_native_ability_cooldowns.gd",
 	"res://tests/test_ambient_tick_budget.gd",
