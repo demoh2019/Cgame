@@ -113,6 +113,15 @@
 				This custom instance data has to be manually accessed in your custom shader using [code]INSTANCE_CUSTOM[/code].
 			</description>
 		</method>
+		<method name="set_instance_transforms_batch">
+			<return type="bool" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<param index="1" name="transforms" type="Array[Transform3D]" />
+			<description>
+				Updates sparse 3D instance transforms with one scripting call. Requires [enum TRANSFORM_3D], equally sized arrays, unique indices within [member instance_count], and finite transforms. All entries are validated before any updates. Invalid inputs return [code]false[/code] and leave the buffer unchanged, including all other instance slots. An empty valid request returns [code]true[/code], and hidden slots may also be updated.
+				This does not change [member instance_count], [member visible_instance_count], colors, custom data, collision, or game entity IDs. One RenderingServer command is still issued per instance. For dense updates use [member buffer]; this API is not a single GPU upload.
+			</description>
+		</method>
 		<method name="set_instance_transform">
 			<return type="void" />
 			<param index="0" name="instance" type="int" />
