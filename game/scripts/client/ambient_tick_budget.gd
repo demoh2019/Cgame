@@ -9,6 +9,7 @@ const HZ_BY_QUALITY := [12.0, 18.0, 30.0, 60.0]
 const MAX_STEP := 0.16
 
 var _elapsed: Dictionary = {}
+var _rate_scale: Dictionary = {} # Per-lane significance, defaults to 1.0.
 var _reserved: Array[String] = []
 var _tie_start: int = 0
 var _quality: int = -1
@@ -51,18 +52,19 @@ func begin_frame(delta: float, quality: int) -> void:
 	_tie_start = (_tie_start + 1) % LANES.size()
 	if not is_finite(delta) or delta <= 0.0:
 		return
-	var interval: float = 1.0 / HZ_BY_QUALITY[_quality]
 	for _slot in range(_budget):
 		var pick: String = ""
-		var best_elapsed: float = -1.0
+		var best_overdue: float = -1.0
 		for offset in range(LANES.size()):
 			var lane: String = LANES[(_tie_start + offset) % LANES.size()]
 			if _reserved.has(lane):
 				continue
+			var interval: float = 1.0 / (HZ_BY_QUALITY[_quality] * float(_rate_scale.get(lane, 1.0)))
 			var due: float = minf(float(_elapsed.get(lane, 0.0)) + delta, MAX_STEP)
-			if due + 0.000001 >= interval and due > best_elapsed + 0.000000000001:
+			var overdue: float = due - interval
+			if overdue + 0.000001 >= 0.0 and overdue > best_overdue + 0.000000000001:
 				pick = lane
-				best_elapsed = due
+				best_overdue = overdue
 		if pick.is_empty():
 			break
 		_reserved.append(pick)
@@ -80,7 +82,7 @@ func consume(lane: String, delta: float, force: bool = false) -> float:
 		_record_update()
 		return elapsed
 	_elapsed[lane] = elapsed
-	var interval: float = 1.0 / HZ_BY_QUALITY[_quality if _quality >= 0 else 0]
+	var interval: float = 1.0 / (HZ_BY_QUALITY[_quality if _quality >= 0 else 0] * float(_rate_scale.get(lane, 1.0)))
 	if elapsed + 0.000001 < interval or _spent >= _budget or not _reserved.has(lane) \
 			or (_time_budget_us > 0 and _frame_cost_us >= _time_budget_us):
 		_last_skipped += 1
@@ -91,6 +93,21 @@ func consume(lane: String, delta: float, force: bool = false) -> float:
 	_elapsed[lane] = 0.0
 	_record_update()
 	return elapsed
+
+
+## Per-lane frequency relative to the quality tier. Does not reset timers,
+## and takes effect when the next frame's reservations are computed.
+func set_lane_rate_scale(lane: String, scale: float) -> bool:
+	if not LANES.has(lane) or not is_finite(scale) or scale < 0.75 or scale > 2.0:
+		return false
+	_rate_scale[lane] = scale
+	return true
+
+
+func get_lane_rate_scale(lane: String) -> float:
+	if not LANES.has(lane):
+		return -1.0
+	return float(_rate_scale.get(lane, 1.0))
 
 
 func reset() -> void:
