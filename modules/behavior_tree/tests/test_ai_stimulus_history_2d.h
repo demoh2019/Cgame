@@ -247,4 +247,47 @@ TEST_CASE("[AIStimulusHistory2D] Repeated newest-source refresh preserves unrela
 	CHECK(older["remaining_seconds"] == real_t(3.0));
 }
 
+TEST_CASE("[AIStimulusHistory2D] Selective forget preserves other identities and ages") {
+	Ref<AIStimulusHistory2D> history;
+	history.instantiate();
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SIGHT, Vector2(1, 0), 1.0, 5.0, 41));
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(2, 0), 0.9, 5.0, 41));
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(3, 0), 0.5, 5.0, 42));
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(4, 0), 0.4, 5.0)); // Anonymous.
+	history->advance_time(1.25);
+	CHECK(history->forget_source(41, AIStimulusHistory2D::SOUND) == 1);
+	CHECK(history->get_event_count() == 3);
+	CHECK(history->get_best(AIStimulusHistory2D::SIGHT)["source_id"] == 41);
+	const Array kept = history->get_recent(3);
+	const Dictionary anonymous = kept[0];
+	const Dictionary survivor = kept[1];
+	const Dictionary sight = kept[2];
+	CHECK(anonymous["source_id"] == -1);
+	CHECK(survivor["source_id"] == 42);
+	CHECK(sight["source_id"] == 41);
+	CHECK(survivor["remaining_seconds"] == real_t(3.75));
+	CHECK(history->forget_source(41) == 1);
+	CHECK(history->forget_source(41) == 0);
+	CHECK(history->get_event_count() == 2);
+	CHECK(history->get_best(AIStimulusHistory2D::SIGHT).is_empty());
+	CHECK(history->get_best(AIStimulusHistory2D::SOUND)["source_id"] == 42);
+}
+
+TEST_CASE("[AIStimulusHistory2D] Invalid source forget is atomic and does not remove anonymous events") {
+	Ref<AIStimulusHistory2D> history;
+	history.instantiate();
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::DAMAGE, Vector2(7, 1), 0.7, 6.0, 7));
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(5, 1), 0.9, 6.0));
+	CHECK(history->forget_source(-1) == 0);
+	CHECK(history->forget_source(-2, AIStimulusHistory2D::SOUND) == 0);
+	CHECK(history->forget_source(7, -2) == 0);
+	CHECK(history->forget_source(7, 3) == 0);
+	CHECK(history->forget_source(999) == 0);
+	CHECK(history->get_event_count() == 2);
+	CHECK(history->forget_source(7, AIStimulusHistory2D::DAMAGE) == 1);
+	CHECK(history->get_best(AIStimulusHistory2D::DAMAGE).is_empty());
+	CHECK(history->get_event_count() == 1);
+	CHECK(history->get_recent(1).size() == 1);
+}
+
 } // namespace TestAIStimulusHistory2D

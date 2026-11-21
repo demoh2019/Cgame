@@ -141,6 +141,25 @@ func run(t) -> void:
         t.check(bounded.best_confirmed_stimulus_in_radius(1, Vector2.ZERO, 15.0).is_empty(),
             "stock Godot continues without optional native stimulus memory")
 
+    t.current = "Source invalidation preserves unrelated authoritative perceptions"
+    var source_senses := NativeSenses.new()
+    source_senses.record_confirmed_sound(Vector2.ZERO, Vector2(4, 0), 30.0, 41)
+    source_senses.record_confirmed_sound(Vector2.ZERO, Vector2(6, 0), 30.0, 42)
+    if source_senses.has_native_history() and source_senses._history.has_method("forget_source"):
+        t.eq(source_senses.forget_confirmed_source(41), 1,
+            "forgetting a known player removes its own previously accepted sound")
+        t.eq(source_senses.get_recent_confirmed_stimuli().size(), 1,
+            "other approved survivor sounds stay recorded")
+        t.eq(source_senses.best_confirmed_stimulus(1).get("source_id"), 42,
+            "surviving source is available for an independent later investigation")
+        t.eq(source_senses.forget_confirmed_source(41), 0,
+            "forgetting a source twice is idempotent")
+        t.eq(source_senses.forget_confirmed_source(-1), 0,
+            "anonymous stimuli cannot be removed by fake source identifiers")
+    else:
+        t.eq(source_senses.forget_confirmed_source(41), 0,
+            "older binaries leave native history unchanged rather than resetting others")
+
     t.current = "Existing authoritative zombie hearing populates native memory"
     var height: float = WorldGen.HUB_HEIGHT
     var world := WorldGen.new(42)
@@ -173,6 +192,35 @@ func run(t) -> void:
     t.check(native_debug.has("sight_memory_seconds") and native_debug.has("sound_memory_seconds"),
         "perception snapshot exposes remaining memory lifetimes")
 
+
+    t.current = "Invalid active targets forget only their own source history"
+    var invalid_target := Zombie.new(978, "walker", Vector3(0.0, height, 0.0))
+    invalid_target._native_senses = NativeSenses.new()
+    invalid_target._native_senses.record_confirmed_sound(Vector2.ZERO, Vector2(3, 0), 30.0, 41)
+    invalid_target._native_senses.record_confirmed_sound(Vector2.ZERO, Vector2(8, 0), 30.0, 42)
+    invalid_target.target_id = 41
+    invalid_target.state = Zombie.State.CHASE
+    invalid_target.think_timer = 1.0 # Skip acquisition: test actual chase invalidation.
+    invalid_target.think(world, {41: {"position": Vector3(3.0, height, 0.0),
+        "alive": true, "safe": true}}, 0.1, rng)
+    t.eq(invalid_target.target_id, -1, "safe player is no longer a combat target")
+    t.eq(invalid_target.state, Zombie.State.IDLE, "existing safe-zone behavior is preserved")
+    if invalid_target._native_senses.has_native_history() and invalid_target._native_senses._history.has_method("forget_source"):
+        t.eq(invalid_target._native_senses.get_recent_confirmed_stimuli().size(), 1,
+            "invalidated player identity is forgotten without clearing a valid source")
+        t.eq(invalid_target._native_senses.best_confirmed_stimulus(1).get("source_id"), 42,
+            "retained source survives the invalidation and can age independently")
+    var disconnected := Zombie.new(979, "walker", Vector3(0.0, height, 0.0))
+    disconnected._native_senses = NativeSenses.new()
+    disconnected._native_senses.record_confirmed_sound(Vector2.ZERO, Vector2(3, 0), 30.0, 41)
+    disconnected.target_id = 41
+    disconnected.state = Zombie.State.CHASE
+    disconnected.think_timer = 1.0
+    disconnected.think(world, {}, 0.1, rng)
+    t.eq(disconnected.target_id, -1, "disconnected players release active targets")
+    if disconnected._native_senses.has_native_history() and disconnected._native_senses._history.has_method("forget_source"):
+        t.check(disconnected._native_senses.get_recent_confirmed_stimuli().is_empty(),
+            "disconnected source cannot persist as a later history candidate")
 
     t.current = "Chase recovery can investigate a second confirmed sound"
     var secondary_memory := NativeSenses.new()

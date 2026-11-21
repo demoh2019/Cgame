@@ -365,6 +365,11 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 				_move_toward(world, here, last_known_target, float(data["speed"]) * 0.7, delta)
 		State.CHASE, State.ATTACK:
 			if not players.has(target_id) or not players[target_id]["alive"] or players[target_id]["safe"]:
+				# The authoritative player list owns eligibility: a disconnected,
+				# dead or safe-zone survivor must not persist as a remembered
+				# source while unrelated confirmed events remain available.
+				if _native_senses != null and target_id >= 0:
+					_native_senses.forget_confirmed_source(target_id)
 				target_id = -1
 				state = State.IDLE
 				return {}

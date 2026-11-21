@@ -151,6 +151,17 @@ func best_confirmed_stimulus_in_radius(sense: int, center: Vector2, radius: floa
     return selected
 
 
+## A server-authoritative source became invalid (disconnect, death, safe hub).
+## Only forget its identified history entries; do not reset other survivors'
+## perceptions or fabricate fresh events. Older binaries safely do nothing.
+func forget_confirmed_source(source_id: int, sense: int = -1) -> int:
+    if source_id < 0 or (sense != -1 and (sense < 0 or sense > 2)):
+        return 0
+    if _history == null or not _history.has_method("forget_source"):
+        return 0
+    return int(_history.forget_source(source_id, sense))
+
+
 func get_recent_confirmed_stimuli(limit: int = 8) -> Array:
     if _history == null:
         return []
