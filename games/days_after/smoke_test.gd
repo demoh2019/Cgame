@@ -141,7 +141,7 @@ func _smoke() -> void:
                     break
             # Independent geometric check, using the engine Basis inverse
             # instead of the gameplay helper's hand-written yaw projection.
-            for b in range(obb_centers.size()):
+            for b in range(mini(obb_centers.size(), mini(obb_halves.size(), obb_yaws.size()))):
                 var local_point: Vector3 = Basis(Vector3.UP, obb_yaws[b]).inverse() * (
                     positions[i] - obb_centers[b])
                 if absf(local_point.x) <= obb_halves[b].x and \
