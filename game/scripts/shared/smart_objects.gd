@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 ## Smart Object registry: slots, exclusive claims with timeouts, query scoring,
 ## placement scoring / automatic placement and per-behavior interaction graphs.

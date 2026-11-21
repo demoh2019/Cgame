@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 ## Utility AI (Dave Mark's Infinite Axis Utility System, as used by the UE5
 ## Utility AI plugins and Guild Wars 2): each option is scored by multiplying
