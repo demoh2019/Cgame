@@ -1,5 +1,6 @@
 extends RefCounted
 const GraphicsAreaLights = preload("res://scripts/client/graphics_area_lights.gd")
+const Rendering = preload("res://scripts/native/cgame_rendering.gd") # Native cgame_rendering module when built in.
 ## Lightweight panoramic light-cookie shared by existing shadowed dungeon torches.
 ## Unity HDRP's cookie and Unreal Light Functions motivate this approach, but
 ## Godot's native OmniLight3D projector handles the actual light evaluation.
@@ -75,7 +76,7 @@ static func apply(light: OmniLight3D, quality: int, method: String,
 		return
 	if not light.is_in_group(GraphicsAreaLights.GROUP):
 		# A torch head is a ~12 cm emitter; PCSS softens its wall shadows on High/Ultra.
-		GraphicsAreaLights.register(light, 0.12)
+		Rendering.area_lights_register(light, 0.12)
 	if not projector_enabled(quality, method, casts_shadow):
 		if light.light_projector != null:
 			light.light_projector = null

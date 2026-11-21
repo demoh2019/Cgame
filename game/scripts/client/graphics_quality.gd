@@ -37,6 +37,7 @@ const GraphicsHdrOutput = preload("res://scripts/client/graphics_hdr_output.gd")
 const GraphicsAreaLights = preload("res://scripts/client/graphics_area_lights.gd")
 const CharacterShading = preload("res://scripts/client/character_shading.gd")
 const ImpostorField = preload("res://scripts/client/impostor_field.gd")
+const Rendering = preload("res://scripts/native/cgame_rendering.gd") # Native cgame_rendering module when built in.
 
 static var _level: int = 1
 static var _loaded: bool = false
@@ -288,18 +289,18 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# High/Ultra enable native PBR detail; low-end presets spend zero taps.
 	StoneMicrodetail.configure(_level, str(method))
 	# Steady frame delivery: vsync mode and FPS cap per tier (UE5 t.MaxFPS).
-	GraphicsFramePacing.apply(_level)
+	Rendering.frame_pacing_apply(_level)
 	# HDR10/EDR swapchain on High/Ultra when the monitor supports it.
-	GraphicsHdrOutput.apply(_level, str(method))
+	Rendering.hdr_apply(_level, str(method))
 	if viewport != null:
 		# Foveated VRS keeps full shading around the player on low presets.
-		GraphicsFoveatedShading.apply(viewport, _level, str(method))
+		Rendering.foveated_apply(viewport, _level, str(method))
 		# Torch/lantern emitter radius drives PCSS soft local shadows.
-		GraphicsAreaLights.configure(_level, viewport.get_tree() if viewport.is_inside_tree() else null)
+		Rendering.area_lights_configure(_level, viewport.get_tree() if viewport.is_inside_tree() else null)
 	# Hair/cloth/eye models apply to characters built from now on.
 	CharacterShading.configure(_level)
 	# Baked billboard impostor rings past the real decor range.
-	ImpostorField.configure(_level)
+	Rendering.impostor_configure(_level)
 	if viewport != null:
 		# Texture-group anisotropic shader variants are already cached per tier.
 		# This viewport cap makes imported glTF PBR texture detail just as sharp.

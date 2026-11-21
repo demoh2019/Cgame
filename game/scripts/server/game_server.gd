@@ -3,7 +3,7 @@ extends RefCounted
 ## connect them. It has no networking and no scene: the network layer only feeds it commands and
 ## reads snapshots out of it, so the whole game can be tested by calling it directly.
 
-const LagCompensation = preload("res://scripts/server/lag_compensation.gd")
+const LagCompensation = preload("res://scripts/native/lag_compensation.gd") # Native CgameLagCompensation when built in.
 const HTNPlanner = preload("res://scripts/native/htn_planner.gd") # Native CgameHTNPlanner when built in.
 const InfectedRaidDomain = preload("res://scripts/shared/infected_raid_domain.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
@@ -225,7 +225,7 @@ var world
 var rng := RandomNumberGenerator.new()
 var time: float = 0.0
 ## PvP lag compensation: recent survivor positions and each peer's measured round trip (seconds).
-var lag_history := LagCompensation.new()
+var lag_history = LagCompensation.create()
 var peer_round_trip: Dictionary = {}
 var tick_count: int = 0
 

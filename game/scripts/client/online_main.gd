@@ -92,6 +92,7 @@ const BarricadeDebris = preload("res://scripts/client/barricade_debris.gd")
 const PerfOverlay = preload("res://scripts/client/perf_overlay.gd")
 const RtEffects = preload("res://scripts/client/rt_effects.gd")
 const VfxPresets = preload("res://scripts/native/cgame_vfx_facade.gd") # Native VFXGraphInstance3D when built in.
+const Rendering = preload("res://scripts/native/cgame_rendering.gd") # Native cgame_rendering module when built in.
 const GraphicsDynamicResolution = preload("res://scripts/client/graphics_dynamic_resolution.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
 const WorldMap = preload("res://scripts/client/world_map.gd")
@@ -184,7 +185,7 @@ var _ground_mist
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
 var _auto_quality := GraphicsAutoQuality.new()
-var _vram_budget := GraphicsVramBudget.new()
+var _vram_budget = Rendering.vram_budget_new()
 var _hitch_analyzer := FrameHitchAnalyzer.new()
 var _trace := TraceCapture.new()
 var _trace_path := ""
@@ -485,7 +486,7 @@ func _build_environment() -> void:
 	add_child(camera)
 	camera.look_at(Vector3.ZERO)
 	# Compile every spatial shader pipeline during loading, not mid-fight.
-	ShaderWarmup.start(camera)
+	Rendering.shader_warmup_start(camera)
 	_perf = PerfOverlay.new()
 	_perf.name = "PerfOverlay"
 	add_child(_perf)
@@ -1821,7 +1822,7 @@ func _process(delta: float) -> void:
 		var step_down: bool = quality_limit and _auto_quality.sample_frame(delta, gpu_ms)
 		# GPU memory pressure steps down too, before the driver starts paging textures.
 		if not step_down and _auto_quality.mode == "auto" and _vram_budget.sample(
-				GraphicsVramBudget.used_bytes(), _auto_quality.level, delta):
+				Rendering.vram_used_bytes(), _auto_quality.level, delta):
 			_auto_quality.level -= 1
 			step_down = true
 		if step_down:

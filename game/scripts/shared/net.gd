@@ -9,7 +9,7 @@ const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildSiegeLedger = preload("res://scripts/shared/guild_siege_ledger.gd")
 const SiegeOutbox = preload("res://scripts/server/siege_outbox.gd")
 const SoloCharacterStore = preload("res://scripts/server/solo_character_store.gd")
-const TradeJournal = preload("res://scripts/server/trade_journal.gd")
+const TradeJournal = preload("res://scripts/native/trade_journal.gd") # Native CgameTradeJournal when built in.
 
 signal welcomed
 signal join_refused(reason: String)
@@ -121,7 +121,7 @@ func _measure_round_trips() -> void:
 func configure_trade_journal(journal_path: String) -> bool:
 	if role != "server" or sim == null or gateway == null or not gateway.enabled or trade_journal != null:
 		return false
-	var journal = TradeJournal.new()
+	var journal = TradeJournal.create()
 	if not journal.open_file(journal_path):
 		return false
 	trade_journal = journal

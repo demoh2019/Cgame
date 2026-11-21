@@ -1,5 +1,6 @@
 extends Node3D
 const ShaderWarmup = preload("res://scripts/client/shader_warmup.gd")
+const Rendering = preload("res://scripts/native/cgame_rendering.gd") # Native cgame_rendering module when built in.
 ## Local playable client of the SAME authoritative simulation used by the dedicated server.
 ## Not a second set of gameplay rules: gathering, combat, loot, survival and crafting all
 ## call GameServer. Multiplayer transport will be wired to this presentation separately.
@@ -243,7 +244,7 @@ func _make_light_and_camera() -> void:
 	_camera.current = true
 	_camera.fov = 58.0
 	add_child(_camera)
-	ShaderWarmup.start(_camera)
+	Rendering.shader_warmup_start(_camera)
 
 
 ## Keep the offline world consistent with the dedicated world's day/night
