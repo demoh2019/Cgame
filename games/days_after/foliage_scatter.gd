@@ -7,6 +7,12 @@ const GRID_SIZE: int = 25
 const MAX_INSTANCES: int = 160
 const MIN_SPACING: float = 2.1
 const WeightedVariants = preload("res://pcg_weighted_variants.gd")
+const PointTransforms = preload("res://pcg_point_transforms.gd")
+const TRANSFORM_SEED := 42019
+const TRANSFORM_HORIZONTAL_MIN := 0.82
+const TRANSFORM_HORIZONTAL_MAX := 1.18
+const TRANSFORM_VERTICAL_MIN := 0.88
+const TRANSFORM_VERTICAL_MAX := 1.16
 const LODPlan = preload("res://pcg_instance_lod.gd")
 const LOD_SWITCH_DISTANCE := 24.0
 const LOD_HYSTERESIS := 3.0
@@ -71,6 +77,7 @@ const ORIENTED_BOX_YAWS = [0.6108652381980153] # 35 degrees in radians.
 var _selected_positions := PackedVector3Array()
 var _selected_variants := PackedInt32Array()
 var _selected_stable_ids := PackedInt64Array()
+var _selected_transforms: Array = []
 var _variant_batches: Array = []
 var _lod_tiers := PackedInt32Array()
 var _lod_buckets: Array = []
@@ -202,6 +209,33 @@ func get_selected_variants() -> PackedInt32Array:
 
 func get_selected_stable_ids() -> PackedInt64Array:
     return _selected_stable_ids.duplicate()
+
+
+func get_selected_transforms() -> Array:
+    return _selected_transforms.duplicate()
+
+
+func verify_point_transform_native_fallback_parity() -> bool:
+    var native: Array = PointTransforms.generate_transforms(
+        _selected_positions, _selected_stable_ids, TRANSFORM_SEED,
+        TAU, TRANSFORM_HORIZONTAL_MIN, TRANSFORM_HORIZONTAL_MAX,
+        TRANSFORM_VERTICAL_MIN, TRANSFORM_VERTICAL_MAX)
+    var fallback: Array = PointTransforms.generate_transforms(
+        _selected_positions, _selected_stable_ids, TRANSFORM_SEED,
+        TAU, TRANSFORM_HORIZONTAL_MIN, TRANSFORM_HORIZONTAL_MAX,
+        TRANSFORM_VERTICAL_MIN, TRANSFORM_VERTICAL_MAX, false)
+    if native.size() != _selected_positions.size() or native.size() != fallback.size():
+        return false
+    for index in native.size():
+        var engine_transform: Transform3D = native[index]
+        var script_transform: Transform3D = fallback[index]
+        var saved_transform: Transform3D = _selected_transforms[index]
+        if engine_transform.origin != script_transform.origin or \
+                engine_transform.origin != saved_transform.origin or \
+                not engine_transform.basis.is_equal_approx(script_transform.basis) or \
+                not engine_transform.basis.is_equal_approx(saved_transform.basis):
+            return false
+    return true
 
 
 func verify_variant_native_fallback_parity() -> bool:
@@ -570,6 +604,18 @@ func regenerate() -> void:
         _variant_batches = WeightedVariants.partition_indices(
             _selected_variants, VARIANT_WEIGHTS.size(), false)
 
+    # Native PCG Transform Points: store stable rotation/scale once per
+    # accepted physical cell ID. Re-bucketing or camera LOD changes never
+    # resample transforms or use the current MultiMesh element order.
+    _selected_transforms = PointTransforms.generate_transforms(
+        _selected_positions, _selected_stable_ids, TRANSFORM_SEED,
+        TAU, TRANSFORM_HORIZONTAL_MIN, TRANSFORM_HORIZONTAL_MAX,
+        TRANSFORM_VERTICAL_MIN, TRANSFORM_VERTICAL_MAX)
+    if _selected_transforms.size() != _selected_positions.size():
+        _selected_transforms = []
+        for point in _selected_positions:
+            _selected_transforms.append(Transform3D(Basis(), point))
+
     # PCG selection is intentionally complete before any LOD work. Changing
     # viewer never re-samples a position, density mask or stable variant ID.
     _lod_tiers.clear()
@@ -685,13 +731,13 @@ func _build_lod_renderers() -> void:
             batch.instance_count = indices.size()
             for local_index in indices.size():
                 var source_index: int = indices[local_index]
-                var orientation := Basis(Vector3.UP, float(source_index) * 0.41)
+                var sampled: Transform3D = _selected_transforms[source_index]
                 var width_scale: float = [0.8, 1.0, 1.15][variant]
                 var height_scale: float = [0.90, 0.78, 0.63][variant]
-                orientation = orientation.scaled(Vector3(width_scale,
-                    height_scale + 0.08 * float(source_index % 5), width_scale))
-                batch.set_instance_transform(local_index, Transform3D(
-                    orientation, _selected_positions[source_index]))
+                var orientation: Basis = sampled.basis.scaled(
+                    Vector3(width_scale, height_scale, width_scale))
+                batch.set_instance_transform(local_index,
+                    Transform3D(orientation, sampled.origin))
                 batch.set_instance_color(local_index, VARIANT_COLORS[variant])
             renderer.multimesh = batch
             renderer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
