@@ -218,6 +218,41 @@ func run(t) -> void:
         t.check(traced.get_ai_trace_snapshot().get("steps", []).is_empty(),
             "stock Godot has a safe empty trace fallback")
 
+    t.current = "Server AI inspector renders real zombie state machine without leaking clients"
+    var visual: Dictionary = traced.get_ai_state_visual_snapshot()
+    var visual_nodes: Array = visual.get("nodes", [])
+    t.eq(int(visual.get("node_count", -1)), 8,
+        "server state-machine inspector exposes root, six states and target selection")
+    t.eq(visual_nodes.size(), 8, "the inspector node count matches the returned hierarchy")
+    if visual_nodes.size() == 8:
+        var visual_root: Dictionary = visual_nodes[0]
+        t.eq(visual_root.get("task_class"), "ZombieStateMachine",
+            "server diagnostics correctly identify the state machine, not a behavior tree")
+        t.eq(visual_root.get("path"), "root", "hierarchy has a stable root path")
+        var active_count := 0
+        for index in range(1, 7):
+            var state_record: Dictionary = visual_nodes[index]
+            if bool(state_record.get("executed", false)):
+                active_count += 1
+                t.eq(index - 1, traced.state,
+                    "only the actual current infected state is highlighted")
+                t.eq(int(state_record.get("status", -1)), 2,
+                    "the alive active zombie state is running")
+        t.eq(active_count, 1, "exactly one authoritative AI state is currently active")
+        var scanned: Dictionary = visual_nodes[7]
+        t.eq(scanned.get("path"), "root/6",
+            "target selection is exposed as its own diagnostic phase")
+        t.eq(bool(scanned.get("executed", false)), native_trace,
+            "only a real native target-selection trace can appear as executed")
+    var visual_debug: Dictionary = traced.get_ai_debug_snapshot().get("visual_tree", {})
+    t.eq(int(visual_debug.get("node_count", -1)), visual_nodes.size(),
+        "existing server diagnostics embed the same private inspector hierarchy")
+    var resting_visual: Dictionary = untraced.get_ai_state_visual_snapshot()
+    t.check(not bool(resting_visual.get("trace_enabled", false)),
+        "inspector does not enable native tracing for unrelated game NPCs")
+    # Inspector data is produced on demand; no client network packet or
+    # automatic per-frame state collection is introduced.
+
     t.current = "Optional per-infected AI profiling is disabled by default"
     t.check(not bool(infected.get_ai_profile_snapshot().get("enabled", false)),
         "ordinary infected do not allocate native timing counters")
