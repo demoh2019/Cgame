@@ -101,7 +101,8 @@ static func interpolate_yaw(from_yaw: float, to_yaw: float,
 	if k <= 0.0 or absf(turn) <= 0.00001:
 		return from_yaw
 	if k >= 1.0:
-		return to_yaw
+		# Equivalent to authoritative yaw modulo TAU without a seam jump.
+		return from_yaw + turn
 	var linear: float = from_yaw + turn * k
 	if not is_finite(snapshot_span) or snapshot_span <= 0.00001 \
 			or snapshot_span > MAX_SAMPLE_SECONDS or absf(turn) > 2.4 \

@@ -41,8 +41,9 @@ double SnapshotRotationSmoothing3D::interpolate_yaw(double p_from_yaw,
 		return p_from_yaw;
 	}
 	if (t >= 1.0) {
-		// Preserve the exact server endpoint (even across 2*pi wrap).
-		return p_to_yaw;
+		// Equivalent to the server yaw modulo 2*pi, but avoid an
+		// artificial full revolution on the exact sample boundary.
+		return p_from_yaw + delta;
 	}
 	const double linear = p_from_yaw + delta * t;
 	// Do not infer angular momentum from a teleport-like abrupt turn,
