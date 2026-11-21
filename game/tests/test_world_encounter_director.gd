@@ -81,7 +81,7 @@ func run(t) -> void:
 			"configured local pressure limits cannot be bypassed")
 		t.eq(int(policy.call("get_spawn_budget", 0, 12, 1.0, 4)), 0,
 			"hard density cap works even for customized encounter policies")
-		policy.free()
+		policy = null # RefCounted: release the temporary, never force free.
 
 	t.current = "nearby infected: only living neighbors count"
 	var enemies: Dictionary = {}

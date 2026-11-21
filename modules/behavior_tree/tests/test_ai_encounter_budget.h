@@ -44,7 +44,9 @@ TEST_CASE("[AIEncounterBudget] Pressure respite can never shorten original recov
 TEST_CASE("[AIEncounterBudget] Invalid state rejects spawns and invalid config rolls back") {
 	Ref<AIEncounterBudget> policy;
 	policy.instantiate();
+	ERR_PRINT_OFF;
 	CHECK_FALSE(policy->configure_limits(10, 8, 12, 20, 7, 10, 3));
+	ERR_PRINT_ON;
 	CHECK(policy->get_global_limit() == 150);
 	CHECK(policy->configure_limits(300, 4, 6, 12, 3, 7, 4));
 	CHECK(policy->get_global_limit() == 300);
