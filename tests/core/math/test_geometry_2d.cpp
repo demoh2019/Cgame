@@ -38,6 +38,59 @@ TEST_FORCE_LINK(test_geometry_2d)
 namespace TestGeometry2D {
 
 
+
+TEST_CASE("[CoreBind] Geometry2D heightfield gradients match central differences") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+	Vector<float> heights;
+	heights.resize(12);
+	for (int y = 0; y < 3; y++) {
+		for (int x = 0; x < 4; x++) {
+			heights.set(y * 4 + x, float(2 * x + 3 * y));
+		}
+	}
+	Vector<Vector2> gradients = api->heightfield_gradients(heights, Vector2i(4, 3), 1.0);
+	REQUIRE(gradients.size() == 12);
+	CHECK(gradients[1 * 4 + 1].is_equal_approx(Vector2(2, 3)));
+	CHECK(gradients[1 * 4 + 0].is_equal_approx(Vector2(1, 3)));
+	CHECK(gradients[1 * 4 + 3].is_equal_approx(Vector2(1, 3)));
+	CHECK(gradients[0 * 4 + 1].is_equal_approx(Vector2(2, 1.5)));
+	CHECK(gradients[2 * 4 + 1].is_equal_approx(Vector2(2, 1.5)));
+	CHECK(gradients[0].is_equal_approx(Vector2(1, 1.5)));
+	CHECK(heights[5] == 5.0f); // Never mutate the source samples.
+
+	gradients = api->heightfield_gradients(heights, Vector2i(4, 3), 2.0);
+	REQUIRE(gradients.size() == 12);
+	CHECK(gradients[5].is_equal_approx(Vector2(1.0, 1.5)));
+
+	Vector<float> one;
+	one.push_back(42.0f);
+	gradients = api->heightfield_gradients(one, Vector2i(1, 1), 3.0);
+	REQUIRE(gradients.size() == 1);
+	CHECK(gradients[0] == Vector2());
+
+	Vector<float> flat;
+	flat.resize(8);
+	for (int i = 0; i < 8; i++) {
+		flat.set(i, 14.0f);
+	}
+	gradients = api->heightfield_gradients(flat, Vector2i(2, 4), 1.0);
+	REQUIRE(gradients.size() == 8);
+	for (int i = 0; i < 8; i++) {
+		CHECK(gradients[i] == Vector2());
+	}
+	ERR_PRINT_OFF;
+	CHECK(api->heightfield_gradients(heights, Vector2i(3, 3), 1.0).is_empty());
+	CHECK(api->heightfield_gradients(heights, Vector2i(0, 3), 1.0).is_empty());
+	CHECK(api->heightfield_gradients(heights, Vector2i(2049, 1), 1.0).is_empty());
+	CHECK(api->heightfield_gradients(heights, Vector2i(4, 3), 0.0).is_empty());
+	CHECK(api->heightfield_gradients(heights, Vector2i(4, 3), -1.0).is_empty());
+	Vector<float> invalid = heights;
+	invalid.set(2, Math_INF);
+	CHECK(api->heightfield_gradients(invalid, Vector2i(4, 3), 1.0).is_empty());
+	ERR_PRINT_ON;
+}
+
 TEST_CASE("[CoreBind] Geometry2D binary 8-connected distance transform") {
 	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
 	REQUIRE(api != nullptr);

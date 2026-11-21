@@ -16,6 +16,7 @@ const GrassField = preload("res://scripts/client/grass_field.gd")
 const GradientBatch = preload("res://scripts/client/gradient_batch.gd")
 const ImageBatch = preload("res://scripts/client/image_batch.gd")
 const MaskDistanceField = preload("res://scripts/client/mask_distance_field.gd")
+const HeightfieldGradients = preload("res://scripts/client/heightfield_gradients.gd")
 const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 const ExpeditionAtlas = preload("res://scripts/shared/expedition_atlas.gd")
 
@@ -57,6 +58,7 @@ var _heights := PackedFloat32Array()
 var _biomes := PackedByteArray()
 var _lush := PackedFloat32Array()
 var _shore_distances := PackedByteArray()
+var _height_slopes := PackedVector2Array()
 var _sampled_rows := 0
 var _painted_rows := 0
 var _sites: Array = []
@@ -89,6 +91,7 @@ func setup(p_client) -> void:
 	_biomes.resize(PIXELS * PIXELS)
 	_lush.resize(PIXELS * PIXELS)
 	_shore_distances = PackedByteArray()
+	_height_slopes = PackedVector2Array()
 	var serif := SystemFont.new()
 	serif.font_names = PackedStringArray(["Georgia", "Palatino", "Book Antiqua", "Times New Roman", "Liberation Serif", "serif"])
 	serif.font_weight = 600
@@ -253,6 +256,11 @@ func _process(delta: float) -> void:
 		if _shore_distances.is_empty():
 			_shore_distances = MaskDistanceField.from_heights(
 					_heights, Vector2i(PIXELS, PIXELS), Defs.WATER_LEVEL - 0.4, 7)
+		# Landscape gradients are also generated once after sampling. Reuse
+		# their dx/dy for all hillshade pixels instead of repeated _h reads.
+		if _height_slopes.is_empty():
+			_height_slopes = HeightfieldGradients.compute(
+					_heights, Vector2i(PIXELS, PIXELS), step)
 		var painted := 0
 		while painted < PAINT_ROWS_PER_FRAME and _painted_rows < PIXELS:
 			_paint_row(_painted_rows)
@@ -279,7 +287,6 @@ func _shore_distance(x: int, y: int) -> int:
 
 
 func _paint_row(row: int) -> void:
-	var cell: float = SPAN / float(PIXELS)
 	var zenith := deg_to_rad(45.0)
 	var azimuth := deg_to_rad(135.0) # 315° compass (north-west) in maths angles.
 	# Compute coast/depth samples once, then evaluate the entire water-color ramp
@@ -318,9 +325,11 @@ func _paint_row(row: int) -> void:
 				color = color.lerp(STEPPE, clampf(0.75 - _lush[row * PIXELS + column] * 1.1, 0.0, 0.8))
 			if h > 90.0:
 				color = color.lerp(SNOW, clampf((h - 90.0) / 30.0, 0.0, 1.0))
-			# Hillshade (Horn-style central differences), exaggerated ×3 so hills read on a small map.
-			var dzdx: float = (_h(column + 1, row) - _h(column - 1, row)) / (2.0 * cell)
-			var dzdy: float = (_h(column, row + 1) - _h(column, row - 1)) / (2.0 * cell)
+			# Precomputed central-difference slope, exaggerated ×3 to keep
+			# the parchment hillshade art direction on this small chart.
+			var gradient: Vector2 = _height_slopes[row * PIXELS + column]
+			var dzdx: float = gradient.x
+			var dzdy: float = gradient.y
 			var slope: float = atan(3.0 * sqrt(dzdx * dzdx + dzdy * dzdy))
 			var aspect: float = atan2(dzdy, -dzdx)
 			var shade: float = maxf(cos(zenith) * cos(slope) + sin(zenith) * sin(slope) * cos(azimuth - aspect), 0.0)

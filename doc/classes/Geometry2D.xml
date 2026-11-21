@@ -94,6 +94,17 @@
 				Returns an empty dictionary for an empty set, an odd number of endpoints, a nonfinite coordinate or more than 32768 segments. Values are checked before any search. This is a linear CPU search; callers handling many queries should partition segments spatially.
 			</description>
 		</method>
+		<method name="heightfield_gradients">
+			<return type="PackedVector2Array" />
+			<param index="0" name="heights" type="PackedFloat32Array" />
+			<param index="1" name="size" type="Vector2i" />
+			<param index="2" name="cell_spacing" type="float" />
+			<description>
+				Cgame extension: computes the two first-order height derivatives for a row-major, regularly spaced heightmap. Returns one [Vector2] per sample: its X component is [code]dheight/dx[/code] and its Y component is [code]dheight/dy[/code]. Each component uses centered differences between adjacent samples, divided by twice [param cell_spacing]. Neighbor coordinates are clamped to the image edge, so outermost samples use the repeated border height and have half the corresponding one-sided slope. Dimensions of 1 are supported, producing zero derivative along that axis.
+				The gradient can be converted to a normalized terrain-facing normal using [code]Vector3(-gradient.x, 1, -gradient.y).normalized()[/code], or used directly for hillshade, slope filtering and procedural landscape masks. This is a CPU-only utility (not a normal-map image encoder or a GPU terrain renderer).
+				[code]size.x[/code] and [code]size.y[/code] must be in the range 1–2048, and [param heights] must contain exactly [code]size.x * size.y[/code] finite values. [param cell_spacing] and its half inverse must be positive, finite and representable. Invalid input or non-representable output gradients returns an empty array. The source heightmap remains unchanged.
+			</description>
+		</method>
 		<method name="distance_transform_8">
 			<return type="PackedByteArray" />
 			<param index="0" name="mask" type="PackedByteArray" />
