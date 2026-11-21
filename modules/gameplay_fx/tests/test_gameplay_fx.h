@@ -227,4 +227,59 @@ TEST_CASE("[GameplayFX] timeline atomic snapshot rollback and validation") {
 	CHECK(timeline->replace_snapshot(cleared));
 	CHECK(timeline->is_empty());
 }
+TEST_CASE("[GameplayFX] timeline scoped snapshot preserves local timers and rolls back") {
+	Ref<GameplayEffectTimeline> timeline;
+	timeline.instantiate();
+	CHECK(timeline->set_effect("Local.Visual.Hit", 0.25, 1));
+	CHECK(timeline->set_effect("Runtime.Status.Staggered", 3.0, 1));
+	CHECK(timeline->set_effect("RuntimeExtra.Keep", 5.0, 2));
+
+	Dictionary resolve;
+	resolve["remaining"] = 4.0;
+	resolve["stacks"] = 3;
+	Dictionary snapshot;
+	snapshot[StringName("Runtime.Status.Resolve")] = resolve;
+	CHECK(timeline->replace_effect_branch("Runtime", snapshot));
+	CHECK(timeline->get_effect_count() == 3);
+	CHECK(timeline->get_remaining("Runtime.Status.Staggered") == 0.0);
+	CHECK(timeline->get_remaining("Runtime.Status.Resolve") == doctest::Approx(4.0));
+	CHECK(timeline->get_stacks("Runtime.Status.Resolve") == 3);
+	CHECK(timeline->get_remaining("RuntimeExtra.Keep") == doctest::Approx(5.0));
+	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(0.25));
+
+	Dictionary before = timeline->get_snapshot();
+	Dictionary invalid = snapshot.duplicate(true);
+	invalid["Outside.Escaped"] = resolve;
+	CHECK_FALSE(timeline->replace_effect_branch("Runtime", invalid));
+	invalid.erase("Outside.Escaped");
+	Dictionary bad;
+	bad["remaining"] = Math::NaN;
+	bad["stacks"] = 1;
+	invalid["Runtime.Status.Frozen"] = bad;
+	CHECK_FALSE(timeline->replace_effect_branch("Runtime", invalid));
+	bad["remaining"] = 2.0;
+	bad["stacks"] = 0;
+	invalid["Runtime.Status.Frozen"] = bad;
+	CHECK_FALSE(timeline->replace_effect_branch("Runtime", invalid));
+	bad["stacks"] = 65536;
+	invalid["Runtime.Status.Frozen"] = bad;
+	CHECK_FALSE(timeline->replace_effect_branch("Runtime", invalid));
+	CHECK_FALSE(timeline->replace_effect_branch("Runtime..Bad", snapshot));
+	CHECK_FALSE(timeline->replace_effect_branch("", snapshot));
+	CHECK(timeline->get_snapshot() == before);
+
+	Dictionary duplicate;
+	duplicate[String("Runtime.Status.Resolve")] = resolve;
+	duplicate[StringName("Runtime.Status.Resolve")] = resolve;
+	CHECK_FALSE(timeline->replace_effect_branch("Runtime", duplicate));
+	CHECK(timeline->get_stacks("Runtime.Status.Resolve") == 3);
+	CHECK(timeline->replace_effect_branch("Runtime", snapshot));
+	CHECK(timeline->tick(0.1).is_empty());
+	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(0.15));
+	CHECK(timeline->replace_effect_branch("Runtime", Dictionary()));
+	CHECK(timeline->get_remaining("Runtime.Status.Resolve") == 0.0);
+	CHECK(timeline->get_remaining("RuntimeExtra.Keep") == doctest::Approx(4.9));
+	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(0.15));
+}
+
 } // namespace TestGameplayFX
