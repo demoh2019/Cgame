@@ -671,6 +671,11 @@ void WorldStreamer::_reset_state() {
 	pending_visual_details.clear();
 	last_queued_view_direction = Vector3();
 	truncated_warned = false;
+	streaming_frame_pressure = 0.0;
+	frame_chunk_work_usec = 0;
+	last_frame_chunk_work_usec = 0;
+	frame_chunk_attempt_count = 0;
+	last_frame_chunk_attempt_count = 0;
 	time_since_update = 1e9;
 }
 
