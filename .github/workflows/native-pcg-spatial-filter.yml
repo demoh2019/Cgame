@@ -75,7 +75,7 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 240s "$BIN" --headless --test --test-case="*PCGPolylineSampler3D*" --no-colors 2>&1 | tee pcg-polyline-native.log
-      - name: Native foliage scalability density tests
+      - name: Native foliage density and per-instance geometry LOD tests
         run: |
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
@@ -106,6 +106,13 @@ jobs:
           timeout 180s "$BIN" --headless --path games/days_after --script res://pcg_weighted_variants_smoke_test.gd 2>&1 | tee pcg-weighted-game.log
           grep -F 'PCG WEIGHTED VARIANTS TOTAL: 0 failures' pcg-weighted-game.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-weighted-game.log; then exit 1; fi
+      - name: Days After native and fallback per-instance geometry LOD tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path games/days_after --script res://pcg_instance_lod_smoke_test.gd 2>&1 | tee pcg-instance-lod-game.log
+          grep -F 'PCG INSTANCE LOD TOTAL: 0 failures' pcg-instance-lod-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-instance-lod-game.log; then exit 1; fi
       - name: Run native exclusion-volume gameplay smoke
         run: |
           set -euo pipefail
@@ -129,6 +136,7 @@ jobs:
           path: |
             pcg-native.log
             pcg-foliage-scalability-native.log
+            pcg-instance-lod-game.log
             pcg-weighted-native.log
             pcg-polyline-native.log
             pcg-weighted-game.log
