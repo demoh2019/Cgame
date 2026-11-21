@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/variant/typed_array.h"
 #include "scene/resources/mesh.h"
 #include "servers/rendering/rendering_server_enums.h"
 
@@ -110,6 +111,8 @@ public:
 	PhysicsInterpolationQuality get_physics_interpolation_quality() const { return _physics_interpolation_quality; }
 
 	void set_instance_transform(int p_instance, const Transform3D &p_transform);
+	// Sparse prevalidated transforms for pooled and authoritative game entities.
+	bool set_instance_transforms_batch(const PackedInt32Array &p_indices, const TypedArray<Transform3D> &p_transforms);
 	void set_instance_transform_2d(int p_instance, const Transform2D &p_transform);
 	Transform3D get_instance_transform(int p_instance) const;
 	Transform2D get_instance_transform_2d(int p_instance) const;

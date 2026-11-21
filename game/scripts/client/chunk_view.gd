@@ -21,6 +21,7 @@ const TerrainHorizonAO = preload("res://scripts/client/terrain_horizon_ao.gd")
 const TerrainAnisotropy = preload("res://scripts/client/terrain_anisotropy.gd")
 const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
+const ResourceMultiMeshUpdates = preload("res://scripts/client/multimesh_resource_updates.gd")
 const DecorStreamingPolicy = preload("res://scripts/client/decor_streaming_policy.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
@@ -1822,17 +1823,33 @@ func apply_state(hidden_ids: Dictionary) -> void:
 	var changed := false
 	for kind in _groups:
 		var group: Dictionary = _groups[kind]
+		var slots := PackedInt32Array()
+		var transforms: Array[Transform3D] = []
+		var changed_ids: Dictionary = {}
 		for id in group["index"]:
 			var should_hide: bool = hidden_ids.has(id)
 			if should_hide == _hidden.has(id):
 				continue
-			changed = true
-			var i: int = group["index"][id]
-			if should_hide:
+			var slot: int = group["index"][id]
+			var original: Transform3D = group["transforms"][slot]
+			slots.append(slot)
+			transforms.append(Transform3D(Basis().scaled(Vector3.ONE * 0.001), original.origin)
+				if should_hide else original)
+			changed_ids[id] = should_hide
+		if slots.is_empty():
+			continue
+		# One native scripting call per changed chunk MultiMesh, not one
+		# call per resource. Stock Godot uses an equally safe fallback.
+		if not ResourceMultiMeshUpdates.apply(group["multimesh"], slots, transforms):
+			push_warning("Cannot apply resource state batch for: %s" % str(kind))
+			continue
+		# Only commit server ID visibility cache after the renderer accepted
+		# this group. Keep successful groups independent of failed groups.
+		for id in changed_ids:
+			if changed_ids[id]:
 				_hidden[id] = true
-				group["multimesh"].set_instance_transform(i, Transform3D(Basis().scaled(Vector3.ONE * 0.001), group["transforms"][i].origin))
 			else:
 				_hidden.erase(id)
-				group["multimesh"].set_instance_transform(i, group["transforms"][i])
+		changed = true
 	if changed and _terrain != null:
 		_refresh_ground_contact()

@@ -325,6 +325,35 @@ void MultiMesh::set_physics_interpolation_quality(PhysicsInterpolationQuality p_
 	RenderingServer::get_singleton()->multimesh_set_physics_interpolation_quality(multimesh, (RSE::MultimeshPhysicsInterpolationQuality)p_quality);
 }
 
+bool MultiMesh::set_instance_transforms_batch(const PackedInt32Array &p_indices, const TypedArray<Transform3D> &p_transforms) {
+	ERR_FAIL_COND_V_MSG(transform_format != TRANSFORM_3D, false, "Sparse transform batches require 3D MultiMesh format.");
+	ERR_FAIL_COND_V_MSG(p_indices.size() != p_transforms.size(), false, "Indices and transforms must have equal lengths.");
+	if (p_indices.is_empty()) {
+		return true;
+	}
+
+	// Validate the complete request before touching any RenderingServer state.
+	PackedInt32Array sorted = p_indices;
+	sorted.sort();
+	for (int i = 0; i < sorted.size(); i++) {
+		ERR_FAIL_INDEX_V_MSG(sorted[i], instance_count, false, "Sparse transform index is out of bounds.");
+		if (i > 0) {
+			ERR_FAIL_COND_V_MSG(sorted[i] == sorted[i - 1], false, "Sparse transform indices must be unique.");
+		}
+	}
+	for (int i = 0; i < p_transforms.size(); i++) {
+		const Transform3D transform = p_transforms[i];
+		ERR_FAIL_COND_V_MSG(!transform.is_finite(), false, "Sparse instance transforms must be finite.");
+	}
+
+	// One script-to-engine entry point; still K RenderingServer updates.
+	for (int i = 0; i < p_indices.size(); i++) {
+		const Transform3D transform = p_transforms[i];
+		RenderingServer::get_singleton()->multimesh_instance_set_transform(multimesh, p_indices[i], transform);
+	}
+	return true;
+}
+
 void MultiMesh::set_instance_transform(int p_instance, const Transform3D &p_transform) {
 	ERR_FAIL_INDEX_MSG(p_instance, instance_count, "Instance index out of bounds. Instance index must be less than `instance_count` and greater than or equal to zero.");
 	ERR_FAIL_COND_MSG(transform_format == TRANSFORM_2D, "Can't set Transform3D on a Multimesh configured to use Transform2D. Ensure that you have set the `transform_format` to `TRANSFORM_3D`.");
@@ -449,6 +478,7 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_physics_interpolation_quality", "quality"), &MultiMesh::set_physics_interpolation_quality);
 	ClassDB::bind_method(D_METHOD("get_physics_interpolation_quality"), &MultiMesh::get_physics_interpolation_quality);
 	ClassDB::bind_method(D_METHOD("set_instance_transform", "instance", "transform"), &MultiMesh::set_instance_transform);
+	ClassDB::bind_method(D_METHOD("set_instance_transforms_batch", "indices", "transforms"), &MultiMesh::set_instance_transforms_batch);
 	ClassDB::bind_method(D_METHOD("set_instance_transform_2d", "instance", "transform"), &MultiMesh::set_instance_transform_2d);
 	ClassDB::bind_method(D_METHOD("get_instance_transform", "instance"), &MultiMesh::get_instance_transform);
 	ClassDB::bind_method(D_METHOD("get_instance_transform_2d", "instance"), &MultiMesh::get_instance_transform_2d);
