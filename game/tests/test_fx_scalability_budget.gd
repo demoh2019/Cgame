@@ -52,6 +52,18 @@ func run(t) -> void:
 						FxPolicy.select_indices(distances, priorities, categories, quality),
 						"native parity quality %d sample %d" % [quality, sample])
 
+
+	t.current = "game graphics tier scales total resident pool, not active effects"
+	for quality in 4:
+		t.check(FxPolicy.pool_resident_target(quality) > 0,
+			"graphics tier %d has a bounded resident target" % quality)
+		t.check(FxPolicy.pool_changes_per_frame(quality) <= 2,
+			"graphics tier %d never performs more than two operations per frame" % quality)
+	t.eq(FxPolicy.pool_resident_target(-1), 2, "Performance target clamps")
+	t.eq(FxPolicy.pool_resident_target(99), 12, "Ultra target clamps")
+	t.eq(FxPolicy.pool_changes_per_frame(0), 1, "Performance spreads allocations one per frame")
+	t.eq(FxPolicy.pool_changes_per_frame(3), 2, "Ultra spreads allocations two per frame")
+
 	t.current = "Albion After enqueues bounded cosmetic nodes"
 	var fx := Effects.new()
 	fx.burst(Vector3.ZERO, Color.WHITE, 10)
