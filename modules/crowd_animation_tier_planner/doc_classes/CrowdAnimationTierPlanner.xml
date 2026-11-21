@@ -7,6 +7,21 @@
 		Invalid inputs, mismatched sizes, non-finite or negative distances, or out-of-range budgets return an empty result. Budgets must be from 0 to 256.
 	</description>
 	<methods>
+		<method name="plan_visible_tiers_costed" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priority_flags" type="PackedByteArray" />
+			<param index="2" name="visible_flags" type="PackedByteArray" />
+			<param index="3" name="retained_full_flags" type="PackedByteArray" />
+			<param index="4" name="full_pose_cost_us" type="PackedInt32Array" />
+			<param index="5" name="full_budget" type="int" />
+			<param index="6" name="priority_budget" type="int" />
+			<param index="7" name="full_pose_budget_us" type="int" />
+			<param index="8" name="hysteresis" type="float" default="1.5" />
+			<description>
+				An optional, additional estimated CPU-time cap on the visible tier-0 procedural IK winners already selected by [method plan_visible_tiers_stable]. Selected winners are visited in retained effective-distance order. A winner that does not fit the remaining [param full_pose_budget_us] is demoted to tier 1 (full-rate base animation without optional IK/head-look). Its slot is not refilled by a less significant character; this conservative policy prevents an extra full-crowd selection pass. Combat-priority tiers are never demoted by this CPU cap. [param full_pose_cost_us] must match the other array lengths and contain estimates from 0 through 100,000 microseconds; zero is an unsampled actor and uses a 100-microsecond fallback estimate. [param full_pose_budget_us] must be 0 through 1,000,000 microseconds, with zero disabling the extra cap entirely. All other validation, visibility, hysteresis and per-tier slot limits are inherited from [method plan_visible_tiers_stable]. The caller measures costs and executes animation; this pure-data planner does not enforce a hard frame deadline or sample native/GPU animation cost.
+			</description>
+		</method>
 		<method name="plan_visible_tiers_stable" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="distances" type="PackedFloat64Array" />
