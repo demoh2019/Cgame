@@ -36,6 +36,7 @@ var inventory: WorldInventory3D
 var inventory_panel: PanelContainer
 var inventory_label: Label
 var inventory_feedback: Label
+var equipped_lantern: OmniLight3D
 var interaction_router: WorldInteractionRouter3D
 var interaction_label: Label
 var interaction_result_label: Label
@@ -159,6 +160,7 @@ func _ready() -> void:
 	add_child(interaction_router)
 	_build_interaction_ui()
 	_build_inventory_ui()
+	_build_equipped_lantern()
 	_on_quest_progress(quest.collected_count(), quest.positions.size())
 	_on_quest_hint(quest.current_hint())
 
@@ -238,6 +240,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_craft_inventory_item("spark_core")
 			KEY_J:
 				_craft_inventory_item("forest_lantern")
+			KEY_T:
+				_toggle_equipped_lantern()
 
 
 func _build_graphics_ui() -> void:
@@ -564,7 +568,7 @@ func _build_inventory_ui() -> void:
 	var column: VBoxContainer = VBoxContainer.new()
 	inventory_panel.add_child(column)
 	var heading: Label = Label.new()
-	heading.text = "ИНВЕНТАРЬ  |  I закрыть"
+	heading.text = "ИНВЕНТАРЬ  |  I закрыть  |  T фонарь"
 	column.add_child(heading)
 	inventory_label = Label.new()
 	column.add_child(inventory_label)
@@ -607,6 +611,33 @@ func _craft_inventory_item(recipe_id: String) -> void:
 		inventory_feedback.text = ("Создано: %s" % ItemCatalog.item_name(recipe_id)
 			if succeeded else "Не хватает материалов или места")
 	_update_inventory_ui()
+
+
+func _build_equipped_lantern() -> void:
+	# Crafted equipment has an immediate gameplay use: localized warm light.
+	# Shadows are disabled here to avoid a second shadow-rendering cost.
+	equipped_lantern = OmniLight3D.new()
+	equipped_lantern.name = "CraftedForestLantern"
+	equipped_lantern.light_color = Color(1.0, 0.72, 0.35)
+	equipped_lantern.light_energy = 1.3
+	equipped_lantern.omni_range = 10.0
+	equipped_lantern.shadow_enabled = false
+	equipped_lantern.position = Vector3(0.4, -0.4, -0.8)
+	player_character.get_view_camera().add_child(equipped_lantern)
+	equipped_lantern.visible = false
+
+
+func _toggle_equipped_lantern() -> void:
+	if not is_instance_valid(equipped_lantern):
+		return
+	if inventory.get_count("forest_lantern") <= 0:
+		if is_instance_valid(inventory_feedback):
+			inventory_feedback.text = "Сначала создайте лесной фонарь"
+		return
+	equipped_lantern.visible = not equipped_lantern.visible
+	if is_instance_valid(inventory_feedback):
+		inventory_feedback.text = ("Лесной фонарь: ВКЛ" if equipped_lantern.visible
+			else "Лесной фонарь: ВЫКЛ")
 
 
 func _build_world() -> void:
