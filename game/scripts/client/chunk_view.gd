@@ -1725,10 +1725,14 @@ func _anchored_spots(entry: Dictionary, anchors: Array, origin: Vector2, rng: Ra
 			var at: Vector2 = anchor + Vector2.from_angle(rng.randf() * TAU) * lerpf(float(ring[0]), float(ring[1]), rng.randf())
 			if at.x < origin.x or at.y < origin.y or at.x >= origin.x + Defs.CHUNK_SIZE or at.y >= origin.y + Defs.CHUNK_SIZE:
 				continue
-			if _world.is_water(at.x, at.y) or not (_world.biome_at(at.x, at.y) in entry["biomes"]) or _on_road(road_pieces, at, road_clear):
+			if _world.is_water(at.x, at.y) or not (_world.biome_at(at.x, at.y) in entry["biomes"]):
 				continue
 			spots.append(at)
-	return spots
+	# All seeded candidate draws are complete before the native batch
+	# corridor filter. The old strict road boundary remains unchanged and
+	# no other chunk categories or authoritative game systems are affected.
+	return SceneryBatches.filter_cosmetic_spots_outside_roads(
+		spots, road_pieces, road_clear)
 
 
 func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary) -> void:

@@ -19,10 +19,18 @@ protected:
 public:
 	static constexpr int MAX_CANDIDATES = 16384;
 	static constexpr int MAX_PATH_POINTS = 256;
+	static constexpr int MAX_CORRIDOR_SEGMENTS = 256;
 	static constexpr double MAX_COORDINATE = 10000000.0;
 	static constexpr double MAX_RADIUS = 10000.0;
 
 	PackedFloat32Array sample_factors(const PackedVector3Array &p_positions,
 			const PackedVector3Array &p_path_points, double p_inner_radius,
 			double p_outer_radius) const;
+
+	// Independent line segments (pairs of endpoints); horizontally exclude
+	// points strictly inside the road corridor, preserving boundary points.
+	// Returns stable source indices; empty segments keep all valid candidates.
+	PackedInt32Array filter_indices_outside_segments(const PackedVector3Array &p_candidates,
+			const PackedVector3Array &p_segment_endpoints, double p_clearance,
+			int p_max_selected = MAX_CANDIDATES) const;
 };
