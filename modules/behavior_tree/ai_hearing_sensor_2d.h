@@ -42,6 +42,8 @@ class AIHearingSensor2D : public RefCounted {
 	real_t memory_duration = 3.0;
 	real_t memory_remaining = 0.0;
 	real_t last_heard_loudness = 0.0;
+	// Normalized perceived strength [0, 1] for optional ranked sound memory.
+	real_t last_heard_strength = 0.0;
 	Vector2 last_heard_position;
 
 protected:
@@ -58,10 +60,14 @@ public:
 	// occlusion factor [0, 1] is chosen by the game for its world geometry.
 	// Returns whether this listener perceived the reported event.
 	bool report_noise(const Vector2 &p_listener, const Vector2 &p_source, real_t p_loudness, real_t p_occlusion = 1.0);
+	// Opt-in: prefer the clearest audible source rather than the latest event.
+	// A weaker sound is heard (true) but does not overwrite stronger memory.
+	bool report_noise_ranked(const Vector2 &p_listener, const Vector2 &p_source, real_t p_loudness, real_t p_occlusion = 1.0);
 	void advance_time(real_t p_delta);
 	bool has_sound_memory() const;
 	Vector2 get_last_heard_position() const;
 	real_t get_last_heard_loudness() const;
+	real_t get_last_heard_strength() const;
 	real_t get_memory_remaining() const;
 	void reset();
 };
