@@ -39,6 +39,8 @@ var last_known_target: Vector2
 var investigate_time: float = 0.0
 const INVESTIGATE_SECONDS := 4.0
 var think_timer: float = 0.0
+var ai_selection_allowed: bool = true # Server-only scheduling hint; never affects damage/movement.
+var _ai_has_selected_once: bool = false
 var attack_timer: float = 0.0
 var spit_pending: bool = false # Delayed ground attack, only for "spitter".
 var spit_seconds: float = 0.0
@@ -176,9 +178,14 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 			return {"spit_impact": true, "x": spit_center.x, "z": spit_center.y}
 		return {}
 
-	# Pick or drop a target a few times a second, not every tick.
-	if think_timer <= 0.0:
+	# Large crowds may distribute expensive scans across stable server ticks.
+	# Initial acquisition, active combat threat, guardian taunts and overdue
+	# scans bypass the slot gate; normal movement and combat always continue.
+	if think_timer <= 0.0 and (ai_selection_allowed or not _ai_has_selected_once
+			or forced_target_seconds > 0.0 or not threat.is_empty()
+			or think_timer <= -0.2):
 		think_timer = 0.25
+		_ai_has_selected_once = true
 		if _ai_profiler != null and _ai_profiler.is_enabled():
 			_ai_profiler.begin_sample(&"target_selection")
 		_select_target(world, players, here)
