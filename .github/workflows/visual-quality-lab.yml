@@ -69,7 +69,11 @@ jobs:
             res://tests/test_streaming_cell_profiler.gd \
             res://tests/test_predictive_streaming_runtime.gd \
             res://tests/test_world_interaction.gd \
-            res://tests/test_world_interaction_runtime.gd; do
+            res://tests/test_world_interaction_runtime.gd \
+            res://tests/test_inventory_component.gd \
+            res://tests/test_inventory_crafting.gd \
+            res://tests/test_inventory_persistence.gd \
+            res://tests/test_inventory_gameplay.gd; do
             /tmp/godot-bin/Godot_v4.6.3-stable_linux.x86_64 --headless --path . --script "$script"
           done
 
