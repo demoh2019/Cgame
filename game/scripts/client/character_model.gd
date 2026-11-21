@@ -499,6 +499,11 @@ func _setup_procedural(model: Node3D) -> void:
 	var modifier := AnimModifier.new()
 	modifier.name = "ProceduralAnim"
 	modifier.body = self
+	# Opt into engine-wide SkeletonModifier work-unit profiling only on
+	# supported Cgame builds. The script-local stopwatch remains as fallback.
+	if modifier.has_method("set_modifier_profiling_enabled"):
+		modifier.use_engine_profile_timing = true
+		modifier.call("set_modifier_profiling_enabled", _lod_tier == 0 and not _dead)
 	(skeleton[0] as Skeleton3D).add_child(modifier)
 	_procedural = modifier
 	_layer = AnimationPlayer.new()
@@ -545,7 +550,13 @@ func set_anim_lod(tier: int) -> void:
 	# scripted modifier; otherwise it runs expensive terrain callbacks even
 	# when crowd budgeting has already demoted this actor.
 	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier):
-		_native_foot_modifier.set("active", tier == 0 and not _dead)
+		var full_native_ik: bool = tier == 0 and not _dead
+		_native_foot_modifier.set("active", full_native_ik)
+		if _native_foot_modifier.has_method("set_modifier_profiling_enabled"):
+			_native_foot_modifier.call("set_modifier_profiling_enabled", full_native_ik)
+	if _procedural != null:
+		if _procedural.has_method("set_modifier_profiling_enabled"):
+			_procedural.call("set_modifier_profiling_enabled", tier == 0 and not _dead)
 	if _procedural != null and not _dead:
 		_procedural.set("foot_ik", tier == 0 and not _native_feet) # Native FootPlacementModifier3D wins when present.
 		_procedural.set("look_at_enabled", tier == 0)
@@ -564,11 +575,41 @@ func anim_lod_tier() -> int:
 ## core animation playback. Older engines simply report zero native samples.
 func estimated_full_pose_cost_us() -> int:
 	var script_us: int = int(_procedural.get("estimated_full_pose_us")) if _procedural != null else 0
+	# Use native SkeletonModifier measurements only after a real completed
+	# sample, not just because the method exists. Never sum both clocks
+	# from the same modifier.
+	if _procedural != null and _procedural.has_method("get_modifier_profile_sample_count") and \
+			int(_procedural.call("get_modifier_profile_sample_count")) > 0:
+		script_us = int(_procedural.call("get_modifier_estimated_update_us"))
 	var native_us: int = 0
-	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier) and \
-			_native_foot_modifier.has_method("get_estimated_process_cost_us"):
-		native_us = int(_native_foot_modifier.call("get_estimated_process_cost_us"))
+	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier):
+		if _native_foot_modifier.has_method("get_modifier_profile_sample_count") and \
+				int(_native_foot_modifier.call("get_modifier_profile_sample_count")) > 0:
+			native_us = int(_native_foot_modifier.call("get_modifier_estimated_update_us"))
+		elif _native_foot_modifier.has_method("get_estimated_process_cost_us"):
+			# Older Cgame engines expose only the FootPlacement-specific clock.
+			native_us = int(_native_foot_modifier.call("get_estimated_process_cost_us"))
 	return clampi(maxi(script_us, 0) + maxi(native_us, 0), 0, 100000)
+
+
+## Developer diagnostics: last and EMA update costs, by actual modifier.
+## No scene walks, timers, or allocations are made until explicitly called.
+func animation_modifier_profile() -> Dictionary:
+	var result := {}
+	if _procedural != null and _procedural.has_method("get_modifier_profile_sample_count"):
+		result["script"] = {
+			"last_us": _procedural.call("get_modifier_last_update_us"),
+			"estimated_us": _procedural.call("get_modifier_estimated_update_us"),
+			"samples": _procedural.call("get_modifier_profile_sample_count")
+		}
+	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier) and \
+			_native_foot_modifier.has_method("get_modifier_profile_sample_count"):
+		result["foot_placement"] = {
+			"last_us": _native_foot_modifier.call("get_modifier_last_update_us"),
+			"estimated_us": _native_foot_modifier.call("get_modifier_estimated_update_us"),
+			"samples": _native_foot_modifier.call("get_modifier_profile_sample_count")
+		}
+	return result
 
 
 func _track_yaw(delta: float) -> void:
@@ -845,7 +886,13 @@ func enable_foot_placement(height_at: Callable) -> bool:
 		_native_foot_modifier = existing
 		_native_feet = true
 		existing.set("ground_height_callback", height_at)
-		if existing.has_method("set_profiling_enabled"):
+		if existing.has_method("set_modifier_profiling_enabled"):
+			# The shared wrapper measures this whole native pass; the old
+			# FootPlacement-specific clock must not run at the same time.
+			existing.call("set_modifier_profiling_enabled", _lod_tier == 0 and not _dead)
+			if existing.has_method("set_profiling_enabled"):
+				existing.call("set_profiling_enabled", false)
+		elif existing.has_method("set_profiling_enabled"):
 			existing.call("set_profiling_enabled", true)
 		existing.set("active", _lod_tier == 0 and not _dead)
 		if _procedural != null:
@@ -863,7 +910,9 @@ func enable_foot_placement(height_at: Callable) -> bool:
 	modifier.call("add_leg", "thigh_r", "calf_r", "foot_r", 0.0)
 	# The profiler is optional on older Cgame builds. Avoid measuring on
 	# projects not explicitly opting in.
-	if modifier.has_method("set_profiling_enabled"):
+	if modifier.has_method("set_modifier_profiling_enabled"):
+		modifier.call("set_modifier_profiling_enabled", _lod_tier == 0 and not _dead)
+	elif modifier.has_method("set_profiling_enabled"):
 		modifier.call("set_profiling_enabled", true)
 	skeleton.add_child(modifier)
 	_native_foot_modifier = modifier as Node
