@@ -65,7 +65,7 @@ func run(t) -> void:
 		var native_stacks: Object = actor.get_meta("tag_stacks") as Object
 		t.check(native_stacks != null, "counted tag container attached to rendered actor")
 		if native_stacks != null:
-			t.eq(int(native_stacks.call("get_stack_count", StringName("Runtime.Status"), false)), 4,
+			t.eq(int(native_stacks.call("get_stack_count", StringName("Runtime.Status"), false)), 5,
 				"parent status query sums active descendant stacks")
 		infected["resolve_seconds"] = 0.0
 		EngineFeatures.sync_runtime_tags(actor, "zombie", infected)
