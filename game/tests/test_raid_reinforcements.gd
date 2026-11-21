@@ -61,6 +61,34 @@ func run(t) -> void:
 	t.eq(no_threats[0], Vector2(8, 0), "no threats preserves source order")
 	t.eq(no_threats[1], Vector2(16, 0), "empty threats still respects spacing")
 
+	t.current = "occupied spawn positions are excluded deterministically"
+	var occupied_sites: Array[Vector2] = [Vector2(25, 0)]
+	var blocked_script: Array[Vector2] = RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, false, occupied_sites, 3.0)
+	var blocked_native: Array[Vector2] = RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true, occupied_sites, 3.0)
+	t.eq(blocked_native, blocked_script, "native occupied EQS matches server fallback")
+	t.eq(blocked_script.size(), 2, "occupied placement still finds two safe spots")
+	t.check(not blocked_script.has(Vector2(25, 0)), "occupied top candidate is rejected")
+	for point in blocked_native:
+		t.check(point.distance_to(occupied_sites[0]) >= 3.0, "all selected spawns clear live infected")
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true, occupied_sites, 0.0),
+		scripted, "zero clearance disables occupied filtering")
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true, occupied_sites, NAN).size(),
+		0, "invalid occupancy clearance is rejected")
+	var too_many: Array[Vector2] = []
+	for i in 129:
+		too_many.append(Vector2(500.0 + i, 300.0))
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true, too_many, 1.0),
+		scripted, "oversized occupancy list falls back to safe GDScript")
+	var invalid_occupied: Array[Vector2] = [Vector2(NAN, 0), Vector2(25, 0)]
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true, invalid_occupied, 3.0),
+		blocked_script, "invalid occupied coordinates cannot bypass valid exclusions")
+
 	t.current = "server only, genuine infected, safe coordinates"
 	var world := FlatWorld.new()
 	var server := GameServer.new(world, 721)
