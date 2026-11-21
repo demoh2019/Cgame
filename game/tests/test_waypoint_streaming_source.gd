@@ -86,6 +86,76 @@ func run(t) -> void:
 			"far quest marker cannot generate chunks hundreds of metres away")
 	remote.free()
 
+	t.current = "AStar waypoint route detours and native stream scheduling"
+	var corridor_streamer := WorldStreamer.new()
+	corridor_streamer.axes = WorldStreamer.AXES_XZ
+	corridor_streamer.cell_size = 16.0
+	corridor_streamer.focus_position = Vector3(8, 0, 8)
+	corridor_streamer.load_radius = 32.0
+	corridor_streamer.unload_radius = 40.0
+	corridor_streamer.max_instantiations_per_frame = 1
+	corridor_streamer.update_interval = 100.0
+	corridor_streamer.set_chunk_generator(Callable(self, "_make_chunk"))
+	var clear_waypoint := Vector2(40, 8)
+	var direct: Array[Vector3i] = StreamingPolicy.plan_waypoint_route(
+		corridor_streamer, clear_waypoint, corridor_streamer.focus_position)
+	t.eq(direct, [Vector3i(0, 0, 0), Vector3i(1, 0, 0), Vector3i(2, 0, 0)],
+		"the direct private waypoint corridor passes through adjacent XZ cells")
+	var detour: Array[Vector3i] = StreamingPolicy.plan_waypoint_route(
+		corridor_streamer, clear_waypoint, corridor_streamer.focus_position,
+		[Vector3i(1, 0, 0)])
+	t.check(detour.size() > direct.size() and detour.size() <= 64,
+		"a dynamic blocked cell produces a bounded longer alternative")
+	t.check(not detour.has(Vector3i(1, 0, 0)),
+		"blocked hazards are avoided by the AStarGrid2D route")
+	for i in range(1, detour.size()):
+		var move: Vector3i = detour[i] - detour[i - 1]
+		t.eq(absi(move.x) + absi(move.y) + absi(move.z), 1,
+			"all alternative route steps share one orthogonal cell edge")
+	t.check(StreamingPolicy.plan_waypoint_route(corridor_streamer,
+		Vector2(900, 8), corridor_streamer.focus_position).is_empty(),
+		"no distant destination starts expensive AStar planning")
+	t.check(StreamingPolicy.plan_waypoint_route(corridor_streamer,
+		clear_waypoint, corridor_streamer.focus_position,
+		[Vector3i(0, 0, 0)]).is_empty(),
+		"blocked player position never creates a fabricated route")
+	t.check(corridor_streamer.has_method("set_route_cells"),
+		"WorldStreamer exposes native bounded corridor priority hints")
+	StreamingPolicy.apply_waypoint_route(
+		corridor_streamer, clear_waypoint, corridor_streamer.focus_position)
+	t.eq(corridor_streamer.get_route_cells(), direct,
+		"real game policy submits planned route cells to native WorldStreamer")
+	var bad_route: Array[Vector3i] = [Vector3i.ZERO, Vector3i(2, 0, 0)]
+	t.check(not corridor_streamer.set_route_cells(bad_route),
+		"engine rejects teleport shortcuts and leaves previous route intact")
+	t.eq(corridor_streamer.get_route_cells(), direct,
+		"invalid corridor cannot mutate the last valid engine route")
+	var too_long: Array[Vector3i] = []
+	for i in 65:
+		too_long.append(Vector3i(i, 0, 0))
+	t.check(not corridor_streamer.set_route_cells(too_long),
+		"engine enforces a strict 64-cell route memory cap")
+	_generated.clear()
+	corridor_streamer.refresh()
+	t.eq(_generated[0], Vector3i.ZERO,
+		"player focus chunk remains first despite the map's route hint")
+	corridor_streamer.refresh()
+	t.eq(_generated[1], Vector3i(1, 0, 0),
+		"native generator prioritizes next waypoint corridor cell")
+	t.eq(corridor_streamer.get_loaded_count(), 2,
+		"route priority cannot bypass the shared per-frame chunk budget")
+	corridor_streamer.set_route_cells(too_long.slice(0, 64))
+	for i in 8:
+		corridor_streamer.refresh()
+	for loaded_cell in corridor_streamer.get_loaded_cells():
+		t.check(loaded_cell.x < 3,
+			"route hints cannot expand residency to distant map segments")
+	StreamingPolicy.apply_waypoint_route(corridor_streamer,
+		Vector2(900, 8), corridor_streamer.focus_position)
+	t.check(corridor_streamer.get_route_cells().is_empty(),
+		"out-of-range map pin clears old route scheduling immediately")
+	corridor_streamer.free()
+
 	t.current = "live personal waypoint policy has distance, finite and bike guards"
 	t.check(StreamingPolicy.waypoint_is_near(Vector2(40, 8),
 		Vector3(8, 0, 8), 24.0, 16.0),
