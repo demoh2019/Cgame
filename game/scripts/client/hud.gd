@@ -120,6 +120,7 @@ var _trade_item_signature: String = ""
 var _market_select: OptionButton
 var _bid_select: OptionButton # Albion-style buy orders (highest price first).
 var _market_bids: Array = []
+var _guild_vault_select: OptionButton # Items in the guild bank (withdraw target).
 var _market_quantity: SpinBox
 var _market_price: SpinBox
 var _market_status: Label
@@ -1253,6 +1254,34 @@ func _build() -> void:
 			var listing_id: int = int(_market_select.get_item_metadata(_market_select.selected))
 			client.market_cancel(listing_id))
 	market_row.add_child(cancel_market)
+	# Albion-style guild bank (hub): members deposit, officers withdraw.
+	_guild_vault_select = OptionButton.new()
+	_guild_vault_select.custom_minimum_size.x = 320.0
+	_guild_vault_select.tooltip_text = "Guild bank contents (press Guild bank to refresh)."
+	inventory_box.add_child(_guild_vault_select)
+	var guild_row := HBoxContainer.new()
+	inventory_box.add_child(guild_row)
+	var vault_view := Button.new()
+	vault_view.text = "Guild bank"
+	vault_view.pressed.connect(func() -> void: client.guild_bank("list"))
+	guild_row.add_child(vault_view)
+	var vault_put := Button.new()
+	vault_put.text = "Deposit barter item"
+	vault_put.tooltip_text = "Moves the market quantity of the item chosen in the barter selector into the guild bank."
+	vault_put.pressed.connect(func() -> void:
+		if _trade_item.selected < 0:
+			say("Guild bank: choose an item in the barter selector.")
+		else:
+			client.guild_bank("deposit", str(_trade_item.get_item_metadata(_trade_item.selected)), int(_market_quantity.value)))
+	guild_row.add_child(vault_put)
+	var vault_take := Button.new()
+	vault_take.text = "Withdraw (officers)"
+	vault_take.pressed.connect(func() -> void:
+		if _guild_vault_select.selected < 0:
+			say("Guild bank: open it and pick an item first.")
+		else:
+			client.guild_bank("withdraw", str(_guild_vault_select.get_item_metadata(_guild_vault_select.selected)), int(_market_quantity.value)))
+	guild_row.add_child(vault_take)
 	# Homestead farming: plant seeds from the hub trader in the green zone, harvest when ripe.
 	var farm_row := HBoxContainer.new()
 	inventory_box.add_child(farm_row)
@@ -2687,6 +2716,25 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "guild_bank":
+		if bool(data.get("ok", false)):
+			var vault: Dictionary = data.get("vault", {})
+			_guild_vault_select.clear()
+			var ids: Array = vault.keys()
+			ids.sort()
+			for id in ids:
+				_guild_vault_select.add_item("%s x%d" % [str(Defs.item(str(id)).get("name", id)), int(vault[id])])
+				_guild_vault_select.set_item_metadata(_guild_vault_select.item_count - 1, str(id))
+			var ledger: Array = data.get("ledger", [])
+			var last: String = ""
+			if not ledger.is_empty():
+				var entry: Dictionary = ledger[-1]
+				last = " Last: %s %s %dx %s." % [str(entry["who"]), str(entry["action"]), int(entry["count"]), str(Defs.item(str(entry["item"])).get("name", entry["item"]))]
+			say("%s guild bank: %d item kinds.%s" % [str(data.get("guild", "")), vault.size(), last])
+		else:
+			say("Guild bank: %s" % {"no_guild": "join a guild first", "no_station": "visit the hub", "officers_only": "only the leader and officers can withdraw",
+				"missing_items": "you do not carry that many", "not_in_vault": "not enough of that in the vault", "vault_full": "the vault is full", "no_space": "no backpack space"}.get(str(data.get("reason", "")), str(data.get("reason", "rejected"))))
+		return
 	if kind == "farm":
 		if bool(data.get("ok", false)):
 			if data.has("crop"):

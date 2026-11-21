@@ -109,6 +109,7 @@ const ReturnRate = preload("res://scripts/shared/return_rate.gd")
 const MarketBids = preload("res://scripts/shared/market_bids.gd")
 const Factions = preload("res://scripts/shared/factions.gd")
 const Farming = preload("res://scripts/shared/farming.gd")
+const GuildBank = preload("res://scripts/shared/guild_bank.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
 const WoundSealant = preload("res://scripts/shared/wound_sealant.gd")
@@ -423,6 +424,8 @@ var downed_until: Dictionary = {} # zombie id -> server time it gets back up (kn
 var market_payouts: Dictionary = {} # account -> silver owed from sales, collected at the hub.
 var market_bids: Dictionary = {} # id -> Albion-style buy order with escrowed silver.
 var farm_plots: Dictionary = {} # id -> homestead crop plot (persisted with the world).
+var guild_banks: Dictionary = {} # guild id -> {item id: count} (persisted with the world).
+var guild_ledgers: Dictionary = {} # guild id -> recent [{who, action, item, count, at}].
 var market_returns: Dictionary = {} # account -> {item: count} unsold or cancelled goods.
 var market_sales: Array = [] # Bounded session-only receipts, NOT durable settlement.
 # Atomic two-account settlement. When the network layer has a persistent backend it sets pair_persistence; every
@@ -2849,6 +2852,54 @@ func cmd_market_list(peer_id: int) -> Dictionary:
 	return {"ok": true, "action": "list", "orders": public_orders, "bids": public_bids,
 		"collected_silver": int(collected.get("silver", 0)), "collected_items": int(collected.get("items", 0)),
 		"pending_silver": int(market_payouts.get(account, 0))}
+
+
+## Albion-style guild bank at the hub: "list", "deposit" (any member), "withdraw" (officers).
+func cmd_guild_bank(peer_id: int, action: String, item_id: String = "", quantity: int = 0) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.guild_id.is_empty():
+		return {"ok": false, "reason": "no_guild"}
+	if not _market_at_hub(player):
+		return {"ok": false, "reason": "no_station"}
+	var vault: Dictionary = guild_banks.get(player.guild_id, {})
+	var ledger: Array = guild_ledgers.get(player.guild_id, [])
+	match action:
+		"list":
+			pass
+		"deposit":
+			var reason: String = GuildBank.deposit_refusal(vault, item_id, quantity)
+			if reason != "":
+				return {"ok": false, "reason": reason}
+			var spare: int = player.inventory.count(item_id) - (1 if player.inventory.is_equipped(item_id) else 0)
+			if spare < quantity:
+				return {"ok": false, "reason": "missing_items"}
+			player.inventory.remove(item_id, quantity)
+			vault[item_id] = int(vault.get(item_id, 0)) + quantity
+			GuildBank.add_ledger(ledger, player.name, "deposit", item_id, quantity, time)
+		"withdraw":
+			if not GuildBank.can_withdraw(player.guild_rank):
+				return {"ok": false, "reason": "officers_only"}
+			if quantity < 1 or int(vault.get(item_id, 0)) < quantity:
+				return {"ok": false, "reason": "not_in_vault"}
+			var left: int = player.inventory.add(item_id, quantity)
+			var taken: int = quantity - left
+			if taken < 1:
+				return {"ok": false, "reason": "no_space"}
+			vault[item_id] = int(vault[item_id]) - taken
+			if int(vault[item_id]) <= 0:
+				vault.erase(item_id)
+			GuildBank.add_ledger(ledger, player.name, "withdraw", item_id, taken, time)
+		_:
+			return {"ok": false, "reason": "unknown_action"}
+	guild_banks[player.guild_id] = vault
+	guild_ledgers[player.guild_id] = ledger
+	if action != "list":
+		player.dirty_inventory = true
+		player.dirty_character = true
+	return {"ok": true, "action": action, "guild": player.guild_name, "vault": vault.duplicate(),
+		"ledger": ledger.duplicate(true), "can_withdraw": GuildBank.can_withdraw(player.guild_rank)}
 
 
 ## Homestead farming: plant a carried seed 1.5 m in front of you (green zone only).

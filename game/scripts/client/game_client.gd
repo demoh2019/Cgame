@@ -877,3 +877,8 @@ func plant(seed_id: String) -> void:
 
 func harvest() -> void:
 	net.c_harvest.rpc_id(1)
+
+
+## Guild bank at the hub: "list", "deposit" (any member) or "withdraw" (officers).
+func guild_bank(action: String, item_id: String = "", quantity: int = 0) -> void:
+	net.c_guild_bank.rpc_id(1, action, item_id, quantity)

@@ -8,6 +8,7 @@ const Structures = preload("res://scripts/shared/structures.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const MarketBids = preload("res://scripts/shared/market_bids.gd")
 const Farming = preload("res://scripts/shared/farming.gd")
+const GuildBank = preload("res://scripts/shared/guild_bank.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
 const VERSION: int = 1
 const MAX_BYTES: int = 262144 # Barricades plus escrowed market listings.
@@ -49,7 +50,7 @@ static func capture(sim) -> Dictionary:
 	walls.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return int(a["id"]) < int(b["id"]))
 	return {"version": VERSION, "world_seed": int(sim.world.world_seed), "barricades": walls,
-		"outposts": sim.territory.persistent_holds(sim.time), "market": _capture_market(sim), "farm": _capture_farm(sim)}
+		"outposts": sim.territory.persistent_holds(sim.time), "market": _capture_market(sim), "farm": _capture_farm(sim), "guild_banks": _capture_guild_banks(sim)}
 
 
 ## Escrowed listings, unpaid proceeds and returned goods of signed-in accounts (guests are not saved).
@@ -105,6 +106,30 @@ static func _validate_farm(source: Variant) -> Variant:
 			return null
 		if not _bounded_float(p.get("elapsed"), 0.0, 100000.0) or typeof(p.get("owner_name", "")) != TYPE_STRING:
 			return null
+	return source
+
+
+## Guild vaults (keyed by verified guild id); ledgers are session-only.
+static func _capture_guild_banks(sim) -> Dictionary:
+	var banks: Dictionary = {}
+	for guild in sim.guild_banks.keys():
+		if not (sim.guild_banks[guild] as Dictionary).is_empty():
+			banks[str(guild)] = sim.guild_banks[guild].duplicate()
+	return banks
+
+
+static func _validate_guild_banks(source: Variant) -> Variant:
+	if typeof(source) != TYPE_DICTIONARY or source.size() > 4096:
+		return null
+	for guild in source.keys():
+		if typeof(guild) != TYPE_STRING or guild.is_empty() or guild.length() > MAX_OWNER_LENGTH:
+			return null
+		var vault: Variant = source[guild]
+		if typeof(vault) != TYPE_DICTIONARY or vault.size() > GuildBank.MAX_KINDS:
+			return null
+		for item in vault.keys():
+			if typeof(item) != TYPE_STRING or not Defs.is_item(item) or not _bounded_int(vault[item], 1, GuildBank.MAX_COUNT):
+				return null
 	return source
 
 
@@ -189,13 +214,16 @@ static func validate(data: Variant, sim) -> Dictionary:
 	if typeof(data) != TYPE_DICTIONARY or data.size() not in [3, 4, 5]:
 		return {}
 	for key in data.keys():
-		if not str(key) in ["version", "world_seed", "barricades", "outposts", "market", "farm"]:
+		if not str(key) in ["version", "world_seed", "barricades", "outposts", "market", "farm", "guild_banks"]:
 			return {}
 	var market: Variant = _validate_market(data.get("market", {}))
 	if market == null:
 		return {}
 	var farm: Variant = _validate_farm(data.get("farm", []))
 	if farm == null:
+		return {}
+	var guild_banks: Variant = _validate_guild_banks(data.get("guild_banks", {}))
+	if guild_banks == null:
 		return {}
 	var holds: Variant = _validate_holds(data.get("outposts", []), sim)
 	if holds == null:
@@ -273,7 +301,7 @@ static func validate(data: Variant, sim) -> Dictionary:
 			"yaw": float(value.get("yaw", 0.0)), "upkeep": float(value.get("upkeep", Structures.UPKEEP_SECONDS)),
 			"piece": str(value.get("piece", "")) if HousePieces.valid(str(value.get("piece", ""))) else "",
 			"open": bool(value.get("open", true))})
-	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls, "outposts": holds, "market": market, "farm": farm}
+	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls, "outposts": holds, "market": market, "farm": farm, "guild_banks": guild_banks}
 
 
 static func restore(sim, data: Variant) -> bool:
@@ -303,6 +331,12 @@ static func restore(sim, data: Variant) -> bool:
 			sim.world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
 		sim._next_id = maxi(sim._next_id, id)
 	sim.territory.restore_holds(valid["outposts"], sim.time)
+	var banks: Dictionary = valid.get("guild_banks", {})
+	for guild in banks.keys():
+		var vault: Dictionary = {}
+		for item in banks[guild].keys():
+			vault[str(item)] = int(banks[guild][item])
+		sim.guild_banks[str(guild)] = vault
 	for p in valid.get("farm", []):
 		var crop: String = str(p["crop"])
 		sim.farm_plots[sim.new_id()] = {"account": str(p["account"]), "owner_name": str(p.get("owner_name", "")), "crop": crop,
