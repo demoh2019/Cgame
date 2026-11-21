@@ -7,6 +7,19 @@
 		Invalid inputs, mismatched sizes, non-finite or negative distances, or out-of-range budgets return an empty result. Budgets must be from 0 to 256.
 	</description>
 	<methods>
+		<method name="plan_visible_tiers_stable" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priority_flags" type="PackedByteArray" />
+			<param index="2" name="visible_flags" type="PackedByteArray" />
+			<param index="3" name="retained_full_flags" type="PackedByteArray" />
+			<param index="4" name="full_budget" type="int" />
+			<param index="5" name="priority_budget" type="int" />
+			<param index="6" name="hysteresis" type="float" default="1.5" />
+			<description>
+				Temporally stable animation-IK budgeting, inspired by Unreal Animation Budget Allocator state-change throttling. Only visible characters strictly closer than 22m compete for [param full_budget] full-IK slots. Characters whose [param retained_full_flags] are nonzero receive a ranking discount of [code]min(distance, hysteresis)[/code] metres, reducing churn near the slot boundary. This discount never extends the 22m eligibility limit, never reserves slots for invisible actors and never changes the separate combat-priority pool, which is selected by actual distance. Effective-distance ties are resolved by original input index. [param hysteresis] must be finite and between 0 and 8m; zero disables retention and reproduces [method plan_visible_tiers]. All four packed arrays must have identical sizes (at most 16,384). Budgets are limited to 0–256. Input errors return an empty result without changing any scene state. The caller supplies retention masks and applies returned tiers; the engine planner keeps no object references or mutable history.
+			</description>
+		</method>
 		<method name="plan_visible_tiers" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="distances" type="PackedFloat64Array" />
