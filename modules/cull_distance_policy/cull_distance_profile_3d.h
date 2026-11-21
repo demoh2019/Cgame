@@ -32,6 +32,7 @@ protected:
 
 public:
 	static constexpr int MAX_PAIRS = 128;
+	static constexpr int MAX_BATCH = 4096;
 	static constexpr double MAX_VALUE = 1000000.0;
 	static constexpr double MAX_COORDINATE = 10000000.0;
 
@@ -45,6 +46,14 @@ public:
 	// per instance. Returns -1 if never configured or invalid.
 	double get_cached_cull_distance(const AABB &p_bounds,
 			double p_authored_distance = 0.0) const;
+
+	// Prevalidated configured profile for up to 4096 independent objects.
+	// Input arrays are index aligned: local AABB position, AABB size, author's
+	// positive or zero draw cap. Invalid batch fails atomically to empty.
+	// Does not apply rendering changes or retain any instance state.
+	PackedFloat64Array get_cached_cull_distances(
+			const PackedVector3Array &p_positions, const PackedVector3Array &p_sizes,
+			const PackedFloat64Array &p_authored_distances) const;
 
 	double get_cull_distance(const AABB &p_bounds,
 			const PackedFloat32Array &p_sizes,
