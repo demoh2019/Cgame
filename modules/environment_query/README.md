@@ -69,6 +69,24 @@ overrides validated targeting, safe-zone, melee or navigation rules.
 
 Reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/eqs-node-reference-tests-in-unreal-engine
 
+## Terrain-height difference test (EQS-style prefilter)
+
+The optional native `max_vertical_difference` filter rejects candidate points
+whose world-space Y differs from the query `origin.y` by more than the given
+threshold. An exact-boundary candidate is allowed; zero disables the test.
+It runs before threat scoring for `query()`, `query_positions()`, top-K and spread,
+and works even when `horizontal_only=true`. It does not sample terrain or
+prove navigation reachability: callers supply server-vetted candidate heights.
+
+Albion After's raid reinforcement planner passes authoritative terrain heights
+and the boss's elevation to the native query, rejecting high shelves and deep
+valleys before selecting spread spawn sites. Older Cgame/stock Godot uses an
+identical script fallback. An invalid or truncated height context fails closed.
+
+This is a small geometric analogue of Unreal EQS distance/height tests; navmesh
+path cost and line-of-sight tracing are independent future systems.
+Reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/eqs-node-reference-tests-in-unreal-engine
+
 ## Scope and limitations
 
 This is a **foundation**, not the full EQS implementation seen in Unreal.

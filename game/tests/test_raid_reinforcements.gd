@@ -7,6 +7,21 @@ const Zombie = preload("res://scripts/shared/zombie.gd")
 const Net = preload("res://scripts/shared/net.gd")
 
 
+class RidgeWorld:
+	extends RefCounted
+	var world_seed: int = 721
+	func zone_at(x: float, _z: float) -> int:
+		return 2 if x > 100.0 else 0
+	func is_safe(x: float, _z: float) -> bool:
+		return x <= 100.0
+	func is_water(_x: float, _z: float) -> bool:
+		return false
+	func height_at(x: float, _z: float) -> float:
+		return 11.0 if x > 215.0 else 3.0
+	func blockers_near(_x: float, _z: float, _r: float) -> Array:
+		return []
+
+
 class FlatWorld:
 	extends RefCounted
 	var world_seed: int = 721
@@ -62,6 +77,27 @@ func run(t) -> void:
 	t.eq(no_threats[1], Vector2(16, 0), "empty threats still respects spacing")
 
 
+	t.current = "server EQS height-filtered spawn candidate parity"
+	var site_heights: Array[float] = [0.0, 0.0, 8.0, 2.0, -5.0]
+	var from_native: Array[Vector2] = RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true,
+		[], 0.0, site_heights, 0.0, 2.0)
+	var from_script: Array[Vector2] = RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, false,
+		[], 0.0, site_heights, 0.0, 2.0)
+	t.eq(from_native, from_script, "native and fallback height filters agree")
+	t.eq(from_script, [Vector2(16, 1), Vector2(8, 1)],
+		"elevated/deep shelf sites are excluded before spreading")
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true,
+		[], 0.0, [0.0], 0.0, 2.0), [], "truncated heights fail closed")
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true,
+		[], 0.0, site_heights, NAN, 2.0), [], "nonfinite origin elevation rejected")
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true,
+		[], 0.0, site_heights, 0.0, INF), [], "nonfinite height limit rejected")
+
 	t.current = "native occupancy contexts exclude all living infected without bypassing guards"
 	var blocked: Array[Vector2] = [Vector2(25, 0)]
 	var script_filtered: Array[Vector2] = RaidReinforcements.spread_sites(
@@ -107,6 +143,14 @@ func run(t) -> void:
 	var sites := RaidReinforcements.sites(world, server.players,
 		server.zombies, boss.position, 1, 2)
 	t.eq(sites.size(), 2, "clear dangerous terrain permits two adds")
+	var ridge := RidgeWorld.new()
+	var ridge_sites: Array[Vector2] = RaidReinforcements.sites(
+		ridge, server.players, server.zombies, boss.position, 1, 2)
+	t.check(not ridge_sites.is_empty(), "raid sites remain available on low ground")
+	for site in ridge_sites:
+		t.check(absf(ridge.height_at(site.x, site.y) - boss.position.y) <=
+			RaidReinforcements.MAX_RAID_HEIGHT_DIFFERENCE,
+			"high shelves never receive server-owned raid adds")
 	if sites.size() >= 2:
 		t.check(sites[0].distance_to(sites[1]) >= RaidReinforcements.MIN_BETWEEN_ADDS,
 			"live raid wave positions maintain separation")
