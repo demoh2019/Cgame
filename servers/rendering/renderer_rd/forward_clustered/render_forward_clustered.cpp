@@ -96,6 +96,19 @@ void RenderForwardClustered::RenderBufferDataForwardClustered::ensure_fsr2(Rende
 	}
 }
 
+bool RenderForwardClustered::RenderBufferDataForwardClustered::ensure_vendor_upscaler(RendererRD::VendorUpscaler *p_upscaler, RSE::ViewportScaling3DMode p_mode) {
+	if (vendor_upscaler_context != nullptr && vendor_upscaler_mode != p_mode) {
+		memdelete(vendor_upscaler_context);
+		vendor_upscaler_context = nullptr;
+	}
+	if (vendor_upscaler_context == nullptr && p_upscaler != nullptr) {
+		vendor_upscaler_context = p_upscaler->create_context(render_buffers->get_internal_size(), render_buffers->get_target_size());
+		vendor_upscaler_mode = p_mode;
+		return true;
+	}
+	return false;
+}
+
 #ifdef METAL_MFXTEMPORAL_ENABLED
 bool RenderForwardClustered::RenderBufferDataForwardClustered::ensure_mfx_temporal(RendererRD::MFXTemporalEffect *p_effect) {
 	if (mfx_temporal_context == nullptr) {
@@ -134,6 +147,11 @@ void RenderForwardClustered::RenderBufferDataForwardClustered::free_data() {
 	if (fsr2_context) {
 		memdelete(fsr2_context);
 		fsr2_context = nullptr;
+	}
+
+	if (vendor_upscaler_context) {
+		memdelete(vendor_upscaler_context);
+		vendor_upscaler_context = nullptr;
 	}
 
 #ifdef METAL_MFXTEMPORAL_ENABLED
@@ -1878,11 +1896,17 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		SCALE_NONE,
 		SCALE_FSR2,
 		SCALE_MFX,
+		SCALE_VENDOR, // NVIDIA DLSS / Intel XeSS, provided by optional modules.
 	} scale_type = SCALE_NONE;
 
 	switch (rb->get_scaling_3d_mode()) {
 		case RSE::VIEWPORT_SCALING_3D_MODE_FSR2:
 			scale_type = SCALE_FSR2;
+			break;
+		case RSE::VIEWPORT_SCALING_3D_MODE_DLSS:
+		case RSE::VIEWPORT_SCALING_3D_MODE_XESS:
+			// The viewport already verified availability and fell back to FSR2 otherwise; re-check defensively.
+			scale_type = RendererRD::VendorUpscalerRegistry::is_available(rb->get_scaling_3d_mode()) ? SCALE_VENDOR : SCALE_FSR2;
 			break;
 		case RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL:
 #ifdef METAL_MFXTEMPORAL_ENABLED
@@ -2654,6 +2678,48 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				params.reprojection = (correction * prev_proj) * prev_transform.affine_inverse() * cur_transform * (correction * cur_proj).inverse();
 
 				fsr2_effect->upscale(params);
+			}
+
+			RD::get_singleton()->draw_command_end_label();
+		} else if (scale_type == SCALE_VENDOR) {
+			RSE::ViewportScaling3DMode vendor_mode = rb->get_scaling_3d_mode();
+			RendererRD::VendorUpscaler *vendor_upscaler = RendererRD::VendorUpscalerRegistry::get(vendor_mode);
+			bool vendor_reset = rb_data->ensure_vendor_upscaler(vendor_upscaler, vendor_mode);
+
+			RID exposure;
+			if (RSG::camera_attributes->camera_attributes_uses_auto_exposure(p_render_data->camera_attributes)) {
+				exposure = luminance->get_current_luminance_buffer(rb);
+			}
+
+			RD::get_singleton()->draw_command_begin_label(vendor_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS ? "DLSS" : "XeSS");
+			RENDER_TIMESTAMP(vendor_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS ? "DLSS" : "XeSS");
+
+			if (rb_data->get_vendor_upscaler_context() != nullptr) {
+				for (uint32_t v = 0; v < rb->get_view_count(); v++) {
+					real_t fov = p_render_data->scene_data->cam_projection.get_fov();
+					real_t aspect = p_render_data->scene_data->cam_projection.get_aspect();
+					RendererRD::VendorUpscaler::Parameters params;
+					params.color = rb->get_internal_texture(v);
+					params.depth = rb->get_depth_texture(v);
+					params.velocity = rb->get_velocity_buffer(false, v);
+					params.exposure = exposure;
+					params.output = rb->get_upscaled_texture(v);
+					params.view = v;
+					params.internal_size = rb->get_internal_size();
+					params.target_size = rb->get_target_size();
+					params.jitter = p_render_data->scene_data->taa_jitter * 0.5f; // Scale to ±0.5 like the MetalFX path.
+					params.sharpness = CLAMP(1.0f - (rb->get_fsr_sharpness() / 2.0f), 0.0f, 1.0f);
+					params.z_near = p_render_data->scene_data->z_near;
+					params.z_far = p_render_data->scene_data->z_far;
+					params.fovy = p_render_data->scene_data->cam_projection.get_fovy(fov, 1.0 / aspect);
+					params.delta_time = float(time_step);
+					params.reset_accumulation = vendor_reset;
+					params.cam_projection = p_render_data->scene_data->cam_projection;
+					params.prev_cam_projection = p_render_data->scene_data->prev_cam_projection;
+					params.cam_transform = p_render_data->scene_data->cam_transform;
+					params.prev_cam_transform = p_render_data->scene_data->prev_cam_transform;
+					vendor_upscaler->upscale(rb_data->get_vendor_upscaler_context(), params);
+				}
 			}
 
 			RD::get_singleton()->draw_command_end_label();

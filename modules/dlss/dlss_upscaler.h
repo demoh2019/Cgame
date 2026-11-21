@@ -1,0 +1,70 @@
+/**************************************************************************/
+/*  dlss_upscaler.h                                                     */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
+
+#pragma once
+
+// NVIDIA DLSS temporal upscaler, implemented on top of the NVIDIA Streamline SDK.
+// This file only compiles when `dlss_sdk_path=...` was passed to SCons (see README.md). It contains
+// no NVIDIA code; it only calls the public Streamline C API declared in the user supplied SDK headers.
+
+#include "servers/rendering/renderer_rd/effects/vendor_upscaler.h"
+#include "servers/rendering/rendering_device_driver.h"
+
+class DLSSUpscaler : public RendererRD::VendorUpscaler {
+	bool initialized = false;
+	bool supported = false;
+	bool vulkan_info_set = false;
+	uint32_t frame_index = 0;
+
+	void _initialize();
+	bool _ensure_vulkan_info();
+
+public:
+	struct Context : public RendererRD::VendorUpscalerContext {
+		uint32_t viewport_id = 0;
+		Size2i internal_size;
+		Size2i target_size;
+		bool options_set = false;
+		~Context();
+	};
+
+	virtual String get_name() const override { return "NVIDIA DLSS"; }
+	virtual bool is_supported() const override;
+	virtual void get_scale_limits(float &r_min, float &r_max) const override;
+	virtual RendererRD::VendorUpscalerContext *create_context(const Size2i &p_internal_size, const Size2i &p_target_size) override;
+	virtual void upscale(RendererRD::VendorUpscalerContext *p_context, const Parameters &p_params) override;
+
+	DLSSUpscaler();
+	~DLSSUpscaler();
+
+	// Implementation detail: used by the driver callback.
+	struct CallbackArgs;
+	static void callback(RenderingDeviceDriver *p_driver, RenderingDeviceDriver::CommandBufferID p_command_buffer, CallbackArgs *p_userdata);
+};

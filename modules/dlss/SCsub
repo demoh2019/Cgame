@@ -1,0 +1,29 @@
+#!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+import os
+
+Import("env")
+Import("env_modules")
+
+env_dlss = env_modules.Clone()
+
+# The NVIDIA Streamline SDK is NOT vendored: headers are taken from the user supplied SDK folder only.
+sdk_path = str(env["dlss_sdk_path"])
+env_dlss.Prepend(CPPPATH=[os.path.join(sdk_path, "include")])
+env_dlss.Append(CPPDEFINES=["DLSS_ENABLED"])
+
+# Vulkan headers are needed for VkImage / VkCommandBuffer handles.
+env_dlss.Prepend(CPPPATH=["#thirdparty/vulkan", "#thirdparty/vulkan/include"])
+
+# Godot source files
+env_dlss.add_source_files(env.modules_sources, "*.cpp")
+
+# Link against the Streamline interposer import library from the user supplied SDK. The runtime plugins
+# (sl.common, sl.dlss, nvngx_dlss, ...) must be shipped next to the executable by the user, see README.md.
+env.Append(LIBPATH=[os.path.join(sdk_path, "lib", "x64"), os.path.join(sdk_path, "bin", "x64")])
+if env["platform"] == "windows":
+    env.Append(LIBS=["sl.interposer"])
+else:
+    env.Append(LIBS=[":libsl.interposer.so"])
+    env.Append(LINKFLAGS=["-Wl,-rpath,$ORIGIN"])

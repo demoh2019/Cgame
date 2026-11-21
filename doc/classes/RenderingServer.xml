@@ -5483,7 +5483,15 @@
 			Use nearest-neighbor filtering for the viewport's 3D buffer. This looks crisper than [constant VIEWPORT_SCALING_3D_MODE_BILINEAR] and has no additional rendering cost. The amount of scaling can be set using [member Viewport.scaling_3d_scale]. Values greater than [code]1.0[/code] are not supported and bilinear downsampling will be used instead. A value of [code]1.0[/code] disables scaling.
 			[b]Note:[/b] When using the [b]Nearest[/b] scaling mode, to avoid uneven pixel scaling, it's highly recommended to use a value equal to an integer divisor with a dividend of [code]1[/code]. For example, it's best to use a scale of [code]0.5[/code] (1/2), [code]0.3333[/code] (1/3), [code]0.25[/code] (1/4), [code]0.2[/code] (1/5), and so on.
 		</constant>
-		<constant name="VIEWPORT_SCALING_3D_MODE_MAX" value="6" enum="ViewportScaling3DMode">
+		<constant name="VIEWPORT_SCALING_3D_MODE_DLSS" value="6" enum="ViewportScaling3DMode">
+			Use NVIDIA DLSS (via the NVIDIA Streamline SDK) temporal upscaling for the viewport's 3D buffer. The amount of scaling can be set using [member Viewport.scaling_3d_scale]. A value of [code]1.0[/code] uses DLSS at native resolution (DLAA).
+			[b]Note:[/b] Only available in builds compiled with the [code]dlss[/code] module (SCons option [code]dlss_sdk_path=...[/code], see [code]modules/dlss/README.md[/code]), with the Forward+ renderer on the Vulkan driver on Windows or Linux and an NVIDIA RTX GPU. If it is not available, a warning is printed and [constant VIEWPORT_SCALING_3D_MODE_FSR2] is used instead.
+		</constant>
+		<constant name="VIEWPORT_SCALING_3D_MODE_XESS" value="7" enum="ViewportScaling3DMode">
+			Use Intel XeSS temporal upscaling for the viewport's 3D buffer. The amount of scaling can be set using [member Viewport.scaling_3d_scale]. A value of [code]1.0[/code] uses XeSS at native resolution (XeSS-AA).
+			[b]Note:[/b] Only available in builds compiled with the [code]xess[/code] module (SCons option [code]xess_sdk_path=...[/code], see [code]modules/xess/README.md[/code]), with the Forward+ renderer on the Vulkan driver on Windows or Linux. XeSS runs best on Intel Arc GPUs. If it is not available, a warning is printed and [constant VIEWPORT_SCALING_3D_MODE_FSR2] is used instead.
+		</constant>
+		<constant name="VIEWPORT_SCALING_3D_MODE_MAX" value="8" enum="ViewportScaling3DMode">
 			Represents the size of the [enum ViewportScaling3DMode] enum.
 		</constant>
 		<constant name="VIEWPORT_UPDATE_DISABLED" value="0" enum="ViewportUpdateMode">

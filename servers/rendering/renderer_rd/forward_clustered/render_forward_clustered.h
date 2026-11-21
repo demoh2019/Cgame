@@ -34,6 +34,7 @@
 #include "servers/rendering/multi_uma_buffer.h"
 #include "servers/rendering/renderer_rd/cluster_builder_rd.h"
 #include "servers/rendering/renderer_rd/effects/fsr2.h"
+#include "servers/rendering/renderer_rd/effects/vendor_upscaler.h"
 #include "servers/rendering/renderer_rd/effects/motion_vectors_store.h"
 #include "servers/rendering/renderer_rd/effects/ss_effects.h"
 #include "servers/rendering/renderer_rd/effects/taa.h"
@@ -96,6 +97,8 @@ public:
 	private:
 		RenderSceneBuffersRD *render_buffers = nullptr;
 		RendererRD::FSR2Context *fsr2_context = nullptr;
+		RendererRD::VendorUpscalerContext *vendor_upscaler_context = nullptr;
+		RSE::ViewportScaling3DMode vendor_upscaler_mode = RSE::VIEWPORT_SCALING_3D_MODE_OFF;
 #ifdef METAL_MFXTEMPORAL_ENABLED
 		RendererRD::MFXTemporalContext *mfx_temporal_context = nullptr;
 #endif
@@ -145,6 +148,10 @@ public:
 
 		void ensure_fsr2(RendererRD::FSR2Effect *p_effect);
 		RendererRD::FSR2Context *get_fsr2_context() const { return fsr2_context; }
+
+		// Returns true when a new context was created (accumulation history must be reset).
+		bool ensure_vendor_upscaler(RendererRD::VendorUpscaler *p_upscaler, RSE::ViewportScaling3DMode p_mode);
+		RendererRD::VendorUpscalerContext *get_vendor_upscaler_context() const { return vendor_upscaler_context; }
 
 #ifdef METAL_MFXTEMPORAL_ENABLED
 		bool ensure_mfx_temporal(RendererRD::MFXTemporalEffect *p_effect);

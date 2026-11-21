@@ -41,6 +41,9 @@
 #include "servers/rendering/renderer_compositor.h"
 #include "servers/rendering/renderer_scene_occlusion_cull.h"
 #include "servers/rendering/rendering_device.h"
+#ifdef RD_ENABLED
+#include "servers/rendering/renderer_rd/effects/vendor_upscaler.h"
+#endif
 #include "servers/rendering/rendering_method.h"
 #include "servers/rendering/rendering_server_globals.h"
 #include "servers/rendering/storage/texture_storage.h"
@@ -159,7 +162,7 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 				WARN_PRINT_ONCE("MetalFX and FSR upscaling are not supported in the Compatibility renderer. Falling back to bilinear scaling.");
 			}
 
-			if ((scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR || scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR2 || scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL) && OS::get_singleton()->get_current_rendering_method() == "mobile") {
+			if ((scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR || scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR2 || scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL || scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS || scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_XESS) && OS::get_singleton()->get_current_rendering_method() == "mobile") {
 				scaling_3d_mode = RSE::VIEWPORT_SCALING_3D_MODE_BILINEAR;
 				scaling_type = RSE::scaling_3d_mode_type(scaling_3d_mode);
 				WARN_PRINT_ONCE("MetalFX temporal and FSR upscaling are not supported in the Mobile renderer. Falling back to bilinear scaling.");
@@ -208,6 +211,37 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 			}
 #endif // RD_ENABLED
 
+			// Optional vendor upscalers (NVIDIA DLSS / Intel XeSS). These are provided by modules that are only
+			// compiled when the vendor SDK path is passed to SCons. Fall back to FSR 2 if unavailable.
+			if (scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS || scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_XESS) {
+				const char *vendor_name = scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS ? "DLSS" : "XeSS";
+#ifdef RD_ENABLED
+				RendererRD::VendorUpscaler *vendor_upscaler = RendererRD::VendorUpscalerRegistry::get(scaling_3d_mode);
+				if (vendor_upscaler == nullptr) {
+					WARN_PRINT_ONCE(vformat("%s upscaling is not compiled into this build (see modules/%s/README.md). Falling back to FSR 2 scaling.", vendor_name, scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS ? "dlss" : "xess"));
+					scaling_3d_mode = RSE::VIEWPORT_SCALING_3D_MODE_FSR2;
+				} else if (!vendor_upscaler->is_supported()) {
+					WARN_PRINT_ONCE(vformat("%s upscaling is not supported by the current renderer, driver or GPU. Falling back to FSR 2 scaling.", vendor_name));
+					scaling_3d_mode = RSE::VIEWPORT_SCALING_3D_MODE_FSR2;
+				} else {
+					float min_scale = 0.0f;
+					float max_scale = 1.0f;
+					vendor_upscaler->get_scale_limits(min_scale, max_scale);
+					if (scaling_3d_scale < min_scale - EPSILON || scaling_3d_scale > max_scale + EPSILON) {
+						WARN_PRINT_ONCE(vformat("%s upscaling scale is outside limits; scale must be between %f and %f. Falling back to FSR 2 3D resolution scaling.", vendor_name, min_scale, max_scale));
+						scaling_3d_mode = RSE::VIEWPORT_SCALING_3D_MODE_FSR2;
+					} else if (msaa_3d != RSE::VIEWPORT_MSAA_DISABLED) {
+						WARN_PRINT_ONCE(vformat("%s upscaling does not support 3D MSAA. Disabling 3D MSAA internally.", vendor_name));
+						msaa_3d = RSE::VIEWPORT_MSAA_DISABLED;
+					}
+				}
+#else
+				WARN_PRINT_ONCE(vformat("%s upscaling requires the RenderingDevice backend. Falling back to FSR 2 scaling.", vendor_name));
+				scaling_3d_mode = RSE::VIEWPORT_SCALING_3D_MODE_FSR2;
+#endif // RD_ENABLED
+				scaling_type = RSE::scaling_3d_mode_type(scaling_3d_mode);
+			}
+
 			bool scaling_3d_is_not_bilinear = scaling_3d_mode != RSE::VIEWPORT_SCALING_3D_MODE_OFF && scaling_3d_mode != RSE::VIEWPORT_SCALING_3D_MODE_BILINEAR;
 			bool use_taa = p_viewport->use_taa;
 
@@ -230,7 +264,7 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 			if (use_taa && scaling_type == RSE::VIEWPORT_SCALING_3D_TYPE_TEMPORAL) {
 				// Temporal upscalers can't be used with TAA.
 				// Turn it off and prefer using the temporal upscaler.
-				WARN_PRINT_ONCE("FSR 2 or MetalFX Temporal is not compatible with TAA. Disabling TAA internally.");
+				WARN_PRINT_ONCE("FSR 2, MetalFX Temporal, DLSS or XeSS is not compatible with TAA. Disabling TAA internally.");
 				use_taa = false;
 			}
 
@@ -251,6 +285,8 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 					break;
 				case RSE::VIEWPORT_SCALING_3D_MODE_METALFX_SPATIAL:
 				case RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL:
+				case RSE::VIEWPORT_SCALING_3D_MODE_DLSS:
+				case RSE::VIEWPORT_SCALING_3D_MODE_XESS:
 				case RSE::VIEWPORT_SCALING_3D_MODE_FSR:
 				case RSE::VIEWPORT_SCALING_3D_MODE_FSR2:
 					target_width = p_viewport->size.width;
@@ -1062,6 +1098,10 @@ void RendererViewport::viewport_set_scaling_3d_mode(RID p_viewport, RSE::Viewpor
 		}
 		if (p_mode == RSE::VIEWPORT_SCALING_3D_MODE_FSR2) {
 			WARN_PRINT_ONCE_ED("FSR2 3D scaling is only available when using the Forward+ renderer.");
+			return;
+		}
+		if (p_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS || p_mode == RSE::VIEWPORT_SCALING_3D_MODE_XESS) {
+			WARN_PRINT_ONCE_ED("DLSS and XeSS 3D scaling are only available when using the Forward+ renderer.");
 			return;
 		}
 		if (p_mode == RSE::VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL) {

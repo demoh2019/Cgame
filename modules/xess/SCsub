@@ -1,0 +1,29 @@
+#!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+import os
+
+Import("env")
+Import("env_modules")
+
+env_xess = env_modules.Clone()
+
+# The Intel XeSS SDK is NOT vendored: headers and import library come from the user supplied SDK folder only.
+sdk_path = str(env["xess_sdk_path"])
+env_xess.Prepend(CPPPATH=[os.path.join(sdk_path, "inc")])
+env_xess.Append(CPPDEFINES=["XESS_ENABLED"])
+
+# Vulkan headers are needed for VkImage / VkImageView / VkCommandBuffer handles.
+env_xess.Prepend(CPPPATH=["#thirdparty/vulkan", "#thirdparty/vulkan/include"])
+
+# Godot source files
+env_xess.add_source_files(env.modules_sources, "*.cpp")
+
+# Link against the XeSS runtime library from the user supplied SDK. libxess.dll / libxess.so must be shipped
+# next to the executable by the user, see README.md.
+env.Append(LIBPATH=[os.path.join(sdk_path, "lib")])
+if env["platform"] == "windows":
+    env.Append(LIBS=["libxess"])
+else:
+    env.Append(LIBS=[":libxess.so"])
+    env.Append(LINKFLAGS=["-Wl,-rpath,$ORIGIN"])
