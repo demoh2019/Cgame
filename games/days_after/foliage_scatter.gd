@@ -573,8 +573,9 @@ func regenerate() -> void:
     # PCG selection is intentionally complete before any LOD work. Changing
     # viewer never re-samples a position, density mask or stable variant ID.
     _lod_tiers.clear()
-    var viewer_position: Vector3 = _lod_viewer.global_position if \
-        _lod_viewer != null and is_instance_valid(_lod_viewer) else Vector3(0.0, 0.15, 3.0)
+    var viewer_position := Vector3(0.0, 0.15, 3.0)
+    if _lod_viewer != null and is_instance_valid(_lod_viewer):
+        viewer_position = _lod_viewer.global_position
     _refresh_lod(viewer_position, true)
 
 
@@ -586,8 +587,8 @@ func _refresh_lod(viewer_position: Vector3, force: bool) -> bool:
         LOD_SWITCH_DISTANCE, LOD_HYSTERESIS)
     if planned.size() != _selected_positions.size():
         return false
-    _last_lod_viewer = viewer_position
     if not force and planned == _lod_tiers:
+        _last_lod_viewer = viewer_position
         return false
 
     var groups: Array = LODPlan.partition_variant_lods(
@@ -605,6 +606,7 @@ func _refresh_lod(viewer_position: Vector3, force: bool) -> bool:
     for count in visited:
         if count != 1:
             return false
+    _last_lod_viewer = viewer_position
     _lod_tiers = planned
     _lod_buckets = groups
     _build_lod_renderers()
