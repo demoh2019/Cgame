@@ -120,6 +120,8 @@ private:
 	bool enabled = true;
 
 	HashMap<Vector3i, ObjectID> loaded;
+	// Nodes resident before a generator replacement may not enter the new cache.
+	HashSet<ObjectID> cache_ineligible_nodes;
 	// Explicitly opt-in, bounded procedural scene retention. Detached nodes do
 	// not render or process; only roots that allow caching can be preserved.
 	struct CachedChunk {
