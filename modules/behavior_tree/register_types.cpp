@@ -30,6 +30,7 @@
 
 #include "register_types.h"
 
+#include "ai_execution_profiler.h"
 #include "ai_hearing_sensor_2d.h"
 #include "ai_visual_sensor_2d.h"
 #include "behavior_tree.h"
@@ -62,6 +63,7 @@ void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(BehaviorTreeRunner);
 	GDREGISTER_CLASS(AIVisualSensor2D);
 	GDREGISTER_CLASS(AIHearingSensor2D);
+	GDREGISTER_CLASS(AIExecutionProfiler);
 }
 
 void uninitialize_behavior_tree_module(ModuleInitializationLevel) {
