@@ -229,7 +229,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 				label.text += " [EXPOSED]"
 		elif kind == "player":
 			label.text = ("%s%s" % [
-				"OUTLAW " if bool(entity.get("outlaw", false)) else "", str(entity["name"])]) if entity["alive"] else "%s (dead)" % entity["name"]
+				("OUTLAW " if bool(entity.get("outlaw", false)) else "") + (("[%s] " % str(entity.get("faction", "")).capitalize()) if bool(entity.get("faction_flagged", false)) else ""), str(entity["name"])]) if entity["alive"] else "%s (dead)" % entity["name"]
 		elif kind == "bag":
 			label.text = LootLabel.for_bag(entity)
 			label.visible = not label.text.is_empty()

@@ -3,6 +3,7 @@ extends CanvasLayer
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const ReturnRate = preload("res://scripts/shared/return_rate.gd")
+const Factions = preload("res://scripts/shared/factions.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
@@ -1251,6 +1252,26 @@ func _build() -> void:
 			var listing_id: int = int(_market_select.get_item_metadata(_market_select.selected))
 			client.market_cancel(listing_id))
 	market_row.add_child(cancel_market)
+	# Faction warfare (hub): enlist, raise or lower the flag, redeem faction points.
+	var faction_row := HBoxContainer.new()
+	inventory_box.add_child(faction_row)
+	for faction_id in Factions.FACTIONS:
+		var join := Button.new()
+		join.text = "Join %s" % Factions.FACTIONS[faction_id]
+		join.tooltip_text = "Enlist at the hub. Switching factions forfeits unspent faction points."
+		join.pressed.connect(func() -> void: client.faction("enlist", faction_id))
+		faction_row.add_child(join)
+	var flag_button := Button.new()
+	flag_button.text = "Faction flag on/off"
+	flag_button.tooltip_text = "Flagged: fight flagged rival factions outside safe towns, even in the yellow zone. Lowering the flag takes 10 s."
+	flag_button.pressed.connect(func() -> void:
+		client.faction("unflag" if bool(client.you.get("faction_flagged", false)) else "flag"))
+	faction_row.add_child(flag_button)
+	var redeem_button := Button.new()
+	redeem_button.text = "Redeem %d pts" % Factions.REDEEM_COST
+	redeem_button.tooltip_text = "Hub only: %d faction points for 60 silver and 3 runes." % Factions.REDEEM_COST
+	redeem_button.pressed.connect(func() -> void: client.faction("redeem"))
+	faction_row.add_child(redeem_button)
 	# Albion-style buy orders: escrow silver now, sellers fill it at the hub, goods wait for you there.
 	_bid_select = OptionButton.new()
 	_bid_select.custom_minimum_size.x = 320.0
@@ -2649,6 +2670,22 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "faction":
+		if bool(data.get("ok", false)):
+			var fname: String = str(Factions.FACTIONS.get(str(data.get("faction", "")), "no faction"))
+			match str(data.get("action", "")):
+				"enlist":
+					say("You serve the %s." % fname)
+				"flag":
+					say("Faction flag raised: flagged rivals can now attack you outside safe towns.")
+				"unflag":
+					say("Lowering the faction flag in %.0fs." % float(data.get("unflag_in", 0.0)))
+				"redeem":
+					say("Faction rewards claimed. %d points left." % int(data.get("points", 0)))
+		else:
+			say("Faction: %s" % {"no_station": "visit the hub", "not_enlisted": "join a faction first", "flagged": "lower your flag first",
+				"need_points": "not enough faction points (%d)" % int(data.get("points", 0)), "no_space": "free some backpack space"}.get(str(data.get("reason", "")), str(data.get("reason", "rejected"))))
+		return
 	if kind == "craft":
 		match str(data.get("reason", "")):
 			"focus_needs_city":

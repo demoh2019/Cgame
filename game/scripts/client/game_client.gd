@@ -859,3 +859,8 @@ func market_fill(bid_id: int, quantity: int) -> void:
 
 func market_cancel_bid(bid_id: int) -> void:
 	net.c_market_cancel_bid.rpc_id(1, bid_id)
+
+
+## Faction warfare: "enlist" (with a faction id), "flag", "unflag", "redeem".
+func faction(action: String, faction_id: String = "") -> void:
+	net.c_faction.rpc_id(1, action, faction_id)

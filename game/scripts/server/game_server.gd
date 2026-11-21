@@ -107,6 +107,7 @@ const Enchanting = preload("res://scripts/shared/enchanting.gd")
 const GearSkills = preload("res://scripts/shared/gear_skills.gd")
 const ReturnRate = preload("res://scripts/shared/return_rate.gd")
 const MarketBids = preload("res://scripts/shared/market_bids.gd")
+const Factions = preload("res://scripts/shared/factions.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
 const WoundSealant = preload("res://scripts/shared/wound_sealant.gd")
@@ -284,6 +285,10 @@ class Player:
 	var attack_timer: float = 0.0
 	var skill_timer: float = 0.0
 	var ultimate_timer: float = 0.0 # Weapon E (charged skill), separate from Q.
+	var faction: String = "" # Factions.FACTIONS id, or "" when not enlisted.
+	var faction_flagged: bool = false
+	var faction_unflag_at: float = -1.0 # Pending unflag time (server clock), -1 when none.
+	var faction_points: int = 0
 	var gear_skill_timers: Dictionary = {} # "armor" / "head" / "feet" -> seconds left.
 	var sprint_buff_seconds: float = 0.0
 	var sprint_buff_speed: float = 0.0
@@ -532,6 +537,7 @@ func character_data(player: Player) -> Dictionary:
 		"scent_mask_seconds": player.survival.scent_mask_seconds,
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
 		"pvp_infamy": player.pvp_infamy,
+		"faction": player.faction, "faction_points": player.faction_points,
 		"pvp_kills": player.pvp_kills, "pvp_honor": player.pvp_honor,
 		"arena_rating": player.arena_rating, "arena_wins": player.arena_wins,
 		"arena_losses": player.arena_losses,
@@ -624,6 +630,10 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not SaveValidation.valid_counter(data.get("deaths", 0)):
 		return false
 	if not PvpInfamy.valid(data.get("pvp_infamy", 0.0)):
+		return false
+	if not (data.get("faction", "") is String) or (str(data.get("faction", "")) != "" and not Factions.valid_faction(str(data.get("faction", "")))):
+		return false
+	if not Factions.valid_points(data.get("faction_points", 0)):
 		return false
 	for key in ["pvp_kills", "pvp_honor"]:
 		if not SaveValidation.valid_counter(data.get(key, 0)) or \
@@ -789,6 +799,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.renown = int(loaded_renown)
 	player.discovered_sites = loaded_discoveries["journal"]
 	player.pvp_infamy = float(data.get("pvp_infamy", 0.0))
+	player.faction = str(data.get("faction", ""))
+	player.faction_points = int(data.get("faction_points", 0))
+	player.faction_flagged = false # Flags never survive a relog.
 	player.pvp_kills = int(data.get("pvp_kills", 0))
 	player.pvp_honor = int(data.get("pvp_honor", 0))
 	player.arena_rating = int(data.get("arena_rating", ArenaRating.START_RATING))
@@ -2834,6 +2847,63 @@ func cmd_market_list(peer_id: int) -> Dictionary:
 	return {"ok": true, "action": "list", "orders": public_orders, "bids": public_bids,
 		"collected_silver": int(collected.get("silver", 0)), "collected_items": int(collected.get("items", 0)),
 		"pending_silver": int(market_payouts.get(account, 0))}
+
+
+## Faction warfare commands: "enlist" (hub, with faction id), "flag", "unflag", "redeem".
+func cmd_faction(peer_id: int, action: String, faction_id: String = "") -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	match action:
+		"enlist":
+			if not _market_at_hub(player):
+				return {"ok": false, "reason": "no_station"}
+			if not Factions.valid_faction(faction_id):
+				return {"ok": false, "reason": "unknown_faction"}
+			if player.faction_flagged:
+				return {"ok": false, "reason": "flagged"}
+			if player.faction != faction_id:
+				player.faction = faction_id
+				player.faction_points = 0 # Switching sides forfeits unspent standing.
+		"flag":
+			if player.faction == "":
+				return {"ok": false, "reason": "not_enlisted"}
+			player.faction_flagged = true
+			player.faction_unflag_at = -1.0
+		"unflag":
+			if not player.faction_flagged:
+				return {"ok": false, "reason": "not_flagged"}
+			player.faction_unflag_at = time + Factions.UNFLAG_SECONDS
+		"redeem":
+			if not _market_at_hub(player):
+				return {"ok": false, "reason": "no_station"}
+			if player.faction_points < Factions.REDEEM_COST:
+				return {"ok": false, "reason": "need_points", "points": player.faction_points}
+			var overflow: Dictionary = _give_items(player, Factions.REDEEM_REWARD)
+			if not overflow.is_empty():
+				return {"ok": false, "reason": "no_space"}
+			player.faction_points -= Factions.REDEEM_COST
+		_:
+			return {"ok": false, "reason": "unknown_action"}
+	player.dirty_character = true
+	return {"ok": true, "action": action, "faction": player.faction, "flagged": player.faction_flagged,
+		"points": player.faction_points, "unflag_in": maxf(0.0, player.faction_unflag_at - time) if player.faction_unflag_at >= 0.0 else 0.0}
+
+
+func _faction_enemies(a: Player, b: Player) -> bool:
+	if a == null or b == null or a.id == b.id:
+		return false
+	return Factions.can_fight(a.faction, a.faction_flagged, b.faction, b.faction_flagged,
+		world.zone_at(a.position.x, a.position.z), world.zone_at(b.position.x, b.position.z),
+		_is_safe(a.position), _is_safe(b.position))
+
+
+func _award_faction_points(player: Player, points: int, reason: String) -> void:
+	if player == null or player.faction == "" or not player.faction_flagged or points <= 0:
+		return
+	player.faction_points = mini(Factions.MAX_POINTS, player.faction_points + points)
+	player.dirty_character = true
+	events.append({"type": "faction_points", "peer": player.id, "points": points, "total": player.faction_points, "reason": reason})
 
 
 ## Albion-style buy order: escrows quantity * price silver from the buyer (hub only).
@@ -6271,7 +6341,7 @@ func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: flo
 			best_distance = distance
 	# PvP zones remain unchanged; only the mutually accepted hub opponent
 	# may be targetable in the otherwise peaceful settlement.
-	if ZoneRisk.allows_pvp(attacker_zone) or training_matches.has(attacker.id):
+	if ZoneRisk.allows_pvp(attacker_zone) or training_matches.has(attacker.id) or attacker.faction_flagged:
 		for other in players.values():
 			if other.id == attacker.id or not _alive(other) or ignored.has("player:" + str(other.id)):
 				continue
@@ -6282,7 +6352,8 @@ func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: flo
 				continue
 			if not training and GuildIdentity.same_guild(attacker, other):
 				continue # Verified guildmates cannot intercept PvP attacks.
-			if not training and not ZoneRisk.can_pvp(attacker_zone, world.zone_at(other.position.x, other.position.z)):
+			if not training and not ZoneRisk.can_pvp(attacker_zone, world.zone_at(other.position.x, other.position.z)) \
+					and not _faction_enemies(attacker, other):
 				continue
 			var distance := _hit_distance(origin, direction, Vector2(other.position.x, other.position.z), reach, ranged, 0.5)
 			if distance >= 0.0 and distance < best_distance and distance < cover_distance:
@@ -6419,8 +6490,9 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 			return
 		if GuildIdentity.same_guild(attacker, victim):
 			return # Direct damage paths also obey guild alliances.
+		var faction_fight: bool = _faction_enemies(attacker, victim)
 		if not ZoneRisk.can_pvp(world.zone_at(attacker.position.x, attacker.position.z),
-				world.zone_at(victim.position.x, victim.position.z)):
+				world.zone_at(victim.position.x, victim.position.z)) and not faction_fight:
 			return
 		_award(attacker, "marksman" if source == "ranged" else "melee", 1.0 + damage / 6.0)
 		var final_damage: float = Combat.apply_gear(damage, victim.inventory)
@@ -6452,8 +6524,12 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 		events.append({"type": "hit", "kind": "player", "id": victim.id, "damage": final_damage, "by": attacker.id})
 		if not _alive(victim):
 			attacker.kills += 1
+			if faction_fight:
+				_award_faction_points(attacker, Factions.POINTS_PLAYER_KILL, "player_kill")
 			var lawful: String = PvpInfamy.lawful_kill_reason(victim.pvp_infamy,
 				attacker.defense_target, attacker.defense_until, victim.id, time)
+			if faction_fight:
+				lawful = "faction_war" # Faction warfare is sanctioned: no infamy.
 			if lawful != "":
 				events.append({"type": "justice", "peer": attacker.id, "reason": lawful})
 			else:
@@ -6568,6 +6644,8 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 		loot = EliteInfected.enhanced_loot(loot, zone)
 	if loot.has("silver"):
 		loot["silver"] = int(round(float(loot["silver"]) * (1.0 + killer.skills.bonus("zombie_silver"))))
+	if zone >= Factions.MIN_ZONE:
+		_award_faction_points(killer, Factions.POINTS_ELITE_KILL if zombie.elite else Factions.POINTS_INFECTED_KILL, "infected")
 	# Albion-style enchantment materials: runes (infected), souls (elites), relics (raid bosses).
 	var enchant_drop: Dictionary = Enchanting.material_drop(zone, zombie.elite, zombie.raid_boss, loot_rng)
 	for material in enchant_drop:
@@ -7019,6 +7097,10 @@ func _tick_players(delta: float) -> void:
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
 		player.skill_timer = maxf(player.skill_timer - delta, 0.0)
 		player.ultimate_timer = maxf(player.ultimate_timer - delta, 0.0)
+		if player.faction_unflag_at >= 0.0 and time >= player.faction_unflag_at:
+			player.faction_flagged = false
+			player.faction_unflag_at = -1.0
+			player.dirty_character = true
 		player.progression.focus = minf(ReturnRate.MAX_FOCUS, player.progression.focus + ReturnRate.REGEN_PER_SECOND * maxf(0.0, delta))
 		for gear_slot in player.gear_skill_timers.keys():
 			player.gear_skill_timers[gear_slot] = maxf(float(player.gear_skill_timers[gear_slot]) - delta, 0.0)
@@ -8579,6 +8661,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"gear": other.inventory.gear.duplicate(), # Worn pieces show on the character for everyone.
 				"doing": _public_action(other), # What they are visibly busy with: a pose for everyone else.
 				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy),
+				"faction": other.faction, "faction_flagged": other.faction_flagged,
 				"guild": {"id": other.guild_id, "name": other.guild_name},
 				"pvp_rank": PvPHonor.rank(other.pvp_honor),
 				"arena_tier": ArenaRating.tier(other.arena_rating)})
@@ -8849,6 +8932,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"scavenging_xp": player.progression.scavenging_xp,
 			"combat_levels": player.progression.combat_levels(),
 			"focus": int(player.progression.focus),
+			"faction": player.faction, "faction_flagged": player.faction_flagged, "faction_points": player.faction_points,
+			"faction_unflag_in": maxf(0.0, player.faction_unflag_at - time) if player.faction_unflag_at >= 0.0 else 0.0,
 			"weapon_mastery": {"family": Progression.weapon_family(player.inventory.weapon),
 				"level": player.progression.weapon_mastery_level(player.inventory.weapon),
 				"fame": int(player.progression.weapon_fame.get(Progression.weapon_family(player.inventory.weapon), 0)),
