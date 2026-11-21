@@ -38,6 +38,7 @@
 #include "scene/main/node.h"
 
 #include <cstdint>
+#include <limits>
 
 bool WorldPartition3D::_within_radius(const Vector2i &p_cell, const Vector2i &p_center, int p_radius) {
 	const int64_t dx = int64_t(p_cell.x) - p_center.x;
@@ -813,6 +814,73 @@ Vector2i WorldPartition3D::get_observer_cell() const {
 	return observer_cell_valid ? observer_cell : Vector2i();
 }
 
+Array WorldPartition3D::find_cell_path(const Vector2i &p_from, const Vector2i &p_to, bool p_loaded_only) const {
+	Array result;
+	// A valid route must begin and end on registered cells, including singleton
+	// paths. A 'loaded only' route cannot cross a queued-for-free scene root.
+	if (_get_scene_path(p_from).is_empty() || _get_scene_path(p_to).is_empty()) {
+		return result;
+	}
+	if (p_loaded_only && (!is_cell_loaded(p_from) || !is_cell_loaded(p_to))) {
+		return result;
+	}
+	if (p_from == p_to) {
+		result.push_back(p_from);
+		return result;
+	}
+
+	Vector<Vector2i> frontier;
+	HashSet<Vector2i> visited;
+	HashMap<Vector2i, Vector2i> predecessor;
+	frontier.push_back(p_from);
+	visited.insert(p_from);
+	const Vector2i directions[4] = { Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(0, -1) };
+	int cursor = 0;
+	while (cursor < frontier.size()) {
+		const Vector2i current = frontier[cursor++];
+		for (int i = 0; i < 4; i++) {
+			// Check in 64-bit before converting back to 32-bit cell coordinates:
+			// callers may legitimately register cells near the integer limits.
+			const int64_t nx = int64_t(current.x) + directions[i].x;
+			const int64_t nz = int64_t(current.y) + directions[i].y;
+			if (nx < std::numeric_limits<int32_t>::min() || nx > std::numeric_limits<int32_t>::max() ||
+					nz < std::numeric_limits<int32_t>::min() || nz > std::numeric_limits<int32_t>::max()) {
+				continue;
+			}
+			const Vector2i neighbor(int32_t(nx), int32_t(nz));
+			if (visited.has(neighbor) || _get_scene_path(neighbor).is_empty() || (p_loaded_only && !is_cell_loaded(neighbor))) {
+				continue;
+			}
+			if (visited.size() >= MAX_PATH_SEARCH_CELLS) {
+				// Fail closed rather than blow the frame budget on a large connected
+				// grid. A chunked/hierarchical planner can relax this bound later.
+				return Array();
+			}
+			visited.insert(neighbor);
+			predecessor.insert(neighbor, current);
+			if (neighbor == p_to) {
+				Vector<Vector2i> reverse;
+				Vector2i step = p_to;
+				reverse.push_back(step);
+				while (step != p_from) {
+					const Vector2i *previous = predecessor.getptr(step);
+					if (previous == nullptr || reverse.size() >= MAX_PATH_SEARCH_CELLS) {
+						return Array();
+					}
+					step = *previous;
+					reverse.push_back(step);
+				}
+				for (int j = reverse.size() - 1; j >= 0; j--) {
+					result.push_back(reverse[j]);
+				}
+				return result;
+			}
+			frontier.push_back(neighbor);
+		}
+	}
+	return result; // Disconnected or no passable loaded cell corridor.
+}
+
 void WorldPartition3D::set_cell_scenes(const Dictionary &p_cells) {
 	Dictionary clean;
 	const Array keys = p_cells.keys();
@@ -1407,6 +1475,7 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remove_cell_scene", "cell"), &WorldPartition3D::remove_cell_scene);
 	ClassDB::bind_method(D_METHOD("clear_cell_scenes"), &WorldPartition3D::clear_cell_scenes);
 	ClassDB::bind_method(D_METHOD("get_configured_cell_count"), &WorldPartition3D::get_configured_cell_count);
+	ClassDB::bind_method(D_METHOD("find_cell_path", "from", "to", "loaded_only"), &WorldPartition3D::find_cell_path, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("pin_cell", "cell"), &WorldPartition3D::pin_cell);
 	ClassDB::bind_method(D_METHOD("unpin_cell", "cell"), &WorldPartition3D::unpin_cell);
 	ClassDB::bind_method(D_METHOD("is_cell_pinned", "cell"), &WorldPartition3D::is_cell_pinned);
