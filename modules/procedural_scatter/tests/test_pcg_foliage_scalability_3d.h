@@ -146,4 +146,121 @@ TEST_CASE("[PCGFoliageScalability3D] stable planner validates all prior rows ato
 	CHECK(planner->plan_visible_counts_stable(counts, distances, history, 1).is_empty());
 }
 
+TEST_CASE("[PCGFoliageScalability3D] per-instance geometry LOD initial and sticky boundaries") {
+	Ref<PCGFoliageScalability3D> planner;
+	planner.instantiate();
+	const PackedVector3Array points = {
+		Vector3(0, 0, 0), Vector3(24, 0, 0), Vector3(24.01, 0, 0),
+		Vector3(27, 0, 0), Vector3(27.01, 0, 0), Vector3(-24, 0, 0)
+	};
+	const PackedInt32Array initial_expected = { 0, 0, 1, 1, 1, 0 };
+	const PackedInt32Array initial = planner->plan_instance_lods(points, Vector3(), {});
+	CHECK(initial == initial_expected);
+	CHECK(planner->plan_instance_lods(points, Vector3(), {}) == initial);
+	const PackedInt32Array near_previous = { 0, 0, 0, 0, 0, 0 };
+	const PackedInt32Array near_expected = { 0, 0, 0, 0, 1, 0 };
+	CHECK(planner->plan_instance_lods(points, Vector3(), near_previous) == near_expected);
+	const PackedInt32Array far_previous = { 1, 1, 1, 1, 1, 1 };
+	const PackedInt32Array far_expected = { 0, 1, 1, 1, 1, 1 };
+	CHECK(planner->plan_instance_lods(points, Vector3(), far_previous) == far_expected);
+	// Distances exactly at transition edges retain the existing tier.
+	CHECK(planner->plan_instance_lods({ Vector3(21, 0, 0) }, Vector3(), { 1 })[0] == 1);
+	CHECK(planner->plan_instance_lods({ Vector3(20.9, 0, 0) }, Vector3(), { 1 })[0] == 0);
+	CHECK(planner->plan_instance_lods({ Vector3(27, 0, 0) }, Vector3(), { 0 })[0] == 0);
+	CHECK(planner->plan_instance_lods({ Vector3(27.1, 0, 0) }, Vector3(), { 0 })[0] == 1);
+	CHECK(planner->plan_instance_lods(points, Vector3(200, 0, 0), initial).size() == points.size());
+	const PackedInt32Array far_move = planner->plan_instance_lods(points, Vector3(200, 0, 0), initial);
+	for (int tier : far_move) {
+		CHECK(tier == 1);
+	}
+}
+
+TEST_CASE("[PCGFoliageScalability3D] combined variant and LOD batches conserve all source instances") {
+	Ref<PCGFoliageScalability3D> planner;
+	planner.instantiate();
+	const PackedInt32Array variants = { 0, 1, 0, 1, 2, 1 };
+	const PackedInt32Array lods = { 0, 1, 1, 0, 0, 1 };
+	const PackedInt32Array copy = variants;
+	const Array groups = planner->partition_variant_lods(variants, lods, 3);
+	REQUIRE(groups.size() == 6);
+	const PackedInt32Array expected0 = { 0 };
+	const PackedInt32Array expected1 = { 2 };
+	const PackedInt32Array expected2 = { 3 };
+	const PackedInt32Array expected3 = { 1, 5 };
+	const PackedInt32Array expected4 = { 4 };
+	const PackedInt32Array group0 = groups[0];
+	CHECK(group0 == expected0);
+	const PackedInt32Array group1 = groups[1];
+	CHECK(group1 == expected1);
+	const PackedInt32Array group2 = groups[2];
+	CHECK(group2 == expected2);
+	const PackedInt32Array group3 = groups[3];
+	CHECK(group3 == expected3);
+	const PackedInt32Array group4 = groups[4];
+	CHECK(group4 == expected4);
+	const PackedInt32Array group5 = groups[5];
+	CHECK(group5.is_empty());
+	CHECK(planner->partition_variant_lods(variants, lods, 3) == groups);
+	CHECK(variants == copy);
+	int visited[6] = {};
+	for (int group_index = 0; group_index < groups.size(); ++group_index) {
+		const PackedInt32Array indices = groups[group_index];
+		for (int index : indices) {
+			REQUIRE(index >= 0);
+			REQUIRE(index < 6);
+			CHECK(variants[index] == group_index / 2);
+			CHECK(lods[index] == group_index % 2);
+			visited[index]++;
+		}
+	}
+	for (int count : visited) {
+		CHECK(count == 1);
+	}
+	const Array empty = planner->partition_variant_lods({}, {}, 3);
+	REQUIRE(empty.size() == 6);
+	for (int i = 0; i < 6; ++i) {
+		const PackedInt32Array indices = empty[i];
+		CHECK(indices.is_empty());
+	}
+}
+
+TEST_CASE("[PCGFoliageScalability3D] invalid per-point LOD input rejects atomically") {
+	Ref<PCGFoliageScalability3D> planner;
+	planner.instantiate();
+	const PackedVector3Array positions = { Vector3(), Vector3(25, 0, 0) };
+	CHECK(planner->plan_instance_lods(positions, Vector3(), { 0 }).is_empty());
+	CHECK(planner->plan_instance_lods(positions, Vector3(), { 0, 2 }).is_empty());
+	CHECK(planner->plan_instance_lods(positions, Vector3(), {}, -1).is_empty());
+	CHECK(planner->plan_instance_lods(positions, Vector3(), {}, Math::INF).is_empty());
+	CHECK(planner->plan_instance_lods(positions, Vector3(), {}, 24, -1).is_empty());
+	CHECK(planner->plan_instance_lods(positions, Vector3(), {}, 24, 24).is_empty());
+	CHECK(planner->plan_instance_lods(positions, Vector3(), {}, 24, Math::NaN).is_empty());
+	CHECK(planner->plan_instance_lods(positions, Vector3(Math::NaN, 0, 0), {}).is_empty());
+	CHECK(planner->plan_instance_lods({ Vector3(), Vector3(Math::NaN, 0, 0) }, Vector3(), {}).is_empty());
+	CHECK(planner->plan_instance_lods({ Vector3(), Vector3(10000001, 0, 0) }, Vector3(), {}).is_empty());
+	CHECK(planner->partition_variant_lods({ 0, 0 }, { 0 }, 2).is_empty());
+	CHECK(planner->partition_variant_lods({ 0, 2 }, { 0, 1 }, 2).is_empty());
+	CHECK(planner->partition_variant_lods({ 0, 1 }, { 0, -1 }, 2).is_empty());
+	CHECK(planner->partition_variant_lods({ 0, 1 }, { 0, 2 }, 2).is_empty());
+	CHECK(planner->partition_variant_lods({ 0, 1 }, { 0, 1 }, 0).is_empty());
+	CHECK(planner->partition_variant_lods({ 0, 1 }, { 0, 1 }, 33).is_empty());
+	PackedVector3Array many;
+	many.resize(16385);
+	CHECK(planner->plan_instance_lods(many, Vector3(), {}).is_empty());
+	PackedInt32Array ids;
+	PackedInt32Array tiers;
+	ids.resize(16385);
+	tiers.resize(16385);
+	CHECK(planner->partition_variant_lods(ids, tiers, 3).is_empty());
+	many.resize(16384);
+	const PackedInt32Array max_lods = planner->plan_instance_lods(many, Vector3(), {});
+	REQUIRE(max_lods.size() == 16384);
+	CHECK(max_lods[0] == 0);
+	ids.resize(16384);
+	tiers.resize(16384);
+	const Array max_groups = planner->partition_variant_lods(ids, tiers, 3);
+	REQUIRE(max_groups.size() == 6);
+	const PackedInt32Array max_near = max_groups[0];
+	CHECK(max_near.size() == 16384);
+}
 } // namespace TestPCGFoliageScalability3D
