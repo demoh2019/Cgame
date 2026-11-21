@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AudioMixSnapshotController" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Deterministic source-keyed audio bus mix stages with independent fade-in and fade-out.
+	</brief_description>
+	<description>
+		Inspired by Unreal Engine Control Bus Mixes. Each named mix profile provides up to eight bus attenuation values in decibels, from -30 through 0. Up to 16 named mix profiles may be active or fading simultaneously. Profiles can overlap on a bus; their faded dB offsets are added, limited to -60 dB per bus. [method tick] advances fade weights independent of the frame rate. Mixes are data-only and do not modify [AudioServer] directly, enabling the caller to combine their output with user volume controls and transient event ducking. Validation is atomic; invalid operations leave all existing mix profiles untouched.
+	</description>
+	<methods>
+		<method name="activate_mix">
+			<return type="bool" />
+			<param index="0" name="source" type="StringName" />
+			<param index="1" name="bus_offsets_db" type="Dictionary" />
+			<param index="2" name="fade_seconds" type="float" default="1.0" />
+			<description>Creates or reactivates a named mix. Keys must be valid nonempty bus names; values must be numeric, finite attenuation in [-30, 0]. A fade in the range [0, 15] seconds is accepted. Re-activation of a fading mix resumes from its current weight.</description>
+		</method>
+		<method name="deactivate_mix">
+			<return type="bool" />
+			<param index="0" name="source" type="StringName" />
+			<param index="1" name="fade_seconds" type="float" default="1.0" />
+			<description>Fades the named mix out; with a zero fade it is removed immediately. Does not affect other mixes.</description>
+		</method>
+		<method name="tick">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>Advances independent mix fades without invoking AudioServer. Invalid or nonpositive deltas are ignored.</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>Removes all mix stages immediately.</description>
+		</method>
+		<method name="get_bus_offset_db" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="bus" type="StringName" />
+			<description>Returns the sum of active, faded dB offsets on the named bus, clamped to [-60, 0]. Does not include the user slider or transient ducking.</description>
+		</method>
+		<method name="get_mix_weight" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="source" type="StringName" />
+			<description>Returns the current fade weight (0 to 1) of a named mix, or 0 when absent.</description>
+		</method>
+		<method name="has_mix" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="source" type="StringName" />
+			<description>Returns true while the mix exists, including during fade-out.</description>
+		</method>
+		<method name="get_mix_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns the number of active and fading mix profiles (at most 16).</description>
+		</method>
+	</methods>
+</class>

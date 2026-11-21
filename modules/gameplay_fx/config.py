@@ -16,6 +16,7 @@ def get_doc_classes():
         "GameplayAttributeSet",
         "GameplayCooldownTracker",
         "AudioDuckMix",
+        "AudioMixSnapshotController",
     ]
 
 
