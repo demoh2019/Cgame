@@ -118,7 +118,12 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 			var resolve_tag := StringName("Runtime.Status.Resolve")
 			if counts.has(resolve_tag):
 				counts[resolve_tag] = clampi(int(snapshot.get("resolve_stacks", 0)), 2, 65535)
-			stack_container.call("replace_stacks", counts)
+			# Runtime snapshots must not erase independent local/FX stack branches.
+			# Fall back to the legacy full snapshot API on older custom binaries.
+			if stack_container.has_method("replace_stack_branch"):
+				stack_container.call("replace_stack_branch", StringName("Runtime"), counts)
+			else:
+				stack_container.call("replace_stacks", counts)
 
 
 ## Presentation-only stack counts. The server remains authoritative for combat.
