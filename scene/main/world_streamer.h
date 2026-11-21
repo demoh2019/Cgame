@@ -202,6 +202,11 @@ private:
 	int max_auto_retries = 0;
 	real_t retry_initial_delay = 1.0;
 	real_t retry_max_delay = 16.0;
+	// Zero preserves the historical simultaneous-release retry policy.
+	real_t retry_delay_spread = 0.0;
+	int max_retry_releases_per_update = 0;
+	int last_retry_release_count = 0;
+	int last_retry_deferred_count = 0;
 	double time_since_update = 1e9;
 	bool truncated_warned = false;
 
@@ -359,6 +364,14 @@ public:
 	real_t get_retry_initial_delay() const { return retry_initial_delay; }
 	void set_retry_max_delay(real_t p_seconds);
 	real_t get_retry_max_delay() const { return retry_max_delay; }
+	void set_retry_delay_spread(real_t p_fraction);
+	real_t get_retry_delay_spread() const { return retry_delay_spread; }
+	void set_max_retry_releases_per_update(int p_count);
+	int get_max_retry_releases_per_update() const { return max_retry_releases_per_update; }
+	int get_last_retry_release_count() const { return last_retry_release_count; }
+	int get_last_retry_deferred_count() const { return last_retry_deferred_count; }
+	static double calculate_retry_delay_seconds(const Vector3i &p_cell, int p_attempt,
+			double p_initial_seconds, double p_max_seconds, double p_spread);
 	int get_retry_pending_count() const;
 	void set_update_interval(double p_seconds);
 	double get_update_interval() const { return update_interval; }
