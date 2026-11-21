@@ -6,6 +6,7 @@ class_name ExplorationQuest3D
 signal progress_changed(collected: int, total: int)
 signal pickup_hint_changed(message: String)
 signal quest_finished()
+signal shard_collected(index: int)
 
 @export_range(1, 32, 1) var shard_count: int = 12
 @export_range(4.0, 40.0, 1.0) var spawn_min_radius: float = 15.0
@@ -89,6 +90,7 @@ func collect_shard(index: int) -> bool:
 	if index < _shards.size():
 		_shards[index].visible = false
 	save_progress()
+	shard_collected.emit(index)
 	progress_changed.emit(collected_ids.size(), positions.size())
 	_update_hint()
 	if collected_ids.size() == positions.size() and not _finished_emitted:
