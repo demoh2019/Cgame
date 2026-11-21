@@ -128,7 +128,8 @@ TEST_CASE("[BehaviorTreeInspector] Shared task resource renders at different pat
 	runner->set_root_task(root);
 	runner->set_trace_enabled(true);
 	CHECK(runner->tick(0.1) == BehaviorTreeTask::SUCCESS);
-	const Array nodes = runner->get_tree_snapshot()["nodes"];
+	const Dictionary snapshot = runner->get_tree_snapshot();
+	const Array nodes = snapshot["nodes"];
 	REQUIRE(nodes.size() == 3);
 	const Dictionary left = nodes[1], right = nodes[2];
 	CHECK(left["path"] == "root/0");
@@ -150,7 +151,8 @@ TEST_CASE("[BehaviorTreeInspector] Inverter and decorator children are visible")
 	inverter->set_task(timeout);
 	BehaviorTreeRunner *runner = memnew(BehaviorTreeRunner);
 	runner->set_root_task(inverter);
-	const Array nodes = runner->get_tree_snapshot()["nodes"];
+	const Dictionary snapshot = runner->get_tree_snapshot();
+	const Array nodes = snapshot["nodes"];
 	REQUIRE(nodes.size() == 3);
 	const Dictionary a = nodes[0], b = nodes[1], c = nodes[2];
 	CHECK(a["task_class"] == "BehaviorTreeInverter");
@@ -192,7 +194,9 @@ TEST_CASE("[BehaviorTreeInspector] Optional inspection does not edit execution m
 	nodes.clear(); // Snapshot is detached from the actual tree.
 	const Dictionary after = runner->get_debug_snapshot()["execution_memory"];
 	CHECK(after == before);
-	CHECK(Array(runner->get_tree_snapshot()["nodes"]).size() == 1);
+	const Dictionary second_snapshot = runner->get_tree_snapshot();
+	const Array fresh_nodes = second_snapshot["nodes"];
+	CHECK(fresh_nodes.size() == 1);
 	memdelete(runner);
 }
 
