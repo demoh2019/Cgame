@@ -37,6 +37,7 @@
 #include "core/io/resource_saver.h"
 #include "core/os/os.h"
 #include "scene/main/scene_tree.h"
+#include "scene/3d/physics/rigid_body_3d.h"
 #include "scene/main/window.h"
 #include "tests/test_macros.h"
 
@@ -44,6 +45,132 @@
 #include <limits>
 
 namespace TestWorldPartition3DExtra {
+
+TEST_CASE("[WorldPartition3D] Rigid body snapshots are disabled unless explicitly opted in") {
+	WorldPartition3D world;
+	CHECK_FALSE(world.is_persisting_rigid_bodies());
+	CHECK(world.snapshot_cell_physics_states().is_empty());
+	CHECK(world.get_cell_physics_state(Vector2i(0, 0)).is_empty());
+	world.set_persist_rigid_bodies(true);
+	CHECK(world.is_persisting_rigid_bodies());
+	world.set_persist_rigid_bodies(false);
+	CHECK_FALSE(world.is_persisting_rigid_bodies());
+}
+
+TEST_CASE("[WorldPartition3D] Rigid body save import validates types finite values and paths") {
+	WorldPartition3D world;
+	Dictionary record;
+	record["transform"] = Transform3D(Basis(), Vector3(3, 2, 1));
+	record["linear_velocity"] = Vector3(2, 0, 0);
+	record["angular_velocity"] = Vector3(0, 0, 1);
+	record["sleeping"] = false;
+	record["freeze"] = false;
+	Dictionary bad_velocity = record.duplicate(true);
+	bad_velocity["linear_velocity"] = Vector3(std::numeric_limits<real_t>::infinity(), 0, 0);
+	Dictionary bad_missing = record.duplicate(true);
+	bad_missing.erase("transform");
+	Dictionary candidates;
+	candidates["PersistentBox"] = record;
+	candidates["../OutsideBody"] = record;
+	candidates["/root/OtherBody"] = record;
+	candidates["PersistentBox:linear_velocity"] = record;
+	candidates["BadVelocity"] = bad_velocity;
+	candidates["MissingTransform"] = bad_missing;
+	candidates[Vector2i(99, 99)] = record;
+	Dictionary raw;
+	raw[Vector2i(1, 1)] = candidates;
+	raw["wrong cell coordinate"] = candidates;
+	world.load_cell_physics_states(raw);
+	CHECK(world.get_cell_physics_state_count() == 1);
+	Dictionary cached = world.get_cell_physics_state(Vector2i(1, 1));
+	CHECK(cached.size() == 1);
+	CHECK(cached.has("PersistentBox"));
+	Dictionary saved = cached["PersistentBox"];
+	CHECK(saved["linear_velocity"] == Vector3(2, 0, 0));
+	saved["linear_velocity"] = Vector3(77, 0, 0);
+	Dictionary again = world.get_cell_physics_state(Vector2i(1, 1));
+	Dictionary body = again["PersistentBox"];
+	CHECK(body["linear_velocity"] == Vector3(2, 0, 0));
+	world.load_cell_physics_states(Dictionary());
+	CHECK(world.get_cell_physics_state_count() == 0);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Persisted rigid-body transforms and velocities survive reload") {
+	const String path = make_physics_cell_scene("transform_velocity_roundtrip");
+	{
+		WorldFixture fixture;
+		fixture.world->set_persist_rigid_bodies(true);
+		const Vector2i cell(0, 0);
+		fixture.world->set_cell_scene(cell, path);
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		Node3D *root = fixture.world->get_cell_instance(cell);
+		REQUIRE(root != nullptr);
+		RigidBody3D *box = Object::cast_to<RigidBody3D>(root->get_node_or_null(NodePath("PersistentBox")));
+		REQUIRE(box != nullptr);
+		box->set_position(Vector3(11, 5, 13));
+		box->set_linear_velocity(Vector3(1, 2, 3));
+		box->set_angular_velocity(Vector3(0, 1, 0));
+		const Dictionary snapshot = fixture.world->snapshot_cell_physics_states();
+		REQUIRE(snapshot.has(cell));
+		const Dictionary box_states = snapshot[cell];
+		REQUIRE(box_states.has("PersistentBox"));
+		CHECK_FALSE(box_states.has("UnmarkedBox"));
+		CHECK(box_states.size() == 1);
+		const Dictionary record = box_states["PersistentBox"];
+		CHECK(record["linear_velocity"] == Vector3(1, 2, 3));
+		CHECK(record["angular_velocity"] == Vector3(0, 1, 0));
+		const Transform3D transform = record["transform"];
+		CHECK(transform.origin == Vector3(11, 5, 13));
+		fixture.observer->set_position(Vector3(1280, 0, 0));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(cell));
+		CHECK(fixture.world->get_cell_physics_state_count() == 1);
+		fixture.observer->set_position(Vector3(0, 0, 0));
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		Node3D *again_root = fixture.world->get_cell_instance(cell);
+		REQUIRE(again_root != nullptr);
+		RigidBody3D *again = Object::cast_to<RigidBody3D>(again_root->get_node_or_null(NodePath("PersistentBox")));
+		REQUIRE(again != nullptr);
+		CHECK(again->get_position() == Vector3(11, 5, 13));
+		CHECK(again->get_linear_velocity() == Vector3(1, 2, 3));
+		CHECK(again->get_angular_velocity() == Vector3(0, 1, 0));
+		fixture.world->clear_cell_physics_states();
+		CHECK(fixture.world->get_cell_physics_state_count() == 0);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Bulk physics snapshot applies to loaded opted-in body") {
+	const String path = make_physics_cell_scene("active_import");
+	{
+		WorldFixture fixture;
+		fixture.world->set_persist_rigid_bodies(true);
+		const Vector2i cell(0, 0);
+		fixture.world->set_cell_scene(cell, path);
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		Node3D *root = fixture.world->get_cell_instance(cell);
+		REQUIRE(root != nullptr);
+		RigidBody3D *body = Object::cast_to<RigidBody3D>(root->get_node_or_null(NodePath("PersistentBox")));
+		REQUIRE(body != nullptr);
+		Dictionary record;
+		record["transform"] = Transform3D(Basis(), Vector3(21, 8, 5));
+		record["linear_velocity"] = Vector3(0, 4, 0);
+		record["angular_velocity"] = Vector3(0, 0, 0.5);
+		record["sleeping"] = true;
+		record["freeze"] = true;
+		Dictionary cell_records;
+		cell_records["PersistentBox"] = record;
+		Dictionary import;
+		import[cell] = cell_records;
+		fixture.world->load_cell_physics_states(import);
+		CHECK(body->get_position() == Vector3(21, 8, 5));
+		CHECK(body->is_freeze_enabled());
+		CHECK(body->is_sleeping());
+		Dictionary saved = fixture.world->get_cell_physics_state(cell);
+		CHECK(saved.size() == 1);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
 
 TEST_CASE("[WorldPartition3D] Navigation corridor route includes edge-adjacent cells") {
 	WorldPartition3D world;
@@ -647,6 +774,31 @@ static String make_cell_scene(const String &p_id, const Vector3 &p_authored_offs
 	const String file_name = "user://partition_extra_" + p_id + "_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
 	CHECK(ResourceSaver::save(packed, file_name) == OK);
 	return file_name;
+}
+
+static String make_physics_cell_scene(const String &p_id) {
+	Node3D *root = memnew(Node3D);
+	root->set_name("PhysicsCell");
+	RigidBody3D *body = memnew(RigidBody3D);
+	body->set_name("PersistentBox");
+	body->set_gravity_scale(0);
+	body->set_meta(SNAME("streaming_persistent"), true);
+	body->set_position(Vector3(9, 4, 7));
+	root->add_child(body);
+	body->set_owner(root);
+	// An ordinary unmarked physics body must never bloat the saved state.
+	RigidBody3D *unmarked = memnew(RigidBody3D);
+	unmarked->set_name("UnmarkedBox");
+	unmarked->set_gravity_scale(0);
+	root->add_child(unmarked);
+	unmarked->set_owner(root);
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	CHECK(packed->pack(root) == OK);
+	memdelete(root);
+	const String path = "user://partition_physics_" + p_id + "_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	CHECK(ResourceSaver::save(packed, path) == OK);
+	return path;
 }
 
 static bool wait_for_cell(WorldPartition3D *p_world, const Vector2i &p_cell) {

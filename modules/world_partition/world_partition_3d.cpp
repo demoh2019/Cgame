@@ -38,6 +38,7 @@
 #include "scene/main/node.h"
 #include "scene/3d/physics/collision_object_3d.h"
 #include "scene/3d/physics/collision_shape_3d.h"
+#include "scene/3d/physics/rigid_body_3d.h"
 #include "scene/3d/navigation/navigation_region_3d.h"
 
 #include <cstdint>
@@ -147,6 +148,8 @@ void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 
 	Node *node = Object::cast_to<Node>(ObjectDB::get_instance(*id));
 	if (node != nullptr) {
+		// Capture motion BEFORE callbacks can freeze a body for deferred deletion.
+		_capture_cell_physics_state(p_cell, node);
 		_notify_cell_deactivating(p_cell, node);
 		_capture_cell_state(p_cell, node);
 		node->queue_free();
@@ -247,6 +250,7 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 	active_cells.insert(p_cell, instance->get_instance_id());
 	// Restoring after _ready() allows scene scripts to create their visuals first.
 	_restore_cell_state(p_cell, instance);
+	_restore_cell_physics_state(p_cell, instance);
 	_notify_cell_activating(p_cell, instance);
 	emit_signal(SNAME("cell_loaded"), p_cell);
 	return true;
@@ -809,6 +813,177 @@ void WorldPartition3D::_stream_candidate_cell(const Vector2i &p_cell, int &r_new
 	}
 }
 
+bool WorldPartition3D::_valid_body_path(const String &p_path) {
+	if (p_path.is_empty() || p_path.contains("..")) {
+		return false;
+	}
+	const NodePath path = NodePath(p_path);
+	return !path.is_absolute() && path.get_subname_count() == 0;
+}
+
+bool WorldPartition3D::_valid_body_state(const Dictionary &p_state) {
+	if (!p_state.has("transform") || !p_state.has("linear_velocity") || !p_state.has("angular_velocity") || !p_state.has("sleeping") || !p_state.has("freeze")) {
+		return false;
+	}
+	const Variant transform = p_state["transform"];
+	const Variant linear = p_state["linear_velocity"];
+	const Variant angular = p_state["angular_velocity"];
+	const Variant sleeping = p_state["sleeping"];
+	const Variant frozen = p_state["freeze"];
+	if (transform.get_type() != Variant::TRANSFORM3D || linear.get_type() != Variant::VECTOR3 || angular.get_type() != Variant::VECTOR3 || sleeping.get_type() != Variant::BOOL || frozen.get_type() != Variant::BOOL) {
+		return false;
+	}
+	const Transform3D body_transform = transform;
+	const Vector3 linear_velocity = linear;
+	const Vector3 angular_velocity = angular;
+	return body_transform.is_finite() && linear_velocity.is_finite() && angular_velocity.is_finite();
+}
+
+void WorldPartition3D::_capture_cell_physics_state(const Vector2i &p_cell, Node *p_instance) {
+	if (!persist_rigid_bodies || p_instance == nullptr) {
+		return;
+	}
+	Dictionary states;
+	Vector<Node *> stack;
+	stack.push_back(p_instance);
+	while (!stack.is_empty()) {
+		Node *node = stack[stack.size() - 1];
+		stack.remove_at(stack.size() - 1);
+		RigidBody3D *body = Object::cast_to<RigidBody3D>(node);
+		if (body != nullptr && bool(body->get_meta(SNAME("streaming_persistent"), false))) {
+			// A stable scene-relative NodePath survives PackedScene reinstantiation.
+			const String path = String(p_instance->get_path_to(body));
+			Dictionary record;
+			record["transform"] = body->get_transform();
+			record["linear_velocity"] = body->get_linear_velocity();
+			record["angular_velocity"] = body->get_angular_velocity();
+			record["sleeping"] = body->is_sleeping();
+			record["freeze"] = body->is_freeze_enabled();
+			if (_valid_body_state(record)) {
+				states[path] = record;
+			}
+		}
+		if (states.size() >= 128) {
+			break;
+		}
+		for (int i = 0; i < node->get_child_count(); i++) {
+			stack.push_back(node->get_child(i));
+		}
+	}
+	if (states.is_empty()) {
+		saved_cell_physics_states.erase(p_cell);
+	} else {
+		saved_cell_physics_states.insert(p_cell, states.duplicate(true));
+	}
+}
+
+void WorldPartition3D::_restore_cell_physics_state(const Vector2i &p_cell, Node *p_instance) {
+	if (!persist_rigid_bodies || p_instance == nullptr) {
+		return;
+	}
+	const Dictionary *states = saved_cell_physics_states.getptr(p_cell);
+	if (states == nullptr) {
+		return;
+	}
+	const Array paths = states->keys();
+	for (int i = 0; i < paths.size(); i++) {
+		const Variant key = paths[i];
+		if (key.get_type() != Variant::STRING || String(key).is_empty()) {
+			continue;
+		}
+		const String path_text = key;
+		// A checkpoint must not traverse outside the cell root or access
+		// node properties through subnames.
+		if (!_valid_body_path(path_text)) {
+			continue;
+		}
+		const NodePath path = NodePath(path_text);
+		RigidBody3D *body = Object::cast_to<RigidBody3D>(p_instance->get_node_or_null(path));
+		if (body == nullptr || (body != p_instance && !p_instance->is_ancestor_of(body)) || !bool(body->get_meta(SNAME("streaming_persistent"), false))) {
+			continue;
+		}
+		const Dictionary record = (*states)[key];
+		if (!_valid_body_state(record)) {
+			continue;
+		}
+		body->set_freeze_enabled(bool(record["freeze"]));
+		body->set_transform(record["transform"]);
+		body->set_linear_velocity(record["linear_velocity"]);
+		body->set_angular_velocity(record["angular_velocity"]);
+		body->set_sleeping(bool(record["sleeping"]));
+	}
+}
+
+void WorldPartition3D::set_persist_rigid_bodies(bool p_enabled) {
+	persist_rigid_bodies = p_enabled;
+}
+
+bool WorldPartition3D::is_persisting_rigid_bodies() const {
+	return persist_rigid_bodies;
+}
+
+Dictionary WorldPartition3D::get_cell_physics_state(const Vector2i &p_cell) const {
+	const Dictionary *states = saved_cell_physics_states.getptr(p_cell);
+	return states != nullptr ? states->duplicate(true) : Dictionary();
+}
+
+Dictionary WorldPartition3D::snapshot_cell_physics_states() {
+	if (persist_rigid_bodies) {
+		for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
+			Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(E.value));
+			_capture_cell_physics_state(E.key, instance);
+		}
+	}
+	Dictionary snapshot;
+	for (const KeyValue<Vector2i, Dictionary> &E : saved_cell_physics_states) {
+		snapshot[E.key] = E.value.duplicate(true);
+	}
+	return snapshot;
+}
+
+void WorldPartition3D::load_cell_physics_states(const Dictionary &p_states) {
+	HashMap<Vector2i, Dictionary> accepted;
+	const Array cells = p_states.keys();
+	for (int i = 0; i < cells.size(); i++) {
+		const Variant cell = cells[i];
+		const Variant raw = p_states[cell];
+		if (cell.get_type() != Variant::VECTOR2I || raw.get_type() != Variant::DICTIONARY) {
+			continue;
+		}
+		const Dictionary candidates = raw;
+		const Array names = candidates.keys();
+		Dictionary valid;
+		for (int j = 0; j < names.size() && valid.size() < 128; j++) {
+			const Variant name = names[j];
+			if (name.get_type() != Variant::STRING || !_valid_body_path(String(name)) || candidates[name].get_type() != Variant::DICTIONARY) {
+				continue;
+			}
+			const Dictionary record = candidates[name];
+			if (_valid_body_state(record)) {
+				valid[name] = record.duplicate(true);
+			}
+		}
+		if (!valid.is_empty()) {
+			accepted.insert(cell, valid);
+		}
+	}
+	saved_cell_physics_states = accepted;
+	if (persist_rigid_bodies) {
+		for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
+			Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(E.value));
+			_restore_cell_physics_state(E.key, instance);
+		}
+	}
+}
+
+void WorldPartition3D::clear_cell_physics_states() {
+	saved_cell_physics_states.clear();
+}
+
+int WorldPartition3D::get_cell_physics_state_count() const {
+	return saved_cell_physics_states.size();
+}
+
 void WorldPartition3D::set_cell_state(const Vector2i &p_cell, const Dictionary &p_state) {
 	const Dictionary previous = get_cell_state(p_cell);
 	if (p_state.is_empty()) {
@@ -1113,6 +1288,13 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("snapshot_cell_states"), &WorldPartition3D::snapshot_cell_states);
 	ClassDB::bind_method(D_METHOD("load_cell_states", "states"), &WorldPartition3D::load_cell_states);
 	ClassDB::bind_method(D_METHOD("get_cell_state_count"), &WorldPartition3D::get_cell_state_count);
+	ClassDB::bind_method(D_METHOD("set_persist_rigid_bodies", "enabled"), &WorldPartition3D::set_persist_rigid_bodies);
+	ClassDB::bind_method(D_METHOD("is_persisting_rigid_bodies"), &WorldPartition3D::is_persisting_rigid_bodies);
+	ClassDB::bind_method(D_METHOD("get_cell_physics_state", "cell"), &WorldPartition3D::get_cell_physics_state);
+	ClassDB::bind_method(D_METHOD("snapshot_cell_physics_states"), &WorldPartition3D::snapshot_cell_physics_states);
+	ClassDB::bind_method(D_METHOD("load_cell_physics_states", "states"), &WorldPartition3D::load_cell_physics_states);
+	ClassDB::bind_method(D_METHOD("clear_cell_physics_states"), &WorldPartition3D::clear_cell_physics_states);
+	ClassDB::bind_method(D_METHOD("get_cell_physics_state_count"), &WorldPartition3D::get_cell_physics_state_count);
 	ClassDB::bind_method(D_METHOD("set_cell_scenes", "scenes"), &WorldPartition3D::set_cell_scenes);
 	ClassDB::bind_method(D_METHOD("get_cell_scenes"), &WorldPartition3D::get_cell_scenes);
 	ClassDB::bind_method(D_METHOD("set_cell_scene", "cell", "scene_path"), &WorldPartition3D::set_cell_scene);
@@ -1137,6 +1319,7 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "layer_states"), "set_layer_states", "get_layer_states");
 	ADD_GROUP("Streaming", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "streaming_enabled"), "set_streaming_enabled", "is_streaming_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "persist_rigid_bodies"), "set_persist_rigid_bodies", "is_persisting_rigid_bodies");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "observer_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Node3D"), "set_observer_path", "get_observer_path");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "additional_observer_paths"), "set_additional_observer_paths", "get_additional_observer_paths");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "pinned_cells", PROPERTY_HINT_ARRAY_TYPE, "Vector2i"), "set_pinned_cells", "get_pinned_cells");

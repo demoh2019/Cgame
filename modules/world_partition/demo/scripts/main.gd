@@ -58,6 +58,7 @@ func _ready() -> void:
     distant = _make_streamer("DistantProxies", 4, 5, PROXY_SCENE, 1)
     baked_validation_ms = Time.get_ticks_msec() - validation_start
     detail = _make_streamer("DetailedCells", 1, 2, DETAIL_SCENE, 2)
+    detail.set("persist_rigid_bodies", true)
     _apply_quality_profile()
     if not detail.has_method("pin_cell") or not detail.has_method("get_pinned_cell_count"):
         push_error("Cgame pinned gameplay cells API required (pin_cell/get_pinned_cell_count).")
@@ -73,6 +74,9 @@ func _ready() -> void:
         return
     if not detail.has_method("get_cell_simulation_stats"):
         push_error("Cgame WorldPartition3D collision/navigation diagnostics required.")
+        return
+    if not detail.has_method("snapshot_cell_physics_states") or not detail.has_method("load_cell_physics_states"):
+        push_error("Cgame WorldPartition3D physics state persistence API required.")
         return
     if not detail.has_method("acquire_cell_route") or not detail.has_method("release_cell_route"):
         push_error("Cgame WorldPartition3D navigation route streaming API required.")
@@ -303,6 +307,20 @@ func _test_navigation_path() -> void:
     last_nav_query = "Navigation path: %d points" % path.size()
     print(last_nav_query)
 
+func _kick_persistent_crate() -> void:
+    if detail == null:
+        return
+    # Hub is pinned initially. When the player releases H, this action
+    # intentionally cannot affect an unloaded crate.
+    var root := _gameplay_cell_root(HUB_CELL)
+    if root == null:
+        root = _gameplay_cell_root(ARENA_CELL)
+    if root != null and root.has_method("kick_persistent_crate"):
+        if bool(root.call("kick_persistent_crate")):
+            print("Applied an impulse to a streamed persistent RigidBody3D")
+    else:
+        push_warning("No streamed physics crate ready. Re-pin Hub with H.")
+
 func _claim_hub_reward() -> void:
     var root := _gameplay_cell_root(HUB_CELL)
     if root != null and root.has_method("claim_hub_reward"):
@@ -333,9 +351,11 @@ func _save_checkpoint() -> void:
         return
     # Captures even the game scenes currently loaded by WorldPartition3D.
     var snapshot: Dictionary = detail.call("snapshot_cell_states")
+    var physics_snapshot: Dictionary = detail.call("snapshot_cell_physics_states")
     var record := {
         "version": SAVE_VERSION,
         "cell_states": snapshot,
+        "physics_states": physics_snapshot,
         "pinned_cells": detail.call("get_pinned_cells"),
         "layer_states": detail.call("get_layer_states"),
         "camera_transform": camera.global_transform,
@@ -365,19 +385,21 @@ func _load_checkpoint() -> void:
     if record.get("version") != SAVE_VERSION:
         push_warning("Unsupported checkpoint version.")
         return
-    if not (record.get("cell_states") is Dictionary) or not (record.get("pinned_cells") is Array) or not (record.get("layer_states") is Dictionary) or not (record.get("camera_transform") is Transform3D) or not (record.get("patrol_state", {}) is Dictionary):
+    if not (record.get("cell_states") is Dictionary) or not (record.get("physics_states", {}) is Dictionary) or not (record.get("pinned_cells") is Array) or not (record.get("layer_states") is Dictionary) or not (record.get("camera_transform") is Transform3D) or not (record.get("patrol_state", {}) is Dictionary):
         push_warning("Checkpoint fields are incomplete.")
         return
     var states: Dictionary = record["cell_states"]
+    var physics_states: Dictionary = record.get("physics_states", {})
     var pins: Array = record["pinned_cells"]
     var layers: Dictionary = record["layer_states"]
-    if states.size() > 4096 or pins.size() > 128 or layers.size() > 64:
+    if states.size() > 4096 or physics_states.size() > 4096 or pins.size() > 128 or layers.size() > 64:
         push_warning("Checkpoint exceeds scene-state or pin limits.")
         return
     # Runtime leases are owner-owned handles, not persisted tokens. Recreate
     # the quest lease from checkpoint gameplay state after import.
     _release_all_owned_leases()
     detail.call("load_cell_states", states)
+    detail.call("load_cell_physics_states", physics_states)
     detail.call("set_layer_states", layers)
     detail.call("set_pinned_cells", pins)
     _sync_quest_arena_lease()
@@ -429,6 +451,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
             _test_navigation_path()
         KEY_O:
             _toggle_patrol_agent()
+        KEY_I:
+            _kick_persistent_crate()
         KEY_T:
             _toggle_combat_event()
         KEY_C:
@@ -490,6 +514,13 @@ func _update_hud() -> void:
     var reward_claimed := bool(_stateful_progress(HUB_CELL, "reward_claimed", false))
     var arena_wins: int = int(_stateful_progress(ARENA_CELL, "arena_wins", 0))
     var state_count: int = int(detail.call("get_cell_state_count")) if detail != null else 0
+    var physics_state_count: int = int(detail.call("get_cell_physics_state_count")) if detail != null else 0
+    var crate_speed := 0.0
+    var hub_root := _gameplay_cell_root(HUB_CELL)
+    if hub_root != null:
+        var crate := hub_root.get_node_or_null("StreamingCrate") as RigidBody3D
+        if crate != null:
+            crate_speed = crate.linear_velocity.length()
     var patrol_state: Dictionary = patrol_agent.call("get_patrol_status") if is_instance_valid(patrol_agent) else {}
     var patrol_text: String = str(patrol_state.get("status", "Loading patrol"))
     var patrol_crossings: int = int(patrol_state.get("crossings", 0))
@@ -502,7 +533,7 @@ func _update_hud() -> void:
             var stats: Dictionary = detail.call("get_cell_simulation_stats", cell)
             collision_count += int(stats.get("collision_objects", 0))
             navigation_count += int(stats.get("navigation_regions", 0))
-    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nCell leases: %d  Arena owners: %d | Quest: %s  M Manual: %s\nT combat event: %s (3 cells)  Champion shrine: %s  V reward: %s\nEvent: %s\nO AI patrol: %s  crossings: %d  route leases: %d  cell: %s\nSimulation near landmarks: %d collision bodies, %d nav regions\n%s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
+    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nCell leases: %d  Arena owners: %d | Quest: %s  M Manual: %s\nT combat event: %s (3 cells)  Champion shrine: %s  V reward: %s\nEvent: %s\nO AI patrol: %s  crossings: %d  route leases: %d  cell: %s\nSimulation near landmarks: %d collision bodies, %d nav regions\nI kick crate: speed %.1f  physics snapshots: %d\n%s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
         Engine.get_frames_per_second(),
         detail_count,
         distant_count,
@@ -527,6 +558,8 @@ func _update_hud() -> void:
         str(patrol_cell),
         collision_count,
         navigation_count,
+        crate_speed,
+        physics_state_count,
         last_nav_query,
         "CLAIMED" if reward_claimed else "READY",
         arena_wins,

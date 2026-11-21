@@ -69,6 +69,7 @@ func _run() -> void:
     world.connect("layer_state_changed", Callable(self, "_on_layer_changed"))
     world.connect("cell_state_changed", Callable(self, "_on_cell_state_changed"))
     world.set("cell_size", 128.0)
+    world.set("persist_rigid_bodies", true)
     world.set("load_radius", 0)
     world.set("unload_radius", 1)
     world.set("observer_path", world.get_path_to(observer))
@@ -90,6 +91,17 @@ func _run() -> void:
     assert(activated_cells.has(CELL))
     var first := world.call("get_cell_instance", CELL) as Node3D
     assert(first != null)
+    var first_crate := first.get_node("StreamingCrate") as RigidBody3D
+    assert(first_crate != null)
+    assert(first_crate.get_meta("streaming_persistent") == true)
+    first_crate.freeze = true
+    first_crate.position = Vector3(82, 5, 66)
+    var body_states: Dictionary = world.call("snapshot_cell_physics_states")
+    assert(body_states.has(CELL))
+    var body_record: Dictionary = body_states[CELL]["StreamingCrate"]
+    var saved_transform: Transform3D = body_record["transform"]
+    assert(saved_transform.origin == Vector3(82, 5, 66))
+    assert(body_record["freeze"] == true)
     assert(first.call("claim_hub_reward"))
     assert(first.call("capture_streaming_state")["reward_claimed"] == true)
     world.call("set_cell_state", CELL, first.call("capture_streaming_state"))
@@ -104,12 +116,19 @@ func _run() -> void:
     assert(deactivating_cells.has(CELL))
     assert(bool(world.call("has_cell_state", CELL)))
     assert(world.call("get_cell_state", CELL)["reward_claimed"] == true)
+    assert(int(world.call("get_cell_physics_state_count")) == 1)
+    var unloaded_physics: Dictionary = world.call("get_cell_physics_state", CELL)
+    assert(unloaded_physics["StreamingCrate"]["freeze"] == true)
     assert(cell_notifications.size() == 1)  # Unload snapshot unchanged.
 
     # A pinned cell must stream back in even while the camera is far away.
     world.call("pin_cell", CELL)
     assert(await _wait_for_cell(world, true))
     var restored := world.call("get_cell_instance", CELL) as Node3D
+    var restored_crate := restored.get_node("StreamingCrate") as RigidBody3D
+    assert(restored_crate != null)
+    assert(restored_crate.freeze)
+    assert(restored_crate.transform.origin.distance_to(saved_transform.origin) < 0.001)
     assert(restored.call("capture_streaming_state")["reward_claimed"] == true)
     assert(not restored.call("claim_hub_reward"))
 

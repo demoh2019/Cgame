@@ -57,6 +57,12 @@
 				Releases all independent runtime lease tokens without touching [member pinned_cells], scene registrations or saved gameplay progress. Any formerly retained scenes become eligible for normal budgeted unloading.
 			</description>
 		</method>
+		<method name="clear_cell_physics_states">
+			<return type="void" />
+			<description>
+				Clears all stored rigid-body motion snapshots for all cells. This does not alter loaded bodies. The cache can be populated again by unloading or snapshotting active cells while [member persist_rigid_bodies] is enabled.
+			</description>
+		</method>
 		<method name="clear_cell_scenes">
 			<return type="void" />
 			<description>
@@ -119,6 +125,19 @@
 			<return type="int" />
 			<description>
 				Returns the total number of independent active lease tokens in this WorldPartition3D, limited to 256.
+			</description>
+		</method>
+		<method name="get_cell_physics_state" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns a defensive deep copy of the cached rigid-body state for a cell. Its keys are scene-relative NodePaths represented by Strings, and values contain a local [Transform3D], linear/angular [Vector3] velocities and sleeping/freeze booleans. Returns an empty dictionary if no data is cached.
+			</description>
+		</method>
+		<method name="get_cell_physics_state_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of cells containing at least one cached opted-in rigid-body record, not the total number of saved bodies.
 			</description>
 		</method>
 		<method name="get_cell_route" qualifiers="const">
@@ -241,6 +260,19 @@
 				Returns the effective runtime state of the named layer. An unregistered layer or empty name defaults to enabled.
 			</description>
 		</method>
+		<method name="is_persisting_rigid_bodies" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns whether [member persist_rigid_bodies] is enabled.
+			</description>
+		</method>
+		<method name="load_cell_physics_states">
+			<return type="void" />
+			<param index="0" name="states" type="Dictionary" />
+			<description>
+				Replaces cached rigid-body state with validated [Vector2i] to [Dictionary] mappings. Each body record must use a safe relative node path, finite transform and velocities, and bool sleeping/freeze flags; invalid values and unsafe paths are ignored. Up to 128 records are accepted per cell. Existing loaded opted-in bodies are updated immediately when a matching record is present. Missing records leave existing loaded body state unchanged. Imported states can restore later when the cell is streamed again.
+			</description>
+		</method>
 		<method name="load_cell_states">
 			<return type="void" />
 			<param index="0" name="states" type="Dictionary" />
@@ -336,11 +368,24 @@
 				Replaces the dictionary of named runtime states. Only nonempty [String] keys with [bool] values are accepted. Missing layer names are active by default. Useful for restoring event-state data from a save game.
 			</description>
 		</method>
+		<method name="set_persist_rigid_bodies">
+			<return type="void" />
+			<param index="0" name="enabled" type="bool" />
+			<description>
+				Enables/disables automatic physics capture on cell unloading and restoration on cell instantiation. Only [RigidBody3D] descendants with [code]set_meta(&quot;streaming_persistent&quot;, true)[/code] are included. Existing physics cache is not cleared when disabled. No physics state is written to disk unless the game calls [method snapshot_cell_physics_states] and saves it.
+			</description>
+		</method>
 		<method name="set_pinned_cells">
 			<return type="void" />
 			<param index="0" name="cells" type="Array" />
 			<description>
 				Replaces the pinned cell coordinates, preserving the first occurrence of each [Vector2i]. Unsupported array entries are skipped. Arrays with more than 128 entries are rejected without changing existing pins. The normalized result is returned by [method get_pinned_cells].
+			</description>
+		</method>
+		<method name="snapshot_cell_physics_states">
+			<return type="Dictionary" />
+			<description>
+				Captures up to 128 opted-in [RigidBody3D] descendants from each active cell, if [member persist_rigid_bodies] is enabled, and returns a deep-copy dictionary mapping [Vector2i] cell coordinates to per-body state dictionaries. Suitable for a save-game bridge with [code]FileAccess.store_var[/code]. Captures transform, linear/angular velocities, sleep and freeze state before normal cell deactivation.
 			</description>
 		</method>
 		<method name="snapshot_cell_states">
@@ -396,6 +441,9 @@
 		</member>
 		<member name="observer_path" type="NodePath" setter="set_observer_path" getter="get_observer_path" default="NodePath(&quot;&quot;)">
 			Path relative to this node pointing to a [Node3D] observer, such as a player or camera.
+		</member>
+		<member name="persist_rigid_bodies" type="bool" setter="set_persist_rigid_bodies" getter="is_persisting_rigid_bodies" default="false">
+			If enabled, the streamer automatically saves and restores local transforms, linear/angular velocities, sleeping and freeze state for [RigidBody3D] descendants marked with [code]streaming_persistent = true[/code] metadata. Bodies without the explicit flag are not captured. The cache survives unloads but is not written to disk automatically. [method snapshot_cell_physics_states] exports it for a game's checkpoint system.
 		</member>
 		<member name="pinned_cells" type="Array" setter="set_pinned_cells" getter="get_pinned_cells" default="[]">
 			List of up to 128 pinned [Vector2i] cell coordinates, editable in the inspector and stored in the scene. Invalid non-[Vector2i] values and duplicates are omitted. Pinned registered scenes are kept loaded independently of observer distance, using the normal async request and scene instantiation budgets. Use [method pin_cell], [method unpin_cell] and [method clear_pinned_cells] to modify them at runtime.
