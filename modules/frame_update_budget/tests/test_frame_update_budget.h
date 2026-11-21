@@ -160,4 +160,59 @@ TEST_CASE("[FrameUpdateBudget] Recorded CPU microseconds bound optional work") {
 	CHECK(b->get_frame_time_budget_us() == 0);
 }
 
+
+TEST_CASE("[FrameUpdateBudget] Relative per-lane rates validate atomically") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane(StringName("fast")));
+	CHECK(b->register_lane(StringName("slow")));
+	CHECK(b->get_lane_rate_scale(StringName("fast")) == 1.0);
+	CHECK(b->set_lane_rate_scale(StringName("fast"), 1.5));
+	CHECK(b->set_lane_rate_scale(StringName("slow"), 0.75));
+	CHECK(b->get_lane_rate_scale(StringName("fast")) == 1.5);
+	CHECK(b->get_lane_rate_scale(StringName("slow")) == 0.75);
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("fast"), 0.5));
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("fast"), 2.01));
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("fast"), std::numeric_limits<double>::infinity()));
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("fast"), std::numeric_limits<double>::quiet_NaN()));
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("missing"), 1.0));
+	CHECK(b->get_lane_rate_scale(StringName("missing")) == -1.0);
+	CHECK(b->get_lane_rate_scale(StringName("fast")) == 1.5);
+	b->reset();
+	CHECK(b->get_lane_rate_scale(StringName("fast")) == 1.5); // Profile survives reset.
+	CHECK(b->unregister_lane(StringName("fast")));
+	CHECK(b->get_lane_rate_scale(StringName("fast")) == -1.0);
+}
+
+TEST_CASE("[FrameUpdateBudget] Significance rates honor due intervals without starving slow lanes") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane(StringName("fast")));
+	CHECK(b->register_lane(StringName("slow")));
+	CHECK(b->set_lane_rate_scale(StringName("fast"), 1.5));
+	CHECK(b->set_lane_rate_scale(StringName("slow"), 0.75));
+	b->begin_frame(1.0 / 60.0, 0);
+	CHECK(b->consume(StringName("fast"), 1.0 / 60.0) > 0.0);
+	CHECK(b->consume(StringName("slow"), 1.0 / 60.0) > 0.0);
+	int fast_updates = 0;
+	int slow_updates = 0;
+	for (int frame = 0; frame < 240; frame++) {
+		b->begin_frame(1.0 / 60.0, 0);
+		// Fixed worst-case order: the less significant lane is consumed first.
+		if (b->consume(StringName("slow"), 1.0 / 60.0) > 0.0) {
+			slow_updates++;
+		}
+		if (b->consume(StringName("fast"), 1.0 / 60.0) > 0.0) {
+			fast_updates++;
+		}
+		CHECK(b->last_frame_counts().x <= 1);
+	}
+	CHECK(fast_updates > slow_updates);
+	CHECK(fast_updates >= 55);
+	CHECK(slow_updates >= 25);
+	CHECK(b->set_lane_rate_scale(StringName("fast"), 0.75));
+	CHECK(b->set_lane_rate_scale(StringName("slow"), 1.5));
+	CHECK(b->get_lane_rate_scale(StringName("slow")) > b->get_lane_rate_scale(StringName("fast")));
+}
+
 } // namespace TestFrameUpdateBudget
