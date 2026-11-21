@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameEarlyReflections" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Image-source early reflections for shoebox rooms and impulse response synthesis.</brief_description>
+	<description>
+		Static helpers that compute early reflections of a rectangular room with the image-source method (J. B. Allen and D. A. Berkley, "Image method for efficiently simulating small-room acoustics", JASA 1979) and turn reflection lists into impulse responses suitable for [AudioEffectConvolutionReverb].
+		A reflection is a [Dictionary] with the keys [code]delay_s[/code] ([float]), [code]gain[/code] ([float]), [code]direction[/code] ([Vector3], unit vector from the listener towards the image source), [code]order[/code] ([int], number of wall bounces, [code]0[/code] is the direct sound) and [code]distance[/code] ([float]).
+		All methods are deterministic: equal inputs and seeds give identical results.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="echogram_to_reflections" qualifiers="static">
+			<return type="Dictionary[]" />
+			<param index="0" name="echogram" type="PackedFloat32Array" />
+			<param index="1" name="bin_s" type="float" />
+			<description>
+				Converts an energy histogram (echogram) with bins of [param bin_s] seconds into reflection dictionaries. The gain of a bin is the square root of its energy and its delay is at the bin center. Empty bins are skipped.
+			</description>
+		</method>
+		<method name="image_source_count" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="order" type="int" />
+			<description>
+				Returns the number of image sources, including the direct path, produced by [method image_sources_box] for the given [param order]. Equal to [code]1[/code], [code]7[/code], [code]25[/code] for orders 0, 1 and 2.
+			</description>
+		</method>
+		<method name="image_sources_box" qualifiers="static">
+			<return type="Dictionary[]" />
+			<param index="0" name="room_size" type="Vector3" />
+			<param index="1" name="source" type="Vector3" />
+			<param index="2" name="listener" type="Vector3" />
+			<param index="3" name="order" type="int" />
+			<param index="4" name="absorption" type="float" />
+			<param index="5" name="speed" type="float" default="343.0" />
+			<description>
+				Computes the image sources of the box [code]0..room_size[/code] for a [param source] and [param listener] inside it, up to [param order] total wall bounces (clamped to 32). Each wall bounce scales the amplitude by [code]sqrt(1 - absorption)[/code]; the gain also includes [code]1 / distance[/code] spreading with a minimum distance of 0.1. The result is sorted by delay; [param speed] is the speed of sound in meters per second.
+			</description>
+		</method>
+		<method name="impulse_response" qualifiers="static">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="rt60" type="Vector3" />
+			<param index="1" name="sample_rate" type="int" />
+			<param index="2" name="seconds" type="float" />
+			<param index="3" name="seed" type="int" />
+			<description>
+				Synthesizes a diffuse reverb tail: noise split into three bands, each decaying by 60 dB over its own reverberation time ([code]x[/code] low, [code]y[/code] mid, [code]z[/code] high, in seconds). The result is peak-normalized to 1.
+			</description>
+		</method>
+		<method name="to_ir" qualifiers="static">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="reflections" type="Dictionary[]" />
+			<param index="1" name="sample_rate" type="int" />
+			<param index="2" name="length_s" type="float" />
+			<param index="3" name="rt60" type="Vector3" default="Vector3(0.7, 0.6, 0.4)" />
+			<param index="4" name="late_start_s" type="float" default="0.04" />
+			<param index="5" name="late_gain" type="float" default="0.25" />
+			<param index="6" name="seed" type="int" default="1" />
+			<description>
+				Builds a mono impulse response of exactly [code]sample_rate * length_s[/code] samples: the reflections are written as linearly interpolated (fractionally delayed) impulses, normalized, and mixed with the tail from [method impulse_response], which fades in quadratically over [param late_start_s] and is scaled by [param late_gain]. The result is peak-normalized to 1.
+			</description>
+		</method>
+	</methods>
+</class>

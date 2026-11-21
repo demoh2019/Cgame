@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AudioStreamPlaybackProcedural" inherits="AudioStreamPlaybackResampled" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Playback instance of an [AudioStreamProcedural].</brief_description>
+	<description>
+		Created by [method AudioStream.instantiate_playback] on an [AudioStreamProcedural]. Each playback owns an independent copy of the compiled graph state, so several playbacks of one stream do not interfere. Seeking re-renders the graph from time zero because filters and delays are recursive.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="is_graph_valid" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the graph compiled successfully; otherwise the playback outputs silence.
+			</description>
+		</method>
+	</methods>
+</class>

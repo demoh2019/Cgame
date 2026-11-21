@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AudioStreamProcedural" inherits="AudioStream" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>An audio stream that synthesizes sound in real time from a node-based audio graph.</brief_description>
+	<description>
+		Evaluates an audio graph block by block (64 frames per block) while playing, so procedural sounds play natively without baking. The graph is a [Dictionary]:
+		[codeblock]
+		{
+		    "nodes": { "osc": {"type": "saw", "freq": 220.0}, "env": {"type": "ar", "attack": 0.01, "release": 0.3}, "out": {"type": "gain"} },
+		    "connections": [["osc", "out", "in"], ["env", "out", "gain"]],
+		    "output": "out"
+		}
+		[/codeblock]
+		A connection to input [code]X[/code] replaces the constant parameter [code]X[/code] with the source signal; a connection to [code]X_mod[/code] is added to it. Several connections to one input are summed.
+		Node types and parameters (defaults in parentheses):
+		- [code]sine[/code], [code]saw[/code], [code]square[/code], [code]triangle[/code]: [code]freq[/code] (440), [code]amp[/code] (1), [code]phase[/code] (0), [code]pw[/code] (0.5). Saw and square are band-limited with polyBLEP.
+		- [code]noise_white[/code], [code]noise_pink[/code], [code]noise_brown[/code]: [code]amp[/code] (1).
+		- [code]const[/code]: [code]value[/code] (1).
+		- [code]adsr[/code]: [code]start[/code], [code]gate[/code] (0.3), [code]attack[/code] (0.01), [code]decay[/code] (0.1), [code]sustain[/code] (0.6), [code]release[/code] (0.2). [code]ar[/code]: [code]start[/code], [code]attack[/code], [code]release[/code]. Times are in seconds and segments are linear.
+		- [code]lowpass[/code], [code]highpass[/code], [code]bandpass[/code]: input [code]in[/code], [code]cutoff[/code] (1000), [code]q[/code]. RBJ biquads.
+		- [code]smooth[/code]: [code]in[/code], [code]time[/code] (0.05), a one-pole lowpass.
+		- [code]delay[/code]: [code]in[/code], [code]time[/code] (0.25, at most 10 s, at least one block), [code]feedback[/code] (0.3). A delay may close a feedback loop.
+		- [code]gain[/code] and [code]mixer[/code]: [code]in[/code] (sum), [code]gain[/code]. [code]multiply[/code]: [code]a[/code], [code]b[/code]. [code]clip[/code] (alias [code]distortion[/code]): [code]in[/code], [code]drive[/code] (tanh soft clip).
+		- [code]random_pitch[/code]: [code]min[/code], [code]max[/code], [code]rate[/code]; log-uniform sample-and-hold in Hz. [code]random_trigger[/code]: [code]rate[/code], [code]decay[/code], [code]min_amp[/code]; Poisson-triggered decaying bursts.
+		Cycles are rejected unless they pass through a [code]delay[/code] node. The same graph and [member seed] always produce the same samples, but the random sequence is not identical to the GDScript implementation in the Cgame project.
+		Algorithms: RBJ "Audio EQ Cookbook" biquads, polyBLEP (V. Valimaki and A. Huovilainen, 2007), Voss-McCartney pink noise.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="bake_to_wav" qualifiers="const">
+			<return type="AudioStreamWAV" />
+			<param index="0" name="seconds" type="float" />
+			<description>
+				Renders [param seconds] of the graph offline and returns them as a 16-bit mono [AudioStreamWAV] at [member mix_rate]. Returns an empty stream if the graph is invalid.
+			</description>
+		</method>
+		<method name="is_valid" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if [member graph] has no validation problems.
+			</description>
+		</method>
+		<method name="render" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="seconds" type="float" />
+			<param index="1" name="sample_rate" type="float" default="0.0" />
+			<description>
+				Renders [param seconds] of mono audio offline, clamped to [-1, 1]. A [param sample_rate] of [code]0[/code] uses [member mix_rate]. Returns an empty array if the graph is invalid.
+			</description>
+		</method>
+		<method name="validate" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Returns human-readable problems with [member graph] (unknown node types, missing output, bad connections, cycles without a delay). An empty array means the graph can be played.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="graph" type="Dictionary" setter="set_graph" getter="get_graph" default="{}">
+			The audio graph. It is deep-copied when set. Playbacks that already started keep the graph they were created with.
+		</member>
+		<member name="length" type="float" setter="set_length" getter="get_length_seconds" default="0.0">
+			Playback duration in seconds. [code]0[/code] plays endlessly until stopped.
+		</member>
+		<member name="mix_rate" type="float" setter="set_mix_rate" getter="get_mix_rate" default="44100.0">
+			Rate in Hz at which the graph is evaluated. The mixer resamples to the output rate.
+		</member>
+		<member name="seed" type="int" setter="set_seed" getter="get_seed" default="0">
+			Seed for the random sources (noise, random pitch, random trigger).
+		</member>
+	</members>
+</class>

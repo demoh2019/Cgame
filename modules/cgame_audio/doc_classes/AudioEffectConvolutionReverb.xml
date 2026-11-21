@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AudioEffectConvolutionReverb" inherits="AudioEffect" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Real-time convolution reverb that applies an impulse response with uniformly partitioned FFT convolution.</brief_description>
+	<description>
+		Convolves the bus signal with an impulse response (IR) in the audio thread using uniformly partitioned overlap-save FFT convolution. The IR is cut into partitions of [member block_size] frames that are transformed once; every input block costs one forward and one inverse FFT plus a spectral multiply-accumulate over all partitions.
+		The IR can be supplied as a [PackedFloat32Array] ([member impulse], optionally [member impulse_right] for a true-stereo IR) or decoded from an [AudioStreamWAV] with [member impulse_stream]. A mono IR is applied to both channels. If [member impulse_sample_rate] is greater than zero and differs from the mixer rate, the IR is resampled linearly to the mix rate.
+		Changing the IR while the effect is running is lock-free: a new immutable kernel is built on the calling thread and handed to the audio thread through an atomic pointer exchange. The audio thread never allocates or blocks. The wet signal is delayed by [method get_latency_frames] frames; the dry signal is not delayed.
+		Algorithm: uniformly partitioned convolution as described by W. G. Gardner, "Efficient Convolution without Input-Output Delay", JAES 1995, and F. Wefers, "Partitioned convolution algorithms for real-time auralization", 2015.
+		[b]Note:[/b] Only 8-bit and 16-bit PCM [AudioStreamWAV] resources can be used as [member impulse_stream].
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_latency_frames" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the latency of the wet signal in frames, which equals the effective [member block_size].
+			</description>
+		</method>
+		<method name="get_partition_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of IR partitions of the currently active kernel, or [code]0[/code] if no impulse response is set.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="block_size" type="int" setter="set_block_size" getter="get_block_size" default="256">
+			Partition length in frames, rounded up to a power of two between 16 and 16384. Smaller blocks lower the latency but increase CPU cost for long impulse responses. Changing it rebuilds the kernel.
+		</member>
+		<member name="dry" type="float" setter="set_dry" getter="get_dry" default="1.0">
+			Gain of the unprocessed signal.
+		</member>
+		<member name="impulse" type="PackedFloat32Array" setter="set_impulse" getter="get_impulse" default="PackedFloat32Array()">
+			Mono (or left channel) impulse response samples. Setting it rebuilds the kernel and swaps it in without locking the audio thread. An empty array disables the wet signal.
+		</member>
+		<member name="impulse_gain_db" type="float" setter="set_impulse_gain_db" getter="get_impulse_gain_db" default="0.0">
+			Gain applied to the impulse response when the kernel is built, in decibels.
+		</member>
+		<member name="impulse_right" type="PackedFloat32Array" setter="set_impulse_right" getter="get_impulse_right" default="PackedFloat32Array()">
+			Optional right-channel impulse response. When non-empty, the left input is convolved with [member impulse] and the right input with this array.
+		</member>
+		<member name="impulse_sample_rate" type="float" setter="set_impulse_sample_rate" getter="get_impulse_sample_rate" default="0.0">
+			Sample rate of the impulse arrays in Hz. [code]0[/code] means the IR is already at the mixer rate. Otherwise the IR is resampled to the mixer rate when the kernel is built.
+		</member>
+		<member name="impulse_stream" type="AudioStreamWAV" setter="set_impulse_stream" getter="get_impulse_stream">
+			Decodes the given WAV into [member impulse] (and [member impulse_right] for stereo data) and sets [member impulse_sample_rate] to the WAV's mix rate.
+		</member>
+		<member name="wet" type="float" setter="set_wet" getter="get_wet" default="0.5">
+			Gain of the convolved signal.
+		</member>
+	</members>
+</class>
