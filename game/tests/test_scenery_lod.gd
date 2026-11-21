@@ -3,6 +3,7 @@ extends RefCounted
 
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
+const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 
 
 func run(t) -> void:
@@ -209,7 +210,6 @@ func run(t) -> void:
 
 
 	t.current = "GPU scene quality swaps use bounded native cull distance batches"
-	const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 	var quality_code: String = (GraphicsQuality as Script).source_code
 	t.check(quality_code.contains("SceneryLod.apply_many("),
 		"real graphics-quality changes route all existing scenery into the bulk policy")
