@@ -70,6 +70,16 @@ func run(t) -> void:
 		t.near(remote_a.think_timer, 0.25, 0.0001,
 			"stock Godot preserves original passive target scan cadence")
 
+	t.current = "Passive AI LOD reacquires a survivor within one second"
+	var approaching := Zombie.new(167, "walker", Vector3(0, ground, 0))
+	approaching.think(world, _players(Vector3(100, ground, 0)), 0.05, rng)
+	for i in 25:
+		approaching.think(world, _players(Vector3(10, ground, 0)), 0.05, rng)
+	t.eq(approaching.target_id, 1,
+		"passive time slicing cannot permanently miss a newly nearby survivor")
+	t.eq(approaching.state, Zombie.State.CHASE,
+		"approaching survivor transitions to ordinary active pursuit")
+
 	t.current = "Aggression interrupts distant passive AI LOD for authoritative threat"
 	var hit_remote := Zombie.new(165, "walker", Vector3(0, ground, 0))
 	hit_remote.think(world, _players(Vector3(100, ground, 0)), 0.05, rng)
