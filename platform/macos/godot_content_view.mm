@@ -149,6 +149,7 @@
 	last_pen_inverted = false;
 	registered_observers = [[NSMutableSet alloc] init];
 	[self updateTrackingAreas];
+	[self updateModifierFlags];
 
 	self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawDuringViewResize;
 	self.layerContentsPlacement = NSViewLayerContentsPlacementTopLeft;
@@ -221,7 +222,45 @@
 	}
 }
 
+- (void)sendKeyEvent:(Key)keycode {
+	DisplayServerMacOS *ds = (DisplayServerMacOS *)DisplayServer::get_singleton();
+	if (!ds || !ds->has_window(window_id)) {
+		return;
+	}
+
+	DisplayServerMacOS::KeyEvent ke;
+
+	ke.window_id = window_id;
+	ke.macos_state = 0;
+	ke.echo = false;
+	ke.keycode = (Key)keycode;
+	ke.physical_keycode = (Key)keycode;
+	ke.key_label = (Key)keycode;
+	ke.unicode = 0;
+	ke.location = KeyLocation::UNSPECIFIED;
+	ke.raw = true;
+
+	ke.pressed = true;
+	ds->push_to_key_event_buffer(ke);
+
+	ke.pressed = false;
+	ds->push_to_key_event_buffer(ke);
+}
+
 - (void)doCommandBySelector:(SEL)aSelector {
+	if (ime_suppress_next_keyup) {
+		if (aSelector == @selector(insertNewline:)) {
+			[self sendKeyEvent:Key::ENTER];
+		} else if (aSelector == @selector(moveLeft:)) {
+			[self sendKeyEvent:Key::LEFT];
+		} else if (aSelector == @selector(moveRight:)) {
+			[self sendKeyEvent:Key::RIGHT];
+		} else if (aSelector == @selector(deleteBackward:)) {
+			[self sendKeyEvent:Key::BACKSPACE];
+		} else if (aSelector == @selector(deleteForward:)) {
+			[self sendKeyEvent:Key::KEY_DELETE];
+		}
+	}
 	[self tryToPerform:aSelector with:self];
 }
 
@@ -745,6 +784,12 @@
 	}
 }
 
+- (void)updateModifierFlags {
+	for (int i = 0x36; i <= 0x3F; i++) {
+		mod_state[i - 0x36] = CGEventSourceKeyState(kCGEventSourceStateCombinedSessionState, (CGKeyCode)i);
+	}
+}
+
 - (void)flagsChanged:(NSEvent *)event {
 	DisplayServerMacOS *ds = (DisplayServerMacOS *)DisplayServer::get_singleton();
 	if (!ds || !ds->has_window(window_id)) {
@@ -760,39 +805,10 @@
 
 	int key = [event keyCode];
 	int mod = [event modifierFlags];
-
-	if (key == 0x36 || key == 0x37) {
-		if (mod & NSEventModifierFlagCommand) {
-			mod &= ~NSEventModifierFlagCommand;
-			ke.pressed = true;
-		} else {
-			ke.pressed = false;
-		}
-	} else if (key == 0x38 || key == 0x3c) {
-		if (mod & NSEventModifierFlagShift) {
-			mod &= ~NSEventModifierFlagShift;
-			ke.pressed = true;
-		} else {
-			ke.pressed = false;
-		}
-	} else if (key == 0x3a || key == 0x3d) {
-		if (mod & NSEventModifierFlagOption) {
-			mod &= ~NSEventModifierFlagOption;
-			ke.pressed = true;
-		} else {
-			ke.pressed = false;
-		}
-	} else if (key == 0x3b || key == 0x3e) {
-		if (mod & NSEventModifierFlagControl) {
-			mod &= ~NSEventModifierFlagControl;
-			ke.pressed = true;
-		} else {
-			ke.pressed = false;
-		}
-	} else {
-		return;
+	if (key >= 0x36 && key <= 0x3F) {
+		mod_state[key - 0x36] = !mod_state[key - 0x36];
+		ke.pressed = mod_state[key - 0x36];
 	}
-
 	ke.macos_state = mod;
 	ke.keycode = KeyMappingMacOS::remap_key(key, mod, false);
 	ke.physical_keycode = KeyMappingMacOS::translate_key(key);

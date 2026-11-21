@@ -5,3 +5,14 @@ assets/packs
 # Poly Haven sources: only the baked meshes and the textures they use are kept (tools/fetch_polyhaven.sh gets the rest).
 assets/models/polyhaven/*/*.gltf
 assets/models/polyhaven/*/*.bin
+
+# Poly Haven tree sources are hundreds of MB; only their baked meshes are committed.
+/assets/models/polyhaven/island_tree_01/
+/assets/models/polyhaven/island_tree_02/
+/assets/models/polyhaven/island_tree_03/
+/assets/models/polyhaven/tree_small_02/
+/assets/models/polyhaven/fir_tree_01/
+/assets/models/polyhaven/shrub_01/
+
+# Production secrets for the accounts backend.
+/backend/.env

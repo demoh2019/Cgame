@@ -51,6 +51,22 @@
 				Returns the [Transform2D] of a specific instance.
 			</description>
 		</method>
+		<method name="pack_transform_buffer" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="transforms" type="Array" />
+			<param index="1" name="colors" type="PackedColorArray" />
+			<description>
+				Cgame extension: returns a packed GPU-ready instance buffer from an array of [Transform3D] values and optional colors. This CPU-only method does not modify the MultiMesh or upload data to the renderer. The current MultiMesh must use [constant TRANSFORM_3D], have an [member instance_count] matching the array length, and have [member use_custom_data] disabled. If [member use_colors] is enabled, provide exactly one color per transform; otherwise pass an empty [PackedColorArray]. Every transform uses the RenderingServer 3D row-major layout (12 floats per instance), followed by four RGBA color floats when enabled. Invalid inputs yield an empty buffer and log an error. Assign the result to [member buffer] once after validating inputs. This is intended for large static scenery batches created during world streaming, not dynamic per-frame animation.
+			</description>
+		</method>
+		<method name="transformed_mesh_bounds" qualifiers="const">
+			<return type="AABB" />
+			<param index="0" name="transforms" type="Array" />
+			<param index="1" name="margin" type="float" />
+			<description>
+				Cgame extension: returns the union of the current [member mesh]'s [method Mesh.get_aabb] after applying each provided [Transform3D], expanded by the nonnegative [param margin] on all sides. This CPU-only method has no rendering-server calls and is suitable for [member MultiMeshInstance3D.custom_aabb]. A conservative transformed bound is essential because a MultiMesh is frustum-culled as a single object, not per instance. Requires a valid mesh, at least one transform and a finite nonnegative margin.
+			</description>
+		</method>
 		<method name="reset_instance_physics_interpolation">
 			<return type="void" />
 			<param index="0" name="instance" type="int" />
@@ -66,6 +82,14 @@
 				This allows you to move all instances instantaneously, and should usually be used when initially placing instances to prevent graphical glitches.
 			</description>
 		</method>
+		<method name="shuffled_instance_buffer" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="buffer" type="PackedFloat32Array" />
+			<param index="1" name="seed" type="int" />
+			<description>
+				Returns a new buffer containing the same instance records in a seeded random order, without modifying [param buffer] or uploading anything to the rendering device. Each record's transform, color, and optional custom data are moved together. This makes an evenly shuffled prefix suitable for distance-dependent [member visible_instance_count] with no missing spatial rows. The current [member transform_format], [member use_colors], [member use_custom_data], and [member instance_count] determine the packed record stride. If the buffer length is not exactly compatible with the instance count and stride, the input is returned unchanged. The seed uses Godot's [RandomNumberGenerator] PCG sequence, matching a Fisher-Yates shuffle from the final record to the second record with [method RandomNumberGenerator.randi_range] between index 0 and the current index. Use the returned array as [member buffer] once after instance allocation; do not invoke this helper every render frame. This engine extension also supports 2D instances.
+			</description>
+		</method>
 		<method name="set_buffer_interpolated">
 			<return type="void" />
 			<param index="0" name="buffer_curr" type="PackedFloat32Array" />
@@ -74,6 +98,15 @@
 				An alternative to setting the [member buffer] property, which can be used with [i]physics interpolation[/i]. This method takes two arrays, and can set the data for the current and previous tick in one go. The renderer will automatically interpolate the data at each frame.
 				This is useful for situations where the order of instances may change from physics tick to tick, such as particle systems.
 				When the order of instances is coherent, the simpler alternative of setting [member buffer] can still be used with interpolation.
+			</description>
+		</method>
+		<method name="set_instance_colors_batch">
+			<return type="bool" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<param index="1" name="colors" type="PackedColorArray" />
+			<description>
+				Sets colors for selected MultiMesh instances using one scripting call. [member use_colors] must be enabled. The arrays must be equally sized, indices must be unique and within [member instance_count], and all RGBA components must be finite. Unsorted and hidden indices are allowed. The complete input is checked before any changes; invalid input returns [code]false[/code] without modifying any instance, and a valid empty input returns [code]true[/code].
+				Updates neither [member instance_count] nor [member visible_instance_count], transforms, custom shader data, or collision. This reduces script-to-engine overhead for sparse updates and initial chunk tint population. Internally each instance still requires a RenderingServer color update; it is not a GPU batch command. For full-buffer updates use [member buffer].
 			</description>
 		</method>
 		<method name="set_instance_color">
@@ -95,6 +128,26 @@
 				[b]Note:[/b] Each number is stored in 32 bits in the Forward+ and Mobile rendering methods, but is packed into 16 bits in the Compatibility rendering method.
 				For the custom data to be used, ensure that [member use_custom_data] is [code]true[/code].
 				This custom instance data has to be manually accessed in your custom shader using [code]INSTANCE_CUSTOM[/code].
+			</description>
+		</method>
+		<method name="set_instance_transforms_batch">
+			<return type="bool" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<param index="1" name="transforms" type="Array[Transform3D]" />
+			<description>
+				Updates sparse 3D instance transforms with one scripting call. Requires [enum TRANSFORM_3D], equally sized arrays, unique indices within [member instance_count], and finite transforms. All entries are validated before any updates. Invalid inputs return [code]false[/code] and leave the buffer unchanged, including all other instance slots. An empty valid request returns [code]true[/code], and hidden slots may also be updated.
+				This does not change [member instance_count], [member visible_instance_count], colors, custom data, collision, or game entity IDs. One RenderingServer command is still issued per instance. For dense updates use [member buffer]; this API is not a single GPU upload.
+			</description>
+		</method>
+		<method name="set_instance_transform_color_buffer">
+			<return type="bool" />
+			<param index="0" name="transforms" type="Array" />
+			<param index="1" name="colors" type="PackedColorArray" />
+			<description>
+				Validates and uploads the complete array of 3D instance transforms and instance RGBA colors using one packed MultiMesh buffer update. This combines native packing with a single RenderingServer full-buffer upload; it does not send a separate update for every instance.
+				The MultiMesh must have [enum TRANSFORM_3D], [member use_colors] enabled and [member use_custom_data] disabled. Both arrays must have exactly [member instance_count] elements, every transform must be [Transform3D], and every transform/color component must be finite. Invalid input returns [code]false[/code] without changing the existing buffer. Zero instances with empty input is valid.
+				The method uses 16 packed float values per instance (a row-major 3x4 transform and four RGBA floats). This [b]replaces all instance transform and color values[/b], including hidden slots; [member instance_count], [member visible_instance_count] and the mesh stay unchanged. It does not update collision, navigation or game entity IDs.
+				Prefer this method when initializing an entire dense 3D batch from gameplay data. For sparse updates, use [method set_instance_transforms_batch] and [method set_instance_colors_batch] instead. Regular Godot can achieve the same buffer layout with [member buffer].
 			</description>
 		</method>
 		<method name="set_instance_transform">

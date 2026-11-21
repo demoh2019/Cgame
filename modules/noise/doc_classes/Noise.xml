@@ -57,6 +57,13 @@
 				Returns the 2D noise value at the given position.
 			</description>
 		</method>
+		<method name="get_noise_2dv_batch" qualifiers="const">
+			<return type="PackedFloat64Array" />
+			<param index="0" name="points" type="PackedVector2Array" />
+			<description>
+				Samples 2D noise for up to 65536 finite positions in one call. Returns the values in input order, each identical to [method get_noise_2dv] for the corresponding point. Returns an empty array for empty input or invalid input. All positions are checked before sampling, and no noise settings are modified.
+			</description>
+		</method>
 		<method name="get_noise_3d" qualifiers="const">
 			<return type="float" />
 			<param index="0" name="x" type="float" />
@@ -71,6 +78,13 @@
 			<param index="0" name="v" type="Vector3" />
 			<description>
 				Returns the 3D noise value at the given position.
+			</description>
+		</method>
+		<method name="get_noise_3dv_batch" qualifiers="const">
+			<return type="PackedFloat64Array" />
+			<param index="0" name="points" type="PackedVector3Array" />
+			<description>
+				Samples 3D noise for up to 65536 finite positions in one call. Returns the values in input order, each identical to [method get_noise_3dv] for the corresponding point. Returns an empty array for empty input or invalid input. This is a CPU batch, not GPU compute.
 			</description>
 		</method>
 		<method name="get_seamless_image" qualifiers="const">

@@ -9,6 +9,7 @@ const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildSiegeLedger = preload("res://scripts/shared/guild_siege_ledger.gd")
 const SiegeOutbox = preload("res://scripts/server/siege_outbox.gd")
 const SoloCharacterStore = preload("res://scripts/server/solo_character_store.gd")
+const TradeJournal = preload("res://scripts/server/trade_journal.gd")
 
 signal welcomed
 signal join_refused(reason: String)
@@ -43,6 +44,7 @@ var siege_outbox # SiegeOutbox, configured by the dedicated server at startup.
 var _siege_ledger_running: bool = false
 var _siege_ledger_retry_clock: float = 0.0
 var _guild_score_loading: Dictionary = {}
+var trade_journal # TradeJournal: crash-safe redo log of two-account deals, configured by the dedicated server.
 const SIEGE_LEDGER_RETRY_SECONDS := 15.0
 
 
@@ -51,6 +53,8 @@ func _process(delta: float) -> void:
 	if _count_clock >= 1.0:
 		_count_clock = 0.0
 		_command_counts.clear()
+		if role == "server" and sim != null:
+			_measure_round_trips()
 	if role == "server" and not shutting_down and gateway != null and gateway.enabled:
 		# Two-account deals settle in one backend transaction (see GameServer.pair_commits).
 		sim.pair_persistence = true
@@ -99,6 +103,58 @@ func _refresh_verified_guilds() -> void:
 
 ## Load the durable outbox before accepting clients. A malformed or wrong-seed
 ## journal fails closed so a restart never silently discards a committed win.
+## ENet smooths each peer's round trip; the server rewinds PvP targets by it (lag compensation).
+func _measure_round_trips() -> void:
+	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if enet == null:
+		return
+	for id in sim.players:
+		var packet_peer: ENetPacketPeer = enet.get_peer(int(id))
+		if packet_peer != null:
+			sim.peer_round_trip[int(id)] = packet_peer.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME) / 1000.0
+	for id in sim.peer_round_trip.keys():
+		if not sim.players.has(id):
+			sim.peer_round_trip.erase(id)
+
+
+## Opens the deal journal and replays every deal the backend never confirmed before a crash.
+func configure_trade_journal(journal_path: String) -> bool:
+	if role != "server" or sim == null or gateway == null or not gateway.enabled or trade_journal != null:
+		return false
+	var journal = TradeJournal.new()
+	if not journal.open_file(journal_path):
+		return false
+	trade_journal = journal
+	if not journal.entries.is_empty():
+		# Block those accounts from loading an older backend copy until replay finishes.
+		for user in journal.accounts():
+			_departing_accounts[user] = true
+		call_deferred("_replay_trade_journal")
+	return true
+
+
+func _replay_trade_journal() -> void:
+	var blocked: PackedStringArray = trade_journal.accounts()
+	for tx in trade_journal.entries.keys():
+		var entry: Dictionary = trade_journal.entries[tx]
+		var ok := true
+		match TradeJournal.replay_kind(entry):
+			"pair":
+				var result: Dictionary = await gateway.save_character_pair(str(entry["a"]["user"]), entry["a"]["data"],
+					str(entry["b"]["user"]), entry["b"]["data"], str(tx))
+				ok = bool(result.get("ok", false))
+			"single":
+				var side: Dictionary = entry["a"] if not bool(entry["a"]["superseded"]) else entry["b"]
+				ok = await gateway.save_character(str(side["user"]), side["data"])
+		if ok:
+			trade_journal.settle(str(tx))
+		else:
+			push_warning("Deal %s is still unsettled after restart; kept in the journal." % tx)
+	for user in blocked:
+		_departing_accounts.erase(user)
+	print("SERVER trade journal: %d unsettled deals remain" % trade_journal.entries.size())
+
+
 func configure_siege_outbox(journal_path: String) -> bool:
 	if role != "server" or sim == null or gateway == null or not gateway.enabled:
 		return false
@@ -339,11 +395,16 @@ func _commit_pair(entry: Dictionary) -> void:
 	# Snapshot after the deal; a later autosave of either account waits for this commit.
 	var data_a: Dictionary = sim.character_data(first)
 	var data_b: Dictionary = sim.character_data(second)
+	# Write-ahead: the deal is on disk before the backend sees it, so a crash can replay it.
+	if trade_journal != null and not trade_journal.record(tx, user_a, data_a, user_b, data_b):
+		push_warning("Deal %s could not be journaled; settling without crash protection." % tx)
 	var committed := false
 	for attempt in PAIR_COMMIT_ATTEMPTS:
 		var result: Dictionary = await gateway.save_character_pair(user_a, data_a, user_b, data_b, tx)
 		if bool(result.get("ok", false)):
 			committed = true
+			if trade_journal != null:
+				trade_journal.settle(tx)
 			break
 		await get_tree().create_timer(0.5 * float(attempt + 1)).timeout
 	_saving.erase(user_a)
@@ -362,6 +423,9 @@ func _save_serial(user_id: String, data: Dictionary) -> bool:
 	_saving[user_id] = true
 	var ok: bool = await gateway.save_character(user_id, data)
 	_saving.erase(user_id)
+	if ok and trade_journal != null:
+		# This newer state already contains any journaled deal; never replay the older snapshot.
+		trade_journal.supersede(user_id)
 	return ok
 
 
@@ -492,6 +556,83 @@ func c_craft_from_stash(recipe: String, times: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_enchant(item_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "enchant", sim.cmd_enchant(peer, str(item_id)))
+
+
+@rpc("any_peer", "reliable")
+func c_repair_gear() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "repair_gear", sim.cmd_repair_gear(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_alliance(action: String, target_peer: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "alliance", sim.cmd_alliance(peer, str(action), target_peer))
+
+
+@rpc("any_peer", "reliable")
+func c_guild_bank(action: String, item_id: String, quantity: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "guild_bank", sim.cmd_guild_bank(peer, str(action), str(item_id), quantity))
+
+
+@rpc("any_peer", "reliable")
+func c_plant(seed_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "farm", sim.cmd_plant(peer, str(seed_id)))
+
+
+@rpc("any_peer", "reliable")
+func c_harvest() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "farm", sim.cmd_harvest(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_faction(action: String, faction_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "faction", sim.cmd_faction(peer, str(action), str(faction_id)))
+
+
+@rpc("any_peer", "reliable")
+func c_market_bid(item_id: String, quantity: int, unit_price: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "market", sim.cmd_market_bid(peer, str(item_id), quantity, unit_price))
+
+
+@rpc("any_peer", "reliable")
+func c_market_fill(bid_id: int, quantity: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "market", sim.cmd_market_fill(peer, bid_id, quantity))
+
+
+@rpc("any_peer", "reliable")
+func c_market_cancel_bid(bid_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "market", sim.cmd_market_cancel_bid(peer, bid_id))
+
+
+@rpc("any_peer", "reliable")
+func c_craft_focus(recipe: String, times: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "craft", sim.cmd_craft(peer, str(recipe), times, false, true))
+
+
+@rpc("any_peer", "reliable")
 func c_craft(recipe: String, times: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -524,6 +665,20 @@ func c_build(x: float, z: float, yaw: float = 0.0) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "build", sim.cmd_build(peer, x, z, yaw))
+
+
+@rpc("any_peer", "reliable")
+func c_toggle_door(id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "door", sim.cmd_toggle_door(peer, id))
+
+
+@rpc("any_peer", "reliable")
+func c_build_piece(piece: String, x: float, z: float, facing: float = 0.0) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "build", sim.cmd_build_piece(peer, piece, x, z, facing))
 
 
 
@@ -1023,6 +1178,20 @@ func c_skill(dir_x: float, dir_z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_skill_ultimate(dir_x: float, dir_z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "skill", sim.cmd_skill(peer, dir_x, dir_z, true))
+
+
+@rpc("any_peer", "reliable")
+func c_gear_skill(slot: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "gear_skill", sim.cmd_gear_skill(peer, str(slot)))
+
+
+@rpc("any_peer", "reliable")
 func c_stagger_finisher() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -1030,10 +1199,45 @@ func c_stagger_finisher() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_power_attack(dir_x: float, dir_z: float, charge: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "attack", sim.cmd_attack(peer, dir_x, dir_z, charge))
+
+
+@rpc("any_peer", "reliable")
+func c_kick(dir_x: float, dir_z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "kick", sim.cmd_kick(peer, dir_x, dir_z))
+
+
+@rpc("any_peer", "reliable")
+func c_rage() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "rage", sim.cmd_rage(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_parry() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "parry", sim.cmd_parry(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_arcane_bolt(dir_x: float, dir_z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "arcane_bolt", sim.cmd_arcane_bolt(peer, dir_x, dir_z))
+
+
+@rpc("any_peer", "reliable")
+func c_ultimate() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "ultimate", sim.cmd_ultimate(peer))
 
 
 @rpc("any_peer", "reliable")
@@ -1185,10 +1389,16 @@ func server_tick(delta: float) -> void:
 	snapshot_accumulator += delta
 	if snapshot_accumulator >= 1.0 / float(Defs.SNAPSHOT_RATE):
 		snapshot_accumulator = 0.0
+		# One spatial index build for all viewers, not one per connection.
+		# Conditional calls retain compatibility with simulated Net fixtures.
+		if sim.has_method("prepare_snapshot_interest"):
+			sim.prepare_snapshot_interest()
 		for peer in sim.players:
 			var snap: Dictionary = sim.snapshot_for(peer)
 			if not snap.is_empty():
 				s_snapshot.rpc_id(peer, snap)
+		if sim.has_method("finish_snapshot_interest"):
+			sim.finish_snapshot_interest()
 
 
 ## Long-range thunder is atmospheric audio, not a remotely visible

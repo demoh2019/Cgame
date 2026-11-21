@@ -1,0 +1,127 @@
+name: Native scenery GPU packing and adaptive 3D instancing
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/procedural_scatter/**'
+      - 'scene/resources/multimesh.cpp'
+      - 'scene/resources/multimesh.h'
+      - 'doc/classes/MultiMesh.xml'
+      - 'tests/scene/test_multimesh_visibility.cpp'
+      - 'game/scripts/client/scenery_batches.gd'
+      - 'game/scripts/client/scenery_density_lod.gd'
+      - 'game/tests/test_pcg_foliage_scalability.gd'
+      - 'game/tests/run_pcg_scenery_spacing.gd'
+      - 'tests/scene/test_pcg_foliage_density_hysteresis_contract.py'
+      - 'game/tests/test_native_scenery_geometry.gd'
+      - 'game/tests/test_scenery_batches.gd'
+      - 'game/tests/run_scenery_clusters.gd'
+      - '.github/workflows/native-scenery-geometry.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/procedural_scatter/**'
+      - 'scene/resources/multimesh.cpp'
+      - 'scene/resources/multimesh.h'
+      - 'tests/scene/test_multimesh_visibility.cpp'
+      - 'game/scripts/client/scenery_batches.gd'
+      - 'game/scripts/client/scenery_density_lod.gd'
+      - 'game/tests/test_pcg_foliage_scalability.gd'
+      - 'game/tests/run_pcg_scenery_spacing.gd'
+      - 'tests/scene/test_pcg_foliage_density_hysteresis_contract.py'
+      - 'game/tests/test_native_scenery_geometry.gd'
+      - 'game/tests/test_scenery_batches.gd'
+      - 'game/tests/run_scenery_clusters.gd'
+      - '.github/workflows/native-scenery-geometry.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-scenery-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: PCG foliage density hysteresis source contracts
+        run: python3 -m unittest tests/scene/test_pcg_foliage_density_hysteresis_contract.py -v
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-native-scenery-geometry
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-native-scenery-geometry
+        continue-on-error: true
+      - name: Native engine buffer and AABB regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --test --test-case="*Native static scenery transforms and visible bounds*" --no-colors
+      - name: Native 3D instancing cluster regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --test --test-case="*PCGInstanceCluster3D*" --no-colors 2>&1 | tee instance-cluster-native.log
+      - name: Native temporal foliage density doctests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --test --test-case="*PCGFoliageScalability3D*" --no-colors 2>&1 | tee native-foliage-density.log
+      - name: Import Albion After game
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee native-scenery-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' native-scenery-import.log; then exit 1; fi
+      - name: Headless Albion After 3D instancing parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_scenery_clusters.gd 2>&1 | tee instance-cluster-game.log
+          grep -E '^SCENERY CLUSTERS TOTAL: [0-9]+ checks, 0 failures$' instance-cluster-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' instance-cluster-game.log; then exit 1; fi
+      - name: Headless Albion After graphics tests using native engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_graphics.gd 2>&1 | tee native-scenery-tests.log
+          grep -E '^GRAPHICS TOTAL: [0-9]+ checks, 0 failures$' native-scenery-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' native-scenery-tests.log; then exit 1; fi
+      - name: Albion After live foliage PCG native and fallback parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_pcg_scenery_spacing.gd 2>&1 | tee native-foliage-density-game.log
+          grep -E '^PCG SCENERY TOTAL: [0-9]+ checks, 0 failures$' native-foliage-density-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' native-foliage-density-game.log; then exit 1; fi
+      - name: Store detailed test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-scenery-geometry-logs
+          if-no-files-found: ignore
+          path: |
+            native-scenery-import.log
+            native-scenery-tests.log
+            instance-cluster-native.log
+            instance-cluster-game.log
+            native-foliage-density.log
+            native-foliage-density-game.log

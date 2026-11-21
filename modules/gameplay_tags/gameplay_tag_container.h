@@ -54,10 +54,16 @@ public:
 
 	void add_tag(const StringName &p_tag);
 	void add_tags(const PackedStringArray &p_tags);
+	// Scope operations operate on an entire dotted tag branch, without touching siblings.
+	// replace_tag_branch validates every replacement before mutating; true means success
+	// (including an unchanged result), false means invalid input and no changes.
+	PackedStringArray get_matching_tags(const StringName &p_query, bool p_exact = false) const;
+	bool replace_tag_branch(const StringName &p_query, const PackedStringArray &p_replacements);
 	void remove_tag(const StringName &p_tag);
 	void clear();
 	bool has_tag(const StringName &p_tag, bool p_exact = false) const;
 	bool has_any(const PackedStringArray &p_tags, bool p_exact = false) const;
+	int count_matching_queries(const PackedStringArray &p_queries, bool p_exact = false) const;
 	bool has_all(const PackedStringArray &p_tags, bool p_exact = false) const;
 	int get_tag_count() const { return tags.size(); }
 	bool is_empty() const { return tags.is_empty(); }
@@ -70,6 +76,8 @@ public:
  * Declarative query: every tag in `all_tags` must match, at least one of `any_tags` must match
  * (ignored when empty), and none of `none_tags` may match.
  */
+class GameplayTagStackContainer;
+
 class GameplayTagQuery : public Resource {
 	GDCLASS(GameplayTagQuery, Resource);
 
@@ -77,6 +85,8 @@ class GameplayTagQuery : public Resource {
 	PackedStringArray any_tags;
 	PackedStringArray none_tags;
 	bool exact = false;
+	int min_any_matches = 1; // Distinct qualifying conditions for matches(), not matches_stacks().
+	int min_stack_count = 1; // Applies only to matches_stacks(), not matches().
 
 protected:
 	static void _bind_methods();
@@ -90,6 +100,13 @@ public:
 	PackedStringArray get_none_tags() const { return none_tags; }
 	void set_exact(bool p_exact) { exact = p_exact; emit_changed(); }
 	bool is_exact() const { return exact; }
+	void set_min_stack_count(int p_count);
+	int get_min_stack_count() const { return min_stack_count; }
+	void set_min_any_matches(int p_count);
+	int get_min_any_matches() const { return min_any_matches; }
 
 	bool matches(const Ref<GameplayTagContainer> &p_container) const;
+	// Uses the same all/any/none and hierarchy rules, requiring the configured
+	// count for each matching tag. Null behaves as an empty stack container.
+	bool matches_stacks(const Ref<GameplayTagStackContainer> &p_container) const;
 };

@@ -3,6 +3,7 @@ extends RefCounted
 ## The server and every client build the same world from the same seed, so the world never has to
 ## be sent over the network, only what changes in it.
 
+const WorldRivers = preload("res://scripts/shared/world_rivers.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
@@ -20,9 +21,12 @@ var _hub_structures: Array = []
 var _level_rx: int = 1 << 30
 var _level_rz: int = 1 << 30
 var _levellers: Array = []
+var _erosion: FastNoiseLite
 var poi_building := false # While sites are being found, terrain is read without their levelling.
 var roads # Seeded roads shared by renderer and movement physics.
+var rivers # Seeded rivers and lakes carved into the land (world_rivers.gd).
 var poi # Villages, camps, forts, ruined cities and the rest: see world_poi.gd.
+var spawn_extender = null # Optional per-chunk content hook (server/pcg_spawns.gd); null = classic chunks.
 const CACHE_LIMIT := 256
 
 # Height range in meters. The hub is leveled to HUB_HEIGHT so the town can be built flat.
@@ -41,6 +45,10 @@ func _init(p_seed: int = 1337) -> void:
 	_detail = _make_noise(p_seed + 202, 0.07, 2)
 	_temperature = _make_noise(p_seed + 303, 0.0021, 2)
 	_moisture = _make_noise(p_seed + 404, 0.0026, 2)
+	_erosion = _make_noise(p_seed + 505, 0.0055, 3)
+	_erosion.fractal_type = FastNoiseLite.FRACTAL_RIDGED
+	rivers = WorldRivers.new(self)
+	rivers.ensure_built() # Before sites: villages must see the rivers to stay out of them.
 	poi = WorldPoi.new(self)
 	roads = WorldRoads.new(self)
 
@@ -71,6 +79,17 @@ static func mix(a: int, b: int, c: int, d: int = 0) -> int:
 
 ## Terrain height: the natural land, levelled under every site so buildings stand on flat ground.
 func height_at(x: float, z: float) -> float:
+	var ground: float = ground_at(x, z)
+	# Bridge decks carry roads over rivers: you walk on the deck, not in the water below.
+	if roads != null and not poi_building:
+		var deck: float = roads.bridge_deck(x, z)
+		if deck > ground:
+			return deck
+	return ground
+
+
+## The ground itself (no bridge decks): what the terrain mesh is built from.
+func ground_at(x: float, z: float) -> float:
 	if x >= Dungeon.UNDERGROUND_X - 40.0 and not poi_building:
 		return Dungeon.FLOOR_Y # The stone floor of the dungeons below the bunkers.
 	var raw: float = _raw_height(x, z)
@@ -94,7 +113,13 @@ func height_at(x: float, z: float) -> float:
 	return result
 
 
+## Natural land with rivers and lakes cut in.
 func _raw_height(x: float, z: float) -> float:
+	return rivers.carve(x, z, _base_height(x, z)) if rivers != null else _base_height(x, z)
+
+
+## The natural land before rivers: continents, hills, mountains, and erosion on the slopes.
+func _base_height(x: float, z: float) -> float:
 	var continent := _continent.get_noise_2d(x, z) # -1..1
 	var hills := _hills.get_noise_2d(x, z)
 	var detail := _detail.get_noise_2d(x, z)
@@ -102,6 +127,14 @@ func _raw_height(x: float, z: float) -> float:
 	var base := continent * 26.0 + hills * 7.0 + detail * 0.8 + LAND_BIAS
 	var mountain := maxf(continent - 0.28, 0.0)
 	base += mountain * mountain * 180.0
+	# Erosion, approximated analytically (no per-frame simulation; height_at must stay a pure function):
+	# hydraulic - branching gullies and ravines cut down the high ground, deepest on mountains;
+	# thermal - the very tops slump, so peaks round off instead of standing as needles.
+	var high: float = smoothstep(10.0, 60.0, base)
+	var gully: float = 1.0 - absf(_erosion.get_noise_2d(x, z))
+	base -= high * pow(gully, 5.0) * (6.0 + mountain * 55.0)
+	if base > 70.0:
+		base = 70.0 + (base - 70.0) * 0.72
 	# Level the hub and blend smoothly into the wilderness.
 	var distance := Vector2(x, z).length()
 	# The edge of the world: the land sinks into the sea.
@@ -111,7 +144,13 @@ func _raw_height(x: float, z: float) -> float:
 
 
 func is_water(x: float, z: float) -> bool:
-	return height_at(x, z) < Defs.WATER_LEVEL
+	var ground: float = height_at(x, z)
+	return ground < Defs.WATER_LEVEL or (rivers != null and rivers.surface_at(x, z) > ground)
+
+
+## Water surface height here: the sea level, or a river/lake surface above it.
+func water_level_at(x: float, z: float) -> float:
+	return maxf(Defs.WATER_LEVEL, rivers.surface_at(x, z) if rivers != null else -INF)
 
 
 func normal_at(x: float, z: float) -> Vector3:
@@ -125,19 +164,57 @@ func biome_at(x: float, z: float) -> String:
 	if Dungeon.is_underground(x, z):
 		return "dungeon"
 	var height := height_at(x, z)
-	if height < Defs.WATER_LEVEL - 0.4:
+	if height < Defs.WATER_LEVEL - 0.4 or (rivers != null and rivers.surface_at(x, z) > height):
 		return "water"
 	if height < Defs.WATER_LEVEL + 1.2:
 		return "beach"
 	if height > 48.0:
 		return "mountain"
-	var temperature := _temperature.get_noise_2d(x, z)
-	var moisture := _moisture.get_noise_2d(x, z)
+	return _biome_from_climate(_temperature.get_noise_2d(x, z), _moisture.get_noise_2d(x, z))
+
+
+static func _biome_from_climate(temperature: float, moisture: float) -> String:
 	if moisture > 0.25:
 		return "swamp" if temperature > 0.0 else "forest"
 	if moisture < -0.2:
 		return "plains"
 	return "forest" if temperature < 0.1 else "plains"
+
+
+## Cgame samples an entire chart row natively; stock Godot uses identical serial samples.
+static func _sample_noise_2dv(noise: Noise, points: PackedVector2Array, force_scalar: bool = false) -> PackedFloat64Array:
+	if not force_scalar and noise.has_method("get_noise_2dv_batch"):
+		var native_values: PackedFloat64Array = noise.call("get_noise_2dv_batch", points)
+		return native_values
+	var samples := PackedFloat64Array()
+	samples.resize(points.size())
+	for i in points.size():
+		samples[i] = noise.get_noise_2d(points[i].x, points[i].y)
+	return samples
+
+
+## Batch biome classification for render/chart consumers with precomputed heights.
+## Scalar biome_at() remains the authoritative query and is not changed for simulation.
+func biomes_at_points(points: PackedVector2Array, heights: PackedFloat64Array) -> PackedStringArray:
+	var result := PackedStringArray()
+	if points.size() != heights.size():
+		return result
+	var temperatures: PackedFloat64Array = _sample_noise_2dv(_temperature, points)
+	var moistures: PackedFloat64Array = _sample_noise_2dv(_moisture, points)
+	for i in points.size():
+		var position: Vector2 = points[i]
+		var height: float = heights[i]
+		if Dungeon.is_underground(position.x, position.y):
+			result.append("dungeon")
+		elif height < Defs.WATER_LEVEL - 0.4:
+			result.append("water")
+		elif height < Defs.WATER_LEVEL + 1.2:
+			result.append("beach")
+		elif height > 48.0:
+			result.append("mountain")
+		else:
+			result.append(_biome_from_climate(temperatures[i], moistures[i]))
+	return result
 
 
 # Names of the big areas: an adjective for every 640 m cell and a noun for the kind of land you stand on.
@@ -282,13 +359,209 @@ func chunk(cell: Vector2i) -> Dictionary:
 	return data
 
 
+## Sunken caches lie on the bottom of deep water; only a diver can open them. A separate
+## random stream keeps every other piece of the chunk exactly as it was before.
+const SUNKEN_MIN_DEPTH := 2.2
+const SUNKEN_ID_BASE := 950
+
+
+## Extra infected that make the wilds teem: ruin guardians and screamers, crawler swarms,
+## lone stalkers that hunt you down, and stragglers even in the green zone. Own random
+## stream, so every other piece of the chunk is unchanged.
+const HOSTILE_ID_BASE := 900
+const HOSTILE_ID_MAX := 45
+
+
+func _add_hostiles(cell: Vector2i, origin: Vector2, zone: int, ruin: bool, spawns: Array) -> void:
+	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
+	if center.length() < Defs.HUB_SAFE_RADIUS + 60.0 or Dungeon.is_underground(origin.x + Defs.CHUNK_SIZE):
+		return
+	var hrng := RandomNumberGenerator.new()
+	hrng.seed = mix(cell.x, cell.y, world_seed, 83)
+	var picks: Array = [] # [type, position]
+	if ruin:
+		# Every ruin has a guardian; darker zones add a screamer and a bigger pack.
+		picks.append(["sentinel" if zone >= 1 else "brute", center + _jitter(hrng, 8.0)])
+		if zone >= 1 and hrng.randf() < 0.55:
+			picks.append(["howler", center + _jitter(hrng, 14.0)])
+		for i in hrng.randi_range(2, 4) + zone:
+			picks.append(["crawler" if hrng.randf() < 0.5 else "walker", center + _jitter(hrng, 22.0)])
+	elif zone == 0:
+		for i in hrng.randi_range(1, 4):
+			picks.append(["walker", origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE])
+		if hrng.randf() < 0.2:
+			var green_nest := origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE
+			for i in hrng.randi_range(3, 5):
+				picks.append(["crawler", green_nest + _jitter(hrng, 5.0)])
+	else:
+		if hrng.randf() < 0.45 + 0.1 * zone:
+			var nest := origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE
+			for i in hrng.randi_range(4, 6) + zone:
+				picks.append(["crawler", nest + _jitter(hrng, 6.0)])
+		if hrng.randf() < 0.25 + 0.1 * zone:
+			picks.append(["stalker", origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE])
+		if hrng.randf() < 0.18 + 0.05 * zone:
+			picks.append(["howler", origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE])
+		for i in hrng.randi_range(2, 4 + zone):
+			picks.append([_pick_zombie(zone, hrng), origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE])
+	var k := 0
+	for pick in picks:
+		if k >= HOSTILE_ID_MAX:
+			break
+		var p: Vector2 = pick[1]
+		if is_water(p.x, p.y) or is_safe(p.x, p.y):
+			continue
+		spawns.append({"id": entity_id(cell, HOSTILE_ID_BASE + k), "x": p.x, "z": p.y, "type": str(pick[0]), "ruin": ruin})
+		k += 1
+
+
+static func _jitter(rng: RandomNumberGenerator, radius: float) -> Vector2:
+	return Vector2(rng.randf_range(-radius, radius), rng.randf_range(-radius, radius))
+
+
+## Lone wilderness outposts between the settlements: a trapper's shack, a watchtower, or a cluster
+## of ruins, often with a loot crate and some clutter. Collidable structures shared by server and
+## client; own random stream (ids 850-899), so everything else in the chunk keeps its place.
+const OUTPOST_ID_BASE := 850
+const OUTPOST_CHANCE := 0.32
+
+
+func _add_outposts(cell: Vector2i, origin: Vector2, zone: int, ruin: bool, structures: Array, crates: Array,
+		props: Array, sites: Array) -> void:
+	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
+	if ruin or center.length() < Defs.HUB_SAFE_RADIUS + 80.0 or Dungeon.is_underground(origin.x + Defs.CHUNK_SIZE):
+		return
+	var orng := RandomNumberGenerator.new()
+	orng.seed = mix(cell.x, cell.y, world_seed, 131)
+	if orng.randf() > OUTPOST_CHANCE:
+		return
+	var at := origin + Vector2(orng.randf_range(14.0, 50.0), orng.randf_range(14.0, 50.0))
+	if is_water(at.x, at.y) or is_safe(at.x, at.y) or normal_at(at.x, at.y).y < 0.85:
+		return
+	for site in sites:
+		if at.distance_to(Vector2(float(site["x"]), float(site["z"]))) < float(site["radius"]) + 25.0:
+			return
+	var index := OUTPOST_ID_BASE
+	var kind_roll := orng.randf()
+	var yaw := orng.randf() * TAU
+	if kind_roll < 0.4:
+		# Trapper's shack.
+		structures.append({"id": entity_id(cell, index), "kind": "building", "variant": orng.randi_range(0, BUILDING_VARIANTS - 1),
+			"scale": BUILDING_SCALE, "x": at.x, "z": at.y, "y": height_at(at.x, at.y), "yaw": yaw,
+			"radius": BUILDING_SCALE * 0.62, "blocks": true})
+		index += 1
+	elif kind_roll < 0.7:
+		# Watchtower.
+		structures.append({"id": entity_id(cell, index), "kind": "tower", "variant": orng.randi_range(0, WorldPoi.TOWER_VARIANTS - 1),
+			"scale": 5.0 * orng.randf_range(0.8, 1.1), "x": at.x, "z": at.y, "y": height_at(at.x, at.y), "yaw": 0.0,
+			"radius": 2.4, "blocks": true})
+		index += 1
+	else:
+		# Overgrown ruins: a few broken walls and remains.
+		for r in orng.randi_range(3, 6):
+			var p := at + Vector2.from_angle(orng.randf() * TAU) * orng.randf_range(3.0, 9.0)
+			if is_water(p.x, p.y):
+				continue
+			var variant := orng.randi_range(0, WorldPoi.RUIN_RADII.size() - 1)
+			structures.append({"id": entity_id(cell, index), "kind": "ruin", "variant": variant, "scale": 1.0,
+				"x": p.x, "z": p.y, "y": height_at(p.x, p.y), "yaw": orng.randf() * TAU,
+				"radius": WorldPoi.RUIN_RADII[variant], "blocks": true})
+			index += 1
+	# Clutter and, often, a crate to scavenge.
+	for c in orng.randi_range(2, 4):
+		var p := at + Vector2.from_angle(orng.randf() * TAU) * orng.randf_range(4.5, 8.0)
+		if is_water(p.x, p.y):
+			continue
+		var variant := orng.randi_range(0, mini(8, WorldPoi.PROP_RADII.size() - 1))
+		props.append({"id": entity_id(cell, index), "kind": "prop", "variant": variant, "x": p.x, "z": p.y, "y": height_at(p.x, p.y),
+			"yaw": orng.randf() * TAU, "scale": 1.5, "radius": WorldPoi.PROP_RADII[variant], "blocks": true})
+		index += 1
+	if orng.randf() < 0.65:
+		var p := at + Vector2.from_angle(orng.randf() * TAU) * orng.randf_range(4.0, 6.0)
+		if not is_water(p.x, p.y):
+			crates.append({"id": entity_id(cell, index), "kind": "crate", "tier": tier_for_zone(zone),
+				"x": p.x, "z": p.y, "y": height_at(p.x, p.y), "radius": 0.6, "blocks": true})
+
+
+## Extra trees in groves, so forests read as forests: a few grove centres per chunk with trees
+## clustered around them, densest in forest, thinner in swamp and plains. Real gatherable,
+## collidable tree nodes (server and client agree), on their own random stream so every other
+## node of the chunk keeps its place. Ids 960-999.
+const GROVE_ID_BASE := 960
+const GROVE_ID_MAX := 40
+const GROVE_TREES := {"forest": [18, 30], "swamp": [8, 14], "plains": [4, 10]}
+
+
+func _add_groves(cell: Vector2i, origin: Vector2, tier: int, nodes: Array, sites: Array) -> void:
+	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
+	if center.length() < Defs.HUB_SAFE_RADIUS + 20.0 or Dungeon.is_underground(origin.x + Defs.CHUNK_SIZE):
+		return
+	var biome := biome_at(center.x, center.y)
+	if not GROVE_TREES.has(biome):
+		return
+	var grng := RandomNumberGenerator.new()
+	grng.seed = mix(cell.x, cell.y, world_seed, 97)
+	var wanted: int = grng.randi_range(int(GROVE_TREES[biome][0]), int(GROVE_TREES[biome][1]))
+	var groves: Array[Vector2] = []
+	for g in grng.randi_range(2, 4):
+		groves.append(origin + Vector2(grng.randf(), grng.randf()) * Defs.CHUNK_SIZE)
+	var taken: Array[Vector2] = []
+	for node in nodes:
+		taken.append(Vector2(float(node["x"]), float(node["z"])))
+	var info := Defs.node_info("tree")
+	var placed := 0
+	for attempt in wanted * 4:
+		if placed >= mini(wanted, GROVE_ID_MAX):
+			break
+		var grove: Vector2 = groves[grng.randi() % groves.size()]
+		var p := grove + Vector2.from_angle(grng.randf() * TAU) * (sqrt(grng.randf()) * 14.0)
+		if p.x < origin.x or p.y < origin.y or p.x >= origin.x + Defs.CHUNK_SIZE or p.y >= origin.y + Defs.CHUNK_SIZE:
+			continue
+		if is_water(p.x, p.y) or is_safe(p.x, p.y) or biome_at(p.x, p.y) != biome or _in_site_clearing(p, sites):
+			continue
+		var crowded := false
+		for q in taken:
+			if q.distance_to(p) < 3.2:
+				crowded = true
+				break
+		if crowded:
+			continue
+		taken.append(p)
+		nodes.append({
+			"id": entity_id(cell, GROVE_ID_BASE + placed), "kind": "tree", "tier": tier,
+			"x": p.x, "z": p.y, "y": height_at(p.x, p.y), "radius": info["radius"], "blocks": info["blocks"],
+		})
+		placed += 1
+
+
+func _add_sunken_caches(cell: Vector2i, origin: Vector2, zone: int, crates: Array) -> void:
+	var sunken_rng := RandomNumberGenerator.new()
+	sunken_rng.seed = mix(cell.x, cell.y, world_seed, 71)
+	if sunken_rng.randf() > 0.35:
+		return
+	var placed := 0
+	for attempt in 10:
+		if placed >= 2:
+			break
+		var p := origin + Vector2(sunken_rng.randf(), sunken_rng.randf()) * Defs.CHUNK_SIZE
+		var depth: float = Defs.WATER_LEVEL - height_at(p.x, p.y)
+		if depth < SUNKEN_MIN_DEPTH or is_safe(p.x, p.y):
+			continue
+		crates.append({
+			"id": entity_id(cell, SUNKEN_ID_BASE + placed), "kind": "crate", "sunken": true,
+			"tier": clampi(tier_for_zone(zone) + 1, 1, Defs.MAX_TIER),
+			"x": p.x, "z": p.y, "y": height_at(p.x, p.y), "radius": 0.6, "blocks": false,
+		})
+		placed += 1
+
+
 func _generate_chunk(cell: Vector2i) -> Dictionary:
 	var origin := cell_origin(cell)
 	if Dungeon.is_underground(origin.x + Defs.CHUNK_SIZE):
 		return _dungeon_chunk(cell, origin)
 	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
 	var zone := zone_at(center.x, center.y)
-	var tier := tier_for_zone(zone)
+	var tier := Defs.tier_for_distance(center.length()) if zone >= Defs.ZONE_RADII.size() else tier_for_zone(zone)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = mix(cell.x, cell.y, world_seed, 11)
 
@@ -306,7 +579,7 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 	# Ruins: scavenging sites, never inside the hub, rarer in the safe green zone.
 	var hub_distance := center.length()
 	if hub_distance > Defs.HUB_SAFE_RADIUS + 60.0 and not is_water(center.x, center.y):
-		var ruin_chance := 0.16 + 0.05 * zone
+		var ruin_chance := 0.24 + 0.06 * zone
 		ruin = rng.randf() < ruin_chance
 		# A site already fills the area: no extra ruin on top of it.
 		for site in sites:
@@ -433,7 +706,14 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 		for item in content["npcs"]:
 			if cell_rect.has_point(Vector2(float(item["x"]), float(item["z"]))):
 				npcs.append(item)
-	return {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
+	_add_sunken_caches(cell, origin, zone, crates)
+	_add_hostiles(cell, origin, zone, ruin, spawns)
+	_add_groves(cell, origin, tier, nodes, sites)
+	_add_outposts(cell, origin, zone, ruin, structures, crates, props, sites)
+	var generated := {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
+	if spawn_extender != null:
+		spawn_extender.extend(cell, generated)
+	return generated
 
 
 ## Trees and rocks keep out of the inner part of a settlement, camp or city.
@@ -508,8 +788,29 @@ func add_dynamic_blocker(id: int, x: float, z: float, radius: float) -> void:
 		dynamic_blockers[id] = {"id": id, "x": x, "z": z, "radius": radius, "blocks": true}
 
 
+## A structure made of several circles (house walls, doorways). Tagged so house placement can
+## tell pieces apart from scenery; removed together by remove_dynamic_blocker(id).
+var _structure_parts: Dictionary = {}
+
+
+func add_structure_blockers(id: int, circles: Array) -> void:
+	remove_dynamic_blocker(id)
+	var keys: Array = []
+	for k in circles.size():
+		var c: Array = circles[k]
+		if not (is_finite(float(c[0])) and is_finite(float(c[1])) and float(c[2]) > 0.0):
+			continue
+		var key := "%d:%d" % [id, k]
+		dynamic_blockers[key] = {"id": id, "x": float(c[0]), "z": float(c[1]), "radius": float(c[2]), "blocks": true, "piece_owner": str(id)}
+		keys.append(key)
+	_structure_parts[id] = keys
+
+
 func remove_dynamic_blocker(id: int) -> void:
 	dynamic_blockers.erase(id)
+	for key in _structure_parts.get(id, []):
+		dynamic_blockers.erase(key)
+	_structure_parts.erase(id)
 
 
 func blockers_near(x: float, z: float, radius: float) -> Array:

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PCGSpatialFilter3D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Height-aware, deterministic 3D spatial thinning of procedural points.
+	</brief_description>
+	<description>
+		Returns indices of 3D candidate points separated by at least the specified full Euclidean distance, preserving input order. Uses a spatial hash checking up to 27 neighboring cells. Unlike 2D XZ filtering, objects on stacked platforms and cliff terraces can coexist. It consumes no randomness, changes no candidates, and creates no scene nodes. Accepts at most 16,384 finite candidates with coordinates within +/- 10,000,000. Minimum spacing is zero or 0.05 through 10,000; output capacity is 0 through 4,096. Invalid input rejects the entire batch.
+	</description>
+	<methods>
+		<method name="filter_indices_scaled" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="candidates" type="PackedVector3Array" />
+			<param index="1" name="scales" type="PackedFloat32Array" />
+			<param index="2" name="min_spacing" type="float" />
+			<param index="3" name="max_selected" type="int" default="4096" />
+			<param index="4" name="largest_first" type="bool" default="true" />
+			<description>
+				3D scale-aware self-pruning inspired by Unreal PCG. Two selected points require Euclidean separation at least [code]min_spacing * (scales[a] + scales[b]) / 2[/code]. Scales must be finite within 0.5–2.0. Candidates are visited largest-first by default, ties by original index, but returned indices preserve source order. With [param largest_first] disabled, original input order defines precedence. A bounded 5x5x5 spatial-hash neighborhood handles steep slopes and vertically separated terraces. Zero spacing retains the first max_selected input indices in original order. Finite coordinates, batch sizes and spacing follow [method filter_indices]; any invalid or mismatched input rejects the whole batch. Pure data: no RNG, scene tree access or gameplay authority changes.
+			</description>
+		</method>
+		<method name="filter_indices" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="candidates" type="PackedVector3Array" />
+			<param index="1" name="min_spacing" type="float" />
+			<param index="2" name="max_selected" type="int" default="4096" />
+			<description>
+				Returns original candidate indices in stable order. Exact minimum distance is inclusive; zero spacing returns the first max_selected indices. Validation occurs before selection, so no partial output is produced.
+			</description>
+		</method>
+	<method name="filter_indices_excluding" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="candidates" type="PackedVector3Array" />
+			<param index="1" name="exclusion_centers" type="PackedVector3Array" />
+			<param index="2" name="exclusion_radii" type="PackedFloat64Array" />
+			<param index="3" name="min_spacing" type="float" />
+			<param index="4" name="max_selected" type="int" default="4096" />
+			<description>
+				First excludes every candidate inside or exactly on any spherical zone, then applies full 3D minimum spacing to surviving points. Returns original input indices, deterministically ordered. Excluded points do not occupy spacing cells. Accepts up to 128 zones with finite centers within +/- 10,000,000 and radii from 0 to 10,000, plus the same candidate, spacing and output limits as [method filter_indices]. All inputs are validated before filtering, even points that would be excluded; malformed batches return empty. No physics, scene or random-number work is performed.
+			</description>
+		</method>
+		<method name="filter_indices_excluding_volumes" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="candidates" type="PackedVector3Array" />
+			<param index="1" name="exclusion_centers" type="PackedVector3Array" />
+			<param index="2" name="exclusion_radii" type="PackedFloat64Array" />
+			<param index="3" name="box_mins" type="PackedVector3Array" />
+			<param index="4" name="box_maxs" type="PackedVector3Array" />
+			<param index="5" name="min_spacing" type="float" />
+			<param index="6" name="max_selected" type="int" default="4096" />
+			<description>
+				Filters candidate points outside both spherical and axis-aligned box exclusion volumes before applying the existing deterministic full-3D spacing filter. Points on the boundary of either shape are excluded. Returns original input indices in source order, not indices relative to filtered arrays. Box mins and maxs must have matching lengths (up to 128), finite components within +/-10,000,000 and each min component not greater than the corresponding max; zero-size boxes are permitted. Spherical inputs use the same limit and validation as [method filter_indices_excluding]. All candidate points, including would-be excluded points, are checked before selection. Empty boxes are equivalent to [method filter_indices_excluding]. No scene nodes or gameplay state are touched.
+			</description>
+		</method>
+		<method name="filter_indices_excluding_oriented_volumes" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="candidates" type="PackedVector3Array" />
+			<param index="1" name="exclusion_centers" type="PackedVector3Array" />
+			<param index="2" name="exclusion_radii" type="PackedFloat64Array" />
+			<param index="3" name="box_mins" type="PackedVector3Array" />
+			<param index="4" name="box_maxs" type="PackedVector3Array" />
+			<param index="5" name="oriented_centers" type="PackedVector3Array" />
+			<param index="6" name="oriented_half_extents" type="PackedVector3Array" />
+			<param index="7" name="oriented_yaws" type="PackedFloat64Array" />
+			<param index="8" name="min_spacing" type="float" />
+			<param index="9" name="max_selected" type="int" default="4096" />
+			<description>
+				Extends [method filter_indices_excluding_volumes] with 3D yaw-rotated oriented-box exclusions. Each box uses a world-space center, nonnegative local half-extents (up to 10000) and a yaw angle (radians, -TAU to TAU). The box rotates about the Godot positive-Y axis, matching [code]Basis(Vector3.UP, yaw)[/code]. Inclusive faces are excluded. Spheres, axis-aligned boxes and oriented boxes are excluded before stable 3D minimum-distance pruning, so a removed point never occupies a spacing cell. This method returns original candidate indices in source order; it does not mutate inputs, the scene, RNG, or physics. Empty oriented boxes are equivalent to [method filter_indices_excluding_volumes]. Limits: at most 16384 candidate points, 128 rotated boxes, 128 spheres, 128 axis-aligned boxes and 4096 selected points. Invalid or mismatched box arrays, negative/nonfinite half-extents, nonfinite/out-of-range yaw, invalid candidate coordinates, or other malformed volume/spacing parameters reject the entire operation. A zero half-extent is permitted to represent an inclusive plane/line/point. This is a preprocessing selector, not dynamic collision or GPU instance culling.
+			</description>
+		</method>
+		<method name="filter_indices_density" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="candidates" type="PackedVector3Array" />
+			<param index="1" name="densities" type="PackedFloat32Array" />
+			<param index="2" name="stable_ids" type="PackedInt32Array" />
+			<param index="3" name="seed" type="int" />
+			<param index="4" name="max_selected" type="int" default="4096" />
+			<description>
+				Deterministically samples each candidate based on its stable ID, seed and density between 0 and 1. A density of 0 always rejects; 1 always admits. The admission decision for an ID does not depend on point position or order within the input array, so reordered or reloaded chunks preserve the same per-ID population. This is data-only and does not mutate global or local random number generator state. Returns original candidate indices in source order, capped to max_selected (0 to 4096). All three input arrays must have equal lengths up to 16384 and every point must have finite coordinates within +/- 10000000. Densities must be finite and between 0 and 1, stable IDs must be unique nonnegative 31-bit integers (0 to 2147483646), and the seed must be between 0 and 2147483646. Invalid input fails atomically. The hash uses bounded prime-modulus integer arithmetic with exact parity in GDScript and C++. Combine the returned indices with [method filter_indices_excluding_volumes] for volume-aware spacing after sampling.
+			</description>
+		</method>
+	</methods>
+</class>

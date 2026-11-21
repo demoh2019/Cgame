@@ -3783,6 +3783,15 @@ PackedStringArray Node::get_configuration_warnings() const {
 	ERR_THREAD_GUARD_V(PackedStringArray());
 	PackedStringArray ret;
 
+	Ref<Script> scr = get_script();
+	if (scr.is_valid()) {
+		const StringName script_base_type = scr->get_instance_base_type();
+		const StringName this_node_type = get_class_name();
+		if (!ClassDB::is_parent_class(this_node_type, script_base_type)) {
+			ret.append(vformat(RTR("Script inherits from native type \"%s\", so it can't be assigned to an object of type: \"%s\""), script_base_type, this_node_type));
+		}
+	}
+
 	Vector<String> warnings;
 	if (GDVIRTUAL_CALL(_get_configuration_warnings, warnings)) {
 		ret.append_array(warnings);
@@ -4304,8 +4313,9 @@ void Node::_bind_methods() {
 
 	ADD_GROUP("Process", "process_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "process_mode", PROPERTY_HINT_ENUM, "Inherit,Pausable,When Paused,Always,Disabled"), "set_process_mode", "get_process_mode");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "process_priority"), "set_process_priority", "get_process_priority");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "process_physics_priority"), "set_physics_process_priority", "get_physics_process_priority");
+	// Process priority is a 32-bit signed integer.
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "process_priority", PROPERTY_HINT_RANGE, "-2147483648,2147483647,1"), "set_process_priority", "get_process_priority");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "process_physics_priority", PROPERTY_HINT_RANGE, "-2147483648,2147483647,1"), "set_physics_process_priority", "get_physics_process_priority");
 
 	ADD_SUBGROUP("Thread Group", "process_thread");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "process_thread_group", PROPERTY_HINT_ENUM, "Inherit,Main Thread,Sub Thread"), "set_process_thread_group", "get_process_thread_group");

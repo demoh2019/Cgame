@@ -327,6 +327,9 @@
 		<member name="docks/scene_tree/derive_script_globals_by_name" type="bool" setter="" getter="">
 			If [code]true[/code], when extending a script, the global class name of the script is inserted in the script creation dialog, if it exists. If [code]false[/code], the script's file path is always inserted.
 		</member>
+		<member name="docks/scene_tree/enable_editable_children_by_default" type="bool" setter="" getter="">
+			If [code]true[/code], instantiated nodes will automatically have Editable Children set to [code]true[/code] in the scene tree dock.
+		</member>
 		<member name="docks/scene_tree/hide_filtered_out_parents" type="bool" setter="" getter="">
 			If [code]true[/code], the scene tree dock will only show nodes that match the filter, without showing parents that don't. This settings can also be changed in the Scene dock's top menu.
 		</member>
@@ -1029,7 +1032,7 @@
 			If [code]true[/code], scenes and scripts are saved when the editor loses focus. Depending on the work flow, this behavior can be less intrusive than [member text_editor/behavior/files/autosave_interval_secs] or remembering to save manually.
 		</member>
 		<member name="interface/editor/behavior/separate_distraction_mode" type="bool" setter="" getter="">
-			If [code]true[/code], the editor's Script tab will have a separate distraction mode setting from the 2D/3D/Game/AssetLib tabs. If [code]false[/code], the distraction-free mode toggle is shared between all tabs.
+			If [code]true[/code], the Script editor's distraction-free mode will be separate from the 2D/3D/Game/Asset Store main screens. If [code]false[/code], the distraction-free mode toggle is shared between all main screens.
 		</member>
 		<member name="interface/editor/behavior/show_internal_errors_in_toast_notifications" type="int" setter="" getter="">
 			If enabled, displays internal engine errors in toast notifications (toggleable by clicking the "bell" icon at the bottom of the editor). No matter the value of this setting, non-internal engine errors will always be visible in toast notifications.
@@ -1379,7 +1382,7 @@
 			If [code]true[/code] the language server will run in a separate thread, if [code]false[/code] it will run on the main thread.
 		</member>
 		<member name="network/tls/editor_tls_certificates" type="String" setter="" getter="">
-			The TLS certificate bundle to use for HTTP requests made within the editor (e.g. from the Asset Store tab). If left empty, the [url=https://github.com/godotengine/godot/blob/master/thirdparty/certs/ca-bundle.crt]included Mozilla certificate bundle[/url] will be used.
+			The TLS certificate bundle to use for HTTP requests made within the editor (e.g. from the Asset Store tab). If left empty, the operating system provided certificate bundle will be used. If OS bundle is not available, [url=https://github.com/godotengine/godot/blob/master/thirdparty/certs/ca-bundle.crt]included Mozilla certificate bundle[/url] is used as a fallback.
 		</member>
 		<member name="network/tls/enable_tls_v1.3" type="bool" setter="" getter="">
 			If [code]true[/code], enable TLSv1.3 negotiation.
@@ -1677,10 +1680,10 @@
 			How many script names can be highlighted at most, if [member text_editor/script_list/script_temperature_enabled] is [code]true[/code]. Scripts older than this value use the default font color.
 		</member>
 		<member name="text_editor/script_list/show_members_overview" type="bool" setter="" getter="">
-			If [code]true[/code], displays an overview of the current script's member functions at the left of the script editor. See also [member text_editor/script_list/sort_members_outline_alphabetically].
+			If [code]true[/code], displays an overview of the current script's methods at the left of the script editor. See also [member text_editor/script_list/sort_members_outline_alphabetically].
 		</member>
 		<member name="text_editor/script_list/sort_members_outline_alphabetically" type="bool" setter="" getter="">
-			If [code]true[/code], sorts the members outline (located at the left of the script editor) using alphabetical order. If [code]false[/code], sorts the members outline depending on the order in which members are found in the script.
+			If [code]true[/code], sorts the members overview (located at the left of the script editor) in alphabetical order. If [code]false[/code], sorts the members overview depending on the order in which methods are found in the script.
 			[b]Note:[/b] Only effective if [member text_editor/script_list/show_members_overview] is [code]true[/code].
 		</member>
 		<member name="text_editor/script_list/sort_scripts_by" type="int" setter="" getter="">
@@ -1816,7 +1819,7 @@
 		</member>
 		<member name="text_editor/theme/highlighting/member_variable_color" type="Color" setter="" getter="">
 			The script editor's color for member variables on objects (e.g. [code]self.some_property[/code]).
-			[b]Note:[/b] This color is not used for local variable declaration and access.
+			[b]Note:[/b] This color is not used when declaring or accessing local variables.
 		</member>
 		<member name="text_editor/theme/highlighting/number_color" type="Color" setter="" getter="">
 			The script editor's color for numbers (integer and floating-point).

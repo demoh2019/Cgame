@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AIEncounterBudget" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Pure, bounded, configurable PvE spawn and recovery pacing policy for authoritative games.</brief_description>
+	<description>
+		A deterministic encounter admission policy inspired by server-side encounter directors and Unreal MassSpawner. Combine global enemy headroom, local enemy density, regional difficulty and survivor health without owning world state. Every call is stateless and free of random numbers, physics, scene nodes or network access. The game still chooses participants, verifies safe zones, spawns real actors, and schedules incidents.
+		The default configuration mirrors Albion After: global limit 150, local soft/dense/hard pressure 8/12/20, base 7 and maximum 10 spawned enemies, with at most 3 zone-bonus enemies. The policy caps dense/low-health incidents at 2 enemies and moderate-pressure incidents at 4. It never allocates a reservation or guarantees that the game can spawn an actor. Use [method configure_limits] to adapt these numeric thresholds to other games.
+	</description>
+	<methods>
+		<method name="configure_limits"><return type="bool" />
+			<param index="0" name="global_limit" type="int" /><param index="1" name="soft_density" type="int" /><param index="2" name="dense_density" type="int" /><param index="3" name="local_hard_limit" type="int" /><param index="4" name="base_squad" type="int" /><param index="5" name="max_squad" type="int" /><param index="6" name="max_zone_bonus" type="int" />
+			<description>Replaces all settings atomically if global_limit is 1–8192, 1 &lt;= soft_density &lt; dense_density &lt; local_hard_limit &lt;= global_limit, 1 &lt;= base_squad &lt;= max_squad &lt;= 64 and max_zone_bonus is 0–10. Returns false without mutation for invalid settings.</description>
+		</method>
+		<method name="get_spawn_budget" qualifiers="const"><return type="int" /><param index="0" name="total_infected" type="int" /><param index="1" name="nearby" type="int" /><param index="2" name="health_ratio" type="float" /><param index="3" name="zone" type="int" /><description>Returns permitted new NPC count between zero and the remaining global headroom. Negative counts or nonfinite health return zero. Zone bonus is clamped; survivor health is clamped to 0–1. Never spawns or reserves NPCs.</description></method>
+		<method name="get_respite_seconds" qualifiers="const"><return type="float" /><param index="0" name="base_delay" type="float" /><param index="1" name="nearby" type="int" /><param index="2" name="health_ratio" type="float" /><description>Returns the authored base recovery delay plus bounded density/health relief (at most 75 seconds). Invalid base delay or health returns zero. Never modifies the simulation clock or network state.</description></method>
+		<method name="get_global_limit" qualifiers="const"><return type="int" /><description>Current global maximum number of enemies.</description></method>
+		<method name="get_local_hard_limit" qualifiers="const"><return type="int" /><description>Current local no-spawn density limit.</description></method>
+		<method name="get_soft_density" qualifiers="const"><return type="int" /><description>Current moderate-pressure threshold.</description></method>
+		<method name="get_dense_density" qualifiers="const"><return type="int" /><description>Current heavy-pressure threshold.</description></method>
+	</methods>
+</class>

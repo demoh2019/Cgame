@@ -8,6 +8,7 @@ const UiSettings = preload("res://scripts/client/ui_settings.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
+const FirstSteps = preload("res://scripts/client/first_steps.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
@@ -450,6 +451,9 @@ func _draw_top_strip(you: Dictionary, view: Vector2) -> void:
 
 func _draw_quest_card(you: Dictionary, view: Vector2) -> void:
 	var lines: Array = []
+	var guide: String = FirstSteps.current_text()
+	if guide != "":
+		lines.append(["FIRST STEPS  (Ctrl+F2 hides)", guide])
 	var journal: Variant = you.get("contract", Contracts.empty_state())
 	var contract_text: String = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
 	if contract_text != "":

@@ -1,0 +1,9 @@
+config_version=5
+
+[application]
+config/name="Visual Quality Lab"
+run/main_scene="res://demo.tscn"
+
+[rendering]
+renderer/rendering_method="forward_plus"
+renderer/rendering_method.mobile="mobile"

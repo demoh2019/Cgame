@@ -182,10 +182,9 @@ public:
 
 		primary_grid_step_x = memnew(SpinBox);
 		primary_grid_step_x->set_min(1);
-		primary_grid_step_x->set_step(1);
 		primary_grid_step_x->set_max(SPIN_BOX_GRID_RANGE);
 		primary_grid_step_x->set_allow_greater(true);
-		primary_grid_step_x->set_format_with_plural("%d step", "%d steps"); // TTRN("%s step", "%s steps")
+		primary_grid_step_x->set_format_with_plural("%s step", "%s steps"); // TTRN("%s step", "%s steps")
 		primary_grid_step_x->set_format_auto_translate_mode(AUTO_TRANSLATE_MODE_INHERIT);
 		primary_grid_step_x->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 		primary_grid_step_x->set_select_all_on_focus(true);
@@ -194,10 +193,9 @@ public:
 
 		primary_grid_step_y = memnew(SpinBox);
 		primary_grid_step_y->set_min(1);
-		primary_grid_step_y->set_step(1);
 		primary_grid_step_y->set_max(SPIN_BOX_GRID_RANGE);
 		primary_grid_step_y->set_allow_greater(true);
-		primary_grid_step_y->set_format_with_plural("%d step", "%d steps"); // TTRN("%s step", "%s steps")
+		primary_grid_step_y->set_format_with_plural("%s step", "%s steps"); // TTRN("%s step", "%s steps")
 		primary_grid_step_y->set_format_auto_translate_mode(AUTO_TRANSLATE_MODE_INHERIT);
 		primary_grid_step_y->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 		primary_grid_step_y->set_select_all_on_focus(true);
@@ -845,10 +843,27 @@ void CanvasItemEditor::_add_node_pressed(int p_result) {
 				return;
 			}
 
+			// Adjust the transform to ignore the parent's. Since the nodes aren't parented yet,
+			// we need to get it from either the selection, or the root node.
+			Node *paste_parent = nullptr;
+			const List<Node *> selection = editor_selection->get_top_selected_node_list();
+			if (selection.is_empty()) {
+				paste_parent = EditorNode::get_singleton()->get_edited_scene();
+			} else {
+				paste_parent = selection.back()->get();
+			}
+			Transform2D parent_inverse;
+			if (paste_parent) {
+				CanvasItem *ci = Object::cast_to<CanvasItem>(paste_parent);
+				if (ci) {
+					parent_inverse = ci->get_global_transform_with_canvas().affine_inverse();
+				}
+			}
+
 			for (Node *node : pasted_nodes) {
 				CanvasItem *ci = Object::cast_to<CanvasItem>(node);
 				if (ci) {
-					Transform2D xform = ci->get_transform() * ci->get_global_transform_with_canvas().affine_inverse();
+					Transform2D xform = ci->get_transform() * parent_inverse;
 					undo_redo->add_do_method(ci, "_edit_set_position", xform.xform(node_create_position));
 					undo_redo->add_undo_method(ci, "_edit_set_position", ci->_edit_get_position());
 				}
@@ -2640,7 +2655,7 @@ void CanvasItemEditor::_notification(int p_what) {
 					callable_mp(this, &CanvasItemEditor::_select_click_on_item),
 					callable_mp(this, &CanvasItemEditor::_get_selection_callback),
 					callable_mp((Viewport *)EditorNode::get_singleton()->get_scene_root(), &Viewport::get_global_canvas_transform),
-					callable_mp((CanvasItem *)viewport, &CanvasItem::get_local_mouse_position),
+					callable_mp((Viewport *)EditorNode::get_singleton()->get_scene_root(), &Viewport::get_mouse_position),
 					callable_mp(EditorNode::get_singleton()->get_editor_plugins_over(), &EditorPluginList::forward_gui_input));
 
 			ControlEditorToolbar::get_singleton()->connect("anchors_mode_toggled", callable_mp(*ci_manipulator, &CanvasItemManipulator::set_anchors_mode_enabled));
@@ -4764,6 +4779,11 @@ bool CanvasItemEditorViewport::_create_instance(Node *p_parent, const String &p_
 	undo_redo->add_do_reference(instantiated_scene);
 	undo_redo->add_undo_method(p_parent, "remove_child", instantiated_scene);
 	undo_redo->add_do_method(editor_selection, "add_node", instantiated_scene);
+
+	if (EDITOR_GET("docks/scene_tree/enable_editable_children_by_default")) {
+		undo_redo->add_do_method(EditorNode::get_singleton()->get_edited_scene(), "set_editable_instance", instantiated_scene, true);
+		undo_redo->add_do_method(instantiated_scene, "set_display_folded", true);
+	}
 
 	String new_name = p_parent->validate_child_name(instantiated_scene);
 	EditorDebuggerNode *ed = EditorDebuggerNode::get_singleton();

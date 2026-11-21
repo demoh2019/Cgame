@@ -2546,7 +2546,7 @@ void Image::initialize_data(int p_width, int p_height, bool p_use_mipmaps, Forma
 	ERR_FAIL_COND_MSG(p_height > MAX_HEIGHT,
 			vformat("The Image height specified (%d pixels) cannot be greater than %d pixels.", p_height, MAX_HEIGHT));
 	ERR_FAIL_COND_MSG(p_width * p_height > MAX_PIXELS,
-			vformat("Too many pixels for Image. Maximum is %dx%d = %d pixels.", MAX_WIDTH, MAX_HEIGHT, MAX_PIXELS));
+			vformat("The Image pixel count (%dx%d = %d pixels) cannot be greater than %d pixels.", p_width, p_height, p_width * p_height, MAX_PIXELS));
 	ERR_FAIL_INDEX_MSG(p_format, FORMAT_MAX, vformat("The Image format specified (%d) is out of range. See Image's Format enum.", p_format));
 
 	int mm = 0;
@@ -2572,7 +2572,7 @@ void Image::initialize_data(int p_width, int p_height, bool p_use_mipmaps, Forma
 	ERR_FAIL_COND_MSG(p_height > MAX_HEIGHT,
 			vformat("The Image height specified (%d pixels) cannot be greater than %d pixels.", p_height, MAX_HEIGHT));
 	ERR_FAIL_COND_MSG(p_width * p_height > MAX_PIXELS,
-			vformat("Too many pixels for Image. Maximum is %dx%d = %d pixels.", MAX_WIDTH, MAX_HEIGHT, MAX_PIXELS));
+			vformat("The Image pixel count (%dx%d = %d pixels) cannot be greater than %d pixels.", p_width, p_height, p_width * p_height, MAX_PIXELS));
 	ERR_FAIL_INDEX_MSG(p_format, FORMAT_MAX, vformat("The Image format specified (%d) is out of range. See Image's Format enum.", p_format));
 
 	int mm;
@@ -3980,6 +3980,33 @@ void Image::set_pixel(int p_x, int p_y, const Color &p_color) {
 	_set_color_at_ofs(data.ptrw(), ofs, p_color);
 }
 
+void Image::set_pixels_rect(const Rect2i &p_rect, const Vector<Color> &p_colors) {
+	ERR_FAIL_COND_MSG(data.is_empty(), "Cannot write pixels to an empty Image.");
+	ERR_FAIL_COND_MSG(is_compressed(), "Cannot write pixel regions on a compressed Image.");
+	ERR_FAIL_COND_MSG(p_rect.size.x <= 0 || p_rect.size.y <= 0, "Pixel region size must be positive.");
+	// Validate against subtraction rather than adding coordinates, so huge user
+	// supplied positions cannot overflow before the bounds check.
+	ERR_FAIL_COND_MSG(p_rect.position.x < 0 || p_rect.position.y < 0 ||
+					p_rect.size.x > width || p_rect.size.y > height ||
+					p_rect.position.x > width - p_rect.size.x ||
+					p_rect.position.y > height - p_rect.size.y,
+			"Pixel region must be fully inside the image bounds.");
+	ERR_FAIL_COND_MSG(int64_t(p_rect.size.x) * p_rect.size.y != p_colors.size(),
+			"PackedColorArray must contain exactly width * height colors.");
+
+	// Detach the image's copy-on-write buffer once. Use the same color-format
+	// encoding as set_pixel(), so L8/RGB8/RGBA8/HDR formats keep exact parity.
+	uint8_t *destination = data.ptrw();
+	const Color *colors = p_colors.ptr();
+	for (int y = 0; y < p_rect.size.y; y++) {
+		const uint32_t destination_row = uint32_t((p_rect.position.y + y) * width + p_rect.position.x);
+		const int source_row = y * p_rect.size.x;
+		for (int x = 0; x < p_rect.size.x; x++) {
+			_set_color_at_ofs(destination, destination_row + x, colors[source_row + x]);
+		}
+	}
+}
+
 const uint8_t *Image::ptr() const {
 	return data.ptr();
 }
@@ -4245,6 +4272,7 @@ void Image::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_pixel", "x", "y"), &Image::get_pixel);
 	ClassDB::bind_method(D_METHOD("set_pixelv", "point", "color"), &Image::set_pixelv);
 	ClassDB::bind_method(D_METHOD("set_pixel", "x", "y", "color"), &Image::set_pixel);
+	ClassDB::bind_method(D_METHOD("set_pixels_rect", "rect", "colors"), &Image::set_pixels_rect);
 
 	ClassDB::bind_method(D_METHOD("adjust_bcs", "brightness", "contrast", "saturation"), &Image::adjust_bcs);
 

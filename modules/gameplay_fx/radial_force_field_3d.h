@@ -52,6 +52,13 @@ private:
 	Falloff falloff = FALLOFF_LINEAR;
 	float upward_bias = 0.0f;
 	uint32_t collision_mask = 1;
+	// Optional ray-traced line-of-sight attenuation. Separate from the
+	// physics overlap mask so walls can screen the explosion without being
+	// pushed by it. Both are opt-in to preserve legacy scene behavior.
+	uint32_t occlusion_mask = 0;
+	float occlusion_attenuation = 0.25f;
+	int max_occlusion_rays = 24;
+	bool mass_independent = false;
 	bool continuous = false;
 	bool affect_rigid_bodies = true;
 	bool affect_physical_bones = true;
@@ -78,6 +85,14 @@ public:
 	float get_upward_bias() const { return upward_bias; }
 	void set_collision_mask(uint32_t p_mask);
 	uint32_t get_collision_mask() const { return collision_mask; }
+	void set_occlusion_mask(uint32_t p_mask) { occlusion_mask = p_mask; }
+	uint32_t get_occlusion_mask() const { return occlusion_mask; }
+	void set_occlusion_attenuation(float p_value);
+	float get_occlusion_attenuation() const { return occlusion_attenuation; }
+	void set_max_occlusion_rays(int p_count);
+	int get_max_occlusion_rays() const { return max_occlusion_rays; }
+	void set_mass_independent(bool p_enabled) { mass_independent = p_enabled; }
+	bool is_mass_independent() const { return mass_independent; }
 	void set_collision_mask_value(int p_layer_number, bool p_value);
 	bool get_collision_mask_value(int p_layer_number) const;
 	void set_continuous(bool p_continuous);
@@ -99,6 +114,9 @@ public:
 	static float falloff_scale(float p_distance, float p_radius, Falloff p_mode);
 	// Impulse direction from field center to body center, tilted by upward bias (normalized).
 	static Vector3 impulse_direction(const Vector3 &p_center, const Vector3 &p_body_position, float p_upward_bias);
+	// Pure helpers for deterministic gameplay parity and native regression tests.
+	static float occlusion_scale(bool p_blocked, float p_attenuation);
+	static float impulse_magnitude(float p_strength, float p_falloff, float p_mass, bool p_mass_independent);
 };
 
 VARIANT_ENUM_CAST(RadialForceField3D::Falloff);

@@ -46,3 +46,326 @@ Gameplay state stays in `survival_state.gd`. Game-specific nodes are in the game
 - Safe and contested regions, loot rules, PvP, guilds and territories.
 - Tiered professions, gear durability, player markets and settlements.
 - More post-apocalyptic simulation: weather, infection, building, vehicles.
+
+
+## Visual significance LOD (Unreal-inspired)
+
+Days After adds 96 small **non-colliding decorative rubble fragments** around
+the ruined area. `debris_lod.gd` updates at 5 Hz and displays up to 18 nearby
+fragments within 26 meters, with a 2-meter retention bonus to reduce flicker.
+The new native Cgame API `SignificanceBudgetPlanner.select_world_priority_stable()`
+supports up to 16 viewers; this game supplies the local player. A deterministic
+GDScript fallback works on stock Godot. This is presentation-only LOD: no AI,
+combat, resource pickup, collision, or network authority is skipped. The
+headless smoke test checks budgeted visibility, distance culling and restoration.
+Actual performance gains require profiling.
+
+## Native PCG exclusion zones and instanced grass
+
+The ruined-world scene now has deterministic collision-free grass distributed
+with up to three mesh-specific `MultiMeshInstance3D` batches instead of one draw object per blade. A shuffled
+625-cell source grid is thinned to at most 160 instances with a 2.1-meter
+minimum 3D spacing. `PCGSpatialFilter3D.filter_indices_excluding()` subtracts
+spherical zones around spawn, loot, ruined structures, and the barricade
+**before** spacing. The native filter returns original indices in stable order,
+so the output remains reproducible. A GDScript fallback maintains equivalent
+results on stock Godot or old Cgame builds.
+
+This affects visual decoration only, not gathering, physics collisions, AI,
+spawning, networking, or server state. The standalone headless smoke verifies
+exclusion boundaries, spacing, instancing limits, deterministic regeneration,
+and native/fallback parity. No FPS improvement is claimed without profiling.
+
+## Combined PCG sphere and box exclusions
+
+The grass generator now calls the general-purpose
+`PCGSpatialFilter3D.filter_indices_excluding_volumes()` native engine
+method. In addition to its existing spherical masks, it uses six
+axis-aligned rectangular volumes to protect the narrow ruin walls,
+barricade, scrap container and supply crate from decorative foliage.
+These boxes also exclude source points the spheres alone would retain.
+Instances are still generated deterministically across up to three `MultiMesh`
+batches with a shared 160-instance cap and 2.1-metre minimum center spacing.
+
+With stock Godot or an older Cgame build, the GDScript fallback checks
+the same inclusive sphere and box boundaries in the same source order.
+The game smoke checks native/fallback parity, box-only candidate
+coverage, reserved zone safety and regeneration stability. Gameplay
+colliders, resource interactions, AI and networking remain untouched.
+Measure a compiled game to determine actual CPU/GPU benefit.
+
+## Seeded biome-density foliage (native PCG)
+
+The vegetation layer uses `PCGSpatialFilter3D.filter_indices_density()`
+to sample each stable grid-cell ID from a per-cell density field before
+applying the existing spheres/boxes and 2.1-metre spatial thinning.
+The worn north–south approach has density 0.13, the dry northern area
+0.46, the less overgrown western area 0.74 and the outer vegetation 0.94.
+
+Sampling is deterministic for the same seed and IDs, even when source
+points are reordered, and does not mutate the global RNG used by
+gameplay. The scene still instantiates at most 160 decoration-only
+instances across bounded mesh-specific `MultiMesh` groups, with no collision, AI, resource or
+networking changes. The GDScript fallback matches the 31-bit native
+integer hash and is smoke-tested for output parity and regeneration.
+
+The density and performance benefits should be measured in a custom
+Cgame build before claiming an FPS increase.
+
+## Curved trail with PCG distance falloff
+
+`FoliageScatter` uses native `PCGPathFalloff3D.sample_factors()`
+to evaluate a multi-segment path from the outskirts past the survivor
+spawn and ruined buildings. The route has a 1.8 m fully cleared
+center and a 6 m soft outer margin: the sampled smoothstep factors
+multiply existing deterministic biome densities *before* seeded
+selection, exclusion volumes and 2.1 m instance spacing.
+
+This is a native engine feature immediately exercised in the game.
+Grass remains purely decorative and renders in up to three
+`MultiMeshInstance3D` batches; collision, enemy AI, gathering and networking
+are not changed. The stock-Godot GDScript fallback implements the
+same point-to-polyline distance mask and the smoke suite checks
+native/fallback parity, corridor clearance, density blending,
+placement bounds and reproducibility.
+
+The path is currently a bounded XZ polyline mask, **not** an editor
+spline tool or a navigation mesh. Performance gains are not claimed
+without building and profiling Cgame.
+
+## Native weighted instanced foliage variants
+
+Days After now applies the reusable native Cgame
+`PCGWeightedVariantSelector.choose_variants()` policy **after**
+all previously implemented biome density, curved trail, sphere/AABB exclusion
+and spacing filters. It uses the original grid-cell stable IDs, not
+position in the final MultiMesh array. The same plant therefore keeps
+its green (60%), dry-green (30%) or dead-straw (10%) variant across
+regeneration, independent of point ordering. The proportions are
+weights/probabilities, not exact guaranteed counts per tile.
+
+The selection adjusts each blade's instance color, width and height
+within GPU-instanced meshes. No per-plant scene nodes, gameplay
+colliders or networking objects are created; each unique geometry has one batched draw.
+Older Godot builds use `pcg_weighted_variants.gd` to reproduce the
+same unsigned 32-bit selection. Native and fallback implementations
+produce identical index choices with the same IDs, weights and seed.
+
+Regression:
+```sh
+godot --headless --path games/days_after --script res://pcg_weighted_variants_smoke_test.gd
+godot --headless --path games/days_after --script res://smoke_test.gd
+```
+
+The focused `native-pcg-spatial-filter.yml` workflow additionally
+executes C++ `[PCGWeightedVariantSelector]` doctests. This is a
+functional rendering-variation feature, not evidence of FPS gains.
+
+## Instanced trail stones with native PCG route sampling
+
+`TrailMarkers` now visualizes the existing curved survivor trail with
+small, path-aligned stones. Its route comes directly from
+`FoliageScatter.get_trail_points()`, so the visible markers and
+no-foliage path falloff cannot drift to separate authored routes.
+
+The new native `PCGPolylineSampler3D` samples the 3D polyline at an
+approximately 1.35 m fitted arc-length interval; both endpoints are
+included. A small GDScript fallback follows the same arc-length
+calculation on standard Godot. Markers inside ruin/barricade/prop
+exclusion AABBs are omitted. Remaining geometry is drawn in **one
+MultiMesh**, with no collisions and no effect on harvesting, enemy AI,
+navmeshes, world saves or network state.
+
+The smoke verifies that sample distances stay bounded, both route
+endpoints are preserved, all visible markers avoid structure zones,
+the instance count matches the filtered positions, native/fallback
+sampling agrees within floating-point tolerance and regeneration is
+deterministic. Performance needs compiled-build profiling before
+making FPS claims.
+
+## GPU instancing for multiple PCG mesh geometries
+
+The native engine's `PCGWeightedVariantSelector.partition_indices(variant_ids,
+variant_count)` converts the already seeded 6:3:1 variant decisions into
+one packed source-index list per **actual mesh geometry**. Days After now
+uses three distinct meshes, not merely differently colored boxes: green
+rectangular blades, autumn tapered reeds and dry seed heads. Geometry
+is intentionally simple so this greybox demo requires no asset downloads.
+
+The original `FoliageScatter` is still the root `MultiMeshInstance3D`
+and renders green blades. Two persistent child instancing nodes render
+the other two mesh types. The same selected 0–160 source positions, IDs,
+trail masks and exclusion constraints are preserved. A plant is never
+duplicated or dropped during mesh bucketing. A second regeneration reuses
+the existing nodes and keeps the original variant and position.
+
+This increases the maximum number of **GPU draw batches from one to
+three**, a deliberate cost for truly different geometry, but does not
+create one draw call or scene node per plant. It is not a measured FPS
+optimization relative to the previous single-mesh implementation.
+
+```sh
+godot --headless --path games/days_after --script res://pcg_weighted_variants_smoke_test.gd
+godot --headless --path games/days_after --script res://smoke_test.gd
+```
+
+The native and fallback tests verify exactly-once source mapping, count
+limits, variant-specific mesh types, per-instance colors, deterministic
+regeneration, invalid-input atomic rejection and no extra child nodes.
+
+## Trail stones use full native PCG transforms
+
+Trail stones now take their **orientation as well as position**
+directly from `PCGPolylineSampler3D.sample_transforms()`.
+The resulting basis is tangent-aligned in 3D, softly transitions at
+path corners and safely handles vertical segments and 180-degree
+U-turns. Previously the game recalculated horizontal yaw per
+instance; the new API also supports other procedural props needing
+full 3D orientation (fences, signposts, pipes, etc.).
+
+The complete path still renders as one `MultiMeshInstance3D`;
+`TrailMarkers` only filters stones around structure AABBs and
+adds a small height offset before submitting the native transforms.
+Stock Godot builds use a pure GDScript equivalent of the native
+frame math. No physics, navmesh, resource or server-authoritative
+gameplay changes are required.
+
+Run the focused native/fallback parity and rendered-orientation check:
+
+```sh
+godot --headless --path games/days_after --script res://trail_frames_smoke_test.gd
+```
+
+The native engine CI runs this after a complete editor build,
+alongside the original Days After gameplay smoke and existing
+`[PCGPolylineSampler3D]` C++ tests. Performance should be
+measured in a compiled game rather than assumed from the API.
+
+## Camera-aware visual LOD of ruin debris (native significance)
+
+The prototype now runs **direction-aware** cosmetic admission for
+the existing 96 debris meshes. Cgame's native
+`SignificanceBudgetPlanner.select_world_priority_stable_cone()`
+receives the actual player camera position and facing direction,
+selects at most 18 nearby fragments, and retains the existing
+2 m stable-ID distance hysteresis and strict priority ranking.
+
+- Details outside a 75-degree half-angle (150-degree total cone)
+  no longer compete for presentation budget, **unless** they are
+  within the 5.5 m near-field safety sphere. The 26 m hard cutoff
+  remains absolute; this never hides gameplay colliders, enemies,
+  pickups or interactive props.
+- The GDScript fallback follows the same squared-distance near-field
+  and 3D dot-product gate. The standard `smoke_test.gd` rotates the
+  player camera, checks native/fallback parity, and validates every
+  selected index against the range and viewing cone.
+- This is CPU significance-based cosmetic control, **not**
+  hardware occlusion culling or a substitute for the built-in Godot
+  renderer frustum. Actual frame-time and draw-call results require
+  measured runs in a compiled game.
+
+
+## Live PCG foliage geometry LOD
+
+The survivor now drives a native Cgame `PCGFoliageScalability3D`
+per-instance geometry LOD policy. Unlike the earlier density-scaling
+work, this does **not cull grass, remove points or reroll variants**.
+All plants remain visible, but each is assigned either a detailed
+box/reed/seed-head geometry (LOD0) or a two-triangle camera-facing
+QuadMesh proxy (LOD1). The default transition is 24 meters with
+a 3-meter hysteresis band to avoid rapid flickering.
+
+The existing three weighted types now produce up to **six** reusable
+instanced renderer slots. A Cgame native method groups by mesh type
+and LOD tier, preserving each original source index exactly once.
+The root `FoliageScatter` still represents green LOD0 for backward
+compatibility. It owns two detailed child renderers and three far
+proxy renderers, not one node per plant. Every variant's shape and
+material is cached across camera changes; only affected instancing
+buffers are rebuilt after a 4Hz viewer update. Spatial density,
+trail clearance, building exclusions and the 160-plant cap are unchanged.
+
+The optional stock-Godot `pcg_instance_lod.gd` fallback mirrors
+native threshold validation, hysteresis and group ordering. The
+playable smoke moves the LOD camera far away to check all proxies,
+then regenerates and verifies the original positions, types and
+node identities. No collision, inventory, enemy AI or multiplayer
+state is affected.
+
+```sh
+godot --headless --path games/days_after --script res://pcg_instance_lod_smoke_test.gd
+godot --headless --path games/days_after --script res://smoke_test.gd
+```
+
+This is an explicit multi-MultiMesh CPU LOD demonstrator, **not**
+Unreal Nanite or screen-size-aware GPU instance culling. Max draw
+batches rise from three to six; profile a built game on target
+hardware before claiming better frame time.
+
+## Exact native PCG trail cluster bounds
+
+The `TrailMarkers` cosmetic `MultiMeshInstance3D` now computes
+tight point-origin AABBs from the native engine's
+`PCGInstanceCluster3D.compute_cluster_bounds()`. Unlike large
+whole-scene fallback bounds, this records the actual visible stone
+anchors. The renderer gets a conservative **0.75-m expanded** AABB,
+which safely includes the rotated 0.52 × 0.055 × 0.72-m box stones.
+The one-MultiMesh design and collision-free trail remain unchanged.
+
+A pure GDScript fallback gives the same result on stock Godot.
+`trail_frames_smoke_test.gd` validates tight native/fallback
+bounds, full source coverage, and padded draw bounds; the native
+`PCGInstanceCluster3D` engine tests reject corrupt index groups.
+
+
+## Incremental MultiMesh LOD transitions
+
+The live foliage renderer now avoids recreating all six
+mesh/LOD `MultiMesh` resources when an individual plant crosses
+a distance threshold. Native
+`PCGFoliageScalability3D.plan_dirty_variant_lod_groups()` returns a
+six-element dirty mask that marks **only** the old and new GPU groups
+for changed foliage instances. Each untouched renderer retains its
+existing `MultiMesh` resource and instance buffer unchanged.
+
+The game exposes diagnostics:
+`FoliageScatter.get_lod_batch_rebuild_counts()` (six cumulative
+resource rebuild counters),
+`get_last_lod_dirty_flags()`, and
+`get_total_lod_batch_rebuild_count()`.
+The original 4Hz/0.5m camera refresh guard, stable source IDs,
+six geometry choices, 160-plant cap and PCG exclusions remain intact.
+A forced refresh with no actual tier changes is idempotent and never
+reuploads a buffer; a full scene regeneration intentionally rebuilds
+all six groups since attributes might have changed.
+
+A native C++ method and independent GDScript fallback validate and
+compute identical masks. CI's native foliage tests and
+`pcg_instance_lod_smoke_test.gd` now check individual dirty bits;
+the full playable `smoke_test.gd` checks actual MultiMesh resource
+identities and rebuild-counter deltas after moving the viewer,
+then validates no-op forced refreshes and full regeneration.
+
+The new stage still does O(points) LOD planning and repartitioning
+on changes; it does **not** claim GPU-driven culling, true
+hierarchical cluster LOD or measured FPS gains. Its purpose is
+to eliminate redundant `MultiMesh` resource/instance uploads for
+unchanged groups, not to reduce instance counts or draw calls.
+
+## Procedural irregular ruin-yard clearing
+
+The western ruin approach uses a hand-authored six-point polygon
+instead of an oversized round or rectangular vegetation exclusion.
+Cgame's native `PCGPolygonMask3D` clears grass **inside** the ruin
+yard and softly restores the original biome density within a 3.5 m
+exterior band. The resulting density factors are multiplied with
+the existing curved-trail mask before stable seeded per-cell PCG
+sampling. No new draw calls, collision objects or extra physics
+queries are created.
+
+The same mask supports inverse mode for authoring grassland/flower
+patches inside enclosed outlines. Stock Godot executes an equivalent
+GDScript calculation; `smoke_test.gd` checks C++/script agreement,
+positive interior/transition/outside coverage, invert parity and
+zero accepted plants in the cleared polygon. Grass stable IDs,
+weighted variants, mesh LOD and survival mechanics are preserved.

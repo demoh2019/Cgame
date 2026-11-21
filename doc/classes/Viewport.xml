@@ -13,12 +13,12 @@
 	<tutorials>
 		<link title="Using Viewports">$DOCS_URL/tutorials/rendering/viewports.html</link>
 		<link title="Viewport and canvas transforms">$DOCS_URL/tutorials/2d/2d_transforms.html</link>
-		<link title="GUI in 3D Viewport Demo">https://godotengine.org/asset-library/asset/2807</link>
-		<link title="3D in 2D Viewport Demo">https://godotengine.org/asset-library/asset/2804</link>
-		<link title="2D in 3D Viewport Demo">https://godotengine.org/asset-library/asset/2803</link>
-		<link title="Screen Capture Demo">https://godotengine.org/asset-library/asset/2808</link>
-		<link title="Dynamic Split Screen Demo">https://godotengine.org/asset-library/asset/2806</link>
-		<link title="3D Resolution Scaling Demo">https://godotengine.org/asset-library/asset/2805</link>
+		<link title="GUI in 3D Viewport Demo">https://store.godotengine.org/asset/godot-foundation/gui-in-3d-demo/</link>
+		<link title="3D in 2D Viewport Demo">https://store.godotengine.org/asset/godot-foundation/viewport-3d-in-2d-demo/</link>
+		<link title="2D in 3D Viewport Demo">https://store.godotengine.org/asset/godot-foundation/viewport-2d-in-3d-demo/</link>
+		<link title="Screen Capture Demo">https://store.godotengine.org/asset/godot-foundation/screen-capture-demo/</link>
+		<link title="Dynamic Split Screen Demo">https://store.godotengine.org/asset/godot-foundation/dynamic-split-screen-demo/</link>
+		<link title="3D Resolution Scaling Demo">https://store.godotengine.org/asset/godot-foundation/viewport-3d-resolution-scaling-demo/</link>
 	</tutorials>
 	<methods>
 		<method name="find_world_2d" qualifiers="const">
@@ -383,10 +383,13 @@
 			See also [member ProjectSettings.rendering/anti_aliasing/quality/msaa_3d] and [method RenderingServer.viewport_set_msaa_3d].
 		</member>
 		<member name="oversampling" type="bool" setter="set_use_oversampling" getter="is_using_oversampling" default="true">
-			If [code]true[/code] and one of the following conditions are true: [member SubViewport.size_2d_override_stretch] and [member SubViewport.size_2d_override] are set, [member Window.content_scale_factor] is set and scaling is enabled, [member oversampling_override] is set, font and [DPITexture] oversampling are enabled.
+			If [code]true[/code], tries to enable font and [DPITexture] oversampling. This is only effective when any of the following is true:
+			- [member oversampling_override] is greater than [code]0.0[/code];
+			- For [SubViewport], [member SubViewport.size_2d_override_stretch] and [member SubViewport.size_2d_override] are set;
+			- For [Window], [member Window.content_scale_factor] is set and [member Window.content_scale_mode] is set to either [constant Window.CONTENT_SCALE_MODE_CANVAS_ITEMS] or [constant Window.CONTENT_SCALE_MODE_VIEWPORT].
 		</member>
 		<member name="oversampling_override" type="float" setter="set_oversampling_override" getter="get_oversampling_override" default="0.0">
-			If greater than zero, this value is used as the font oversampling factor, otherwise oversampling is equal to viewport scale.
+			If greater than [code]0.0[/code], this value is used as the font oversampling factor, otherwise the factor is based on the viewport's scale (see also [method get_stretch_transform]).
 		</member>
 		<member name="own_world_3d" type="bool" setter="set_use_own_world_3d" getter="is_using_own_world_3d" default="false">
 			If [code]true[/code], the viewport will use a unique copy of the [World3D] defined in [member world_3d].

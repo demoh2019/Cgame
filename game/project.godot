@@ -4,6 +4,7 @@ config_version=5
 [application]
 
 config/name="Albion After"
+config/version="0.9.0"
 config/description="A persistent open world: Albion-style tiers, zones and full loot, Days-After-style scavenging and zombies."
 run/main_scene="res://scripts/client/online_main.tscn"
 
@@ -66,6 +67,11 @@ renderer/rendering_method.mobile="gl_compatibility"
 renderer/rendering_method.web="gl_compatibility"
 
 [shader_globals]
+
+aa_snow_cover={
+"type": "float",
+"value": 0.0
+}
 
 aa_weather_wetness={
 "type": "float",
@@ -175,6 +181,52 @@ aa_plant_bend={
 "value": Vector4(0, 0, 0, 0)
 }
 
+; Up to eight object footprints (x, z, radius, strength) that flatten grass under them.
+aa_plant_crush_count={
+"type": "float",
+"value": 0.0
+}
+
+aa_plant_crush_0={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_crush_1={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_crush_2={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_crush_3={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_crush_4={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_crush_5={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_crush_6={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_crush_7={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
 aa_plant_shake={
 "type": "vec4",
 "value": Vector4(0, 0, 0, 0)
@@ -243,3 +295,7 @@ aa_terrain_horizon_ao_strength={
 "type": "float",
 "value": 0.0
 }
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/cgame_bt_debugger/plugin.cfg")

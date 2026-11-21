@@ -12,7 +12,7 @@ const INTEREST_RADIUS := 90.0 # Entities farther than this from a player are not
 const HUB_SAFE_RADIUS := 45.0 # Nobody can be hurt inside it.
 const ZONE_RADII := [260.0, 620.0, 1050.0] # Green ends at 260 m, yellow at 620 m, red at 1050 m, then black.
 const ZONE_NAMES := ["green", "yellow", "red", "black"]
-const MAX_TIER := 4
+const MAX_TIER := 8 # T1-T3 in green/yellow/red, T4-T8 deeper and deeper into the black zone.
 const CAMP_FISH_STEW := "camp_fish_stew" # Clean fish-and-water camp meal.
 
 # --- Player tuning -------------------------------------------------------------------------------
@@ -27,18 +27,20 @@ const INFECTION_MAX := 100.0
 const INFECTION_GROWTH_PER_SECOND := 0.065
 const INFECTION_DAMAGE_START := 30.0
 const INFECTION_DAMAGE_PER_SECOND := 1.4
-const ZOMBIE_INFECTION_PER_HIT := {"walker": 8.0, "runner": 12.0, "brute": 20.0, "spitter": 10.0}
+const ZOMBIE_INFECTION_PER_HIT := {"walker": 8.0, "runner": 12.0, "brute": 20.0, "spitter": 10.0,
+	"stalker": 12.0, "sentinel": 14.0, "howler": 6.0, "crawler": 5.0}
 # Persistent wounds: real attacks cause bleeding; untreated bleeding slowly clots but costs HP.
 const BLEEDING_MAX := 100.0
 const BLEEDING_DAMAGE_PER_SECOND := 1.2
 const BLEEDING_DECAY_PER_SECOND := 0.2
-const ZOMBIE_BLEEDING_PER_HIT := {"walker": 9.0, "runner": 13.0, "brute": 22.0, "spitter": 3.0}
+const ZOMBIE_BLEEDING_PER_HIT := {"walker": 9.0, "runner": 13.0, "brute": 22.0, "spitter": 3.0,
+	"stalker": 15.0, "sentinel": 16.0, "howler": 4.0, "crawler": 7.0}
 const PVP_MELEE_BLEEDING_PER_HIT := 12.0
 # Brute trauma is a persistent injury instead of extra raw damage.
 const FRACTURE_MAX := 100.0
 const FRACTURE_DECAY_PER_SECOND := 0.04
 const FRACTURE_SPEED_FACTOR := 0.65
-const ZOMBIE_FRACTURE_PER_HIT := {"brute": 35.0}
+const ZOMBIE_FRACTURE_PER_HIT := {"brute": 35.0, "sentinel": 18.0}
 const COMBAT_ENERGY_MAX := 100.0
 const COMBAT_ENERGY_REGEN := 9.0
 # Sprint exhaustion is a server-owned survival mechanic.
@@ -74,9 +76,25 @@ const THERMAL_WRAP_REDUCTION := 0.70
 
 # --- Zombies ---------------------------------------------------------------------------------------
 const ZOMBIES := {
+	# behavior: "roamer" (default) drifts and chases within its leash; "hunter" keeps chasing while it can see
+	# you and searches your last position before giving up; "territorial" defends `territory` metres around
+	# its home and never follows you out of it.
 	"walker": {"health": 45.0, "speed": 1.7, "damage": 9.0, "attack_range": 1.6, "attack_cooldown": 1.3, "notice": 16.0, "lose": 34.0, "xp": 5},
-	"runner": {"health": 28.0, "speed": 4.4, "damage": 7.0, "attack_range": 1.6, "attack_cooldown": 0.9, "notice": 24.0, "lose": 40.0, "xp": 8},
-	"brute": {"health": 170.0, "speed": 2.2, "damage": 26.0, "attack_range": 2.0, "attack_cooldown": 1.8, "notice": 14.0, "lose": 30.0, "xp": 25},
+	"runner": {"health": 28.0, "speed": 4.4, "damage": 7.0, "attack_range": 1.6, "attack_cooldown": 0.9, "notice": 24.0, "lose": 40.0, "xp": 8,
+		"behavior": "hunter"},
+	"brute": {"health": 170.0, "speed": 2.2, "damage": 26.0, "attack_range": 2.0, "attack_cooldown": 1.8, "notice": 14.0, "lose": 30.0, "xp": 25,
+		"behavior": "territorial", "territory": 16.0},
+	# Relentless tracker: follows a survivor it can see far beyond other infected.
+	"stalker": {"health": 62.0, "speed": 3.9, "damage": 13.0, "attack_range": 1.6, "attack_cooldown": 1.0, "notice": 28.0, "lose": 90.0, "xp": 16,
+		"behavior": "hunter"},
+	# Armoured guardian of ruins and camps: punishing inside its ground, harmless if you leave it.
+	"sentinel": {"health": 150.0, "speed": 3.0, "damage": 18.0, "attack_range": 1.8, "attack_cooldown": 1.4, "notice": 24.0, "lose": 32.0, "xp": 22,
+		"behavior": "territorial", "territory": 20.0},
+	# Weak screamer: its howl wakes every infected nearby.
+	"howler": {"health": 40.0, "speed": 2.4, "damage": 6.0, "attack_range": 1.6, "attack_cooldown": 1.2, "notice": 26.0, "lose": 36.0, "xp": 12,
+		"behavior": "territorial", "territory": 24.0, "howl_radius": 42.0},
+	# Small, fast swarm infected that come in packs.
+	"crawler": {"health": 18.0, "speed": 3.3, "damage": 5.0, "attack_range": 1.4, "attack_cooldown": 0.75, "notice": 13.0, "lose": 28.0, "xp": 3},
 	"spitter": {"health": 52.0, "speed": 2.0, "damage": 14.0, "attack_range": 1.6, "attack_cooldown": 2.0, "notice": 21.0, "lose": 36.0, "xp": 12},
 }
 
@@ -101,11 +119,77 @@ static func recipes() -> Dictionary:
 
 
 static func item(id: String) -> Dictionary:
+	if id.contains("+"):
+		return _quality_item(id)
 	return items().get(id, {})
 
 
 static func is_item(id: String) -> bool:
+	if id.contains("+"):
+		return not _quality_item(id).is_empty()
 	return items().has(id)
+
+
+# --- Item quality: crafted gear rolls Normal..Masterpiece; id "club_5+3" = Club T5, quality 3. ---
+const QUALITY_NAMES := ["", "Normal", "Good", "Outstanding", "Excellent", "Masterpiece"]
+const MAX_QUALITY := 5
+const QUALITY_KINDS := ["weapon", "armor", "tool"]
+static var _quality_cache: Dictionary = {}
+
+
+static func base_id(id: String) -> String:
+	var at: int = id.find("+")
+	return id if at < 0 else id.substr(0, at)
+
+
+static func quality_of(id: String) -> int:
+	var at: int = id.find("+")
+	if at < 0:
+		return 1
+	var q: String = id.substr(at + 1)
+	return int(q) if q.is_valid_int() else 0
+
+
+static func with_quality(id: String, quality: int) -> String:
+	return base_id(id) if quality <= 1 else "%s+%d" % [base_id(id), mini(quality, MAX_QUALITY)]
+
+
+static func can_have_quality(id: String) -> bool:
+	return str(items().get(base_id(id), {}).get("kind", "")) in QUALITY_KINDS
+
+
+static func _quality_item(id: String) -> Dictionary:
+	if _quality_cache.has(id):
+		return _quality_cache[id]
+	var q: int = quality_of(id)
+	var base: Dictionary = items().get(base_id(id), {})
+	if q < 2 or q > MAX_QUALITY or base.is_empty() or not str(base.get("kind", "")) in QUALITY_KINDS \
+			or id != with_quality(id, q):
+		return {}
+	var data: Dictionary = base.duplicate(true)
+	var bonus: float = 1.0 + 0.08 * float(q - 1)
+	for key in ["damage", "armor"]:
+		if data.has(key):
+			data[key] = float(data[key]) * bonus
+	data["value"] = int(round(float(data.get("value", 1)) * (1.0 + 0.6 * float(q - 1))))
+	data["quality"] = q
+	data["name"] = "%s (%s)" % [str(data.get("name", id)), QUALITY_NAMES[q]]
+	_quality_cache[id] = data
+	return data
+
+
+## Crafting quality roll: skill and luck push toward Masterpiece. Returns 1..5.
+static func roll_quality(rng: RandomNumberGenerator, skill_bonus: float = 0.0) -> int:
+	var r: float = rng.randf() / (1.0 + maxf(0.0, skill_bonus))
+	if r < 0.006:
+		return 5
+	if r < 0.035:
+		return 4
+	if r < 0.12:
+		return 3
+	if r < 0.36:
+		return 2
+	return 1
 
 
 static func stack_size(id: String) -> int:
@@ -128,6 +212,15 @@ static func carry_speed_factor(weight_kg: float) -> float:
 
 static func tier_of(id: String) -> int:
 	return int(item(id).get("tier", 0))
+
+
+## Resource tier at a distance from the hub: the black zone keeps getting richer outward.
+const BLACK_TIER_STEP := 450.0
+static func tier_for_distance(distance: float) -> int:
+	var zone: int = zone_index_for_distance(distance)
+	if zone < ZONE_RADII.size():
+		return zone + 1
+	return clampi(4 + int((distance - float(ZONE_RADII[-1])) / BLACK_TIER_STEP), 4, MAX_TIER)
 
 
 static func zone_index_for_distance(distance: float) -> int:
@@ -297,7 +390,7 @@ static func _build_items() -> void:
 				"workbench", 6.0 + float(t))
 			# The sealed suit trades PvP armor and warmth for environmental protection.
 			var sealed_id: String = "sealed_suit_%d" % t
-			var spore_resistance: float = 0.65 + 0.1 * float(t - 2)
+			var spore_resistance: float = minf(0.95, 0.65 + 0.1 * float(t - 2))
 			_add_item(sealed_id, {"name": "Sealed Expedition Suit T%d" % t,
 				"kind": "armor", "tier": t, "armor": 0.04 + 0.015 * float(t - 2),
 				"spore_resistance": spore_resistance, "insulation": 0.25,
@@ -733,12 +826,31 @@ static func _build_items() -> void:
 	_add_recipe("bike_dynamo_lamp", "bike_dynamo_lamp", 1,
 		{"bar_2": 1, "scrap": 3, "cloth_2": 1}, "workbench", 7.0)
 	# Crafted travel vehicle; ownership and cooldowns are checked by the server.
+	# Boat: carried in the pack; in deep water you paddle it instead of swimming.
+	_add_item("raft", {"name": "Driftwood Raft", "kind": "boat", "tier": 1, "weight": 9.0, "value": 70,
+		"desc": "In deep water you paddle across the surface at speed instead of swimming. Cannot dive."})
+	_add_recipe("raft", "raft", 1, {"plank_1": 10, "fiber_1": 8}, "workbench", 6.0)
 	_add_item("salvage_bike", {"name": "Salvaged Trail Bike", "kind": "mount",
 		"tier": 2, "weight": 12.0, "value": 180})
 	_add_recipe("salvage_bike", "salvage_bike", 1,
 		{"bar_2": 4, "plank_2": 3, "scrap": 5, "fiber_2": 4},
 		"workbench", 12.0)
 	_add_item("silver", {"name": "Silver", "kind": "currency", "stack": 100000, "value": 1})
+	# Homestead farming (see farming.gd): seeds from the hub trader, crops from personal plots.
+	_add_item("carrot_seeds", {"name": "Carrot Seeds", "kind": "seed", "stack": 50, "value": 3, "weight": 0.01})
+	_add_item("potato_seeds", {"name": "Potato Seeds", "kind": "seed", "stack": 50, "value": 4, "weight": 0.01})
+	_add_item("wheat_seeds", {"name": "Wheat Seeds", "kind": "seed", "stack": 50, "value": 4, "weight": 0.01})
+	_add_item("carrot", {"name": "Carrot", "kind": "food", "food": 14.0, "stack": 30, "value": 3, "weight": 0.1})
+	_add_item("potato", {"name": "Potato", "kind": "food", "food": 20.0, "stack": 30, "value": 4, "weight": 0.2})
+	_add_item("wheat", {"name": "Wheat", "kind": "material", "stack": 60, "value": 2, "weight": 0.1})
+	_add_item("farm_bread", {"name": "Farm Bread", "kind": "food", "food": 45.0, "stack": 20, "value": 12, "weight": 0.3})
+	_add_recipe("farm_bread", "farm_bread", 1, {"wheat": 3}, "campfire", 3.0)
+	# Albion-style enchantment materials, dropped by infected (runes), elites (souls)
+	# and raid bosses (relics). Spent at a workbench to raise gear to .1 / .2 / .3.
+	_add_item("rune", {"name": "Rune", "kind": "enchant_material", "stack": 999, "value": 6, "weight": 0.02})
+	_add_item("soul", {"name": "Soul", "kind": "enchant_material", "stack": 999, "value": 24, "weight": 0.02})
+	_add_item("relic", {"name": "Relic", "kind": "enchant_material", "stack": 999, "value": 90, "weight": 0.02})
+	_build_enchantments()
 
 
 static func tool_tier_for_node(kind: String) -> String:
@@ -765,3 +877,70 @@ static func node_info(kind: String) -> Dictionary:
 		"berry":
 			return {"yield": "berries", "amount": 3, "seconds": 1.2, "respawn": 90.0, "radius": 0.4, "blocks": false}
 	return {}
+
+
+# --- Enchantment and item power (Albion Online style) ----------------------------------------------------------
+
+const MAX_ENCHANT := 3
+const ENCHANT_KINDS := ["weapon", "armor", "head", "cape", "hands", "feet", "tool"]
+const ENCHANT_STAT_BONUS := 0.10 # +10% damage / protection per enchant level.
+const ENCHANT_MATERIALS := ["", "rune", "soul", "relic"] # Material to reach .1 / .2 / .3.
+
+
+## Adds `<base>@1..@3` variants for every piece of gear. Same item, stronger stats.
+static func _build_enchantments() -> void:
+	var bases: Array = []
+	for id in _items.keys():
+		if ENCHANT_KINDS.has(str(_items[id].get("kind", ""))) and not str(id).contains("@"):
+			bases.append(str(id))
+	for base in bases:
+		var info: Dictionary = _items[base]
+		for level in range(1, MAX_ENCHANT + 1):
+			var variant: Dictionary = info.duplicate(true)
+			var mult: float = 1.0 + ENCHANT_STAT_BONUS * float(level)
+			for stat in ["damage", "armor"]:
+				if variant.has(stat):
+					variant[stat] = float(variant[stat]) * mult
+			variant["name"] = "%s .%d" % [str(info.get("name", base)), level]
+			variant["value"] = int(round(float(info.get("value", 1)) * (1.0 + float(level))))
+			variant["enchant"] = level
+			variant["base"] = base
+			variant.erase("id")
+			_add_item(enchanted_id(base, level), variant)
+
+
+## "club_2" + 1 -> "club_2@1"; level 0 is the base item.
+static func enchanted_id(base: String, level: int) -> String:
+	return base if level <= 0 else "%s@%d" % [base, level]
+
+
+## The unenchanted item an id belongs to ("club_2@3" -> "club_2").
+static func unenchanted_id(id: String) -> String:
+	return base_id(id).get_slice("@", 0)
+
+
+static func enchant_of(id: String) -> int:
+	return int(item(id).get("enchant", 0))
+
+
+## Albion item power: 300 + 100 per tier + 100 per enchantment level (T4.1 = 800),
+## plus the quality bonus (Good +20, Outstanding +40, Excellent +60, Masterpiece +100).
+static func item_power(id: String) -> int:
+	var tier: int = tier_of(id)
+	if tier <= 0:
+		return 0
+	var quality_bonus: int = [0, 0, 20, 40, 60, 100][clampi(int(item(id).get("quality", 1)), 0, 5)]
+	return 300 + 100 * tier + 100 * enchant_of(id) + quality_bonus
+
+
+## What enchanting `id` one level further costs: {material: count, "silver": n}, or {} if it cannot be enchanted.
+static func enchant_cost(id: String) -> Dictionary:
+	var info := item(id)
+	if info.is_empty() or not ENCHANT_KINDS.has(str(info.get("kind", ""))):
+		return {}
+	var level: int = enchant_of(id)
+	if level >= MAX_ENCHANT:
+		return {}
+	var tier: int = maxi(1, tier_of(id))
+	var material: String = ENCHANT_MATERIALS[level + 1]
+	return {material: tier * 4, "silver": 25 * tier * (level + 1)}

@@ -1,0 +1,932 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WorldPartition3D" inherits="Node3D" api_type="core" keywords="open world,streaming,partition,cell" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Streams 3D scene cells around a moving observer.
+	</brief_description>
+	<description>
+		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
+		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work. Optional predictive streaming can preload one cell ahead of the observer using [member predictive_velocity], [member predictive_lookahead_seconds], and [member predictive_max_distance]. Current cells and pinned hubs always take priority over speculative work. [method set_streaming_source] registers up to 8 named world-space sources (radius 0 or 1 cell) for mission targets, cameras and portals. They run after observer cells and pinned hubs, before the speculative velocity forecast, using the same asynchronous work budgets. Each source has a priority 0 through 3; urgent sources are scheduled before background sources without starving immediate observer work. Equal priorities use stable alphabetical ordering by name. For fast travel, use [method get_streaming_source_progress] and [method is_streaming_source_ready] to wait non-blockingly for registered destination scenes to instantiate; do not assume the source is ready immediately after registration. They are runtime-only, not persistent pins.
+		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries. For persistent camps or quest hubs, use [method pin_cell] and [method unpin_cell] to override distance-based unloading. At most 128 registered cells may be pinned; a disabled streamer still unloads all cells.
+		To activate collision separately from simulation and visuals, set [member physics_radius], [member physics_hysteresis_cells] and [member max_physics_transitions_per_frame]. Pinned cells and important/urgent sources automatically request full-detail physics while ordinary preloads remain dormant. Scene roots opt into [code]set_streaming_physics_active(active)[/code]. Use [method is_streaming_source_physics_ready] to wait for collision activation after a physics tick; a scene can additionally implement [code]is_streaming_physics_ready()[/code] to validate its own colliders. This policy never automatically disables collision in other nodes. To stage gameplay transitions, [method is_streaming_source_activation_ready] requires live source roots, [member min_physics_frames_after_load] elapsed engine physics ticks and any scene-defined [code]is_streaming_activation_ready()[/code] check. This is intentionally stricter than [method is_streaming_source_ready], which requires only live scene roots. It cannot guarantee arbitrary physics/navmesh/GPU readiness unless your scene implements the relevant check. To avoid completely regenerating the grid tile for every dynamic obstacle, [method patch_navigation_tile] uses the unchanged NavMesh vertices, an old and new blocker snapshot, and shared obstacle/slope filtering to recheck only affected polygons. [method get_last_navigation_tile_retested_triangle_count] exposes how much geometry work occurred. This is a bounded synchronous optimization, not background baking. To support live obstacle editing without reloading cell scenes, [method mark_cell_navigation_dirty] invalidates an opted-in loaded cell and schedules its scene-owned [code]rebuild_streaming_navigation_mesh()[/code] callback under [member max_navigation_rebuilds_per_physics_frame]. Repeated marks coalesce, pending tiles are not reported navigation-ready, and a successful rebuild increments the cell revision and world generation for path-cache invalidation. To construct native grid-based terrain navigation meshes while excluding circular static obstacles and steep slopes, use [method build_navigation_tile] with sampled terrain heights and local obstacle footprints. It expands blockers by agent radius, bounds the work and returns a [NavigationMesh] resource; this is not Recast baking and does not manage the returned resource's lifecycle. To stream real authored NavigationRegion3D meshes independently of render, collision and NPC simulation, configure [member navigation_radius], [member navigation_hysteresis_cells] and [member max_navigation_transitions_per_frame]. An opt-in scene root implements [code]set_streaming_navigation_active(active)[/code], and can use [code]is_streaming_navigation_ready()[/code] to report actual region readiness. The engine allows two physics ticks before [method is_cell_navigation_ready] returns true, enabling safe NavigationServer synchronization without forced server flush. This does not automatically generate navigation polygons or establish connectivity for arbitrary scenes. To provide cheap cross-cell quest corridors without baking a navmesh, use [method find_cell_path] on registered grid cells. It uses bounded deterministic breadth-first search and optionally requires live loaded cells; collision avoidance remains the caller's responsibility. To budget costly NPC pathfinding and local obstacle avoidance, register live Node3D agents using [method register_navigation_agent], call [method try_acquire_navigation_update] from their physics processing to decide when to recalculate steering, and call [method unregister_navigation_agent_if_owner] on removal. [member max_navigation_updates_per_physics_frame] bounds native permits per fixed physics frame. This is a task scheduler, not an authored navigation mesh or a replacement for NavigationAgent3D updates. Optionally set [member simulation_radius] to gate AI/script activity independently from graphics. An opt-in scene root implements [code]set_streaming_simulation_active(active)[/code] and can pause its own processing; game systems may query [method is_cell_simulation_active] or subscribe to [signal cell_simulation_changed]. Activation is not automatic tree-wide pausing. Changes to existing loaded cells are limited by [member max_simulation_transitions_per_frame], and [member simulation_hysteresis_cells] reduces oscillations. Optionally set [member detail_radius] to enable near/distant scene-detail callbacks. A cell root script must implement [code]set_streaming_lod(level)[/code], where 0 means near detail and 1 means distant. The engine invokes this method before the new root enters the tree (so its [code]_ready()[/code] can generate only the required content), and again when an existing cell changes tier. Changes are bounded by [member max_detail_transitions_per_frame]. Optionally increase [member detail_hysteresis_cells] to suppress LOD oscillation while the observer moves around grid boundaries. Pinned cells always receive level 0. This does not generate simplified meshes automatically; the scene script must provide both representations.
+		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
+		[codeblock]
+		var partition := WorldPartition3D.new()
+		partition.cell_size = 128.0
+		partition.load_radius = 1
+		partition.unload_radius = 2
+		add_child(partition)
+		partition.observer_path = partition.get_path_to($Player)
+		partition.set_cell_scene(Vector2i(0, 0), "res://world/cell_0_0.tscn")
+		partition.set_cell_scene(Vector2i(-1, 0), "res://world/cell_-1_0.tscn")
+		[/codeblock]
+		For example, [code]partition.set_streaming_source("quest", $Objective.global_position, 0, 0)[/code] keeps the objective's scene cell loaded while the player explores; call [code]partition.remove_streaming_source("quest")[/code] after completion. This requires a valid configured observer. It never automatically registers a [PackedScene] for a source cell.
+		Streaming is disabled while editing a scene; the node processes automatically while the game runs. Call [method update_streaming] if an immediate update is required after moving the observer.
+	</description>
+	<methods>
+		<method name="set_max_cell_path_cache_entries">
+			<return type="void" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Sets the maximum number of cached named grid-route query results to retain, 0 to 128 (default 64). Zero disables caching. Changing the capacity discards stored paths but preserves cumulative hit/miss counters. This is an exact-key, per-WorldPartition3D LRU cache, not NavigationServer3D path caching.
+			</description>
+		</method>
+		<method name="get_max_cell_path_cache_entries" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of entries allowed in the bounded shortest-cell-route cache.
+			</description>
+		</method>
+		<method name="get_cell_path_cache_entry_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of currently stored route results, including empty/disconnected paths. Registered-topology changes evict all cached routes, while ordinary loaded-scene changes evict only loaded_only results.
+			</description>
+		</method>
+		<method name="get_cell_path_cache_hit_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the cumulative number of successful cached calls to find_cell_path. Returned arrays are always duplicated, so gameplay scripts cannot mutate cached routes. This counter saturates at the signed 32-bit maximum until reset.
+			</description>
+		</method>
+		<method name="get_cell_path_cache_miss_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the cumulative count of route searches not satisfied by the cache, including when the cache is disabled and invalid or disconnected routes. This counter saturates until reset.
+			</description>
+		</method>
+		<method name="clear_cell_path_cache">
+			<return type="void" />
+			<description>
+				Clears all cached cell routes, hit and miss counters, and the LRU clock. Does not change cell registrations, live scene roots or the NavigationServer3D mesh.
+			</description>
+		</method>
+		<method name="patch_navigation_tile" qualifiers="const">
+			<return type="NavigationMesh" />
+			<param index="0" name="previous" type="NavigationMesh" />
+			<param index="1" name="resolution" type="int" />
+			<param index="2" name="previous_blockers" type="PackedVector3Array" />
+			<param index="3" name="blockers" type="PackedVector3Array" />
+			<param index="4" name="agent_radius" type="float" default="0.45" />
+			<param index="5" name="max_slope_degrees" type="float" default="45.0" />
+			<description>
+				Incrementally updates a previously built regular-grid [NavigationMesh] when circular obstacle footprints have changed, without resampling terrain or reevaluating every triangle's slope and clearance. [param previous] must originate from [method build_navigation_tile] or an earlier patch with the same [param resolution], terrain vertices, agent radius and maximum slope. [param previous_blockers] and [param blockers] must describe the entire old and new footprint sets (each at most 256 finite [code]Vector3(local_x, local_z, radius)[/code]). The engine compares the sets as multisets, including duplicates, automatically combines expanded influence bounds for added, removed and moved footprints, re-tests only overlapping triangles with the same native collision and slope filter as the full builder, and retains all unaffected triangle occupancy. Polygon ordering matches a full tile build. A change in blocker order alone returns [param previous] unchanged, with zero geometric re-tests. If the cached polygon topology is malformed, the method falls back to a full build for correctness. Invalid input returns [code]null[/code]. It returns a new mesh resource for actual changes, so callers can safely replace [NavigationRegion3D.navigation_mesh] after publication and rely on navigation server physics-frame synchronization. No moving-geometry detection, terrain-height edits or asynchronous worker is implied.
+			</description>
+		</method>
+		<method name="get_last_navigation_tile_retested_triangle_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many triangle slope/obstacle tests the last call to [method build_navigation_tile] or [method patch_navigation_tile] performed on this instance (including zero for a no-change patch). This is a CPU-work diagnostic, not frame time or polygon count; even incremental patching scans bounded old polygon masks and candidate triangle bounds. In Aurora Forest, a complete 16 by 16 tile tests 512 triangles, while a local barricade normally retests only a small subset.
+			</description>
+		</method>
+		<method name="set_max_navigation_rebuilds_per_physics_frame">
+			<return type="void" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Sets the maximum number of dynamic streamed navigation mesh rebuild callbacks attempted per engine physics frame, from 1 to 16 (default 1). Repeated calls to update_streaming within the same physics frame cannot exceed this budget. This is distinct from NavMesh region activation transitions and agent path request grants.
+			</description>
+		</method>
+		<method name="get_max_navigation_rebuilds_per_physics_frame" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the per-physics-frame budget for dynamically rebuilding scene-owned NavMesh tiles.
+			</description>
+		</method>
+		<method name="mark_cell_navigation_dirty">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Coalesces a navigation mesh invalidation request for a loaded, opted-in scene root exposing [code]rebuild_streaming_navigation_mesh() - bool[/code]. Returns false for unloaded/unsupported scenes or when the bounded pending set is full (128 cell IDs). A dirty tile fails [method is_cell_navigation_ready] until the scheduler receives Boolean true from the scene callback, then waits two physics frames for NavigationServer3D synchronization. Inactive cells keep their request pending until activated; repeated requests for the same cell do not add extra work. The callback must construct and publish its own new NavigationMesh resource. Failed callbacks stay pending and can be retried under the next frame budget.
+			</description>
+		</method>
+		<method name="get_navigation_dirty_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of distinct loaded cells with a pending NavMesh rebuild, including temporarily navigation-inactive cells. Queued marks are discarded on cell unload.
+			</description>
+		</method>
+		<method name="get_cell_navigation_revision" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the successful dynamic NavMesh rebuild count for a live cell (initially 0), or -1 when the cell is not loaded. The counter resets on scene unload/reload and saturates at the signed 32-bit limit.
+			</description>
+		</method>
+		<method name="get_navigation_mesh_generation" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns a monotonic whole-world navigation topology generation. Incremented when a cell scene loads or unloads, a navigation region activates/deactivates, a new dirty tile is marked, or a dynamic tile rebuild succeeds. A cached path must be reconsidered after the generation changes, including when an intermediate NavMesh region changes; this count does not prove path availability.
+			</description>
+		</method>
+		<method name="build_navigation_tile" qualifiers="const">
+			<return type="NavigationMesh" />
+			<param index="0" name="vertices" type="PackedVector3Array" />
+			<param index="1" name="resolution" type="int" />
+			<param index="2" name="blockers" type="PackedVector3Array" />
+			<param index="3" name="agent_radius" type="float" default="0.45" />
+			<param index="4" name="max_slope_degrees" type="float" default="45.0" />
+			<description>
+				Builds a bounded, non-Recast 3D terrain navigation mesh from a regular row-major (Z then X) grid of sampled local [Vector3] vertices. For [param resolution] (2 to 32), [param vertices] must have exactly [code](resolution + 1)²[/code] finite samples; this can generate at most 2048 triangles. The input [param blockers] stores up to 256 circular obstacle footprints, each as [code]Vector3(local_x, local_z, obstacle_radius)[/code] (the third component is a radius, not elevation). For each candidate triangle, the engine checks its up-facing normal against [param max_slope_degrees] (0 to 89), then conservatively rejects the triangle if its XZ footprint intersects any obstacle disc expanded by [param agent_radius] (0 to 8). Disc tests include triangle edges and corners, not just centroid samples. Invalid inputs return [code]null[/code]. The result is a grid-based, deterministic walkable-surface approximation for static circular obstacles; it does not invoke Recast, update any live [NavigationRegion3D], or automatically bake scene geometry. The caller owns the returned resource and must attach it to an enabled region. Neighbor tiles should share border vertices and blocker rules to preserve connectivity. Filtering can remove entire small polygons and create disconnected islands; it is not full 3D collision or height-clearance proof.
+			</description>
+		</method>
+		<method name="set_navigation_radius">
+			<return type="void" />
+			<param index="0" name="radius" type="int" />
+			<description>
+				Controls independent navigation-region activation radius around the observer: -1 disables the policy (all loaded cells active, default), 0 to 32 selects an inner radius. Pinned hubs and priority 2/3 streaming sources force navigation-active regardless of distance. Games opt in by implementing [code]set_streaming_navigation_active(active)[/code] on each scene root.
+			</description>
+		</method>
+		<method name="get_navigation_radius" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the current independent navigation-region activation radius.
+			</description>
+		</method>
+		<method name="set_navigation_hysteresis_cells">
+			<return type="void" />
+			<param index="0" name="cells" type="int" />
+			<description>
+				Sets 0 to 8 extra cell rings in which previously active navigation regions may remain active. Inactive cells activate only within the inner radius, important source radius or pinned hubs.
+			</description>
+		</method>
+		<method name="get_navigation_hysteresis_cells" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns navigation tier demotion hysteresis in grid cells.
+			</description>
+		</method>
+		<method name="set_max_navigation_transitions_per_frame">
+			<return type="void" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Caps live-cell navigation region activation/deactivation transitions at 1 to 64 per streaming update. Initial scene state is applied before [code]_ready()[/code]. Independent of the maximum expensive per-agent navigation update budget.
+			</description>
+		</method>
+		<method name="get_max_navigation_transitions_per_frame" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns navigation-region transition budget per update, distinct from path-recalculation grants.
+			</description>
+		</method>
+		<method name="is_cell_navigation_active" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the native navigation-region activation policy's current state for a live cell, false for missing or unloaded cells. The scene callback must create/enable or disable its own NavigationRegion3D nodes; arbitrary scenes are never modified automatically.
+			</description>
+		</method>
+		<method name="get_navigation_active_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Counts live loaded cells currently marked as navigation-active by the native region activation policy. Not the number of NavigationServer polygons or synchronized regions.
+			</description>
+		</method>
+		<method name="is_cell_navigation_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns true only for a live, navigation-active cell after at least two engine physics frames since activation and when an optional [code]is_streaming_navigation_ready()[/code] callback returns Boolean true. Callbacks without a valid Boolean fail closed. If a scene has no callback, this only proves the activation age, not the existence of a NavMesh or server connectivity.
+			</description>
+		</method>
+		<method name="is_streaming_source_navigation_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Requires an existing loaded named streaming source and all registered source cells to pass [method is_cell_navigation_ready]. Pinned hubs and priority 2/3 source cells can force navigation to become active. A positive result is not a guarantee of complete navmesh connectivity, global pathfinding or object-radius clearance.
+			</description>
+		</method>
+		<method name="find_cell_path" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="from" type="Vector2i" />
+			<param index="1" name="to" type="Vector2i" />
+			<param index="2" name="loaded_only" type="bool" default="false" />
+			<description>
+				Returns a deterministic shortest 4-connected route of [Vector2i] cell coordinates, including both endpoints, across registered scene cells. Results (including empty routes) are stored in a bounded LRU cache when [member max_cell_path_cache_entries] is nonzero, keyed by exact signed coordinates and [code]loaded_only[/code]. Returned arrays are always duplicated so gameplay cannot mutate the cached result. Native scene registration changes invalidate all entries, while scene load/unload events invalidate only loaded-only routes; active NavMesh obstacle patches do not affect the registered-cell graph. Invalid, empty or disconnected coordinates return an empty [Array]. With [code]loaded_only=true[/code], every route cell must be a currently live instantiated scene root; otherwise this plans through registered cells even when unloaded. At most 512 cells are visited per query; exceeding the cap fails closed with an empty route, preventing unbounded synchronous work. This is a topological streaming corridor, not a collision-free [NavigationMesh] path or route around trees. Equal-length alternatives use +X, +Z, -X, -Z neighbor order for reproducibility. Grid coordinates are checked against 32-bit overflow.
+			</description>
+		</method>
+		<method name="set_max_navigation_updates_per_physics_frame">
+			<return type="void" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Sets the global per-physics-frame budget for expensive navigation/steering recomputations, from 1 to 64 (default 2). This scheduler grants update slots; it does not run pathfinding, bake a navigation mesh, or automatically slow down Node physics processing.
+			</description>
+		</method>
+		<method name="get_max_navigation_updates_per_physics_frame" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the configured maximum updates allowed across all active registered navigation agents in a single engine physics frame.
+			</description>
+		</method>
+		<method name="register_navigation_agent">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="agent" type="Node3D" />
+			<param index="2" name="priority" type="int" default="1" />
+			<description>
+				Registers or replaces one named agent as a weak ObjectID reference. Name length 1 to 64; priorities 0 (background) to 3 (urgent). At most 128 entries; duplicate names are upserted but registering the same Node3D under two distinct names is rejected. Returns false for invalid data or exceeded capacity. Register after adding the agent to a SceneTree, and call unregister when it is removed.
+			</description>
+		</method>
+		<method name="unregister_navigation_agent">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Removes an agent by name. If this ID may be reused by a new NPC before the old one exits, prefer [method unregister_navigation_agent_if_owner] to prevent a stale object's cleanup from removing the replacement.
+			</description>
+		</method>
+		<method name="unregister_navigation_agent_if_owner">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="agent" type="Node3D" />
+			<description>
+				Unregisters only if the supplied Node3D currently owns this name. Returns false for missing, null or replaced nodes; avoids stale NPC cleanup unregistering a newly spawned actor.
+			</description>
+		</method>
+		<method name="has_navigation_agent" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns whether the name is present in the runtime agent registry; stale weak references are pruned during the next scheduling pass.
+			</description>
+		</method>
+		<method name="get_navigation_agent_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of registered agent entries, including dormant agents. Automatic stale-reference cleanup runs during scheduling; callers should unregister on scene exit.
+			</description>
+		</method>
+		<method name="set_navigation_agent_priority">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="priority" type="int" />
+			<description>
+				Sets registered agent priority 0 to 3; higher priorities receive scarce update slots first. A change takes effect from the next physics-frame selection, not retroactively in an already frozen frame.
+			</description>
+		</method>
+		<method name="get_navigation_agent_priority" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns priority 0 to 3 or -1 for an unknown agent name.
+			</description>
+		</method>
+		<method name="try_acquire_navigation_update">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Grants one steering/path recalculation slot to a registered agent selected for the current physics frame, at most once per agent and without exceeding [member max_navigation_updates_per_physics_frame]. Only live, tree-bound physics-processing agents in loaded, simulation-active, physics-active cells are eligible. Selection is priority-first then least-recently-selected, then alphabetical for deterministic ties; decisions are frozen per physics frame, regardless of agent callback order. Call from physics processing only; reuse cached steering when false. No automatic navmesh computation is performed. Equal-priority agents share slots fairly; a permanently higher priority can monopolize a saturated budget.
+			</description>
+		</method>
+		<method name="get_navigation_updates_used_this_frame" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many selected navigation updates have actually been consumed in the current engine physics frame; returns zero when the cached schedule belongs to an older frame. Useful for profiling HUDs, but not an absolute CPU or pathfinding cost metric.
+			</description>
+		</method>
+		<method name="set_physics_radius">
+			<return type="void" />
+			<param index="0" name="radius" type="int" />
+			<description>
+				Sets the independent cell collision radius (-1: disabled/all loaded physics active; 0 to 32: distance-based activation). Priority 2/3 sources and pinned hubs override distance. The engine calls an optional [code]set_streaming_physics_active(active)[/code] on scene roots; it does not automatically alter arbitrary collision objects.
+			</description>
+		</method>
+		<method name="get_physics_radius" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the independent physics active radius. -1 keeps all loaded cells active, preserving previous behavior.
+			</description>
+		</method>
+		<method name="set_physics_hysteresis_cells">
+			<return type="void" />
+			<param index="0" name="cells" type="int" />
+			<description>
+				Sets 0 to 8 additional cell rings where previously active physics can remain active before deactivating. Pinned and important source cells always stay active.
+			</description>
+		</method>
+		<method name="get_physics_hysteresis_cells" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the additional hysteresis rings for active collision cells.
+			</description>
+		</method>
+		<method name="set_max_physics_transitions_per_frame">
+			<return type="void" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Limits physics activation changes for already-loaded cells to 1 to 64 per frame. Initial state is set before scene [code]_ready()[/code] and does not count against this limit.
+			</description>
+		</method>
+		<method name="get_max_physics_transitions_per_frame" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the per-frame physics tier transition budget.
+			</description>
+		</method>
+		<method name="is_cell_physics_active" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the native physics activation policy for an existing live cell, false for unloaded cells. A true value alone does not prove collider properties have changed; scene root scripts must implement [code]set_streaming_physics_active(active)[/code] to filter their own collision.
+			</description>
+		</method>
+		<method name="get_physics_active_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of live loaded cells the engine currently marks physics-active; used for monitoring spatial collision budgets.
+			</description>
+		</method>
+		<method name="is_cell_physics_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns true only after a live cell is marked physics-active, at least one physics tick has elapsed since it was enabled, and an optional scene root [code]is_streaming_physics_ready()[/code] returns Boolean [code]true[/code]. This is an opt-in gameplay readiness check, not a universal physics-server synchronization guarantee.
+			</description>
+		</method>
+		<method name="is_streaming_source_physics_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Requires a named source with registered center, all its registered scene roots loaded, every root's native physics tier active and each cell passing [method is_cell_physics_ready]. Use together with [method is_streaming_source_activation_ready] for urgent fast travel. Background priority 0 and normal priority 1 sources do not automatically activate remote physics.
+			</description>
+		</method>
+		<method name="set_min_physics_frames_after_load">
+			<return type="void" />
+			<param index="0" name="frames" type="int" />
+			<description>
+				Sets the minimum completed engine physics frames (0 to 8, default 2) between scene root instantiation and activation readiness. It does not block loading or guarantee that arbitrary physics, navigation or GPU resources have finished initializing.
+			</description>
+		</method>
+		<method name="get_min_physics_frames_after_load" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the minimum physics-frame delay required by [method is_cell_activation_ready].
+			</description>
+		</method>
+		<method name="is_cell_activation_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns true only when the cell has a live instantiated scene root, the minimum number of engine physics frames has elapsed since that instance was added, and an optional scene root [code]is_streaming_activation_ready()[/code] callback returns [code]true[/code]. A callback returning a non-boolean value fails closed. Missing or unloaded cells return false. This is a gameplay activation fence, not a universal collision, navigation or GPU readiness check.
+			</description>
+		</method>
+		<method name="get_streaming_source_activated_cell_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Counts registered source cells whose live scene roots pass the physics-frame delay and the optional readiness callback. Sparse unregistered neighboring cells are ignored; an unregistered center produces zero.
+			</description>
+		</method>
+		<method name="get_streaming_source_activation_progress" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns 0.0 to 1.0 as activation-ready cells divided by registered destination cells. Zero means the source is missing, has no registered center, or has no activated cells. This is not byte-level resource download or GPU pipeline progress.
+			</description>
+		</method>
+		<method name="is_streaming_source_activation_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns true only if [method is_streaming_source_ready] is true, and every registered cell in the source radius passes [method is_cell_activation_ready]. Use this before staged fast travel or spawning AI. Game code must still verify safe spawn positions and any additional custom collision or navigation prerequisites.
+			</description>
+		</method>
+		<method name="get_simulation_radius" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the independent AI/script activation radius, -1 when the simulation tier is disabled.
+			</description>
+		</method>
+		<method name="set_simulation_radius">
+			<return type="void" />
+			<param index="0" name="radius" type="int" />
+			<description>
+				Sets the inner active simulation radius in grid cells. -1 leaves simulation active in all loaded cells (default); 0 to 32 uses distance from the observer. Pinned cells always remain active. This does not unload geometry or automatically disable scene processes.
+			</description>
+		</method>
+		<method name="get_simulation_hysteresis_cells" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns extra cell rings tolerated before an already-active scene is deactivated. Newly inactive cells reactivate only inside [member simulation_radius].
+			</description>
+		</method>
+		<method name="set_simulation_hysteresis_cells">
+			<return type="void" />
+			<param index="0" name="cells" type="int" />
+			<description>
+				Sets 0 to 8 extra demotion rings for active simulation, suppressing rapid AI start/stop around cell boundaries.
+			</description>
+		</method>
+		<method name="get_max_simulation_transitions_per_frame" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the maximum number of already-loaded cell activation changes processed per streaming update.
+			</description>
+		</method>
+		<method name="set_max_simulation_transitions_per_frame">
+			<return type="void" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Limits existing-cell activation transitions to 1 to 64 per frame. Initial activation is applied on instantiation and not charged against this budget.
+			</description>
+		</method>
+		<method name="is_cell_simulation_active" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the native simulation policy's current state for a live cell. False for absent/unloaded cells. Distinct from visual detail level. Game-owned AI/controllers must use this state or implement the callback; the engine does not automatically pause physics or navigation.
+			</description>
+		</method>
+		<method name="get_simulation_active_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of live loaded cells currently marked as simulation-active, including pinned hubs. This is a state count, not a CPU-time metric.
+			</description>
+		</method>
+		<method name="set_streaming_source_priority">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="priority" type="int" />
+			<description>
+				Changes an existing named source's priority without moving it or changing its radius. Valid values are 0 (background), 1 (normal), 2 (important), 3 (urgent). Returns [code]false[/code] if the name is unknown or the priority is invalid. Only work waiting for a frame budget is reordered; already-running threaded resource requests are not preempted.
+			</description>
+		</method>
+		<method name="get_streaming_source_priority" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns the registered source priority between 0 and 3. Returns -1 for unknown source names. Higher values are processed first after the primary observer and pinned hub cells.
+			</description>
+		</method>
+		<method name="get_streaming_source_cell_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns how many [PackedScene] cells are registered in the named source's square radius (0 or 1). Unregistered sparse neighbors are ignored, but an unregistered source center returns zero so it can never be considered ready.
+			</description>
+		</method>
+		<method name="get_streaming_source_loaded_cell_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns how many registered cells in this source currently have live, instantiated [Node3D] roots. A root queued for deletion does not count. Does not issue load requests.
+			</description>
+		</method>
+		<method name="get_streaming_source_failed_cell_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns the number of registered cells inside this source whose asynchronous load has failed. Games can abort their staging operation rather than waiting indefinitely.
+			</description>
+		</method>
+		<method name="get_streaming_source_progress" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns 0 to 1 as live instantiated cells divided by registered cells. Zero means no valid destination or no cells loaded; 1 means all relevant scene roots are present. This is scene activation progress, not byte-level loading or GPU upload progress.
+			</description>
+		</method>
+		<method name="is_streaming_source_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns [code]true[/code] only when streaming is enabled, the node is in the scene tree with a valid [Node3D] observer, the named source's center has a registered scene, all registered scenes in its radius have live root instances and none have failed. Missing sources and missing center scenes return [code]false[/code]. This does not guarantee collisions, navigation meshes, physics synchronization or GPU resource readiness.
+			</description>
+		</method>
+		<method name="get_cell_instance" qualifiers="const">
+			<return type="Node3D" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the currently instantiated [Node3D] root for [param cell], or [code]null[/code] if no live instance exists (including after it is queued for deletion). Use this to attach cell-specific gameplay, read biome metadata, or inspect the scene root without scanning all children. The returned object is owned by the streamer and may be freed by the next streaming update. Never cache it without an instance-validity check. Does not trigger a load.
+			</description>
+		</method>
+		<method name="set_streaming_source">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="global_position" type="Vector3" />
+			<param index="2" name="radius" type="int" default="0" />
+			<param index="3" name="priority" type="int" default="1" />
+			<description>
+				Registers or updates one named extra streaming source at the given world-space position. Radius can be 0 or 1 cell (default 0); priority can be 0 (background), 1 (normal/default), 2 (important), or 3 (urgent). Higher-priority sources are scheduled first within the common streaming budgets, after the observer and pinned hubs and before velocity prediction. Equal-priority names use alphabetical order, independent of dictionary iteration order. Updating a registered source with an omitted priority resets it to the normal default 1; use [method set_streaming_source_priority] to change priority without moving a source. The scheduler cannot preempt an already-running thread. Returns [code]false[/code] for invalid data or when creating a ninth source; updating an existing one is allowed. It shares existing asynchronous request and instantiation budgets. This runtime state is not serialized.
+			</description>
+		</method>
+		<method name="remove_streaming_source">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Removes a named extra source. Its formerly requested cells become eligible for unloading, unless they are still required by the observer, a pinned hub or another source.
+			</description>
+		</method>
+		<method name="clear_streaming_sources">
+			<return type="void" />
+			<description>
+				Clears all extra sources without affecting the primary observer or pinned hubs.
+			</description>
+		</method>
+		<method name="has_streaming_source" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns whether the named extra streaming source is registered.
+			</description>
+		</method>
+		<method name="get_streaming_source_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of extra sources, excluding the observer and pinned hubs. Maximum is 8.
+			</description>
+		</method>
+		<method name="get_streaming_source_cell" qualifiers="const">
+			<return type="Vector2i" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Converts the named source's global position to a local grid coordinate, returning (0, 0) when the source is absent. Check [method has_streaming_source] first.
+			</description>
+		</method>
+		<method name="set_detail_hysteresis_cells">
+			<return type="void" />
+			<param index="0" name="cells" type="int" />
+			<description>
+				Sets the extra number of cell rings (0 to 8) an already-full-detail cell can remain in level 0 before being demoted. New cells and distant-to-near promotions still use [member detail_radius]. Zero restores the original single threshold.
+			</description>
+		</method>
+		<method name="get_detail_hysteresis_cells" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of extra rings used exclusively when demoting a previously-near cell.
+			</description>
+		</method>
+		<method name="set_detail_radius">
+			<return type="void" />
+			<param index="0" name="radius" type="int" />
+			<description>
+				Sets the full-detail Chebyshev radius, in cells. -1 disables switching and requests detail level 0 for all loaded cells. A value of 0 keeps only the current cell fully detailed. Does not change [member load_radius] or create proxy meshes.
+			</description>
+		</method>
+		<method name="get_detail_radius" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the full-detail radius (-1 when distance LOD switching is disabled).
+			</description>
+		</method>
+		<method name="set_max_detail_transitions_per_frame">
+			<return type="void" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Limits the number of loaded cells allowed to rebuild their detail representation per frame, between 1 and 128.
+			</description>
+		</method>
+		<method name="get_max_detail_transitions_per_frame" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the maximum number of detail transitions per streaming update.
+			</description>
+		</method>
+		<method name="get_cell_detail_level" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns 0 for full-detail or 1 for distant-detail cells whose roots implement [code]set_streaming_lod(level)[/code], or -1 if the cell has no active compatible root.
+			</description>
+		</method>
+		<method name="get_distant_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of loaded scene roots currently using distant detail level 1.
+			</description>
+		</method>
+		<method name="get_predictive_lookahead_seconds" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the configured projection horizon in seconds.
+			</description>
+		</method>
+		<method name="get_predictive_max_distance" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the maximum future-cell displacement in world units.
+			</description>
+		</method>
+		<method name="get_predictive_velocity" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the supplied world-space velocity in units per second.
+			</description>
+		</method>
+		<method name="get_predicted_cell" qualifiers="const">
+			<return type="Vector2i" />
+			<description>
+				Returns the latest future cell, or (0, 0) if none. Call [method has_predicted_cell] first.
+			</description>
+		</method>
+		<method name="has_predicted_cell" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when prediction targets a different cell. Does not guarantee a registered or loaded scene.
+			</description>
+		</method>
+		<method name="set_predictive_velocity">
+			<return type="void" />
+			<param index="0" name="velocity" type="Vector3" />
+			<description>
+				Sets the world-space observer velocity. Non-finite values are rejected and speed is capped at 512 units/second. Game code should update this at physics cadence.
+			</description>
+		</method>
+		<method name="set_predictive_lookahead_seconds">
+			<return type="void" />
+			<param index="0" name="seconds" type="float" />
+			<description>
+				Sets the prediction horizon in the range 0 to 5 seconds. Zero disables prefetch.
+			</description>
+		</method>
+		<method name="set_predictive_max_distance">
+			<return type="void" />
+			<param index="0" name="distance" type="float" />
+			<description>
+				Sets the cap on speculative displacement in the range 0 to 128 world units. Zero disables prefetch.
+			</description>
+		</method>
+		<method name="cell_to_local_position" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the local-space origin of [param cell]. The Y component is always zero.
+			</description>
+		</method>
+		<method name="clear_cell_scenes">
+			<return type="void" />
+			<description>
+				Removes all registered cells and unloads instantiated cells.
+			</description>
+		</method>
+		<method name="get_cell_scene" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the registered scene path or an empty string if none exists.
+			</description>
+		</method>
+		<method name="get_cells_in_radius" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="center" type="Vector2i" />
+			<param index="1" name="radius" type="int" />
+			<description>
+				Returns all coordinates in the square centered on [param center], including the boundary. The radius must be between 0 and 32 inclusive.
+			</description>
+		</method>
+		<method name="get_configured_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of registered scene paths, whether loaded or unloaded.
+			</description>
+		</method>
+		<method name="get_pinned_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many registered cells are explicitly pinned to remain loaded, up to 128.
+			</description>
+		</method>
+		<method name="get_pinned_cells" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns an unordered snapshot of pinned [Vector2i] coordinates. Modifying the returned array does not modify the partition.
+			</description>
+		</method>
+		<method name="get_loaded_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of tracked instantiated cells.
+			</description>
+		</method>
+		<method name="get_pending_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many registered cells are waiting for their scene resource to finish loading or to be instantiated. This is a runtime streaming diagnostic, not the total number of configured cells.
+			</description>
+		</method>
+		<method name="get_inflight_request_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of distinct asynchronous resource paths whose background loads have not completed. Several cells using the same scene path share one request.
+			</description>
+		</method>
+		<method name="get_failed_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of cells that failed to load or instantiate. Failed cells are not retried until their configuration changes.
+			</description>
+		</method>
+		<method name="has_observer_cell" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] after the configured [member observer_path] has resolved to a [Node3D] and a streaming update has computed its cell.
+			</description>
+		</method>
+		<method name="get_observer_cell" qualifiers="const">
+			<return type="Vector2i" />
+			<description>
+				Returns the last observed cell in this node's local grid coordinates. Only meaningful when [method has_observer_cell] is [code]true[/code]. This result updates when the observer enters a new cell or its grid configuration changes.
+			</description>
+		</method>
+		<method name="get_loaded_cells" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the cell coordinates of currently instantiated scenes.
+			</description>
+		</method>
+		<method name="is_cell_loaded" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] when the cell has a living instantiated scene.
+			</description>
+		</method>
+		<method name="is_cell_pinned" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns whether [param cell] is explicitly retained independent of the observer distance.
+			</description>
+		</method>
+		<method name="pin_cell">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Keeps the registered scene at [param cell] active even when outside [member unload_radius]. Returns [code]true[/code] only for a newly added pin. Unregistered coordinates and requests past the 128-cell limit are rejected. Pinned cells still obey normal loading/instantiation budgets. Pins are not serialized as a property: restore them in gameplay code after loading a world.
+			</description>
+		</method>
+		<method name="local_position_to_cell" qualifiers="const">
+			<return type="Vector2i" />
+			<param index="0" name="local_position" type="Vector3" />
+			<description>
+				Converts a local-space position to its grid coordinate using floor division. Negative positions belong to negative cells.
+			</description>
+		</method>
+		<method name="remove_cell_scene">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Unregisters [param cell] and unloads its existing instance.
+			</description>
+		</method>
+		<method name="set_cell_scene">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="scene_path" type="String" />
+			<description>
+				Registers a resource path for a cell. An empty path removes the mapping. Replacing a path unloads the previous cell.
+			</description>
+		</method>
+		<method name="unpin_cell">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Releases a pin. The cell becomes eligible for normal radius-based unloading on the next streaming update; a cell inside the observer radius stays loaded.
+			</description>
+		</method>
+		<method name="update_streaming">
+			<return type="void" />
+			<description>
+				Polls background requests and updates cells around the observer. The node calls this method every frame while streaming is enabled.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="max_cell_path_cache_entries" type="int" setter="set_max_cell_path_cache_entries" getter="get_max_cell_path_cache_entries" default="64">
+			Maximum size of the exact-key least-recently-used cache for [method find_cell_path] results, including empty paths. Valid range is 0 to 128 (0 disables). The engine invalidates all routes on changes to registered scene topology, but invalidates only [code]loaded_only[/code] entries when scene roots load or unload. NavMesh obstacle edits do not change registered cell-grid topology and therefore do not evict these topological routes.
+		</member>
+		<member name="max_navigation_rebuilds_per_physics_frame" type="int" setter="set_max_navigation_rebuilds_per_physics_frame" getter="get_max_navigation_rebuilds_per_physics_frame" default="1">
+			Maximum number of opt-in [code]rebuild_streaming_navigation_mesh()[/code] callbacks attempted per engine physics frame, from 1 to 16. Duplicate invalidations of one cell are coalesced, nearest observer cells are serviced first, and a successful callback resets the cell's navigation readiness fence.
+		</member>
+		<member name="navigation_radius" type="int" setter="set_navigation_radius" getter="get_navigation_radius" default="-1">
+			Independent active navigation-region radius: -1 for all loaded cells (default), otherwise 0 through 32 cell rings. Pinned and important/urgent source cells remain navigation active. Cell scenes implement [code]set_streaming_navigation_active(active)[/code] to own their NavigationRegion3D lifetime.
+		</member>
+		<member name="navigation_hysteresis_cells" type="int" setter="set_navigation_hysteresis_cells" getter="get_navigation_hysteresis_cells" default="1">
+			0 to 8 extra cell rings of navigation demotion hysteresis for previously active regions.
+		</member>
+		<member name="max_navigation_transitions_per_frame" type="int" setter="set_max_navigation_transitions_per_frame" getter="get_max_navigation_transitions_per_frame" default="2">
+			Maximum number of already-loaded cell navigation-region tier transitions per streaming frame, 1 to 64. This is separate from [member max_navigation_updates_per_physics_frame], which throttles expensive NPC path recalculations.
+		</member>
+		<member name="max_navigation_updates_per_physics_frame" type="int" setter="set_max_navigation_updates_per_physics_frame" getter="get_max_navigation_updates_per_physics_frame" default="2">
+			Maximum number of native navigation work permits issued per physics frame across up to 128 registered Node3D agents, 1 to 64. Uses a deterministic priority-first and least-recently-selected schedule, constrained to live agents in loaded, simulation-active, physics-active cells. This limits caller-submitted expensive steering/path refreshes, not the agent's actual movement/physics updates.
+		</member>
+		<member name="physics_radius" type="int" setter="set_physics_radius" getter="get_physics_radius" default="-1">
+			Independent collision policy radius in cell rings, -1 (all loaded active, default) or 0 to 32. Pinned hubs and priorities 2 or 3 streaming sources force active collision and full visual LOD. Scene roots implement [code]set_streaming_physics_active(active)[/code] to actually filter colliders. Background sources do not force physics.
+		</member>
+		<member name="physics_hysteresis_cells" type="int" setter="set_physics_hysteresis_cells" getter="get_physics_hysteresis_cells" default="1">
+			0 to 8 extra rings tolerated before an already-active collision scene is deactivated. New inactive cells activate within [member physics_radius], pinned hubs, or important sources.
+		</member>
+		<member name="max_physics_transitions_per_frame" type="int" setter="set_max_physics_transitions_per_frame" getter="get_max_physics_transitions_per_frame" default="2">
+			1 to 64 maximum physics enable/disable transitions across already-loaded cells per update. Initial state is assigned before scene [code]_ready()[/code].
+		</member>
+		<member name="min_physics_frames_after_load" type="int" setter="set_min_physics_frames_after_load" getter="get_min_physics_frames_after_load" default="2">
+			Minimum number of completed physics ticks after loading a cell before it may pass the optional activation readiness check. Valid range 0 to 8. Scenes can implement [code]is_streaming_activation_ready()[/code] to gate their own colliders, navmesh or gameplay setup. The counter resets when a cell is unloaded and later instantiated again. This does not guarantee that all engine physics or rendering servers have synchronized.
+		</member>
+		<member name="simulation_radius" type="int" setter="set_simulation_radius" getter="get_simulation_radius" default="-1">
+			Independent simulation-active neighborhood, -1 (disabled, all loaded cells active) or 0 to 32 cell rings. Unlike [member detail_radius], this is a logical activation flag for AI/script systems and never unloads graphics. Scene roots may opt into [code]set_streaming_simulation_active(active)[/code] and game controllers can call [method is_cell_simulation_active]. Pinned cells are always active.
+		</member>
+		<member name="simulation_hysteresis_cells" type="int" setter="set_simulation_hysteresis_cells" getter="get_simulation_hysteresis_cells" default="1">
+			Additional 0 to 8 cell rings tolerated before disabling an already-active cell. Inactive cells activate only within [member simulation_radius].
+		</member>
+		<member name="max_simulation_transitions_per_frame" type="int" setter="set_max_simulation_transitions_per_frame" getter="get_max_simulation_transitions_per_frame" default="2">
+			Maximum number of existing loaded cell activation changes per frame (1 to 64). Initial activation on scene instantiation is not budgeted.
+		</member>
+		<member name="detail_hysteresis_cells" type="int" setter="set_detail_hysteresis_cells" getter="get_detail_hysteresis_cells" default="0">
+			Extra cell rings tolerated before an already-near loaded scene is downgraded to distant detail. A far scene upgrades only inside [member detail_radius], reducing back-and-forth regeneration near cell boundaries. The default is 0 for backward compatibility; maximum 8. New cells always use [member detail_radius] without hysteresis.
+		</member>
+		<member name="detail_radius" type="int" setter="set_detail_radius" getter="get_detail_radius" default="-1">
+			Full-detail neighborhood radius, from -1 (disabled) through 32. Within that radius (and for pinned cells), scene roots receive detail level 0. Outside, loaded compatible scene roots receive level 1.
+		</member>
+		<member name="max_detail_transitions_per_frame" type="int" setter="set_max_detail_transitions_per_frame" getter="get_max_detail_transitions_per_frame" default="2">
+			Maximum number of already-loaded cell roots switched between detail levels in a streaming update. Valid range is 1 to 128.
+		</member>
+		<member name="cell_scenes" type="Dictionary" setter="set_cell_scenes" getter="get_cell_scenes" default="{}">
+			Dictionary mapping [Vector2i] coordinates to [String] scene resource paths. Invalid keys and values are discarded.
+		</member>
+		<member name="cell_size" type="float" setter="set_cell_size" getter="get_cell_size" default="128.0">
+			Width and depth of a single square cell in local 3D units.
+		</member>
+		<member name="load_radius" type="int" setter="set_load_radius" getter="get_load_radius" default="1">
+			Radius in cells to load around the observer, between 0 and 32.
+		</member>
+		<member name="max_concurrent_requests" type="int" setter="set_max_concurrent_requests" getter="get_max_concurrent_requests" default="8">
+			Maximum simultaneous background resource-load requests made by this node.
+		</member>
+		<member name="max_instances_per_frame" type="int" setter="set_max_instances_per_frame" getter="get_max_instances_per_frame" default="2">
+			Maximum number of loaded cell scenes instantiated per frame.
+		</member>
+		<member name="max_new_requests_per_frame" type="int" setter="set_max_new_requests_per_frame" getter="get_max_new_requests_per_frame" default="2">
+			Maximum number of new resource-load requests per frame.
+		</member>
+		<member name="observer_path" type="NodePath" setter="set_observer_path" getter="get_observer_path" default="NodePath(&quot;&quot;)">
+			Path relative to this node pointing to a [Node3D] observer, such as a player or camera.
+		</member>
+		<member name="predictive_velocity" type="Vector3" setter="set_predictive_velocity" getter="get_predictive_velocity" default="Vector3(0, 0, 0)">
+			World-space velocity for speculative streaming; supply it from the active moving character in gameplay code.
+		</member>
+		<member name="predictive_lookahead_seconds" type="float" setter="set_predictive_lookahead_seconds" getter="get_predictive_lookahead_seconds" default="0.0">
+			Forecast horizon from 0 to 5 seconds. The default of zero disables prefetch.
+		</member>
+		<member name="predictive_max_distance" type="float" setter="set_predictive_max_distance" getter="get_predictive_max_distance" default="32.0">
+			Maximum future-cell displacement (0 to 128 world units). One additional cell at most is speculatively loaded.
+		</member>
+		<member name="streaming_enabled" type="bool" setter="set_streaming_enabled" getter="is_streaming_enabled" default="true">
+			Enables or disables streaming. Disabling unloads tracked instances and preserves cell registrations.
+		</member>
+		<member name="unload_radius" type="int" setter="set_unload_radius" getter="get_unload_radius" default="2">
+			Cells outside this radius are unloaded. Must be at least [member load_radius].
+		</member>
+	</members>
+	<signals>
+		<signal name="cell_navigation_mesh_rebuilt">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="revision" type="int" />
+			<description>
+				Emitted after a scene-owned navigation mesh rebuild callback successfully returns Boolean true. The NavigationServer3D mesh update still needs physics-frame synchronization before [method is_cell_navigation_ready] becomes true.
+			</description>
+		</signal>
+		<signal name="cell_navigation_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="active" type="bool" />
+			<description>
+				Emitted when a loaded cell changes its native navigation-region activation tier. Initial scene-root state is delivered through [code]set_streaming_navigation_active(active)[/code] before its [code]_ready()[/code] without this transition signal.
+			</description>
+		</signal>
+		<signal name="cell_physics_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="active" type="bool" />
+			<description>
+				Emitted when a previously loaded cell changes native collision activation state. Newly loaded scenes instead receive [code]set_streaming_physics_active(active)[/code] before [code]_ready()[/code].
+			</description>
+		</signal>
+		<signal name="cell_simulation_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="active" type="bool" />
+			<description>
+				Emitted when a loaded cell switches its simulation activation state. New cell initialization uses [signal cell_loaded] instead; scripts implementing [code]set_streaming_simulation_active(active)[/code] receive that call before [code]_ready()[/code] for the initial state.
+			</description>
+		</signal>
+		<signal name="cell_detail_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="detail_level" type="int" />
+			<description>
+				Emitted when an already-instantiated cell implements [code]set_streaming_lod(level)[/code] and the engine changes its detail level from 0 (near) to 1 (distant) or back.
+			</description>
+		</signal>
+		<signal name="cell_loaded">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted after a [PackedScene] is instantiated as a child of this node.
+			</description>
+		</signal>
+		<signal name="observer_cell_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted when the observer enters a different grid cell (including the first resolved cell after setting [member observer_path] or changing [member cell_size]). Use this to trigger cell-based game logic without checking the observer's position every frame.
+			</description>
+		</signal>
+		<signal name="cell_unloaded">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted when a previously instantiated cell is queued for deletion.
+			</description>
+		</signal>
+	</signals>
+</class>

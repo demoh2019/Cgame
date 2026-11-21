@@ -1,7 +1,11 @@
 extends CanvasLayer
+const UiSafeArea = preload("res://scripts/client/ui_safe_area.gd")
 ## All of the interface, built in code: vitals, zone, inventory, crafting and a message log.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const ReturnRate = preload("res://scripts/shared/return_rate.gd")
+const Factions = preload("res://scripts/shared/factions.gd")
+const Farming = preload("res://scripts/shared/farming.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
@@ -20,6 +24,7 @@ const Crafting = preload("res://scripts/shared/crafting.gd")
 const CraftingCatalog = preload("res://scripts/shared/crafting_catalog.gd")
 const ExpeditionLoadout = preload("res://scripts/shared/expedition_loadout.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
+const FirstSteps = preload("res://scripts/client/first_steps.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
@@ -36,6 +41,7 @@ const EquipmentPresets = preload("res://scripts/shared/equipment_presets.gd")
 var client
 var _bars: Dictionary = {}
 var _zone_label: Label
+var world_streaming_notice := ""
 var _info_label: Label
 var _vendor_water_button: Button
 var _vendor_food_button: Button
@@ -114,6 +120,9 @@ var _trade_status: Label
 var _trade_peer_signature: String = ""
 var _trade_item_signature: String = ""
 var _market_select: OptionButton
+var _bid_select: OptionButton # Albion-style buy orders (highest price first).
+var _market_bids: Array = []
+var _guild_vault_select: OptionButton # Items in the guild bank (withdraw target).
 var _market_quantity: SpinBox
 var _market_price: SpinBox
 var _market_status: Label
@@ -136,9 +145,12 @@ func _build() -> void:
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for side in ["left", "top", "right", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 14)
+	# Base 14 px plus the display's unsafe area (notches, overscan, handheld bezels).
+	UiSafeArea.apply(margin, UiSafeArea.current(get_viewport()))
 	add_child(margin)
+	get_viewport().size_changed.connect(func() -> void:
+		if is_instance_valid(margin):
+			UiSafeArea.apply(margin, UiSafeArea.current(get_viewport())))
 
 
 	var radar := SurvivalRadar.new()
@@ -315,6 +327,24 @@ func _build() -> void:
 		else:
 			client.salvage_gear(item_id))
 	salvage_row.add_child(salvage_button)
+	var repair_button := Button.new()
+	repair_button.name = "RepairGear"
+	repair_button.text = "Repair gear (workbench, silver)"
+	repair_button.tooltip_text = "Restores every damaged carried item to 100% durability. Broken (0%) gear only works at half strength."
+	repair_button.pressed.connect(func() -> void: client.repair_gear())
+	salvage_row.add_child(repair_button)
+	for enchant_slot in ["weapon", "armor"]:
+		var enchant_button := Button.new()
+		enchant_button.name = "Enchant" + enchant_slot.capitalize()
+		enchant_button.text = "Enchant %s" % enchant_slot
+		enchant_button.tooltip_text = "Workbench only. Raises the equipped %s one level (.1 runes, .2 souls, .3 relics) plus silver: +10%% stats, +100 item power." % enchant_slot
+		enchant_button.pressed.connect(func() -> void:
+			var target: String = client.inventory.weapon if enchant_slot == "weapon" else client.inventory.armor
+			if target == "":
+				say("Enchant: equip a %s first." % enchant_slot)
+			else:
+				client.enchant(target))
+		salvage_row.add_child(enchant_button)
 	_action_sections.append([inventory_box.get_child_count(), "Field"])
 	var trauma_button := Button.new()
 	trauma_button.name = "UseExpeditionTraumaKit"
@@ -1229,6 +1259,124 @@ func _build() -> void:
 			var listing_id: int = int(_market_select.get_item_metadata(_market_select.selected))
 			client.market_cancel(listing_id))
 	market_row.add_child(cancel_market)
+	# Albion-style alliances (guild leaders, hub): invite the leader picked in the barter target list.
+	var alliance_row := HBoxContainer.new()
+	inventory_box.add_child(alliance_row)
+	var ally_invite := Button.new()
+	ally_invite.text = "Alliance invite"
+	ally_invite.tooltip_text = "Guild leaders at the hub: invite the guild of the survivor chosen as barter target."
+	ally_invite.pressed.connect(func() -> void:
+		if _trade_target.selected < 0:
+			say("Alliance: choose a survivor in the barter target list.")
+		else:
+			client.alliance("invite", _trade_target.get_item_id(_trade_target.selected)))
+	alliance_row.add_child(ally_invite)
+	for ally_action in ["accept", "leave", "status"]:
+		var ally_button := Button.new()
+		ally_button.text = "Alliance %s" % ally_action
+		ally_button.pressed.connect(func() -> void: client.alliance(ally_action))
+		alliance_row.add_child(ally_button)
+	# Albion-style guild bank (hub): members deposit, officers withdraw.
+	_guild_vault_select = OptionButton.new()
+	_guild_vault_select.custom_minimum_size.x = 320.0
+	_guild_vault_select.tooltip_text = "Guild bank contents (press Guild bank to refresh)."
+	inventory_box.add_child(_guild_vault_select)
+	var guild_row := HBoxContainer.new()
+	inventory_box.add_child(guild_row)
+	var vault_view := Button.new()
+	vault_view.text = "Guild bank"
+	vault_view.pressed.connect(func() -> void: client.guild_bank("list"))
+	guild_row.add_child(vault_view)
+	var vault_put := Button.new()
+	vault_put.text = "Deposit barter item"
+	vault_put.tooltip_text = "Moves the market quantity of the item chosen in the barter selector into the guild bank."
+	vault_put.pressed.connect(func() -> void:
+		if _trade_item.selected < 0:
+			say("Guild bank: choose an item in the barter selector.")
+		else:
+			client.guild_bank("deposit", str(_trade_item.get_item_metadata(_trade_item.selected)), int(_market_quantity.value)))
+	guild_row.add_child(vault_put)
+	var vault_take := Button.new()
+	vault_take.text = "Withdraw (officers)"
+	vault_take.pressed.connect(func() -> void:
+		if _guild_vault_select.selected < 0:
+			say("Guild bank: open it and pick an item first.")
+		else:
+			client.guild_bank("withdraw", str(_guild_vault_select.get_item_metadata(_guild_vault_select.selected)), int(_market_quantity.value)))
+	guild_row.add_child(vault_take)
+	# Homestead farming: plant seeds from the hub trader in the green zone, harvest when ripe.
+	var farm_row := HBoxContainer.new()
+	inventory_box.add_child(farm_row)
+	for crop in Farming.CROPS:
+		var seed_id: String = str(Farming.CROPS[crop]["seed"])
+		var plant_button := Button.new()
+		plant_button.text = "Plant %s" % crop
+		plant_button.tooltip_text = "Plants one %s in front of you (green zone, up to %d plots). Ripe in %d min." % [
+			str(Defs.item(seed_id).get("name", seed_id)), Farming.MAX_PLOTS, int(float(Farming.CROPS[crop]["seconds"]) / 60.0)]
+		plant_button.pressed.connect(func() -> void: client.plant(seed_id))
+		farm_row.add_child(plant_button)
+	var harvest_button := Button.new()
+	harvest_button.text = "Harvest"
+	harvest_button.tooltip_text = "Harvests your nearest ripe plot within 3 m."
+	harvest_button.pressed.connect(func() -> void: client.harvest())
+	farm_row.add_child(harvest_button)
+	# Faction warfare (hub): enlist, raise or lower the flag, redeem faction points.
+	var faction_row := HBoxContainer.new()
+	inventory_box.add_child(faction_row)
+	for faction_id in Factions.FACTIONS:
+		var join := Button.new()
+		join.text = "Join %s" % Factions.FACTIONS[faction_id]
+		join.tooltip_text = "Enlist at the hub. Switching factions forfeits unspent faction points."
+		join.pressed.connect(func() -> void: client.faction("enlist", faction_id))
+		faction_row.add_child(join)
+	var flag_button := Button.new()
+	flag_button.text = "Faction flag on/off"
+	flag_button.tooltip_text = "Flagged: fight flagged rival factions outside safe towns, even in the yellow zone. Lowering the flag takes 10 s."
+	flag_button.pressed.connect(func() -> void:
+		client.faction("unflag" if bool(client.you.get("faction_flagged", false)) else "flag"))
+	faction_row.add_child(flag_button)
+	var redeem_button := Button.new()
+	redeem_button.text = "Redeem %d pts" % Factions.REDEEM_COST
+	redeem_button.tooltip_text = "Hub only: %d faction points for 60 silver and 3 runes." % Factions.REDEEM_COST
+	redeem_button.pressed.connect(func() -> void: client.faction("redeem"))
+	faction_row.add_child(redeem_button)
+	# Albion-style buy orders: escrow silver now, sellers fill it at the hub, goods wait for you there.
+	_bid_select = OptionButton.new()
+	_bid_select.custom_minimum_size.x = 320.0
+	_bid_select.tooltip_text = "Buy orders (highest price first). Sell to one to get paid instantly."
+	inventory_box.add_child(_bid_select)
+	var bid_row := HBoxContainer.new()
+	inventory_box.add_child(bid_row)
+	var place_bid := Button.new()
+	place_bid.text = "Place buy order"
+	place_bid.tooltip_text = "Escrows quantity x price silver for the selected listing's item (or your barter item)."
+	place_bid.pressed.connect(func() -> void:
+		var bid_item := ""
+		if _market_select.selected >= 0 and _market_select.selected < _market_listings.size():
+			for order in _market_listings:
+				if int(order["id"]) == int(_market_select.get_item_metadata(_market_select.selected)):
+					bid_item = str(order["item"])
+		if bid_item == "" and _trade_item.selected >= 0:
+			bid_item = str(_trade_item.get_item_metadata(_trade_item.selected))
+		if bid_item == "":
+			say("Buy order: select a listing or an item first.")
+		else:
+			client.market_bid(bid_item, int(_market_quantity.value), int(_market_price.value)))
+	bid_row.add_child(place_bid)
+	var fill_bid := Button.new()
+	fill_bid.text = "Sell to order"
+	fill_bid.pressed.connect(func() -> void:
+		if _bid_select.selected < 0:
+			say("Buy order: select an order to sell into.")
+		else:
+			client.market_fill(int(_bid_select.get_item_metadata(_bid_select.selected)), int(_market_quantity.value)))
+	bid_row.add_child(fill_bid)
+	var cancel_bid := Button.new()
+	cancel_bid.text = "Cancel my order"
+	cancel_bid.pressed.connect(func() -> void:
+		if _bid_select.selected >= 0:
+			client.market_cancel_bid(int(_bid_select.get_item_metadata(_bid_select.selected))))
+	bid_row.add_child(cancel_bid)
 
 	_craft_panel = PanelContainer.new()
 	_craft_panel.set_anchors_preset(Control.PRESET_CENTER_LEFT)
@@ -1739,7 +1887,7 @@ func _effect_icon(effect: Array, value: float) -> Control:
 	if amount != "":
 		var label := Label.new()
 		label.text = amount
-		label.add_theme_font_size_override("font_size", 9)
+		label.add_theme_font_size_override("font_size", 12)
 		label.add_theme_constant_override("outline_size", 3)
 		label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 		label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, -2)
@@ -2082,7 +2230,7 @@ func _section_label(text: String, hint: String) -> Control:
 	if hint != "":
 		var small := Label.new()
 		small.text = hint
-		small.add_theme_font_size_override("font_size", 11)
+		small.add_theme_font_size_override("font_size", 12)
 		small.add_theme_color_override("font_color", UiTheme.INK_SOFT)
 		column.add_child(small)
 	return column
@@ -2205,6 +2353,33 @@ func _on_event(event: Dictionary) -> void:
 			if involved:
 				banner("SIEGE %s" % str(event.get("result", "over")).to_upper().replace("_", " "), Color(0.95, 0.78, 0.35))
 		# Combat feedback that used to show only as numbers.
+		"incident":
+			var spot := Vector2(float(event.get("x", 0.0)), float(event.get("z", 0.0)))
+			var me := Vector2(client.predicted.x, client.predicted.z)
+			var offset: Vector2 = spot - me
+			if offset.length() <= 160.0:
+				var bearing: String = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][int(round(fposmod(atan2(offset.x, -offset.y), TAU) / (TAU / 8.0))) % 8]
+				match str(event.get("kind", "")):
+					"horde":
+						banner("A HORDE IS MOVING IN — %s, %d m" % [bearing, int(offset.length())], Color(1.0, 0.5, 0.35))
+					"cache":
+						banner("SURVIVORS' CACHE SPOTTED — %s, %d m (guarded)" % [bearing, int(offset.length())], Color(0.95, 0.82, 0.4))
+					"screamer":
+						banner("A SCREAMER STALKS NEARBY — %s, %d m" % [bearing, int(offset.length())], Color(0.85, 0.65, 1.0))
+		"bed_respawn":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("You wake up in your own bed.")
+		"howl":
+			var heard_from := Vector2(float(event.get("x", 0.0)), float(event.get("z", 0.0)))
+			var me := Vector2(client.predicted.x, client.predicted.z)
+			if me.distance_to(heard_from) <= float(event.get("radius", 40.0)) + 10.0:
+				banner("A HOWL ECHOES — %d INFECTED STIR" % int(event.get("woken", 0)), Color(0.85, 0.65, 1.0))
+		"eel_bite":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Something bit you in the dark water! (-%d)" % int(event.get("damage", 0.0)))
+		"drowning":
+			if int(event.get("peer", -1)) == client.peer_id:
+				banner("OUT OF AIR — SURFACE!", Color(0.5, 0.8, 1.0))
 		"restoration_pulse":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Restoration pulse: %d ally%s treated." % [int(event.get("count", 0)), "" if int(event.get("count", 0)) == 1 else "s"])
@@ -2496,6 +2671,15 @@ func _on_event(event: Dictionary) -> void:
 					int(event.get("xp", 0)), int(event.get("level", 1))])
 		"crate":
 			say("You search the crate...")
+		"rage":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("RAGE!" if bool(event.get("active", false)) else "Rage fades.")
+		"masterwork":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Crafted %s!" % str(Defs.item(str(event.get("item", ""))).get("name", "")))
+		"market_sale":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Market: sold %dx %s, +%d silver." % [int(event.get("quantity", 0)), str(Defs.item(str(event.get("item", ""))).get("name", event.get("item", ""))), int(event.get("net", 0))])
 		"lockpick":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Lockpick consumed: sealed T%d compartment salvaged!" % int(event.get("tier", 3)))
@@ -2554,6 +2738,138 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "alliance":
+		if bool(data.get("ok", false)):
+			var allies: Array = data.get("allied_guilds", [])
+			var pending: String = str(data.get("invite_from", ""))
+			say("Alliance: %s%s" % ["allied with " + ", ".join(allies) if not allies.is_empty() else "no alliance",
+				(" | invite pending from %s" % pending) if pending != "" else ""])
+		else:
+			say("Alliance: %s" % {"no_guild": "join a guild first", "leaders_only": "only guild leaders manage alliances", "no_station": "visit the hub",
+				"target_not_leader": "that survivor does not lead a guild", "target_allied": "their guild is already allied", "alliance_full": "alliances hold up to 4 guilds",
+				"no_invite": "no pending invitation", "invalid_target": "choose a leader of another guild"}.get(str(data.get("reason", "")), str(data.get("reason", "rejected"))))
+		return
+	if kind == "guild_bank":
+		if bool(data.get("ok", false)):
+			var vault: Dictionary = data.get("vault", {})
+			_guild_vault_select.clear()
+			var ids: Array = vault.keys()
+			ids.sort()
+			for id in ids:
+				_guild_vault_select.add_item("%s x%d" % [str(Defs.item(str(id)).get("name", id)), int(vault[id])])
+				_guild_vault_select.set_item_metadata(_guild_vault_select.item_count - 1, str(id))
+			var ledger: Array = data.get("ledger", [])
+			var last: String = ""
+			if not ledger.is_empty():
+				var entry: Dictionary = ledger[-1]
+				last = " Last: %s %s %dx %s." % [str(entry["who"]), str(entry["action"]), int(entry["count"]), str(Defs.item(str(entry["item"])).get("name", entry["item"]))]
+			say("%s guild bank: %d item kinds.%s" % [str(data.get("guild", "")), vault.size(), last])
+		else:
+			say("Guild bank: %s" % {"no_guild": "join a guild first", "no_station": "visit the hub", "officers_only": "only the leader and officers can withdraw",
+				"missing_items": "you do not carry that many", "not_in_vault": "not enough of that in the vault", "vault_full": "the vault is full", "no_space": "no backpack space"}.get(str(data.get("reason", "")), str(data.get("reason", "rejected"))))
+		return
+	if kind == "farm":
+		if bool(data.get("ok", false)):
+			if data.has("crop"):
+				say("Planted %s: ripe in %d minutes." % [str(data["crop"]), int(float(data.get("seconds", 0.0)) / 60.0)])
+			else:
+				var got: Array = []
+				var items: Dictionary = data.get("items", {})
+				for id in items:
+					got.append("%d %s" % [int(items[id]), str(Defs.item(str(id)).get("name", id))])
+				say("Harvested %s." % ", ".join(got))
+		else:
+			say("Farming: %s" % {"green_zone_only": "plots only grow in the green zone", "missing_seed": "buy seeds from the hub trader",
+				"too_many_plots": "you already tend %d plots" % Farming.MAX_PLOTS, "too_close": "too close to another plot", "water": "not in water",
+				"not_ripe": "not ripe yet", "no_plot": "stand next to one of your plots"}.get(str(data.get("reason", "")), str(data.get("reason", "rejected"))))
+		return
+	if kind == "faction":
+		if bool(data.get("ok", false)):
+			var fname: String = str(Factions.FACTIONS.get(str(data.get("faction", "")), "no faction"))
+			match str(data.get("action", "")):
+				"enlist":
+					say("You serve the %s." % fname)
+				"flag":
+					say("Faction flag raised: flagged rivals can now attack you outside safe towns.")
+				"unflag":
+					say("Lowering the faction flag in %.0fs." % float(data.get("unflag_in", 0.0)))
+				"redeem":
+					say("Faction rewards claimed. %d points left." % int(data.get("points", 0)))
+		else:
+			say("Faction: %s" % {"no_station": "visit the hub", "not_enlisted": "join a faction first", "flagged": "lower your flag first",
+				"need_points": "not enough faction points (%d)" % int(data.get("points", 0)), "no_space": "free some backpack space"}.get(str(data.get("reason", "")), str(data.get("reason", "rejected"))))
+		return
+	if kind == "craft":
+		match str(data.get("reason", "")):
+			"focus_needs_city":
+				say("Focus crafting works only at a safe settlement workbench.")
+				return
+			"need_focus":
+				say("Not enough focus: %d needed, %d left (refills over a day)." % [int(data.get("cost", 0)), int(data.get("focus", 0))])
+				return
+		var back: Dictionary = data.get("returned", {})
+		if bool(data.get("ok", false)) and not back.is_empty():
+			var parts: Array = []
+			for id in back:
+				parts.append("%d %s" % [int(back[id]), str(Defs.item(str(id)).get("name", id))])
+			say("Focus returned: %s." % ", ".join(parts))
+	if (kind == "stash" or kind == "stash_bulk") and bool(data.get("ok", false)):
+		FirstSteps.note_deposit()
+	if kind == "door" and not bool(data.get("ok", false)):
+		say({"locked": "The door is barred from inside — break it or ask the owner.", "blocked": "Something is in the doorway.",
+			"too_far": "Too far from the door."}.get(str(data.get("reason", "")), "The door will not move."))
+		return
+	if kind == "arcane_bolt" or kind == "ultimate":
+		var label: String = "Arcane Bolt" if kind == "arcane_bolt" else "Cataclysm"
+		if bool(data.get("ok", false)):
+			if kind == "ultimate":
+				say("Cataclysm! %d infected caught in the blast." % int(data.get("hits", 0)))
+		elif str(data.get("reason", "")) == "cooldown":
+			say("%s ready in %.0fs." % [label, ceilf(float(data.get("remaining", 0.0)))])
+		else:
+			say("%s: %s." % [label, str(data.get("reason", "rejected")).replace("_", " ")])
+		return
+	if kind == "gear_skill":
+		if bool(data.get("ok", false)):
+			say("%s!" % str(data.get("skill", "")).replace("_", " ").capitalize())
+		elif str(data.get("reason", "")) == "no_item":
+			say("Equip a %s to use that ability." % {"armor": "chest piece", "head": "helmet", "feet": "pair of boots"}.get(str(data.get("slot", "")), "piece"))
+		elif str(data.get("reason", "")) == "cooldown":
+			say("Ability ready in %.0fs." % float(data.get("remaining", 0.0)))
+		return
+	if kind == "enchant":
+		if bool(data.get("ok", false)):
+			var made: String = str(data.get("item", ""))
+			say("Enchanted: %s (item power %d)." % [str(Defs.item(made).get("name", made)), int(data.get("item_power", 0))])
+		else:
+			match str(data.get("reason", "")):
+				"no_station":
+					say("Enchant: stand at a workbench.")
+				"need_materials":
+					var parts: Array = []
+					var cost: Dictionary = data.get("cost", {})
+					for id in cost:
+						parts.append("%d %s" % [int(cost[id]), str(Defs.item(str(id)).get("name", id))])
+					say("Enchant needs: %s." % ", ".join(parts))
+				"cannot_enchant":
+					say("Enchant: already at .3 or not enchantable.")
+				_:
+					say("Enchant: %s" % str(data.get("reason", "rejected")))
+		return
+	if kind == "repair_gear":
+		if bool(data.get("ok", false)):
+			say("Repaired %d item(s) for %d silver." % [(data.get("items", []) as Array).size(), int(data.get("cost", 0))])
+		else:
+			match str(data.get("reason", "")):
+				"no_station":
+					say("Repair: stand at a workbench.")
+				"nothing_to_repair":
+					say("Repair: all your gear is at 100%.")
+				"need_silver":
+					say("Repair costs %d silver." % int(data.get("cost", 0)))
+				_:
+					say("Repair: %s" % str(data.get("reason", "rejected")))
+		return
 	if kind == "smart_provision":
 		if bool(data.get("ok", false)):
 			var item_id: String = str(data.get("item", ""))
@@ -2978,6 +3294,11 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Nearby pickup: %s." % str(data.get("reason", "rejected")))
 		return
+	if kind == "loot" and str(data.get("reason", "")) == "dive_to_reach":
+		say("The cache lies on the bottom. Hold crouch to dive down to it.")
+		return
+	if kind == "loot" and bool(data.get("sunken", false)) and bool(data.get("ok", false)):
+		say("You pry open the sunken cache.")
 	if kind == "loot" and str(data.get("reason", "")) == "guards_alive":
 		say("Cache sealed: eliminate %d infected guards." % int(data.get("remaining", 0)))
 		return
@@ -3134,7 +3455,18 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				say("Market: " + str(data.get("reason", "rejected")))
 		elif str(data.get("action", "")) == "list":
 			_market_listings = data.get("orders", [])
+			_market_bids = data.get("bids", [])
+			if int(data.get("collected_silver", 0)) > 0 or int(data.get("collected_items", 0)) > 0:
+				say("Market: collected %d silver and %d returned items." % [int(data.get("collected_silver", 0)), int(data.get("collected_items", 0))])
+			if int(data.get("pending_silver", 0)) > 0:
+				say("Market: %d silver waits for backpack space." % int(data.get("pending_silver", 0)))
 			_refresh_market_options()
+		elif str(data.get("action", "")) == "filled":
+			say("Market: sold %dx %s into a buy order for %d silver (tax %d)." % [int(data.get("quantity", 0)), str(data.get("item", "")), int(data.get("total", 0)), int(data.get("tax", 0))])
+			client.market_list()
+		elif str(data.get("action", "")) == "bid_created":
+			say("Market: buy order placed, %d silver held in escrow." % int(data.get("escrowed", 0)))
+			client.market_list()
 		elif str(data.get("action", "")) == "bought":
 			say("Market: bought %dx %s for %d silver (tax %d; seller receives %d)." % [
 				int(data.get("quantity", 0)), str(data.get("item", "")), int(data.get("total", 0)),
@@ -3322,6 +3654,8 @@ func _process(_delta: float) -> void:
 		float(client.you.get("guardian_cooldown", 0.0)),
 		float(client.you.get("guardian_brace", 0.0))
 	]
+	if not world_streaming_notice.is_empty():
+		_info_label.text += "\n" + world_streaming_notice
 	var combat_stress: float = float(client.you.get("combat_stress", 0.0))
 	if combat_stress >= CombatStress.HUD_THRESHOLD:
 		_info_label.text += "\nINFECTED PRESSURE: %d/100 | passive stamina recovery -%d%%. Regroup or find shelter." % [
@@ -3746,6 +4080,13 @@ func _refresh_market_options() -> void:
 			_market_select.select(index)
 	_market_status.text = "%d listings | item then lowest price | %d%% seller tax" % [
 		_market_listings.size(), MarketBoard.SALE_TAX_PERCENT]
+	if _bid_select != null:
+		_bid_select.clear()
+		for bid in _market_bids:
+			var bid_item: String = str(bid["item"])
+			_bid_select.add_item("WANTED %s x%d | %d silver/item | %s%s" % [str(Defs.item(bid_item).get("name", bid_item)),
+				int(bid["quantity"]), int(bid["price"]), str(bid.get("buyer_name", "?")), " (yours)" if bool(bid.get("own", false)) else ""])
+			_bid_select.set_item_metadata(_bid_select.item_count - 1, int(bid["id"]))
 
 
 func _refresh_party_controls() -> void:
@@ -3977,7 +4318,9 @@ func _refresh_trade_controls() -> void:
 		]
 
 
-const TIER_COLORS := [Color(0.62, 0.64, 0.68), Color(0.62, 0.64, 0.68), Color(0.36, 0.82, 0.42), Color(0.36, 0.62, 1.0), Color(0.78, 0.42, 1.0)]
+const QUALITY_COLORS := [Color.WHITE, Color.WHITE, Color(0.75, 0.85, 1.0), Color(0.55, 0.9, 0.55), Color(0.8, 0.55, 1.0), Color(1.0, 0.8, 0.3)]
+const TIER_COLORS := [Color(0.62, 0.64, 0.68), Color(0.62, 0.64, 0.68), Color(0.36, 0.82, 0.42), Color(0.36, 0.62, 1.0), Color(0.78, 0.42, 1.0),
+	Color(1.0, 0.78, 0.25), Color(1.0, 0.52, 0.22), Color(0.95, 0.28, 0.28), Color(0.96, 0.96, 0.98)]
 
 
 ## A short tag for the kind of item, shown in its slot.
@@ -4102,9 +4445,12 @@ func _refresh_inventory() -> void:
 		var equipped: bool = client.inventory.is_equipped(item_id)
 		var info: Dictionary = Defs.item(item_id)
 		var card := _item_card(item_id, int(slot["count"]), equipped, Vector2(64, 64))
-		card.tooltip_text = "%s\n%s  ·  Tier %d%s\n\nDouble click or drag to a lit slot: equip\nRight click: put one in the stash" % [
+		var durability: float = client.inventory.durability(item_id) if client.inventory.has_method("durability") else 100.0
+		var power: int = Defs.item_power(item_id)
+		card.tooltip_text = ("Item power %d\n" % power if power > 0 and str(info.get("kind", "")) in Defs.ENCHANT_KINDS else "") + "%s\n%s  ·  Tier %d%s%s\n\nDouble click or drag to a lit slot: equip\nRight click: put one in the stash" % [
 			str(info.get("name", item_id)), str(info.get("kind", "item")).capitalize().replace("_", " "), maxi(1, Defs.tier_of(item_id)),
-			"\nEQUIPPED" if equipped else ""]
+			"\nEQUIPPED" if equipped else "",
+			("\nDurability %d%%%s" % [int(round(durability)), "  BROKEN - repair at a workbench" if durability <= 0.0 else ""]) if durability < 100.0 else ""]
 		card.gui_input.connect(func(event: InputEvent) -> void:
 			if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
 				client.move_stash(item_id, 1, true)
@@ -4165,9 +4511,11 @@ func _item_card(item_id: String, count: int, equipped: bool, size: Vector2) -> B
 		card.add_child(art)
 	var tier: int = Defs.tier_of(item_id)
 	if tier >= 1 and item_id.rfind("_") > 0 and item_id.substr(item_id.rfind("_") + 1).is_valid_int():
-		card.add_child(_card_badge(["", "I", "II", "III", "IV", "V"][clampi(tier, 0, 5)], TIER_COLORS[clampi(tier, 0, TIER_COLORS.size() - 1)], Control.PRESET_TOP_LEFT))
+		card.add_child(_card_badge(["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII"][clampi(tier, 0, 8)], TIER_COLORS[clampi(tier, 0, TIER_COLORS.size() - 1)], Control.PRESET_TOP_LEFT))
 	if count > 1:
 		card.add_child(_card_badge(_short_count(count), Color(1, 1, 1), Control.PRESET_BOTTOM_RIGHT))
+	if Defs.quality_of(item_id) > 1:
+		card.add_child(_card_badge("★".repeat(Defs.quality_of(item_id) - 1), QUALITY_COLORS[Defs.quality_of(item_id)], Control.PRESET_BOTTOM_LEFT))
 	if equipped:
 		card.add_child(_card_badge("E", UiTheme.GOLD, Control.PRESET_TOP_RIGHT))
 	return card
@@ -4177,7 +4525,7 @@ func _card_badge(text: String, color: Color, corner: int) -> Label:
 	var badge := Label.new()
 	badge.text = text
 	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	badge.add_theme_font_size_override("font_size", 10)
+	badge.add_theme_font_size_override("font_size", 12)
 	badge.add_theme_color_override("font_color", color)
 	badge.add_theme_constant_override("outline_size", 0)
 	var pill := StyleBoxFlat.new()
@@ -4452,7 +4800,7 @@ func _refresh_crafting() -> void:
 			var amount := Label.new()
 			amount.text = "%d/%d" % [mini(have, 999), need]
 			amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			amount.add_theme_font_size_override("font_size", 10)
+			amount.add_theme_font_size_override("font_size", 12)
 			amount.add_theme_color_override("font_color", UiTheme.INK_SOFT if have >= need else Color(0.7, 0.15, 0.1))
 			part.add_child(amount)
 			parts.add_child(part)
@@ -4470,6 +4818,14 @@ func _refresh_crafting() -> void:
 				else:
 					client.craft(recipe_id, amount_max))
 			row.add_child(max_button)
+		if ready and not use_bank and station == "workbench":
+			var focus_button := Button.new()
+			focus_button.text = "Focus"
+			focus_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			focus_button.tooltip_text = "Craft with focus at a city workbench: 35%% of the materials come back. Costs %d focus (you have %d; it refills over a day)." % [
+				ReturnRate.focus_cost(output_id, maxi(1, Defs.tier_of(output_id)), 1), int(client.you.get("focus", 0))]
+			focus_button.pressed.connect(func() -> void: client.craft_focus(recipe_id, 1))
+			row.add_child(focus_button)
 		var divider := VBoxContainer.new()
 		divider.add_theme_constant_override("separation", 6)
 		divider.add_child(row)

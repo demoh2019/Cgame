@@ -36,6 +36,95 @@ func run(t) -> void:
 		z.think(world, players, 0.1, rng)
 	t.check(z.state != Zombie.State.CHASE, "a player 60 m away is not noticed")
 
+
+	t.current = "Native AI simulation LOD only throttles passive remote target scans"
+	var remote_a := Zombie.new(160, "walker", Vector3(0, ground, 0))
+	var remote_b := Zombie.new(161, "walker", Vector3(0, ground, 0))
+	var remote_same := Zombie.new(160, "walker", Vector3(0, ground, 0))
+	var far_survivor := _players(Vector3(100, ground, 0))
+	remote_a.think(world, far_survivor, 0.05, rng)
+	remote_b.think(world, far_survivor, 0.05, rng)
+	remote_same.think(world, far_survivor, 0.05, rng)
+	if ClassDB.class_exists("AISimulationLOD2D"):
+		t.check(remote_a.think_timer > 0.0 and remote_a.think_timer <= 1.0,
+			"passive scan is bounded to a maximum one second")
+		t.check(remote_a.think_timer != remote_b.think_timer,
+			"consecutive zombie IDs stagger their first distant scan")
+		t.near(remote_a.think_timer, remote_same.think_timer, 0.0001,
+			"the same zombie ID has deterministic phase regardless of RNG")
+		var combined_lod: Variant = Zombie._get_ai_lod_scheduler()
+		if combined_lod != null and combined_lod.has_method("plan_passive_scan"):
+			var passive_near: float = float(Defs.ZOMBIES["walker"]["lose"])
+			var first_plan: Vector2 = combined_lod.plan_passive_scan(
+				remote_a.id, 100.0, passive_near, passive_near + 24.0,
+				0.0, 4.0, false)
+			t.near(remote_a.think_timer, first_plan.y, 0.0001,
+				"real infected uses one-call scheduled startup scan delay")
+			t.near(remote_a._ai_lod_previous_interval, first_plan.x, 0.0001,
+				"real infected remembers nominal tier, not staggered delay")
+			t.check(remote_a._ai_lod_staggered,
+				"server flags one-shot stagger after first remote scan")
+			var next_plan: Vector2 = combined_lod.plan_passive_scan(
+				remote_a.id, 100.0, passive_near, passive_near + 24.0,
+				remote_a._ai_lod_previous_interval, 4.0, true)
+			t.near(next_plan.x, next_plan.y, 0.0001,
+				"subsequent remote scans use full LOD period, not startup phase")
+			var close_plan: Vector2 = combined_lod.plan_passive_scan(
+				remote_a.id, passive_near, passive_near, passive_near + 24.0,
+				next_plan.x, 4.0, true)
+			t.near(close_plan.y, 0.25, 0.0001,
+				"survivor reaching pursuit range immediately restores fast scanning")
+			var urgent_plan: Vector2 = combined_lod.plan_passive_scan(
+				remote_a.id, 100.0, passive_near, passive_near + 24.0,
+				next_plan.x, 4.0, false, true)
+			t.near(urgent_plan.y, 0.25, 0.0001,
+				"urgent work bypasses even the one-time startup stagger")
+		var nearby_idle := Zombie.new(162, "walker", Vector3(0, ground, 0))
+		nearby_idle.think(world, _players(Vector3(20, ground, 0)), 0.05, rng)
+		t.near(nearby_idle.think_timer, 0.25, 0.0001,
+			"nearby survivors keep the original four target scans per second")
+		var empty_scan := Zombie.new(163, "walker", Vector3(0, ground, 0))
+		empty_scan.think(world, {}, 0.05, rng)
+		t.check(empty_scan.think_timer > 0.0 and empty_scan.think_timer <= 1.0,
+			"an empty server is time-sliced safely")
+		var alert_now := remote_a.receive_pack_alert(6,
+			{6: {"position": Vector3(10, ground, 0), "alive": true, "safe": false}})
+		t.check(alert_now and remote_a.target_id == 6,
+			"authoritative pack alert interrupts passive LOD immediately")
+		t.near(remote_a.think_timer, 0.25, 0.0001,
+			"alerted infected resumes high-frequency target scanning")
+	else:
+		t.near(remote_a.think_timer, 0.25, 0.0001,
+			"stock Godot preserves original passive target scan cadence")
+
+	t.current = "Passive AI LOD reacquires a survivor within one second"
+	var approaching := Zombie.new(167, "walker", Vector3(0, ground, 0))
+	approaching.think(world, _players(Vector3(100, ground, 0)), 0.05, rng)
+	for i in 25:
+		approaching.think(world, _players(Vector3(10, ground, 0)), 0.05, rng)
+	t.eq(approaching.target_id, 1,
+		"passive time slicing cannot permanently miss a newly nearby survivor")
+	t.eq(approaching.state, Zombie.State.CHASE,
+		"approaching survivor transitions to ordinary active pursuit")
+
+	t.current = "Aggression interrupts distant passive AI LOD for authoritative threat"
+	var hit_remote := Zombie.new(165, "walker", Vector3(0, ground, 0))
+	hit_remote.think(world, _players(Vector3(100, ground, 0)), 0.05, rng)
+	t.check(not hit_remote.take_damage(1.0, 1),
+		"verified nonlethal attack registers server combat threat")
+	t.near(hit_remote.think_timer, 0.0, 0.0001,
+		"confirmed damage interrupts any previously scheduled passive LOD")
+	hit_remote.think(world, _players(Vector3(12, ground, 0)), 0.05, rng)
+	t.eq(hit_remote.target_id, 1,
+		"attacker is selected on the next authoritative tick")
+	var rejected_damage := Zombie.new(166, "walker", Vector3(0, ground, 0))
+	rejected_damage.think(world, _players(Vector3(100, ground, 0)), 0.05, rng)
+	var previously_scheduled: float = rejected_damage.think_timer
+	t.check(not rejected_damage.take_damage(-1.0, 1),
+		"invalid negative attack does not register as damage")
+	t.near(rejected_damage.think_timer, previously_scheduled, 0.0001,
+		"invalid untrusted damage cannot force target recalculation")
+
 	t.current = "noise attracts infected"
 	z = Zombie.new(80, "walker", Vector3(0, ground, 0))
 	players = _players(Vector3(20, ground, 0))
@@ -66,6 +155,28 @@ func run(t) -> void:
 			"native top-3 flanking keeps a deterministic circle around survivor")
 		var owned_query: Resource = flanker._flank_query
 		t.check(owned_query != null, "one native query resource is cached per infected")
+		if owned_query != null and owned_query.has_method("query_random_best_positions"):
+			var random_goal: PackedVector3Array = owned_query.call(
+				"query_random_best_positions", 25, flanker.id)
+			t.eq(random_goal.size(), 1,
+				"native Random Best 25% returns exactly one tactical flank")
+			if random_goal.size() == 1:
+				t.check(Vector2(random_goal[0].x, random_goal[0].z).distance_to(
+					flank_first) < 0.001,
+					"unleased infected actually use the native random-best selection")
+			t.eq(owned_query.call("query_random_best_positions", 25, flanker.id),
+				random_goal, "same actor ID and query produce a replay-stable flank")
+		if owned_query != null and owned_query.has_method("set_direction_axis"):
+			var candidate_side: Vector2 = (flank_first - prey).normalized()
+			t.check(candidate_side.dot(prey.normalized()) >= -0.251,
+				"directional EQS prevents a near-side-only flank")
+			t.check(bool(owned_query.get("use_direction")),
+				"flank replanning enables the reusable native directional test")
+			if owned_query.has_method("set_max_direction_dot"):
+				t.near(float(owned_query.get("max_direction_dot")), 0.75, 0.0001,
+					"infected configures the native bounded side-flank sector")
+				t.check(candidate_side.dot(Vector2.RIGHT) <= 0.751,
+					"infected selects a side instead of the straight far-side slot")
 		t.eq(flanker._flank_goal(Vector2(0.4, 0.0), Vector2(10.4, 0.0)),
 			flank_first, "small positional changes retain a stable flank point")
 		t.check(flanker._flank_query == owned_query,
@@ -80,10 +191,102 @@ func run(t) -> void:
 			"expired cache still reuses the same native query")
 	else:
 		t.eq(flank_first, prey, "stock Godot directly chases without native EQS")
+	# A shared lease pool must bypass Random Best entirely: every eligible
+	# ranked slot must remain available for authoritative ownership attempts.
+	if ClassDB.class_exists("EnvironmentQuery3D") and flanker._flank_query != null:
+		t.check(flanker._flank_query.has_method("query_top_positions"),
+			"leased fallback keeps the native ordered top-K API available")
 	t.eq(flanker._flank_goal(Vector2.ZERO, Vector2(2.0, 0.0)),
 		Vector2(2.0, 0.0), "close melee pursuit bypasses expensive flank scoring")
 	t.eq(flanker._flank_goal(Vector2.ZERO, Vector2(60.0, 0.0)),
 		Vector2(60.0, 0.0), "distant pursuit bypasses flank scoring")
+	t.current = "time-sliced EQS flank never uses a partial native ranking"
+	var sliced := Zombie.new(1460, "walker", Vector3.ZERO)
+	sliced.flank_incremental_enabled = true
+	var sliced_goal := Vector2(10.0, 0.0)
+	var first_step := sliced._flank_goal(Vector2.ZERO, sliced_goal)
+	if ClassDB.class_exists("EnvironmentQuery3D") and sliced._flank_query != null and \
+			sliced._flank_query.has_method("begin_incremental_top_positions"):
+		t.eq(first_step, sliced_goal, "first three candidate tests do not invent a partial flank")
+		t.check(sliced._flank_incremental_running, "EQS cursor persists across enemy AI ticks")
+		var first_count: int = int(sliced._flank_query.call("get_incremental_processed_count"))
+		t.check(first_count >= 1 and first_count <= 3,
+			"first timed work grant processes at least one and no more than three candidates")
+		if sliced._flank_query.has_method("step_incremental_top_positions_timed"):
+			t.check(sliced.flank_last_step_us >= 0 and sliced.flank_last_step_candidates == first_count,
+				"native microsecond profiling reports exactly the scored candidate count")
+		else:
+			t.eq(sliced.flank_last_step_candidates, 0,
+				"older native builds without measured steps keep their original count-only API")
+		sliced.flank_replan_allowed = false
+		t.eq(sliced._flank_goal(Vector2.ZERO, sliced_goal), sliced_goal,
+			"deferred EQS slot still pursues the survivor directly")
+		t.eq(int(sliced._flank_query.call("get_incremental_processed_count")), first_count,
+			"denied work slot cannot advance a native in-flight cursor")
+		sliced.flank_replan_allowed = true
+		var completed_goal := sliced_goal
+		var step_count: int = 1
+		while sliced._flank_incremental_running and step_count < 9:
+			var previous: int = int(sliced._flank_query.call("get_incremental_processed_count"))
+			completed_goal = sliced._flank_goal(Vector2.ZERO, sliced_goal)
+			step_count += 1
+			if sliced._flank_incremental_running:
+				var next: int = int(sliced._flank_query.call("get_incremental_processed_count"))
+				t.check(next > previous and next - previous <= Zombie.FLANK_EQS_MAX_CANDIDATES,
+					"native measured work advances safely inside its candidate count cap")
+				t.eq(completed_goal, sliced_goal,
+					"partial native scores never create a premature tactical waypoint")
+		t.near(completed_goal.distance_to(sliced_goal), Zombie.FLANK_RING, 0.001,
+			"timed query eventually finishes and returns the same tactical flank")
+		t.check(not sliced._flank_incremental_running,
+			"completed work releases snapshot and returns to normal cached path")
+		var next_cached := sliced._flank_goal(Vector2(0.2, 0.0), sliced_goal)
+		t.eq(next_cached, completed_goal,
+			"completed incremental result still participates in stable flank cache")
+		# Changed targets invalidate a pending context before it can claim a slot.
+		sliced._flank_replan_remaining = 0.0
+		sliced._flank_goal(Vector2.ZERO, sliced_goal)
+		t.check(sliced._flank_incremental_running, "a later replan begins a fresh snapshot")
+		sliced._flank_goal(Vector2.ZERO, sliced_goal + Vector2(-8, 9))
+		var restarted: int = int(sliced._flank_query.call("get_incremental_processed_count"))
+		t.check(restarted >= 1 and restarted <= 3,
+			"large target displacement cancels and restarts a conservatively sized snapshot")
+	else:
+		t.near(first_step.distance_to(sliced_goal), Zombie.FLANK_RING, 0.001,
+			"legacy engine retains original one-shot flanking")
+
+	t.current = "shared EQS budget blocks a second worker without changing direct chase"
+	if ClassDB.class_exists("EnvironmentQueryTickBudget") and \
+			ClassDB.class_exists("EnvironmentQuery3D"):
+		var budget = ClassDB.instantiate("EnvironmentQueryTickBudget")
+		t.check(budget.begin_tick(22, 1, 120), "one-microsecond budget begins a new frame")
+		var first_worker := Zombie.new(9141, "walker", Vector3.ZERO)
+		first_worker.flank_incremental_enabled = true
+		first_worker.flank_tick_budget = budget
+		var second_worker := Zombie.new(9142, "walker", Vector3.ZERO)
+		second_worker.flank_incremental_enabled = true
+		second_worker.flank_tick_budget = budget
+		var global_target := Vector2(10.0, 0.0)
+		t.eq(first_worker._flank_goal(Vector2.ZERO, global_target), global_target,
+			"first worker pursues directly while its incremental EQS is unfinished")
+		t.check(first_worker._flank_incremental_running,
+			"first worker genuinely started the native resumable scorer")
+		t.eq(int(budget.get_remaining_us()), 0,
+			"one completed scorer step debits and exhausts shared 1us quota")
+		t.eq(second_worker._flank_goal(Vector2.ZERO, global_target), global_target,
+			"second worker keeps chasing without starting over-budget EQS work")
+		t.check(not second_worker._flank_incremental_running,
+			"second worker cannot start an over-budget native snapshot")
+		second_worker.flank_step_urgent = true
+		t.eq(second_worker._flank_goal(Vector2.ZERO, global_target), global_target,
+			"urgent recovery has its own time pool but not a partial flank")
+		t.check(second_worker._flank_incremental_running,
+			"independent urgent pool can start the second worker's query")
+		t.check(int(budget.get_urgent_spent_us()) >= 1,
+			"urgent recovery is charged to its own capped pool")
+		t.check(not budget.is_pending(),
+			"each asynchronous logical query step closes its synchronous budget admission")
+
 	t.current = "runner is faster"
 	var runner := Zombie.new(3, "runner", Vector3(0, ground, 0))
 	var walker := Zombie.new(4, "walker", Vector3(0, ground, 0))

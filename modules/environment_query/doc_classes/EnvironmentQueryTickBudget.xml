@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="EnvironmentQueryTickBudget" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Shared per-tick microsecond ledger for multiple incremental EQS queries.
+	</brief_description>
+	<description>
+		Holds separate regular and urgent work pools across all AI controllers sharing the same instance. Call [method begin_tick] once per authoritative simulation tick, then call [method try_admit_step] immediately before a query's [method EnvironmentQuery3D.step_incremental_top_positions_timed], bound that call by [method get_remaining_us], and record the native measured time with [method record_step]. Admission is rejected when the appropriate pool is exhausted; any one candidate can still exceed the soft allowance. This only accounts for time supplied by the caller and does not postpone simulation, attack, movement, navigation or network work. The ledger is main-thread, transient, and does not autonomously run queries.
+	</description>
+	<methods>
+		<method name="begin_tick">
+			<return type="bool" />
+			<param index="0" name="tick" type="int" />
+			<param index="1" name="regular_quota_us" type="int" />
+			<param index="2" name="urgent_quota_us" type="int" default="0" />
+			<description>Initialize a new nonnegative server tick with independent regular and urgent quotas of 0–1000000 microseconds each. A repeated call for the same tick and matching quotas is idempotent and does not refill a spent budget. Returns false for invalid input, inconsistent same-tick quotas or an uncommitted step from the previous tick.</description>
+		</method>
+		<method name="try_admit_step">
+			<return type="bool" />
+			<param index="0" name="urgent" type="bool" default="false" />
+			<description>Opens one synchronous native EQS work admission if the selected pool has positive remaining microseconds. Repeated admissions before recording or cancelling the pending step are rejected. The urgent and regular pools never borrow from one another.</description>
+		</method>
+		<method name="record_step">
+			<return type="bool" />
+			<param index="0" name="actual_us" type="int" />
+			<description>Debit one previously admitted work step using its measured native scorer microseconds (0–1000000000). Zero-microsecond calls charge one unit to prevent infinitely many free steps. A single expensive candidate may overdraw its pool, but subsequent grants in that pool will be denied until the next tick.</description>
+		</method>
+		<method name="cancel_pending_step">
+			<return type="void" />
+			<description>Discard an uncommitted admission (for example when a query fails to start). Safe to call repeatedly. Does not refund already recorded work.</description>
+		</method>
+		<method name="get_remaining_us" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="urgent" type="bool" default="false" />
+			<description>Nonnegative remaining microsecond allowance in the selected pool. Returns zero before the first tick or after quota exhaustion.</description>
+		</method>
+		<method name="get_tick" qualifiers="const"><return type="int" /><description>Active authoritative tick, or -1 before initialization.</description></method>
+		<method name="get_regular_spent_us" qualifiers="const"><return type="int" /><description>Charged microseconds consumed by ordinary EQS steps this tick.</description></method>
+		<method name="get_urgent_spent_us" qualifiers="const"><return type="int" /><description>Charged microseconds consumed by urgent EQS steps this tick.</description></method>
+		<method name="get_regular_completed" qualifiers="const"><return type="int" /><description>Completed ordinary native EQS work steps this tick.</description></method>
+		<method name="get_urgent_completed" qualifiers="const"><return type="int" /><description>Completed urgent native EQS work steps this tick.</description></method>
+		<method name="get_denied_count" qualifiers="const"><return type="int" /><description>Rejected work admissions this tick, including overlapping admissions.</description></method>
+		<method name="is_pending" qualifiers="const"><return type="bool" /><description>True while an admission is awaiting recording or explicit cancellation.</description></method>
+	</methods>
+</class>

@@ -74,7 +74,104 @@ const JOBS := {
 }
 
 
+# Scanned ground plants, baked one mesh per variant (each gltf holds several), centred on its root.
+#   godot --headless --path game --script res://tools/bake_polyhaven.gd -- --plants
+# id: [triangle budget per variant, merge every part into one mesh, part names to skip]
+const PLANT_OUTPUT := "res://assets/models/polyhaven/baked/plants/"
+const PLANTS := {
+	# Grass replaces the old procedural blades, so it is drawn by the thousand: keep it light.
+	"grass_medium_01": [300, false, []],
+	"grass_medium_02": [360, false, []],
+	"grass_bermuda_01": [941, true, []],
+	"dandelion_01": [1400, false, []],
+	"celandine_01": [1000, false, []],
+	"flower_heliophila": [2500, false, ["flower_heliophila_large", "flower_heliophila_medium"]],
+	"nettle_plant": [1400, false, []],
+	"weed_plant_02": [1000, false, []],
+	"shrub_sorrel_01": [1600, true, []],
+	"periwinkle_plant": [1400, false, []],
+	"moss_01": [204, true, []],
+	"fern_02": [1200, false, []],
+	"shrub_02": [2200, false, []],
+	"shrub_03": [1200, false, []],
+	"shrub_04": [2400, false, []],
+	"flower_empodium": [900, false, []],
+	"flower_gazania": [1200, false, []],
+	"flower_ursinia": [1200, false, []],
+	"flower_stinkkruid": [1600, false, []],
+}
+
+
+func _bake_plants() -> int:
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(PLANT_OUTPUT))
+	var manifest: Dictionary = {}
+	var failures := 0
+	for id in PLANTS:
+		var job: Array = PLANTS[id]
+		var scene := load(SOURCE + id + "/" + id + ".gltf") as PackedScene
+		if scene == null:
+			printerr("PLANT missing ", id)
+			failures += 1
+			continue
+		var root: Node = scene.instantiate()
+		var part_names: Array = []
+		if bool(job[1]):
+			part_names = [""]
+		else:
+			for candidate in root.find_children("*", "MeshInstance3D", true, false):
+				if not (String(candidate.name) in job[2]):
+					part_names.append(String(candidate.name))
+		root.free()
+		var variants: Array = []
+		for part in part_names:
+			var mesh: ArrayMesh = bake(id, part, int(job[0]))
+			if mesh == null:
+				continue
+			_center_on_root(mesh)
+			mesh = _with_lods(mesh)
+			var file: String = "%s_%d.res" % [id, variants.size()]
+			if ResourceSaver.save(mesh, PLANT_OUTPUT + file, ResourceSaver.FLAG_COMPRESS) == OK:
+				var box: AABB = mesh.get_aabb()
+				variants.append({"file": file, "height": box.size.y, "width": maxf(box.size.x, box.size.z)})
+		manifest[id] = variants
+		print("PLANT %-18s %d variants" % [id, variants.size()])
+	var out := FileAccess.open(PLANT_OUTPUT + "manifest.json", FileAccess.WRITE)
+	out.store_string(JSON.stringify(manifest, "\t"))
+	return failures
+
+
+## Adds automatic LODs (meshoptimizer) so distant plants draw a fraction of their triangles.
+func _with_lods(mesh: ArrayMesh) -> ArrayMesh:
+	var importer := ImporterMesh.new()
+	for surface in mesh.get_surface_count():
+		importer.add_surface(Mesh.PRIMITIVE_TRIANGLES, mesh.surface_get_arrays(surface), [], {}, mesh.surface_get_material(surface))
+	importer.generate_lods(25.0, 60.0, [])
+	var result: ArrayMesh = importer.get_mesh()
+	return result if result != null else mesh
+
+
+## Moves the mesh so its footprint is centred on the origin and its lowest point sits at y = 0.
+func _center_on_root(mesh: ArrayMesh) -> void:
+	var box: AABB = mesh.get_aabb()
+	var shift := Vector3(-(box.position.x + box.size.x * 0.5), -box.position.y, -(box.position.z + box.size.z * 0.5))
+	var surfaces: Array = []
+	for surface in mesh.get_surface_count():
+		var arrays: Array = mesh.surface_get_arrays(surface)
+		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		for i in vertices.size():
+			vertices[i] += shift
+		arrays[Mesh.ARRAY_VERTEX] = vertices
+		surfaces.append([arrays, mesh.surface_get_material(surface)])
+	mesh.clear_surfaces()
+	for entry in surfaces:
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, entry[0])
+		mesh.surface_set_material(mesh.get_surface_count() - 1, entry[1])
+
+
 func _initialize() -> void:
+	if "--plants" in OS.get_cmdline_user_args():
+		quit(1 if _bake_plants() > 0 else 0)
+		return
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUTPUT))
 	var failures := 0
 	for name in JOBS:

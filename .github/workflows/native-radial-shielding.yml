@@ -1,0 +1,91 @@
+name: Native blast shielding and velocity-change physics
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/radial_force_field_3d.cpp'
+      - 'modules/gameplay_fx/radial_force_field_3d.h'
+      - 'modules/gameplay_fx/tests/test_gameplay_fx.h'
+      - 'modules/gameplay_fx/doc_classes/RadialForceField3D.xml'
+      - 'game/scripts/client/engine_features.gd'
+      - 'game/scripts/client/physics_debris.gd'
+      - 'game/tests/test_radial_blast_shielding.gd'
+      - 'game/tests/run_radial_blast.gd'
+      - 'game/tests/run_radial_blast_integration.gd'
+      - '.github/workflows/native-radial-shielding.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/radial_force_field_3d.cpp'
+      - 'modules/gameplay_fx/radial_force_field_3d.h'
+      - 'modules/gameplay_fx/tests/test_gameplay_fx.h'
+      - 'game/scripts/client/engine_features.gd'
+      - 'game/scripts/client/physics_debris.gd'
+      - 'game/tests/test_radial_blast_shielding.gd'
+      - '.github/workflows/native-radial-shielding.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-blast-physics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-radial-shielding
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-radial-shielding
+        continue-on-error: true
+      - name: Native C++ falloff, shielding and velocity-change regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*RadialForceField3D shielding*"
+      - name: Import Albion After game scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee radial-import.log
+      - name: Game stock/native physics fallback parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_radial_blast.gd 2>&1 | tee radial-parity.log
+          grep -E '^RADIAL BLAST TOTAL: [0-9]+ checks, 0 failures$' radial-parity.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' radial-parity.log; then exit 1; fi
+      - name: Real rigid-body occlusion by a static wall
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 120s "$BIN" --headless --path game --script res://tests/run_radial_blast_integration.gd 2>&1 | tee radial-world.log
+          grep -E '^RADIAL BLAST INTEGRATION: [0-9]+ checks, 0 failures$' radial-world.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' radial-world.log; then exit 1; fi
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-radial-shielding-logs
+          if-no-files-found: ignore
+          path: |
+            radial-import.log
+            radial-parity.log
+            radial-world.log

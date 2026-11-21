@@ -123,7 +123,7 @@
 	[wd.window_object setContentMaxSize:NSMakeSize(FLT_MAX, FLT_MAX)];
 
 	// Reset custom window buttons.
-	if ([wd.window_object styleMask] & NSWindowStyleMaskFullSizeContentView) {
+	if (wd.extend_to_title) {
 		ds->window_set_custom_window_buttons(wd, false);
 	}
 
@@ -142,7 +142,7 @@
 	wd.fs_transition = true;
 
 	// Restore custom window buttons.
-	if ([wd.window_object styleMask] & NSWindowStyleMaskFullSizeContentView) {
+	if (wd.extend_to_title && !wd.borderless) {
 		ds->window_set_custom_window_buttons(wd, true);
 	}
 
@@ -157,7 +157,7 @@
 	DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);
 	wd.fs_transition = false;
 
-	if ([wd.window_object styleMask] & NSWindowStyleMaskFullSizeContentView) {
+	if (wd.extend_to_title) {
 		ds->window_set_custom_window_buttons(wd, false);
 	}
 
@@ -332,6 +332,9 @@
 	}
 
 	[self windowDidResize:notification]; // Emit resize event, to ensure content is resized if the window was resized while it was hidden.
+	if (wd.window_view) {
+		[wd.window_view updateModifierFlags];
+	}
 
 	wd.focused = true;
 	ds->set_last_focused_window(window_id);

@@ -1,11 +1,18 @@
 extends RefCounted
+const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 ## Dedicated-server world checkpoints for account-owned barricades only.
 ## Authenticated account IDs stay on the server and are NEVER sent to clients.
 ## Session-only offline/guest structures cannot be reclaimed safely after restart.
 
 const Structures = preload("res://scripts/shared/structures.gd")
+const MarketBoard = preload("res://scripts/shared/market_board.gd")
+const MarketBids = preload("res://scripts/shared/market_bids.gd")
+const Farming = preload("res://scripts/shared/farming.gd")
+const GuildBank = preload("res://scripts/shared/guild_bank.gd")
+const GuildAlliances = preload("res://scripts/shared/guild_alliances.gd")
+const Defs = preload("res://scripts/shared/defs.gd")
 const VERSION: int = 1
-const MAX_BYTES: int = 131072
+const MAX_BYTES: int = 262144 # Barricades plus escrowed market listings.
 const MAX_ABS_COORD: float = 20000.0
 const MIN_ID: int = 5000000001
 const MAX_ID: int = 9007199254740000
@@ -38,13 +45,165 @@ static func capture(sim) -> Dictionary:
 			"x": float(item["x"]), "z": float(item["z"]),
 			"hp": float(item["hp"]), "tier": Structures.tier_of(item), "owner_account": account,
 			"owner_guild": str(item.get("owner_guild", "")),
-			"yaw": float(item.get("yaw", 0.0)),
+			"yaw": float(item.get("yaw", 0.0)), "piece": str(item.get("piece", "")), "open": bool(item.get("open", true)),
 			"upkeep": clampf(float(item.get("upkeep_until", sim.time)) - sim.time, 0.0, Structures.UPKEEP_SECONDS),
 		})
 	walls.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return int(a["id"]) < int(b["id"]))
 	return {"version": VERSION, "world_seed": int(sim.world.world_seed), "barricades": walls,
-		"outposts": sim.territory.persistent_holds(sim.time)}
+		"outposts": sim.territory.persistent_holds(sim.time), "market": _capture_market(sim), "farm": _capture_farm(sim), "guild_banks": _capture_guild_banks(sim), "alliances": _capture_alliances(sim)}
+
+
+## Escrowed listings, unpaid proceeds and returned goods of signed-in accounts (guests are not saved).
+static func _capture_market(sim) -> Dictionary:
+	var orders: Array = []
+	for listing_id in sim.market_orders.keys():
+		var o: Dictionary = sim.market_orders[listing_id]
+		if str(o["account"]).begins_with("peer:"):
+			continue
+		orders.append({"account": str(o["account"]), "seller_name": str(o.get("seller_name", "")),
+			"item": str(o["item"]), "remaining": int(o["remaining"]), "price": int(o["price"]),
+			"left": maxf(0.0, float(o["expires"]) - sim.time)})
+	var payouts: Dictionary = {}
+	for a in sim.market_payouts.keys():
+		if not str(a).begins_with("peer:"):
+			payouts[str(a)] = int(sim.market_payouts[a])
+	var returns: Dictionary = {}
+	for a in sim.market_returns.keys():
+		if not str(a).begins_with("peer:"):
+			returns[str(a)] = sim.market_returns[a].duplicate()
+	var bids: Array = []
+	for bid_id in sim.market_bids.keys():
+		var b: Dictionary = sim.market_bids[bid_id]
+		if str(b["account"]).begins_with("peer:"):
+			continue
+		bids.append({"account": str(b["account"]), "buyer_name": str(b.get("buyer_name", "")),
+			"item": str(b["item"]), "remaining": int(b["remaining"]), "price": int(b["price"]),
+			"left": maxf(0.0, float(b["expires"]) - sim.time)})
+	return {"orders": orders, "payouts": payouts, "returns": returns, "bids": bids}
+
+
+## Homestead crop plots of signed-in accounts (guests are not saved); growth is kept as elapsed seconds.
+static func _capture_farm(sim) -> Array:
+	var plots: Array = []
+	for plot_id in sim.farm_plots.keys():
+		var p: Dictionary = sim.farm_plots[plot_id]
+		if str(p["account"]).begins_with("peer:"):
+			continue
+		plots.append({"account": str(p["account"]), "owner_name": str(p.get("owner_name", "")), "crop": str(p["crop"]),
+			"x": float(p["x"]), "z": float(p["z"]), "elapsed": clampf(sim.time - float(p["planted"]), 0.0, float(p["grow"]))})
+	return plots
+
+
+static func _validate_farm(source: Variant) -> Variant:
+	if typeof(source) != TYPE_ARRAY or source.size() > Farming.MAX_PLOTS_TOTAL:
+		return null
+	for p in source:
+		if typeof(p) != TYPE_DICTIONARY or not _valid_account(p.get("account")):
+			return null
+		if typeof(p.get("crop")) != TYPE_STRING or not Farming.CROPS.has(p["crop"]):
+			return null
+		if not _bounded_float(p.get("x"), -100000.0, 100000.0) or not _bounded_float(p.get("z"), -100000.0, 100000.0):
+			return null
+		if not _bounded_float(p.get("elapsed"), 0.0, 100000.0) or typeof(p.get("owner_name", "")) != TYPE_STRING:
+			return null
+	return source
+
+
+## Guild vaults (keyed by verified guild id); ledgers are session-only.
+static func _capture_guild_banks(sim) -> Dictionary:
+	var banks: Dictionary = {}
+	for guild in sim.guild_banks.keys():
+		if not (sim.guild_banks[guild] as Dictionary).is_empty():
+			banks[str(guild)] = sim.guild_banks[guild].duplicate()
+	return banks
+
+
+static func _validate_guild_banks(source: Variant) -> Variant:
+	if typeof(source) != TYPE_DICTIONARY or source.size() > 4096:
+		return null
+	for guild in source.keys():
+		if typeof(guild) != TYPE_STRING or guild.is_empty() or guild.length() > MAX_OWNER_LENGTH:
+			return null
+		var vault: Variant = source[guild]
+		if typeof(vault) != TYPE_DICTIONARY or vault.size() > GuildBank.MAX_KINDS:
+			return null
+		for item in vault.keys():
+			if typeof(item) != TYPE_STRING or not Defs.is_item(item) or not _bounded_int(vault[item], 1, GuildBank.MAX_COUNT):
+				return null
+	return source
+
+
+## Guild alliances as lists of {guild id: guild name}.
+static func _capture_alliances(sim) -> Array:
+	var result: Array = []
+	for alliance_id in sim.guild_alliances:
+		result.append((sim.guild_alliances[alliance_id]["guilds"] as Dictionary).duplicate())
+	return result
+
+
+static func _validate_alliances(source: Variant) -> Variant:
+	if typeof(source) != TYPE_ARRAY or source.size() > 2048:
+		return null
+	var seen: Dictionary = {}
+	for guilds in source:
+		if typeof(guilds) != TYPE_DICTIONARY or guilds.size() < 2 or guilds.size() > GuildAlliances.MAX_GUILDS:
+			return null
+		for guild in guilds.keys():
+			if typeof(guild) != TYPE_STRING or guild.is_empty() or guild.length() > MAX_OWNER_LENGTH or seen.has(guild):
+				return null
+			if typeof(guilds[guild]) != TYPE_STRING or guilds[guild].length() > MAX_OWNER_LENGTH:
+				return null
+			seen[guild] = true
+	return source
+
+
+static func _valid_account(a: Variant) -> bool:
+	return typeof(a) == TYPE_STRING and not a.is_empty() and a.length() <= MAX_OWNER_LENGTH and not a.begins_with("peer:")
+
+
+static func _validate_market(source: Variant) -> Variant:
+	if typeof(source) != TYPE_DICTIONARY:
+		return null
+	var orders: Variant = source.get("orders", [])
+	var payouts: Variant = source.get("payouts", {})
+	var returns: Variant = source.get("returns", {})
+	if typeof(orders) != TYPE_ARRAY or typeof(payouts) != TYPE_DICTIONARY or typeof(returns) != TYPE_DICTIONARY:
+		return null
+	if orders.size() > MarketBoard.MAX_LISTINGS or payouts.size() > 4096 or returns.size() > 4096:
+		return null
+	for o in orders:
+		if typeof(o) != TYPE_DICTIONARY or not _valid_account(o.get("account")):
+			return null
+		if typeof(o.get("item")) != TYPE_STRING or not Defs.is_item(o["item"]) or o["item"] == "silver":
+			return null
+		if not _bounded_int(o.get("remaining"), 1, 1000000) or not _bounded_int(o.get("price"), 1, MarketBoard.MAX_UNIT_PRICE):
+			return null
+		if not _bounded_float(o.get("left"), 0.0, MarketBoard.LISTING_LIFETIME) or typeof(o.get("seller_name", "")) != TYPE_STRING:
+			return null
+	for a in payouts.keys():
+		if not _valid_account(a) or not _bounded_int(payouts[a], 0, 2147483647):
+			return null
+	for a in returns.keys():
+		if not _valid_account(a) or typeof(returns[a]) != TYPE_DICTIONARY or returns[a].size() > 256:
+			return null
+		for item in returns[a].keys():
+			if typeof(item) != TYPE_STRING or not Defs.is_item(item) or not _bounded_int(returns[a][item], 1, 1000000):
+				return null
+	# Buy orders (older checkpoints have none): same bounds as listings, escrow is the remaining * price.
+	var bids: Variant = source.get("bids", [])
+	if typeof(bids) != TYPE_ARRAY or bids.size() > MarketBids.MAX_BIDS:
+		return null
+	for b in bids:
+		if typeof(b) != TYPE_DICTIONARY or not _valid_account(b.get("account")):
+			return null
+		if typeof(b.get("item")) != TYPE_STRING or not Defs.is_item(b["item"]) or b["item"] == "silver":
+			return null
+		if not _bounded_int(b.get("remaining"), 1, MarketBoard.MAX_QUANTITY) or not _bounded_int(b.get("price"), 1, MarketBoard.MAX_UNIT_PRICE):
+			return null
+		if not _bounded_float(b.get("left"), 0.0, MarketBids.BID_LIFETIME) or typeof(b.get("buyer_name", "")) != TYPE_STRING:
+			return null
+	return {"orders": orders, "payouts": payouts, "returns": returns, "bids": bids}
 
 
 ## Guild holds of outposts: [{id, guild, name, remaining}]. Older checkpoints have none.
@@ -77,9 +236,23 @@ static func _validate_holds(source: Variant, sim) -> Variant:
 ## Refuse a snapshot from another seed or terrain layout, including overlapping
 ## terrain obstacles, neighboring restored walls and impossible owner quotas.
 static func validate(data: Variant, sim) -> Dictionary:
-	if typeof(data) != TYPE_DICTIONARY or data.size() not in [3, 4]:
+	# version, world_seed, barricades are required; outposts, market, farm, guild_banks, alliances are optional.
+	if typeof(data) != TYPE_DICTIONARY or data.size() < 3 or data.size() > 8:
 		return {}
-	if data.size() == 4 and not data.has("outposts"):
+	for key in data.keys():
+		if not str(key) in ["version", "world_seed", "barricades", "outposts", "market", "farm", "guild_banks", "alliances"]:
+			return {}
+	var market: Variant = _validate_market(data.get("market", {}))
+	if market == null:
+		return {}
+	var farm: Variant = _validate_farm(data.get("farm", []))
+	if farm == null:
+		return {}
+	var guild_banks: Variant = _validate_guild_banks(data.get("guild_banks", {}))
+	if guild_banks == null:
+		return {}
+	var alliances: Variant = _validate_alliances(data.get("alliances", []))
+	if alliances == null:
 		return {}
 	var holds: Variant = _validate_holds(data.get("outposts", []), sim)
 	if holds == null:
@@ -97,7 +270,12 @@ static func validate(data: Variant, sim) -> Dictionary:
 	var ids: Dictionary = {}
 	var owner_counts: Dictionary = {}
 	for value in source:
-		if typeof(value) != TYPE_DICTIONARY or value.size() not in [5, 6, 7, 9]:
+		if typeof(value) != TYPE_DICTIONARY or value.size() not in [5, 6, 7, 9, 11]:
+			return {}
+		# House-building checkpoints add the piece kind and the door state.
+		if value.size() == 11 and not (value.has("piece") and value.has("open") and value.has("tier") and value.has("yaw")):
+			return {}
+		if typeof(value.get("piece", "")) != TYPE_STRING or typeof(value.get("open", true)) != TYPE_BOOL:
 			return {}
 		# Current checkpoints add the facing and the upkeep left.
 		if value.size() == 9 and not (value.has("tier") and value.has("owner_guild") and value.has("yaw") and value.has("upkeep")):
@@ -154,8 +332,10 @@ static func validate(data: Variant, sim) -> Dictionary:
 		owner_counts[uid] = next_count
 		walls.append({"id": id, "x": x, "z": z, "hp": float(value["hp"]),
 			"tier": tier, "owner_account": uid, "owner_guild": guild,
-			"yaw": float(value.get("yaw", 0.0)), "upkeep": float(value.get("upkeep", Structures.UPKEEP_SECONDS))})
-	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls, "outposts": holds}
+			"yaw": float(value.get("yaw", 0.0)), "upkeep": float(value.get("upkeep", Structures.UPKEEP_SECONDS)),
+			"piece": str(value.get("piece", "")) if HousePieces.valid(str(value.get("piece", ""))) else "",
+			"open": bool(value.get("open", true))})
+	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls, "outposts": holds, "market": market, "farm": farm, "guild_banks": guild_banks, "alliances": alliances}
 
 
 static func restore(sim, data: Variant) -> bool:
@@ -175,9 +355,49 @@ static func restore(sim, data: Variant) -> bool:
 			"owner_account": wall["owner_account"], "owner_guild": str(wall.get("owner_guild", "")),
 			"yaw": float(wall.get("yaw", 0.0)), "upkeep_until": sim.time + float(wall.get("upkeep", Structures.UPKEEP_SECONDS)),
 		}
-		sim.world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
+		var piece: String = str(wall.get("piece", ""))
+		if HousePieces.valid(piece):
+			sim.barricades[id]["piece"] = piece
+			sim.barricades[id]["open"] = bool(wall.get("open", true))
+			sim.barricades[id]["y"] = sim.world.height_at(x, z) + HousePieces.elevation(piece)
+			sim.world.add_structure_blockers(id, HousePieces.blockers_of(sim.barricades[id]))
+		else:
+			sim.world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
 		sim._next_id = maxi(sim._next_id, id)
 	sim.territory.restore_holds(valid["outposts"], sim.time)
+	for guilds in valid.get("alliances", []):
+		var members: Dictionary = {}
+		for guild in guilds.keys():
+			members[str(guild)] = str(guilds[guild])
+		sim.guild_alliances[sim.new_id()] = {"guilds": members}
+	sim._rebuild_alliance_index()
+	var banks: Dictionary = valid.get("guild_banks", {})
+	for guild in banks.keys():
+		var vault: Dictionary = {}
+		for item in banks[guild].keys():
+			vault[str(item)] = int(banks[guild][item])
+		sim.guild_banks[str(guild)] = vault
+	for p in valid.get("farm", []):
+		var crop: String = str(p["crop"])
+		sim.farm_plots[sim.new_id()] = {"account": str(p["account"]), "owner_name": str(p.get("owner_name", "")), "crop": crop,
+			"x": float(p["x"]), "z": float(p["z"]), "planted": sim.time - float(p["elapsed"]),
+			"grow": float(Farming.CROPS[crop]["seconds"])}
+	var market: Dictionary = valid["market"]
+	for o in market["orders"]:
+		sim.market_orders[sim.new_id()] = {"account": str(o["account"]), "seller_name": str(o.get("seller_name", "")),
+			"item": str(o["item"]), "remaining": int(o["remaining"]), "price": int(o["price"]),
+			"expires": sim.time + float(o["left"])}
+	for a in market["payouts"].keys():
+		sim.market_payouts[str(a)] = int(market["payouts"][a])
+	for a in market["returns"].keys():
+		var goods: Dictionary = {}
+		for item in market["returns"][a].keys():
+			goods[str(item)] = int(market["returns"][a][item])
+		sim.market_returns[str(a)] = goods
+	for b in market.get("bids", []):
+		sim.market_bids[sim.new_id()] = {"account": str(b["account"]), "buyer_name": str(b.get("buyer_name", "")),
+			"item": str(b["item"]), "remaining": int(b["remaining"]), "price": int(b["price"]),
+			"expires": sim.time + float(b["left"])}
 	return true
 
 

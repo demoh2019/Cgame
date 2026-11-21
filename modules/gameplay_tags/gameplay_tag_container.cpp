@@ -30,6 +30,7 @@
 
 
 #include "gameplay_tag_container.h"
+#include "gameplay_tag_stack_container.h"
 
 #include "core/object/class_db.h"
 
@@ -71,6 +72,73 @@ void GameplayTagContainer::add_tags(const PackedStringArray &p_tags) {
 	}
 }
 
+PackedStringArray GameplayTagContainer::get_matching_tags(const StringName &p_query, bool p_exact) const {
+	PackedStringArray result;
+	for (const StringName &tag : tags) {
+		if (tag_matches(tag, p_query, p_exact)) {
+			result.push_back(String(tag));
+		}
+	}
+	return result;
+}
+
+bool GameplayTagContainer::replace_tag_branch(const StringName &p_query, const PackedStringArray &p_replacements) {
+	const String query = p_query;
+	// Invalid scopes/replacements never partially clear an actor's status.
+	if (query.is_empty() || query.begins_with(".") || query.ends_with(".") || query.contains("..")) {
+		return false;
+	}
+	Vector<StringName> replacements;
+	for (const String &value : p_replacements) {
+		if (value.is_empty() || value.begins_with(".") || value.ends_with(".") || value.contains("..") ||
+				!tag_matches(StringName(value), p_query) || replacements.has(StringName(value))) {
+			return false;
+		}
+		replacements.push_back(StringName(value));
+	}
+
+	// Frequent network snapshots often repeat the same state. Avoid allocating a
+	// second tag vector or firing resource change notifications for a no-op.
+	int matched = 0;
+	bool unchanged = true;
+	for (const StringName &tag : tags) {
+		if (!tag_matches(tag, p_query)) {
+			continue;
+		}
+		if (matched >= replacements.size() || tag != replacements[matched]) {
+			unchanged = false;
+		}
+		matched++;
+	}
+	if (unchanged && matched == replacements.size()) {
+		return true;
+	}
+	Vector<StringName> next;
+	for (const StringName &tag : tags) {
+		if (!tag_matches(tag, p_query)) {
+			next.push_back(tag);
+		}
+	}
+	for (const StringName &tag : replacements) {
+		next.push_back(tag);
+	}
+
+	bool modified = tags.size() != next.size();
+	if (!modified) {
+		for (int i = 0; i < tags.size(); ++i) {
+			if (tags[i] != next[i]) {
+				modified = true;
+				break;
+			}
+		}
+	}
+	if (modified) {
+		tags = next;
+		emit_changed();
+	}
+	return true;
+}
+
 void GameplayTagContainer::remove_tag(const StringName &p_tag) {
 	int idx = tags.find(p_tag);
 	if (idx >= 0) {
@@ -102,6 +170,27 @@ bool GameplayTagContainer::has_any(const PackedStringArray &p_tags, bool p_exact
 		}
 	}
 	return false;
+}
+
+int GameplayTagContainer::count_matching_queries(const PackedStringArray &p_queries, bool p_exact) const {
+	// Each *distinct query* contributes at most once. A parent and a child
+	// query can both match; duplicate copies of either cannot double-count.
+	Vector<StringName> seen;
+	int matches = 0;
+	for (const String &query : p_queries) {
+		if (query.is_empty()) {
+			continue;
+		}
+		const StringName name = query;
+		if (seen.has(name)) {
+			continue;
+		}
+		seen.push_back(name);
+		if (has_tag(name, p_exact)) {
+			matches++;
+		}
+	}
+	return matches;
 }
 
 bool GameplayTagContainer::has_all(const PackedStringArray &p_tags, bool p_exact) const {
@@ -137,10 +226,13 @@ void GameplayTagContainer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("add_tag", "tag"), &GameplayTagContainer::add_tag);
 	ClassDB::bind_method(D_METHOD("add_tags", "tags"), &GameplayTagContainer::add_tags);
+	ClassDB::bind_method(D_METHOD("get_matching_tags", "query", "exact"), &GameplayTagContainer::get_matching_tags, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("replace_tag_branch", "query", "replacements"), &GameplayTagContainer::replace_tag_branch);
 	ClassDB::bind_method(D_METHOD("remove_tag", "tag"), &GameplayTagContainer::remove_tag);
 	ClassDB::bind_method(D_METHOD("clear"), &GameplayTagContainer::clear);
 	ClassDB::bind_method(D_METHOD("has_tag", "tag", "exact"), &GameplayTagContainer::has_tag, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("has_any", "tags", "exact"), &GameplayTagContainer::has_any, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("count_matching_queries", "queries", "exact"), &GameplayTagContainer::count_matching_queries, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("has_all", "tags", "exact"), &GameplayTagContainer::has_all, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_tag_count"), &GameplayTagContainer::get_tag_count);
 	ClassDB::bind_method(D_METHOD("is_empty"), &GameplayTagContainer::is_empty);
@@ -148,6 +240,14 @@ void GameplayTagContainer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_tags"), &GameplayTagContainer::get_tags);
 
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "tags"), "set_tags", "get_tags");
+}
+
+void GameplayTagQuery::set_min_any_matches(int p_count) {
+	ERR_FAIL_COND_MSG(p_count < 1 || p_count > 64, "min_any_matches must be between 1 and 64.");
+	if (min_any_matches != p_count) {
+		min_any_matches = p_count;
+		emit_changed();
+	}
 }
 
 bool GameplayTagQuery::matches(const Ref<GameplayTagContainer> &p_container) const {
@@ -158,11 +258,53 @@ bool GameplayTagQuery::matches(const Ref<GameplayTagContainer> &p_container) con
 	if (!c->has_all(all_tags, exact)) {
 		return false;
 	}
-	if (!any_tags.is_empty() && !c->has_any(any_tags, exact)) {
+	if (!any_tags.is_empty() && c->count_matching_queries(any_tags, exact) < min_any_matches) {
 		return false;
 	}
 	if (!none_tags.is_empty() && c->has_any(none_tags, exact)) {
 		return false;
+	}
+	return true;
+}
+
+void GameplayTagQuery::set_min_stack_count(int p_count) {
+	// A finite, positive threshold is always safe to serialize in a Resource.
+	const int next_count = CLAMP(p_count, 1, 65535);
+	if (min_stack_count == next_count) {
+		return;
+	}
+	min_stack_count = next_count;
+	emit_changed();
+}
+
+bool GameplayTagQuery::matches_stacks(const Ref<GameplayTagStackContainer> &p_container) const {
+	// No intermediate tag list or copied Dictionary: use the native indexed
+	// count lookup directly. The parent scope totals descendant stack counts.
+	const auto has_enough = [&](const String &p_tag) {
+		return p_container.is_valid() &&
+				p_container->get_stack_count(StringName(p_tag), exact) >= min_stack_count;
+	};
+	for (const String &tag : all_tags) {
+		if (!has_enough(tag)) {
+			return false;
+		}
+	}
+	if (!any_tags.is_empty()) {
+		bool found = false;
+		for (const String &tag : any_tags) {
+			if (has_enough(tag)) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			return false;
+		}
+	}
+	for (const String &tag : none_tags) {
+		if (has_enough(tag)) {
+			return false;
+		}
 	}
 	return true;
 }
@@ -176,10 +318,17 @@ void GameplayTagQuery::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_none_tags"), &GameplayTagQuery::get_none_tags);
 	ClassDB::bind_method(D_METHOD("set_exact", "exact"), &GameplayTagQuery::set_exact);
 	ClassDB::bind_method(D_METHOD("is_exact"), &GameplayTagQuery::is_exact);
+	ClassDB::bind_method(D_METHOD("set_min_any_matches", "count"), &GameplayTagQuery::set_min_any_matches);
+	ClassDB::bind_method(D_METHOD("get_min_any_matches"), &GameplayTagQuery::get_min_any_matches);
+	ClassDB::bind_method(D_METHOD("set_min_stack_count", "count"), &GameplayTagQuery::set_min_stack_count);
+	ClassDB::bind_method(D_METHOD("get_min_stack_count"), &GameplayTagQuery::get_min_stack_count);
 	ClassDB::bind_method(D_METHOD("matches", "container"), &GameplayTagQuery::matches);
+	ClassDB::bind_method(D_METHOD("matches_stacks", "container"), &GameplayTagQuery::matches_stacks);
 
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "all_tags"), "set_all_tags", "get_all_tags");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "any_tags"), "set_any_tags", "get_any_tags");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "none_tags"), "set_none_tags", "get_none_tags");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "exact"), "set_exact", "is_exact");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "min_any_matches", PROPERTY_HINT_RANGE, "1,64,1"), "set_min_any_matches", "get_min_any_matches");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "min_stack_count", PROPERTY_HINT_RANGE, "1,65535,1"), "set_min_stack_count", "get_min_stack_count");
 }

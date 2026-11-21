@@ -340,6 +340,16 @@ public:
 	Vector<Vector2> get_closest_points_between_segments(const Vector2 &p_p1, const Vector2 &p_q1, const Vector2 &p_p2, const Vector2 &p_q2);
 	Vector2 get_closest_point_to_segment(const Vector2 &p_point, const Vector2 &p_a, const Vector2 &p_b);
 	Vector2 get_closest_point_to_segment_uncapped(const Vector2 &p_point, const Vector2 &p_a, const Vector2 &p_b);
+	Dictionary get_closest_point_on_segments(const Vector2 &p_point, const PackedVector2Array &p_segment_endpoints);
+	TypedArray<PackedInt32Array> get_nearest_neighbors(const PackedVector2Array &p_points, int p_neighbor_count, real_t p_max_distance);
+	PackedInt32Array prune_points_min_distance(const PackedVector2Array &p_points, real_t p_min_distance, int p_max_kept = -1);
+	PackedByteArray rasterize_segments_mask(const PackedVector2Array &p_segment_endpoints, const Vector2i &p_size, real_t p_half_width, real_t p_softness);
+	PackedByteArray distance_transform_8(const PackedByteArray &p_mask, const Vector2i &p_size, int p_max_distance);
+	PackedByteArray max_filter_mask(const PackedByteArray &p_mask, const Vector2i &p_size, int p_radius);
+	Vector<Vector2> heightfield_gradients(const Vector<float> &p_heights, const Vector2i &p_size, real_t p_cell_spacing);
+	Vector<float> sample_scalar_grid_wrapped(const Vector<float> &p_grid, const Vector2i &p_size, const Vector<Vector2> &p_uvs, bool p_smooth = true);
+	Vector<Color> bake_heightfield_curvature_colors(const Vector<float> &p_padded_heights, const Vector2i &p_size, real_t p_cell_spacing,
+			real_t p_cavity_start = 0.015, real_t p_cavity_end = 0.32, real_t p_ridge_start = 0.015, real_t p_ridge_end = 0.42);
 	bool point_is_inside_triangle(const Vector2 &p_s, const Vector2 &p_a, const Vector2 &p_b, const Vector2 &p_c) const;
 
 	bool is_point_in_circle(const Vector2 &p_point, const Vector2 &p_circle_pos, real_t p_circle_radius);

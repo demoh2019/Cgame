@@ -66,8 +66,9 @@ func run(t) -> void:
 		"stock Godot keeps per-source filtering when running without the fork")
 	t.check(source.contains('AudioSpatial.obstruction_db(amount)'),
 		"stock Godot keeps per-source amplitude attenuation")
-	t.check(source.contains("move_toward(old_amount, target, delta * 6.0)"),
-		"crossing a doorway changes occlusion smoothly without audio clicks")
+	t.check(source.contains("AudioSpatial.smooth_obstruction(old_amount, target, delta)") and
+		source.contains('player.call("advance_obstruction_amount", target, delta,'),
+		"doorway obstruction uses frame-rate-independent attack and release on both engines")
 	t.check(not source.contains("AudioServer.set_bus_volume_db(_sfx_bus,"),
 		"world obstruction never mutes the entire SFX bus")
 	t.current = "stable first buffer, fresh terrain LOS and voice priority"

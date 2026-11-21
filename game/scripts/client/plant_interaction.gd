@@ -8,6 +8,14 @@ const BEND_RADIUS := [0.0, 1.1, 1.5, 1.9] # Low, Medium, High, Ultra: Low keeps 
 const SHAKE_RADIUS := [0.0, 2.2, 2.8, 3.4]
 const SHAKE_SECONDS := 1.1
 const MAX_BEND := 0.5
+const MAX_CRUSHERS := 8
+const CRUSH_RANGE := 45.0 # Beyond the grass fade there is nothing to flatten.
+# Footprint radius (m) and strength per kind of object resting in the grass.
+const FOOTPRINTS := {
+	"campfire": Vector2(1.05, 1.0), "shelter": Vector2(1.9, 1.0), "barricade": Vector2(1.2, 1.0),
+	"bag": Vector2(0.6, 1.0), "snare": Vector2(0.5, 0.9), "decoy": Vector2(0.5, 0.9),
+	"player": Vector2(0.5, 0.75), "zombie": Vector2(0.5, 0.75),
+}
 
 var _shake_at := Vector2.ZERO
 var _shake_age := 99.0
@@ -72,3 +80,36 @@ func update(delta: float, player: Vector3, level: int) -> Vector2:
 	RenderingServer.global_shader_parameter_set(&"aa_plant_bend", bend)
 	RenderingServer.global_shader_parameter_set(&"aa_plant_shake", shake_v)
 	return Vector2(bend.w, shake_v.w)
+
+
+## Nearest object footprints to `center` as Vector4(x, z, radius, strength), at most MAX_CRUSHERS.
+## `sources` is an Array of [kind, Dictionary-with-x-and-z].
+static func pick_crushers(center: Vector2, sources: Array) -> Array:
+	var found: Array = []
+	for source in sources:
+		var kind: String = str(source[0])
+		var entity: Dictionary = source[1]
+		if not FOOTPRINTS.has(kind) or not entity.has("x") or not entity.has("z"):
+			continue
+		var at := Vector2(float(entity["x"]), float(entity["z"]))
+		if not at.is_finite():
+			continue
+		var distance := center.distance_to(at)
+		if distance > CRUSH_RANGE:
+			continue
+		var footprint: Vector2 = FOOTPRINTS[kind]
+		found.append({"d": distance, "v": Vector4(at.x, at.y, footprint.x, footprint.y)})
+	found.sort_custom(func(a, b): return float(a["d"]) < float(b["d"]))
+	var result: Array = []
+	for entry in found.slice(0, MAX_CRUSHERS):
+		result.append(entry["v"])
+	return result
+
+
+## Uploads the footprints to the grass shader globals.
+func set_crushers(crushers: Array) -> void:
+	var count: int = mini(crushers.size(), MAX_CRUSHERS)
+	for i in MAX_CRUSHERS:
+		var value: Vector4 = crushers[i] if i < count else Vector4.ZERO
+		RenderingServer.global_shader_parameter_set(StringName("aa_plant_crush_%d" % i), value)
+	RenderingServer.global_shader_parameter_set(&"aa_plant_crush_count", float(count))

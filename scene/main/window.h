@@ -129,7 +129,8 @@ private:
 	mutable Size2i max_size;
 	mutable Vector<Vector2> mpath;
 	mutable Mode mode = MODE_WINDOWED;
-	mutable Mode toggle_fullscreen_previous_mode = mode;
+	mutable Mode toggle_fullscreen_previous_windowed_mode = mode;
+	mutable Mode toggle_fullscreen_previous_fullscreen_mode = MODE_FULLSCREEN;
 	mutable bool flags[FLAG_MAX] = {};
 	bool visible = true;
 	bool focused = false;
@@ -167,6 +168,11 @@ private:
 	String announcement;
 	String accessibility_name;
 	String accessibility_description;
+
+	Point2i self_fitting_restore_position;
+	Size2i self_fitting_restore_size;
+	bool self_fitting_restore_position_valid = false;
+	bool self_fitting_restore_size_valid = false;
 
 	void _make_window();
 	void _clear_window();

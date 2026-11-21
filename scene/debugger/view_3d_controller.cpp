@@ -109,28 +109,6 @@ bool View3DController::gui_input(const Ref<InputEvent> &p_event, const Rect2 &p_
 		return true;
 	}
 
-	Vector<ShortcutCheck> shortcut_checks;
-
-	if (Input::get_singleton()->get_mouse_mode() != Input::MouseMode::MOUSE_MODE_CAPTURED) {
-#define GET_SHORTCUT_COUNT(p_name) (inputs[p_name].is_null() ? 0 : inputs[p_name]->get_events().size())
-
-		bool orbit_mod_pressed = DebuggerHelpers::is_shortcut_pressed(SHORTCUT_ORBIT_MOD_1, inputs, true) && DebuggerHelpers::is_shortcut_pressed(SHORTCUT_ORBIT_MOD_2, inputs, true);
-		bool pan_mod_pressed = DebuggerHelpers::is_shortcut_pressed(SHORTCUT_PAN_MOD_1, inputs, true) && DebuggerHelpers::is_shortcut_pressed(SHORTCUT_PAN_MOD_2, inputs, true);
-		bool zoom_mod_pressed = DebuggerHelpers::is_shortcut_pressed(SHORTCUT_ZOOM_MOD_1, inputs, true) && DebuggerHelpers::is_shortcut_pressed(SHORTCUT_ZOOM_MOD_2, inputs, true);
-		int orbit_mod_input_count = GET_SHORTCUT_COUNT(SHORTCUT_ORBIT_MOD_1) + GET_SHORTCUT_COUNT(SHORTCUT_ORBIT_MOD_2);
-		int pan_mod_input_count = GET_SHORTCUT_COUNT(SHORTCUT_PAN_MOD_1) + GET_SHORTCUT_COUNT(SHORTCUT_PAN_MOD_2);
-		int zoom_mod_input_count = GET_SHORTCUT_COUNT(SHORTCUT_ZOOM_MOD_1) + GET_SHORTCUT_COUNT(SHORTCUT_ZOOM_MOD_2);
-		bool orbit_not_empty = !DebuggerHelpers::is_shortcut_empty(SHORTCUT_ORBIT_MOD_1, inputs) || !DebuggerHelpers::is_shortcut_empty(SHORTCUT_ORBIT_MOD_2, inputs);
-		bool pan_not_empty = !DebuggerHelpers::is_shortcut_empty(SHORTCUT_PAN_MOD_1, inputs) || !DebuggerHelpers::is_shortcut_empty(SHORTCUT_PAN_MOD_2, inputs);
-		bool zoom_not_empty = !DebuggerHelpers::is_shortcut_empty(SHORTCUT_ZOOM_MOD_1, inputs) || !DebuggerHelpers::is_shortcut_empty(SHORTCUT_ZOOM_MOD_2, inputs);
-		shortcut_checks.push_back(ShortcutCheck(orbit_mod_pressed, orbit_not_empty, orbit_mod_input_count, orbit_mouse_button, NAV_MODE_ORBIT));
-		shortcut_checks.push_back(ShortcutCheck(pan_mod_pressed, pan_not_empty, pan_mod_input_count, pan_mouse_button, NAV_MODE_PAN));
-		shortcut_checks.push_back(ShortcutCheck(zoom_mod_pressed, zoom_not_empty, zoom_mod_input_count, zoom_mouse_button, NAV_MODE_ZOOM));
-		shortcut_checks.sort_custom<ShortcutCheckSetComparator>();
-
-#undef GET_SHORTCUT_COUNT
-	}
-
 	Ref<InputEventMouseMotion> m = p_event;
 	if (m.is_valid()) {
 		if (m->get_button_mask() == MouseButtonMask::NONE) {
@@ -145,50 +123,7 @@ bool View3DController::gui_input(const Ref<InputEvent> &p_event, const Rect2 &p_
 			previous_cursor = cursor;
 		}
 
-		NavigationMode nav_mode = NAV_MODE_NONE;
-
-		if (m->get_button_mask().has_flag(MouseButtonMask::LEFT)) {
-			NavigationMode change_nav_from_shortcut = _get_nav_mode_from_shortcuts(NAV_MOUSE_BUTTON_LEFT, shortcut_checks, false);
-			if (change_nav_from_shortcut != NAV_MODE_NONE) {
-				nav_mode = change_nav_from_shortcut;
-			}
-		} else if (freelook || m->get_button_mask().has_flag(MouseButtonMask::RIGHT)) {
-			NavigationMode change_nav_from_shortcut = _get_nav_mode_from_shortcuts(NAV_MOUSE_BUTTON_RIGHT, shortcut_checks, false);
-			if (m->get_button_mask().has_flag(MouseButtonMask::RIGHT) && change_nav_from_shortcut != NAV_MODE_NONE) {
-				nav_mode = change_nav_from_shortcut;
-			} else if (freelook) {
-				nav_mode = NAV_MODE_LOOK;
-			} else if (orthogonal) {
-				nav_mode = NAV_MODE_PAN;
-			}
-
-		} else if (m->get_button_mask().has_flag(MouseButtonMask::MIDDLE)) {
-			NavigationMode change_nav_from_shortcut = _get_nav_mode_from_shortcuts(NAV_MOUSE_BUTTON_MIDDLE, shortcut_checks, false);
-			if (change_nav_from_shortcut != NAV_MODE_NONE) {
-				nav_mode = change_nav_from_shortcut;
-			}
-
-		} else if (m->get_button_mask().has_flag(MouseButtonMask::MB_XBUTTON1)) {
-			NavigationMode change_nav_from_shortcut = _get_nav_mode_from_shortcuts(NAV_MOUSE_BUTTON_4, shortcut_checks, false);
-			if (change_nav_from_shortcut != NAV_MODE_NONE) {
-				nav_mode = change_nav_from_shortcut;
-			}
-
-		} else if (m->get_button_mask().has_flag(MouseButtonMask::MB_XBUTTON2)) {
-			NavigationMode change_nav_from_shortcut = _get_nav_mode_from_shortcuts(NAV_MOUSE_BUTTON_5, shortcut_checks, false);
-			if (change_nav_from_shortcut != NAV_MODE_NONE) {
-				nav_mode = change_nav_from_shortcut;
-			}
-
-		} else if (emulate_3_button_mouse) {
-			// Handle trackpad (no external mouse) use case.
-			NavigationMode change_nav_from_shortcut = _get_nav_mode_from_shortcuts(NAV_MOUSE_BUTTON_LEFT, shortcut_checks, true);
-			if (change_nav_from_shortcut != NAV_MODE_NONE) {
-				nav_mode = change_nav_from_shortcut;
-			}
-		}
-
-		switch (nav_mode) {
+		switch (get_nav_mode_from_input(m)) {
 			case NAV_MODE_PAN: {
 				cursor_pan(m, get_warped_mouse_motion(m, p_surface_rect));
 			} break;
@@ -227,32 +162,23 @@ bool View3DController::gui_input(const Ref<InputEvent> &p_event, const Rect2 &p_
 		return true;
 	}
 
-	Ref<InputEventPanGesture> pan_gesture = p_event;
-	if (pan_gesture.is_valid()) {
-		NavigationMode nav_mode = NAV_MODE_NONE;
-
-		for (const ShortcutCheck &shortcut_check_set : shortcut_checks) {
-			if (shortcut_check_set.mod_pressed) {
-				nav_mode = shortcut_check_set.result_nav_mode;
-				break;
-			}
-		}
-
-		switch (nav_mode) {
+	Ref<InputEventPanGesture> pg = p_event;
+	if (pg.is_valid()) {
+		switch (get_nav_mode_from_input(pg)) {
 			case NAV_MODE_PAN: {
-				cursor_pan(pan_gesture, -pan_gesture->get_delta());
+				cursor_pan(pg, -pg->get_delta());
 			} break;
 
 			case NAV_MODE_ZOOM: {
-				cursor_zoom(pan_gesture, pan_gesture->get_delta());
+				cursor_zoom(pg, pg->get_delta());
 			} break;
 
 			case NAV_MODE_ORBIT: {
-				cursor_orbit(pan_gesture, -pan_gesture->get_delta());
+				cursor_orbit(pg, -pg->get_delta());
 			} break;
 
 			case NAV_MODE_LOOK: {
-				cursor_look(pan_gesture, pan_gesture->get_delta());
+				cursor_look(pg, pg->get_delta());
 			} break;
 
 			default: {
@@ -523,11 +449,12 @@ void View3DController::update_freelook(const float p_delta) {
 		forward = Vector3(0, 0, -1).rotated(Vector3(0, 1, 0), camera_transform.get_basis().get_euler().y);
 	} else {
 		// Forward/backward keys will be relative to the camera pitch.
-		forward = camera_transform.basis.xform(Vector3(0, 0, -1));
+		forward = -camera_transform.basis.get_column(2);
 	}
 
-	const Vector3 right = camera_transform.basis.xform(Vector3(1, 0, 0));
+	const Vector3 right = camera_transform.basis.get_column(0);
 
+	Vector3 local_up = camera_transform.basis.get_column(1);
 	Vector3 up;
 	if (freelook_scheme == View3DController::FREELOOK_PARTIALLY_AXIS_LOCKED || freelook_scheme == View3DController::FREELOOK_FULLY_AXIS_LOCKED) {
 		// Up/down keys will always go up/down regardless of camera pitch.
@@ -555,6 +482,21 @@ void View3DController::update_freelook(const float p_delta) {
 	}
 	if (DebuggerHelpers::is_shortcut_pressed(SHORTCUT_FREELOOK_DOWN, inputs)) {
 		direction -= up;
+	}
+	if (DebuggerHelpers::is_shortcut_pressed(SHORTCUT_FREELOOK_GLOBAL_UP, inputs)) {
+		direction += Vector3(0, 1, 0);
+	}
+	if (DebuggerHelpers::is_shortcut_pressed(SHORTCUT_FREELOOK_GLOBAL_DOWN, inputs)) {
+		direction -= Vector3(0, 1, 0);
+	}
+	if (DebuggerHelpers::is_shortcut_pressed(SHORTCUT_FREELOOK_LOCAL_UP, inputs)) {
+		direction += local_up;
+	}
+	if (DebuggerHelpers::is_shortcut_pressed(SHORTCUT_FREELOOK_LOCAL_DOWN, inputs)) {
+		// Avoid conflict with Shift+F to toggle freelook (alternative to right click).
+		if (Input::get_singleton()->is_mouse_button_pressed(MouseButton::RIGHT) || !Input::get_singleton()->is_action_pressed("spatial_editor/freelook_toggle")) {
+			direction -= local_up;
+		}
 	}
 
 	real_t speed = freelook_speed;
@@ -603,6 +545,86 @@ void View3DController::scale_cursor_distance(const float p_scale) {
 	}
 
 	emit_signal(SNAME("cursor_distance_scaled"));
+}
+
+View3DController::NavigationMode View3DController::get_nav_mode_from_input(const Ref<InputEvent> &p_event) {
+	Vector<ShortcutCheck> shortcut_checks;
+	if (Input::get_singleton()->get_mouse_mode() != Input::MouseMode::MOUSE_MODE_CAPTURED) {
+#define GET_SHORTCUT_COUNT(p_name) (inputs[p_name].is_null() ? 0 : inputs[p_name]->get_events().size())
+
+		bool orbit_mod_pressed = DebuggerHelpers::is_shortcut_pressed(SHORTCUT_ORBIT_MOD_1, inputs, true) && DebuggerHelpers::is_shortcut_pressed(SHORTCUT_ORBIT_MOD_2, inputs, true);
+		bool pan_mod_pressed = DebuggerHelpers::is_shortcut_pressed(SHORTCUT_PAN_MOD_1, inputs, true) && DebuggerHelpers::is_shortcut_pressed(SHORTCUT_PAN_MOD_2, inputs, true);
+		bool zoom_mod_pressed = DebuggerHelpers::is_shortcut_pressed(SHORTCUT_ZOOM_MOD_1, inputs, true) && DebuggerHelpers::is_shortcut_pressed(SHORTCUT_ZOOM_MOD_2, inputs, true);
+		int orbit_mod_input_count = GET_SHORTCUT_COUNT(SHORTCUT_ORBIT_MOD_1) + GET_SHORTCUT_COUNT(SHORTCUT_ORBIT_MOD_2);
+		int pan_mod_input_count = GET_SHORTCUT_COUNT(SHORTCUT_PAN_MOD_1) + GET_SHORTCUT_COUNT(SHORTCUT_PAN_MOD_2);
+		int zoom_mod_input_count = GET_SHORTCUT_COUNT(SHORTCUT_ZOOM_MOD_1) + GET_SHORTCUT_COUNT(SHORTCUT_ZOOM_MOD_2);
+		bool orbit_not_empty = !DebuggerHelpers::is_shortcut_empty(SHORTCUT_ORBIT_MOD_1, inputs) || !DebuggerHelpers::is_shortcut_empty(SHORTCUT_ORBIT_MOD_2, inputs);
+		bool pan_not_empty = !DebuggerHelpers::is_shortcut_empty(SHORTCUT_PAN_MOD_1, inputs) || !DebuggerHelpers::is_shortcut_empty(SHORTCUT_PAN_MOD_2, inputs);
+		bool zoom_not_empty = !DebuggerHelpers::is_shortcut_empty(SHORTCUT_ZOOM_MOD_1, inputs) || !DebuggerHelpers::is_shortcut_empty(SHORTCUT_ZOOM_MOD_2, inputs);
+		shortcut_checks.push_back(ShortcutCheck(orbit_mod_pressed, orbit_not_empty, orbit_mod_input_count, orbit_mouse_button, NAV_MODE_ORBIT));
+		shortcut_checks.push_back(ShortcutCheck(pan_mod_pressed, pan_not_empty, pan_mod_input_count, pan_mouse_button, NAV_MODE_PAN));
+		shortcut_checks.push_back(ShortcutCheck(zoom_mod_pressed, zoom_not_empty, zoom_mod_input_count, zoom_mouse_button, NAV_MODE_ZOOM));
+		shortcut_checks.sort_custom<ShortcutCheckSetComparator>();
+
+#undef GET_SHORTCUT_COUNT
+	}
+
+	Ref<InputEventMouse> m = p_event;
+	if (m.is_valid()) {
+		if (m->get_button_mask().has_flag(MouseButtonMask::LEFT)) {
+			NavigationMode change_nav_from_shortcut = _get_nav_mode_from_shortcuts(NAV_MOUSE_BUTTON_LEFT, shortcut_checks, false);
+			if (change_nav_from_shortcut != NAV_MODE_NONE) {
+				return change_nav_from_shortcut;
+			}
+		} else if (freelook || m->get_button_mask().has_flag(MouseButtonMask::RIGHT)) {
+			NavigationMode change_nav_from_shortcut = _get_nav_mode_from_shortcuts(NAV_MOUSE_BUTTON_RIGHT, shortcut_checks, false);
+			if (m->get_button_mask().has_flag(MouseButtonMask::RIGHT) && change_nav_from_shortcut != NAV_MODE_NONE) {
+				return change_nav_from_shortcut;
+			}
+			if (freelook) {
+				return NAV_MODE_LOOK;
+			}
+			if (orthogonal) {
+				return NAV_MODE_PAN;
+			}
+
+		} else if (m->get_button_mask().has_flag(MouseButtonMask::MIDDLE)) {
+			NavigationMode change_nav_from_shortcut = _get_nav_mode_from_shortcuts(NAV_MOUSE_BUTTON_MIDDLE, shortcut_checks, false);
+			if (change_nav_from_shortcut != NAV_MODE_NONE) {
+				return change_nav_from_shortcut;
+			}
+
+		} else if (m->get_button_mask().has_flag(MouseButtonMask::MB_XBUTTON1)) {
+			NavigationMode change_nav_from_shortcut = _get_nav_mode_from_shortcuts(NAV_MOUSE_BUTTON_4, shortcut_checks, false);
+			if (change_nav_from_shortcut != NAV_MODE_NONE) {
+				return change_nav_from_shortcut;
+			}
+
+		} else if (m->get_button_mask().has_flag(MouseButtonMask::MB_XBUTTON2)) {
+			NavigationMode change_nav_from_shortcut = _get_nav_mode_from_shortcuts(NAV_MOUSE_BUTTON_5, shortcut_checks, false);
+			if (change_nav_from_shortcut != NAV_MODE_NONE) {
+				return change_nav_from_shortcut;
+			}
+
+		} else if (emulate_3_button_mouse) {
+			// Handle trackpad (no external mouse) use case.
+			NavigationMode change_nav_from_shortcut = _get_nav_mode_from_shortcuts(NAV_MOUSE_BUTTON_LEFT, shortcut_checks, true);
+			if (change_nav_from_shortcut != NAV_MODE_NONE) {
+				return change_nav_from_shortcut;
+			}
+		}
+	} else {
+		Ref<InputEventPanGesture> pg = p_event;
+		if (pg.is_valid()) {
+			for (const ShortcutCheck &shortcut_check_set : shortcut_checks) {
+				if (shortcut_check_set.mod_pressed) {
+					return shortcut_check_set.result_nav_mode;
+				}
+			}
+		}
+	}
+
+	return NAV_MODE_NONE;
 }
 
 Key View3DController::emulate_numpad_key(const Key p_code) const {

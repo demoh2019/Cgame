@@ -5,11 +5,11 @@ extends RefCounted
 ## nodes are modified. Uses the Cgame native camera trauma path when available.
 
 const PROFILES := {
-	"hit_zombie": {"amount": 0.12, "inner": 0.6, "outer": 4.0},
+	"hit_zombie": {"amount": 0.12, "inner": 0.6, "outer": 4.0, "directional": true},
 	"zombie_died": {"amount": 0.18, "inner": 1.0, "outer": 6.0},
-	"knockback": {"amount": 0.15, "inner": 1.0, "outer": 8.0},
+	"knockback": {"amount": 0.15, "inner": 1.0, "outer": 8.0, "directional": true},
 	"flash_thrown": {"amount": 0.25, "inner": 1.5, "outer": 12.0},
-	"barricade_broken": {"amount": 0.30, "inner": 1.5, "outer": 10.0},
+	"barricade_broken": {"amount": 0.30, "inner": 1.5, "outer": 10.0, "directional": true},
 }
 
 
@@ -38,7 +38,12 @@ static func apply(camera: Camera3D, kind: String, source: Vector3,
 	var amount: float = float(profile["amount"]) * clampf(shake_scale, 0.0, 1.0)
 	var inner: float = float(profile["inner"])
 	var outer: float = float(profile["outer"])
-	if camera.has_method("add_spatial_trauma"):
+	# Unreal PlayWorldCameraShake-style optional epicenter orientation:
+	# the local camera reacts towards impactful hits without moving the
+	# player or changing combat authority. Old binaries use radial trauma.
+	if bool(profile.get("directional", false)) and camera.has_method("add_directional_spatial_trauma"):
+		camera.call("add_directional_spatial_trauma", source, listener, amount, inner, outer)
+	elif camera.has_method("add_spatial_trauma"):
 		camera.call("add_spatial_trauma", source, listener, amount, inner, outer)
 	elif camera.has_method("add_trauma"):
 		# Older engine builds keep the same game feedback and accessibility.

@@ -35,6 +35,7 @@
 #include "core/math/vector2.h"
 #include "core/math/vector3.h"
 #include "core/variant/variant.h"
+#include "core/templates/vector.h"
 
 /**
  * Deterministic, physics-independent spatial candidate filter and scorer.
@@ -46,15 +47,43 @@ class EnvironmentQuery3D : public Resource {
 	PackedVector3Array candidates;
 	Vector3 origin;
 	Vector3 threat_position;
+	PackedVector3Array threat_positions; // Up to 32 optional multi-actor threat contexts.
+	PackedVector3Array exclusion_positions; // Up to 128 occupied positions for clearance filtering.
+	double min_exclusion_distance = 0.0; // Zero disables this optional filter.
+	bool use_direction = false; // Optional EQS-like cone/dot-product candidate test.
+	Vector3 direction_origin;
+	Vector3 direction_axis = Vector3(1, 0, 0);
+	double min_direction_dot = -1.0;
+	double max_direction_dot = 1.0; // Inclusive upper bound preserves legacy cone behavior.
 	bool use_threat = false;
 	bool horizontal_only = false;
 	double min_distance = 0.0;
 	double max_distance = 100.0;
+	double max_vertical_difference = 0.0; // Zero disables optional vertical test.
 	double desired_distance = 0.0;
 	double distance_weight = 1.0;
 	double safety_weight = 0.0;
 	double min_threat_distance = 0.0;
 	int max_results = 0;
+
+	// Transient, non-serialized EQS cursor with a copy-on-write snapshot of
+	// the complete scoring context. Mutating the live query mid-step cannot
+	// corrupt an in-flight result; only explicit restart replaces the snapshot.
+	struct IncrementalHit {
+		int index = 0;
+		double score = 0.0;
+	};
+	Ref<EnvironmentQuery3D> incremental_snapshot;
+	Vector<IncrementalHit> incremental_best;
+	int incremental_cursor = 0;
+	int incremental_limit = 0;
+	bool incremental_done = false;
+	int incremental_last_step_candidates = 0;
+	int64_t incremental_last_step_us = 0;
+	int incremental_total_step_candidates = 0;
+	int64_t incremental_total_step_us = 0;
+
+	bool _step_incremental_top_positions_internal(int p_budget, int64_t p_time_budget_us);
 
 protected:
 	static void _bind_methods();
@@ -67,6 +96,23 @@ public:
 	Vector3 get_origin() const { return origin; }
 	void set_threat_position(const Vector3 &p_position);
 	Vector3 get_threat_position() const { return threat_position; }
+	void set_threat_positions(const PackedVector3Array &p_positions);
+	PackedVector3Array get_threat_positions() const { return threat_positions; }
+	void set_exclusion_positions(const PackedVector3Array &p_positions);
+	PackedVector3Array get_exclusion_positions() const { return exclusion_positions; }
+	void set_min_exclusion_distance(double p_distance);
+	double get_min_exclusion_distance() const { return min_exclusion_distance; }
+	void set_use_direction(bool p_enabled) { use_direction = p_enabled; emit_changed(); }
+	bool is_using_direction() const { return use_direction; }
+	void set_direction_origin(const Vector3 &p_origin);
+	Vector3 get_direction_origin() const { return direction_origin; }
+	void set_direction_axis(const Vector3 &p_axis);
+	Vector3 get_direction_axis() const { return direction_axis; }
+	void set_min_direction_dot(double p_dot);
+	double get_min_direction_dot() const { return min_direction_dot; }
+	void set_max_direction_dot(double p_dot);
+	double get_max_direction_dot() const { return max_direction_dot; }
+
 	void set_use_threat(bool p_enabled) { use_threat = p_enabled; emit_changed(); }
 	bool is_using_threat() const { return use_threat; }
 	void set_horizontal_only(bool p_enabled) { horizontal_only = p_enabled; emit_changed(); }
@@ -76,6 +122,8 @@ public:
 	double get_min_distance() const { return min_distance; }
 	void set_max_distance(double p_distance);
 	double get_max_distance() const { return max_distance; }
+	void set_max_vertical_difference(double p_height);
+	double get_max_vertical_difference() const { return max_vertical_difference; }
 	void set_desired_distance(double p_distance);
 	double get_desired_distance() const { return desired_distance; }
 	void set_distance_weight(double p_weight);
@@ -93,9 +141,57 @@ public:
 	PackedVector3Array query_positions() const;
 	// Bounded allocation-free-of-metadata stable top-K for frequent AI queries.
 	PackedVector3Array query_top_positions(int p_count) const;
+	// Score-band random best: deterministic seed, O(N) work, O(1) scratch.
+	PackedVector3Array query_random_best_positions(int p_best_percent, int64_t p_seed) const;
+	// Same stable top-K scoring as query_top_positions(), but returns original
+	// candidate indices instead of copying positions or creating metadata.
+	// Duplicate coordinates retain distinct identities (e.g. Smart Object slots).
+	// O(candidates * K) time, O(K) memory; count must be 1..64.
+	PackedInt32Array query_top_indices(int p_count) const;
+	// True stepwise native EQS: score at most N candidates per call while
+	// preserving a stable query snapshot and the exact ranked top-K output.
+	// Only the final result is readable; incomplete scores cannot drive AI.
+	bool begin_incremental_top_positions(int p_count);
+	bool step_incremental_top_positions(int p_budget);
+	// Bounded wall-clock work for the snapshot, measured with monotonic
+	// microseconds. At least one candidate is processed per valid active step.
+	// One expensive candidate can overrun the soft time limit.
+	bool step_incremental_top_positions_timed(int p_time_budget_us, int p_max_candidates);
+	int get_incremental_last_step_candidates() const { return incremental_last_step_candidates; }
+	int64_t get_incremental_last_step_us() const { return incremental_last_step_us; }
+	// Adaptive next-step cap from observed average cost with a 20% reserve.
+	int suggest_incremental_step_size(int p_time_budget_us, int p_max_candidates) const;
+	bool is_incremental_top_complete() const { return incremental_snapshot.is_valid() && incremental_done; }
+	int get_incremental_processed_count() const { return incremental_cursor; }
+	PackedInt32Array get_incremental_top_indices() const;
+	PackedVector3Array get_incremental_top_positions() const;
+	// Pick a seeded score-band candidate from the already-scored top K.
+	// For all eligible sources, begin with count >= candidate count.
+	PackedVector3Array get_incremental_random_best_positions(int p_best_percent, int64_t p_seed) const;
+	void cancel_incremental_top_positions();
+	// Rank candidates once, then greedily choose spatially separated points.
+	// Stable score/index order, max_results output cap; optional horizontal spacing.
+	PackedVector3Array query_spread_positions(int p_count, double p_min_separation) const;
 
 	// Generates candidates on the XZ plane. Count/size are bounded to avoid
 	// accidentally allocating millions of points in the editor.
 	static PackedVector3Array sample_ring(const Vector3 &p_center, double p_radius, int p_count, double p_phase = 0.0);
+	// Concentric XZ rings with optional deterministic spiral staggering.
+	// At most 65536 points; one ring samples the outer radius.
+	static PackedVector3Array sample_donut(const Vector3 &p_center, double p_inner_radius, double p_outer_radius, int p_ring_count, int p_points_per_ring, double p_phase = 0.0, bool p_spiral = false);
+	// Generates a bounded oriented XZ fan across radii and full cone aperture.
+	// No physics, scene nodes or navigation work; at most 65536 output points.
+	static PackedVector3Array sample_cone(const Vector3 &p_center, const Vector3 &p_direction, double p_inner_radius, double p_outer_radius, int p_ring_count, int p_points_per_ring, double p_cone_degrees = 90.0, bool p_include_center = false);
 	static PackedVector3Array sample_grid(const Vector3 &p_center, const Vector2 &p_half_extents, double p_spacing, int p_max_points = 4096);
+	// Context-relative XZ grid: local +Z follows the input forward direction.
+	// Pure geometry, with bounded allocation and deterministic row-major order.
+	static PackedVector3Array sample_oriented_grid(const Vector3 &p_center, const Vector3 &p_forward, const Vector2 &p_half_extents, double p_spacing, int p_max_points = 4096);
+	// Deterministic area-uniform annulus candidates with a golden-angle phase.
+	// O(count), 1..65536 bounded points; never queries the scene or navigation.
+	static PackedVector3Array sample_fibonacci_annulus(const Vector3 &p_center, double p_inner_radius, double p_outer_radius, int p_count, double p_phase = 0.0);
+
+	// Main-thread EQS work admission mask: regular work is capped at 64 per
+	// tick and rotated over a stable ordered cohort. Urgent recovery bypasses
+	// the regular quota. O(N) time and O(N) bytes, no clock or scene access.
+	static PackedByteArray schedule_query_mask(int p_agent_count, int64_t p_tick, int p_regular_budget, const PackedByteArray &p_urgent = PackedByteArray());
 };

@@ -1,0 +1,48 @@
+name: GDScript Static Debugger Upstream Regression
+
+on:
+  pull_request:
+    paths:
+      - "core/debugger/**"
+      - "core/object/script_backtrace.*"
+      - "core/object/script_language*"
+      - "editor/debugger/**"
+      - "editor/script/script_text_editor.cpp"
+      - "modules/gdscript/**"
+      - "doc/classes/ScriptBacktrace.xml"
+      - "doc/classes/ScriptLanguageExtension.xml"
+      - "misc/tests/test_static_variable_debugger_port.py"
+      - ".github/workflows/static-gdscript-debugger-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-api-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate debugger static-variable source integration
+        run: python3 -m unittest discover -s misc/tests -p 'test_static_variable_debugger_port.py' -v
+
+  static-native-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/godot-deps
+
+      - name: Build Godot editor with C++ tests
+        run: scons platform=linuxbsd target=editor tests=yes module_text_server_fb_enabled=yes -j2
+
+      - name: Run static debugger native doctest suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="$(find bin -maxdepth 1 -type f -name 'godot.linuxbsd.editor.*' -perm /u+x | head -n 1)"
+          test -n "$exe"
+          "$exe" --headless --test --test-case="*[GDScriptStaticDebugger]*"

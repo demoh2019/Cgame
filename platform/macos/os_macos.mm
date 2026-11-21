@@ -728,7 +728,11 @@ Vector<String> OS_MacOS::get_system_font_path_for_text(const String &p_font_name
 					CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(fallback_font, kCTFontURLAttribute);
 					if (url) {
 						NSString *font_path = [NSString stringWithString:[(__bridge NSURL *)url path]];
-						ret.push_back(String::utf8([font_path UTF8String]));
+						String path = String::utf8([font_path UTF8String]);
+						if (FileAccess::get_size(path) == 0 && FileAccess::get_size(path + "/..namedfork/rsrc") != 0) {
+							path += "/..namedfork/rsrc";
+						}
+						ret.push_back(path);
 						CFRelease(url);
 					}
 					CFRelease(fallback_font);
@@ -791,7 +795,11 @@ String OS_MacOS::get_system_font_path(const String &p_font_name, int p_weight, i
 		CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(font, kCTFontURLAttribute);
 		if (url) {
 			NSString *font_path = [NSString stringWithString:[(__bridge NSURL *)url path]];
-			ret = String::utf8([font_path UTF8String]);
+			String path = String::utf8([font_path UTF8String]);
+			if (FileAccess::get_size(path) == 0 && FileAccess::get_size(path + "/..namedfork/rsrc") != 0) {
+				path += "/..namedfork/rsrc";
+			}
+			ret = path;
 			CFRelease(url);
 		}
 		CFRelease(font);
@@ -1338,6 +1346,9 @@ void OS_MacOS_Embedded::run() {
 OS_MacOS_Embedded::OS_MacOS_Embedded(const char *p_execpath, int p_argc, char **p_argv) :
 		OS_MacOS(p_execpath, p_argc, p_argv) {
 	DisplayServerMacOSEmbedded::register_embedded_driver();
+
+	[GodotApplication sharedApplication];
+	[NSApp setActivationPolicy:NSApplicationActivationPolicyProhibited];
 }
 
 #endif

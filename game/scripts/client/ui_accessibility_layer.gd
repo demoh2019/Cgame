@@ -151,6 +151,7 @@ func _process(delta: float) -> void:
 					_world_streamer.get_loaded_count(),
 					_world_streamer.get_queued_generation_count(),
 					_world_streamer.get_pending_visual_details_count()]
+				metrics += " | %d retry" % _world_streamer.get_retry_pending_count()
 			fps_label.text = metrics
 
 

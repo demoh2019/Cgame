@@ -135,6 +135,10 @@ public:
 		SHORTCUT_FREELOOK_DOWN,
 		SHORTCUT_FREELOOK_SPEED_MOD,
 		SHORTCUT_FREELOOK_SLOW_MOD,
+		SHORTCUT_FREELOOK_GLOBAL_UP,
+		SHORTCUT_FREELOOK_GLOBAL_DOWN,
+		SHORTCUT_FREELOOK_LOCAL_UP,
+		SHORTCUT_FREELOOK_LOCAL_DOWN,
 
 		SHORTCUT_MAX,
 	};
@@ -143,9 +147,9 @@ public:
 		// Store the X/Y/Z position individually as doubles, as Vector3 is 32-bit in single-precision builds.
 		// We want to always use doubles, so that freelook and panning behavior stays correct
 		// when far away from the origin.
-		double pos_x;
-		double pos_y;
-		double pos_z;
+		double pos_x = 0.0;
+		double pos_y = 0.0;
+		double pos_z = 0.0;
 
 		real_t x_rot;
 		real_t y_rot;
@@ -155,9 +159,9 @@ public:
 		real_t unsnapped_y_rot;
 
 		// Used for freelook.
-		double eye_pos_x;
-		double eye_pos_y;
-		double eye_pos_z;
+		double eye_pos_x = 0.0;
+		double eye_pos_y = 0.0;
+		double eye_pos_z = 0.0;
 
 		// TODO: These variables are not related to cursor manipulation, and specific
 		// to Node3DEditorPlugin. So remove them in the future.
@@ -166,6 +170,10 @@ public:
 		Point2 region_end;
 
 		Cursor() {
+			pos_x = 0.0;
+			pos_y = 0.0;
+			pos_z = 0.0;
+
 			// These rotations place the camera in +X +Y +Z, aka south east, facing north west.
 			x_rot = 0.5;
 			y_rot = -0.5;
@@ -173,6 +181,11 @@ public:
 			unsnapped_y_rot = y_rot;
 			distance = 4;
 			fov_scale = 1.0;
+
+			eye_pos_x = 0.0;
+			eye_pos_y = 0.0;
+			eye_pos_z = 0.0;
+
 			region_select = false;
 		}
 	};
@@ -279,6 +292,8 @@ public:
 
 	inline Transform3D to_camera_transform() const { return _to_camera_transform(cursor); }
 	inline Transform3D interp_to_camera_transform() const { return _to_camera_transform(cursor_interp); }
+
+	NavigationMode get_nav_mode_from_input(const Ref<InputEvent> &p_event);
 
 	Key emulate_numpad_key(const Key p_code) const;
 

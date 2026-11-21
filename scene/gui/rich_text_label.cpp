@@ -896,7 +896,7 @@ float RichTextLabel::_shape_line(ItemFrame *p_frame, int p_line, const Ref<Font>
 	}
 
 	// Add zero-width space to the end if line did not end with /n to ensure uniform height.
-	if (it_prev) {
+	if (it_prev && txt.is_empty()) {
 		Ref<Font> font = p_base_font;
 		int font_size = p_base_font_size;
 
@@ -4249,7 +4249,11 @@ void RichTextLabel::_process_line_caches() {
 
 	float ctrl_height = get_size().height;
 	int fi = main->first_invalid_line.load();
-	int total_chars = main->lines[fi].char_offset;
+	int total_chars = 0;
+	if (fi > 0) {
+		Line &l_prev = main->lines[fi - 1];
+		total_chars = l_prev.char_offset + l_prev.char_count;
+	}
 	float old_scroll = vscroll->get_value();
 
 	float total_height = 0;
@@ -6032,7 +6036,7 @@ void RichTextLabel::append_text(const String &p_bbcode) {
 			add_text(String::chr(0x2066));
 			pos = brk_end + 1;
 		} else if (tag == "rli") {
-			add_text(String::chr(0x2027));
+			add_text(String::chr(0x2067));
 			pos = brk_end + 1;
 		} else if (tag == "fsi") {
 			add_text(String::chr(0x2068));

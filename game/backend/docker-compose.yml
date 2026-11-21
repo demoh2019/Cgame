@@ -1,12 +1,14 @@
 # Accounts, characters, storage, chat, guilds, the market and leaderboards come from Nakama
 # (Heroic Labs, open source); only the real-time 3D world runs in the headless Godot server.
+# Secrets come from the environment (copy .env.example to .env and change every value for production);
+# the defaults below are for local development only.
 #   docker compose -f game/backend/docker-compose.yml up -d
 services:
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: nakama
-      POSTGRES_PASSWORD: localdb
+      POSTGRES_PASSWORD: ${NAKAMA_DB_PASSWORD:-localdb}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -20,12 +22,19 @@ services:
       - "/bin/sh"
       - "-ecx"
       - >
-        /nakama/nakama migrate up --database.address postgres:localdb@postgres:5432/nakama &&
-        exec /nakama/nakama --name nakama1 --database.address postgres:localdb@postgres:5432/nakama
+        /nakama/nakama migrate up --database.address postgres:$${NAKAMA_DB_PASSWORD}@postgres:5432/nakama &&
+        exec /nakama/nakama --name nakama1 --database.address postgres:$${NAKAMA_DB_PASSWORD}@postgres:5432/nakama
         --logger.level INFO --session.token_expiry_sec 7200
         --runtime.path /nakama/data/modules
-        --socket.server_key albion_after_key
-        --runtime.http_key albion_http_key
+        --socket.server_key $${NAKAMA_SERVER_KEY}
+        --runtime.http_key $${NAKAMA_HTTP_KEY}
+        --console.username $${NAKAMA_CONSOLE_USER} --console.password $${NAKAMA_CONSOLE_PASSWORD}
+    environment:
+      NAKAMA_DB_PASSWORD: ${NAKAMA_DB_PASSWORD:-localdb}
+      NAKAMA_SERVER_KEY: ${NAKAMA_SERVER_KEY:-albion_after_key}
+      NAKAMA_HTTP_KEY: ${NAKAMA_HTTP_KEY:-albion_http_key}
+      NAKAMA_CONSOLE_USER: ${NAKAMA_CONSOLE_USER:-admin}
+      NAKAMA_CONSOLE_PASSWORD: ${NAKAMA_CONSOLE_PASSWORD:-password}
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,7 +43,7 @@ services:
     ports:
       - "7349:7349" # gRPC
       - "7350:7350" # HTTP / WebSocket API
-      - "7351:7351" # Console
+      - "127.0.0.1:7351:7351" # Console: local only; reach it through an SSH tunnel in production
     restart: unless-stopped
 volumes:
   pgdata:

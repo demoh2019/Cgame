@@ -9,8 +9,8 @@
 	</description>
 	<tutorials>
 		<link title="Inputs documentation index">$DOCS_URL/tutorials/inputs/index.html</link>
-		<link title="2D Dodge The Creeps Demo">https://godotengine.org/asset-library/asset/2712</link>
-		<link title="3D Voxel Demo">https://godotengine.org/asset-library/asset/2755</link>
+		<link title="2D Dodge The Creeps Demo">https://store.godotengine.org/asset/godot-foundation/dodge-the-creeps-demo/</link>
+		<link title="Voxel Game Demo">https://store.godotengine.org/asset/godot-foundation/voxel-game-demo/</link>
 	</tutorials>
 	<methods>
 		<method name="action_press">
@@ -553,7 +553,7 @@
 			<return type="bool" />
 			<param index="0" name="button" type="int" enum="MouseButton" />
 			<description>
-				Returns [code]true[/code] if you are pressing the mouse button specified with [enum MouseButton].
+				Returns [code]true[/code] if you are pressing the given mouse button.
 				[b]Note:[/b] If you want to check if a mouse button was just pressed, use Godot's input action system with [method is_action_just_pressed] or use the [method Node._input] method like this instead:
 				[codeblocks]
 				[gdscript]

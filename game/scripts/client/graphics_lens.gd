@@ -39,3 +39,13 @@ static func apply(env: Environment, level: int, rendering_method: String) -> boo
 		env.set("lens_vignette", float(profile["vignette"]))
 		return float(profile["vignette"]) > 0.0
 	return false
+
+
+## Subtle barrel distortion of a wide real lens (UE5 Lens Distortion, HDRP
+## Lens Distortion). Applied in the existing canvas grade pass; kept small so
+## the top-down playfield stays readable.
+static func distortion(level: int, rendering_method: String) -> float:
+	var tier: int = clampi(level, 0, 3)
+	if tier < 2 or rendering_method == "gl_compatibility":
+		return 0.0
+	return 0.035 if tier == 2 else 0.05

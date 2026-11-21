@@ -30,6 +30,9 @@
 
 #pragma once
 
+#include "ai_execution_profiler.h"
+#include "ai_behavior_trace.h"
+
 #include "core/io/resource.h"
 #include "core/object/gdvirtual.gen.h"
 #include "core/variant/dictionary.h"
@@ -56,6 +59,9 @@ protected:
 
 public:
 	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta);
+	// Executes the virtual task normally, but records optional per-node trace.
+	// All built-in composites/decorators use this to preserve child paths.
+	Status execute_traced(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta);
 	virtual bool contains_task(const BehaviorTreeTask *p_target, int p_depth = 0) const;
 };
 
@@ -101,6 +107,28 @@ public:
 	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
 };
 
+/** Rescans all children every tick, interrupting any abandoned running task. */
+class BehaviorTreeReactiveSequence : public BehaviorTreeComposite {
+	GDCLASS(BehaviorTreeReactiveSequence, BehaviorTreeComposite);
+
+protected:
+	static void _bind_methods() {}
+
+public:
+	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
+};
+
+/** Rechecks priority from the first child on every tick, preempting old work. */
+class BehaviorTreeReactiveSelector : public BehaviorTreeComposite {
+	GDCLASS(BehaviorTreeReactiveSelector, BehaviorTreeComposite);
+
+protected:
+	static void _bind_methods() {}
+
+public:
+	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
+};
+
 class BehaviorTreeInverter : public BehaviorTreeTask {
 	GDCLASS(BehaviorTreeInverter, BehaviorTreeTask);
 
@@ -113,6 +141,52 @@ public:
 	void set_task(const Ref<BehaviorTreeTask> &p_task);
 	Ref<BehaviorTreeTask> get_task() const { return task; }
 	virtual bool contains_task(const BehaviorTreeTask *p_target, int p_depth = 0) const override;
+	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
+};
+
+/** Single-child decorator with resource-safe cycle detection and runner-local state. */
+class BehaviorTreeDecorator : public BehaviorTreeTask {
+	GDCLASS(BehaviorTreeDecorator, BehaviorTreeTask);
+
+	Ref<BehaviorTreeTask> task;
+
+protected:
+	static void _bind_methods();
+	static void clear_branch_memory(Dictionary &r_memory, const String &p_path);
+
+public:
+	void set_task(const Ref<BehaviorTreeTask> &p_task);
+	Ref<BehaviorTreeTask> get_task() const { return task; }
+	virtual bool contains_task(const BehaviorTreeTask *p_target, int p_depth = 0) const override;
+};
+
+/** Fails and aborts the child if it does not finish before a time limit. */
+class BehaviorTreeTimeout : public BehaviorTreeDecorator {
+	GDCLASS(BehaviorTreeTimeout, BehaviorTreeDecorator);
+
+	double duration = 1.0;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void set_duration(double p_duration);
+	double get_duration() const { return duration; }
+	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
+};
+
+/** Rejects a child for a cooldown window after that child succeeds. */
+class BehaviorTreeCooldown : public BehaviorTreeDecorator {
+	GDCLASS(BehaviorTreeCooldown, BehaviorTreeDecorator);
+
+	double duration = 1.0;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void set_duration(double p_duration);
+	double get_duration() const { return duration; }
 	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
 };
 
@@ -133,6 +207,48 @@ public:
 	Variant get_expected_value() const { return expected_value; }
 	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
 };
+
+/** Configurable Blackboard condition, with optional second-key operand. */
+class BehaviorTreeBlackboardCompare : public BehaviorTreeTask {
+	GDCLASS(BehaviorTreeBlackboardCompare, BehaviorTreeTask);
+
+public:
+	enum Comparison {
+		EQUAL,
+		NOT_EQUAL,
+		LESS,
+		LESS_OR_EQUAL,
+		GREATER,
+		GREATER_OR_EQUAL,
+		EXISTS,
+		NOT_EXISTS,
+	};
+
+private:
+	StringName key;
+	StringName other_key;
+	Variant value;
+	Comparison comparison = EQUAL;
+	bool use_other_key = false;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void set_key(const StringName &p_key) { key = p_key; emit_changed(); }
+	StringName get_key() const { return key; }
+	void set_other_key(const StringName &p_key) { other_key = p_key; emit_changed(); }
+	StringName get_other_key() const { return other_key; }
+	void set_value(const Variant &p_value) { value = p_value; emit_changed(); }
+	Variant get_value() const { return value; }
+	void set_comparison(Comparison p_comparison);
+	Comparison get_comparison() const { return comparison; }
+	void set_use_other_key(bool p_enable) { use_other_key = p_enable; emit_changed(); }
+	bool is_using_other_key() const { return use_other_key; }
+	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
+};
+
+VARIANT_ENUM_CAST(BehaviorTreeBlackboardCompare::Comparison);
 
 /** Built-in leaf that writes a blackboard value. */
 class BehaviorTreeBlackboardSet : public BehaviorTreeTask {
@@ -176,6 +292,9 @@ class BehaviorTreeRunner : public Node {
 	BehaviorTreeTask::Status last_status = BehaviorTreeTask::RUNNING;
 	bool auto_tick = false;
 	bool finished = false;
+	Ref<AIExecutionProfiler> execution_profiler;
+	Ref<AIBehaviorTrace> execution_trace;
+	bool trace_enabled = false;
 
 protected:
 	static void _bind_methods();
@@ -192,6 +311,24 @@ public:
 	void reset();
 	bool is_finished() const { return finished; }
 	BehaviorTreeTask::Status get_last_status() const { return last_status; }
+	// On-demand diagnostic view; nested containers are copied, Objects stay shared.
+	Dictionary get_debug_snapshot() const;
+	void set_profiling_enabled(bool p_enabled);
+	bool is_profiling_enabled() const;
+	Dictionary get_profile_snapshot() const;
+	void reset_profile();
+	void set_trace_enabled(bool p_enabled);
+	bool is_trace_enabled() const { return trace_enabled; }
+	Dictionary get_trace_snapshot() const;
+	// On-demand hierarchy: all Resource tasks plus latest per-path trace status.
+	// Unvisited nodes remain visible with status=-1 and executed=false.
+	Dictionary get_tree_snapshot() const;
+	void reset_trace();
+	// Replay is opt-in even when trace_enabled; 0 retains only current tick.
+	void set_trace_history_capacity(int p_capacity);
+	int get_trace_history_capacity() const;
+	Array get_trace_history_frames(bool p_changes_only = false) const;
+	Array get_slowest_trace_nodes(int p_limit = 8) const;
 
 	BehaviorTreeRunner();
 };

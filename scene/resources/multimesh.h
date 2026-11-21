@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/variant/typed_array.h"
 #include "scene/resources/mesh.h"
 #include "servers/rendering/rendering_server_enums.h"
 
@@ -80,6 +81,16 @@ protected:
 public:
 	void set_buffer(const Vector<float> &p_buffer);
 	Vector<float> get_buffer() const;
+	// Build static 3D GPU instance records in one native pass, preserving
+	// transforms and optional tint without per-float GDScript writes.
+	// Validate and atomically upload a whole 3D transform/RGBA buffer.
+	bool set_instance_transform_color_buffer(const Array &p_transforms, const Vector<Color> &p_colors);
+	Vector<float> pack_transform_buffer(const Array &p_transforms, const Vector<Color> &p_colors) const;
+	// Union transformed mesh bounds without a script loop per instance.
+	AABB transformed_mesh_bounds(const Array &p_transforms, real_t p_margin) const;
+	// Pure CPU Fisher-Yates shuffle of complete instance records. No GPU upload,
+	// no transform/color mixing, and no mutation of the input buffer.
+	Vector<float> shuffled_instance_buffer(const Vector<float> &p_buffer, uint64_t p_seed) const;
 
 	void set_buffer_interpolated(const Vector<float> &p_buffer_curr, const Vector<float> &p_buffer_prev);
 
@@ -105,11 +116,15 @@ public:
 	PhysicsInterpolationQuality get_physics_interpolation_quality() const { return _physics_interpolation_quality; }
 
 	void set_instance_transform(int p_instance, const Transform3D &p_transform);
+	// Sparse prevalidated transforms for pooled and authoritative game entities.
+	bool set_instance_transforms_batch(const PackedInt32Array &p_indices, const TypedArray<Transform3D> &p_transforms);
 	void set_instance_transform_2d(int p_instance, const Transform2D &p_transform);
 	Transform3D get_instance_transform(int p_instance) const;
 	Transform2D get_instance_transform_2d(int p_instance) const;
 
 	void set_instance_color(int p_instance, const Color &p_color);
+	// Validate every sparse instance color update before modifying the buffer.
+	bool set_instance_colors_batch(const PackedInt32Array &p_indices, const PackedColorArray &p_colors);
 	Color get_instance_color(int p_instance) const;
 
 	void set_instance_custom_data(int p_instance, const Color &p_custom_data);

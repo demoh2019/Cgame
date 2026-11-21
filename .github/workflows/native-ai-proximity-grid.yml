@@ -1,0 +1,106 @@
+name: Native AI pack proximity and authoritative game regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_proximity_grid_2d.*'
+      - 'modules/behavior_tree/tests/test_ai_proximity_grid_2d.h'
+      - 'modules/behavior_tree/register_types.cpp'
+      - 'modules/behavior_tree/doc_classes/AIProximityGrid2D.xml'
+      - 'game/scripts/server/game_server.gd'
+      - 'game/tests/test_zombie_pack.gd'
+      - 'game/scripts/shared/pack_neighbor_selection.gd'
+      - 'tests/scene/test_ai_nearest_pack_contract.py'
+      - 'game/tests/run_pack_spatial.gd'
+      - '.github/workflows/native-ai-proximity-grid.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_proximity_grid_2d.*'
+      - 'modules/behavior_tree/tests/test_ai_proximity_grid_2d.h'
+      - 'modules/behavior_tree/register_types.cpp'
+      - 'modules/behavior_tree/doc_classes/AIProximityGrid2D.xml'
+      - 'game/scripts/server/game_server.gd'
+      - 'game/tests/test_zombie_pack.gd'
+      - 'game/scripts/shared/pack_neighbor_selection.gd'
+      - 'tests/scene/test_ai_nearest_pack_contract.py'
+      - 'game/tests/run_pack_spatial.gd'
+      - '.github/workflows/native-ai-proximity-grid.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nearest-source-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            modules/behavior_tree/ai_proximity_grid_2d.h
+            modules/behavior_tree/ai_proximity_grid_2d.cpp
+            game/scripts/server/game_server.gd
+            game/scripts/shared/pack_neighbor_selection.gd
+            game/tests/test_zombie_pack.gd
+            tests/scene/test_ai_nearest_pack_contract.py
+          sparse-checkout-cone-mode: false
+      - name: Validate nearest-K game integration and reference crowd model
+        run: python3 tests/scene/test_ai_nearest_pack_contract.py -v
+
+  native-and-game:
+    needs: nearest-source-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-ai-proximity
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-ai-proximity
+        continue-on-error: true
+      - name: Run native pack query bounds and radius tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[AIProximityGrid2D]*" 2>&1 | tee ai-proximity-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' ai-proximity-native.log; then exit 1; fi
+      - name: Import the Albion After game
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee ai-proximity-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' ai-proximity-import.log; then exit 1; fi
+      - name: Run native and fallback server pack regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --script res://tests/run_pack_spatial.gd 2>&1 | tee ai-proximity-game.log
+          grep -E '^PACK SPATIAL TOTAL: [0-9]+ checks, 0 failures$' ai-proximity-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' ai-proximity-game.log; then exit 1; fi
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-proximity-regressions
+          if-no-files-found: ignore
+          path: |
+            ai-proximity-native.log
+            ai-proximity-import.log
+            ai-proximity-game.log

@@ -34,6 +34,8 @@
 
 #include "core/variant/callable.h"
 
+#include <cstdint>
+
 class FootPlacementModifier3D : public SkeletonModifier3D {
 	GDCLASS(FootPlacementModifier3D, SkeletonModifier3D);
 
@@ -63,6 +65,14 @@ private:
 
 	float pelvis_smoothed = 0.0f;
 	bool pelvis_initialized = false;
+
+	// Optional bounded main-thread CPU telemetry. Disabled by default to
+	// avoid clock-read overhead for projects not using pose budgets.
+	bool profiling_enabled = false;
+	int last_process_cost_us = 0;
+	int estimated_process_cost_us = 0;
+	int process_sample_count = 0;
+	void _record_process_sample(uint64_t p_started_us);
 
 	bool _sample_ground(const Skeleton3D *p_skeleton, float p_x, float p_z, float &r_height) const;
 
@@ -130,6 +140,17 @@ public:
 
 	float get_current_pelvis_offset() const;
 	void reset();
+
+	// A measured update costs at least 1us and at most 100,000us.
+	// Previous estimate 0 denotes an unseen work unit; invalid inputs
+	// fail closed. Static helper is used by telemetry and regression tests.
+	static int smooth_process_cost_us(int p_previous_us, int p_sample_us);
+	void set_profiling_enabled(bool p_enabled);
+	bool is_profiling_enabled() const { return profiling_enabled; }
+	void reset_process_telemetry();
+	int get_last_process_cost_us() const { return last_process_cost_us; }
+	int get_estimated_process_cost_us() const { return estimated_process_cost_us; }
+	int get_process_sample_count() const { return process_sample_count; }
 
 	FootPlacementModifier3D() {}
 };

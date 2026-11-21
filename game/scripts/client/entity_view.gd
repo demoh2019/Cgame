@@ -7,32 +7,50 @@ const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
+const RaftVisual = preload("res://scripts/client/raft_visual.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const LootLabel = preload("res://scripts/shared/loot_label.gd")
 const Ragdoll = preload("res://scripts/client/ragdoll.gd")
 const CharacterAnim = preload("res://scripts/client/character_anim.gd")
 const SnapshotSmoothing = preload("res://scripts/client/network_snapshot_smoothing.gd")
+const NetworkJitterBuffer = preload("res://scripts/client/network_jitter_buffer.gd")
 const LootDropBounce = preload("res://scripts/client/loot_drop_bounce.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const EngineFeatures = preload("res://scripts/client/engine_features.gd")
+const GameplayCues = preload("res://scripts/client/gameplay_cues.gd")
 const AnimLod = preload("res://scripts/client/anim_lod.gd")
 const CombatAnimationPriority = preload("res://scripts/client/combat_animation_priority.gd")
 const CampfireFx = preload("res://scripts/client/campfire_fx.gd")
 const LootBeam = preload("res://scripts/client/loot_beam.gd")
 const CorpseBurn = preload("res://scripts/client/corpse_burn.gd")
 const BlobShadow = preload("res://scripts/client/blob_shadow.gd")
+const FarmPlotVisual = preload("res://scripts/client/farm_plot_visual.gd")
+const MotionWarp = preload("res://scripts/client/motion_warp.gd")
+const Combat = preload("res://scripts/shared/combat.gd")
 var _anim_lod: Node = null # Native AnimationLODController when the engine has it, else the GDScript AnimLod.
 var _priority_quality: int = -1
 var _world = null
 var _corpses: Array[Dictionary] = []
+var _leaps: Dictionary = {} # "zombie:id" -> {"from": Vector3, "to": Vector3, "t": float}
+const LEAP_SECONDS := 0.55
+const CORPSE_MAX_SECONDS := 900.0 # A looted-out or abandoned body still goes eventually.
+const LOOT_GLOW_SHADER := preload("res://shaders/loot_glow.gdshader")
 
 const ZOMBIE_LOOK := {
 	"walker": {"tint": Color(0.62, 0.85, 0.55), "scale": 2.0, "walk": 0.8, "model": "Orc_Male"},
 	"runner": {"tint": Color(0.9, 0.9, 0.45), "scale": 1.85, "walk": 1.8, "model": "Elf_Female"},
 	"brute": {"tint": Color(0.55, 0.5, 0.7), "scale": 3.0, "walk": 0.7, "model": "Orc_Female"},
 	"spitter": {"tint": Color(0.42, 0.87, 0.28), "scale": 2.1, "walk": 0.65, "model": "Orc_Male"},
+	"stalker": {"tint": Color(0.32, 0.3, 0.36), "scale": 1.95, "walk": 1.6, "model": "Elf_Male"},
+	"sentinel": {"tint": Color(0.5, 0.58, 0.72), "scale": 2.6, "walk": 0.9, "model": "Orc_Female"},
+	"howler": {"tint": Color(0.82, 0.7, 0.9), "scale": 2.0, "walk": 1.0, "model": "Elf_Female"},
+	"crawler": {"tint": Color(0.72, 0.62, 0.42), "scale": 1.35, "walk": 1.6, "model": "Orc_Male"},
 }
+
+
+static func zombie_look(zombie_type: String) -> Dictionary:
+	return ZOMBIE_LOOK.get(zombie_type, ZOMBIE_LOOK["walker"])
 const ALERT_TINT := Color(1.0, 0.45, 0.4)
 
 var _nodes: Dictionary = {} # "kind:id" -> Node3D
@@ -41,9 +59,51 @@ var _history: Dictionary = {} # "player:id" / "zombie:id" -> [[server time, posi
 var _wetness_step: int = 0
 var _snapshot_time := 0.0
 var _last_hp: Dictionary = {} # "player:id" / "zombie:id" -> last seen HP, for hit flashes.
+var _tag_epoch: Dictionary = {} # Sync native live tags once per server timestamp, not per render frame.
 var _render_time := -1.0
-const INTERPOLATION_DELAY := 0.12 # A little more than one snapshot interval (10 per second).
+# Native jitter telemetry and delay adaptation on Cgame, with 1:1 script
+# policy on official Godot. Positions/teleports stay server-authoritative.
+var _snapshot_buffer = ClassDB.instantiate("AdaptiveNetworkJitterBuffer") if ClassDB.class_exists("AdaptiveNetworkJitterBuffer") else NetworkJitterBuffer.new()
+var _rotation_smoother: Object = EngineFeatures.make("SnapshotRotationSmoothing3D")
+const INTERPOLATION_DELAY := 0.12 # Baseline for 10 server snapshots per second.
 const TELEPORT_DISTANCE := 8.0
+
+
+func _init() -> void:
+	# Match the dedicated server's actual snapshot rate. Configuration
+	# only resets this local presentation buffer, never server simulation.
+	_snapshot_buffer.configure(INTERPOLATION_DELAY, NetworkJitterBuffer.MAX_DELAY,
+		1.0 / float(Defs.SNAPSHOT_RATE))
+	# A few stable *new* snapshots must arrive before shedding the
+	# interpolation reserve after loss. Old Cgame binaries ignore this.
+	if _snapshot_buffer.has_method("set_recovery_guard_packets"):
+		_snapshot_buffer.set_recovery_guard_packets(3)
+
+
+## House piece models (Kenney Fantasy Town Kit, CC0), sized to the 3 m building grid. Upgraded
+## walls (tier 2+) turn from timber to stone.
+const PIECE_DIR := "res://assets/models/kenney_building/town/"
+const PIECE_MODELS := {
+	"wall": [["wall-wood", "length", 3.0], ["wall", "length", 3.0]],
+	"door": [["wall-wood-door", "length", 3.0], ["wall-doorway-square", "length", 3.0]],
+	"window": [["wall-wood-window-shutters", "length", 3.0], ["wall-window-shutters", "length", 3.0]],
+	"floor": [["planks", "length", 3.0], ["planks", "length", 3.0]],
+	"roof": [["roof", "length", 3.2], ["roof", "length", 3.2]],
+	"pillar": [["pillar-wood", "height", 3.0], ["pillar-wood", "height", 3.0]],
+	"bed": [["../../kenney_ruins/survival/bedroll-frame", "length", 2.2], ["../../kenney_ruins/survival/bedroll-frame", "length", 2.2]],
+	"lamp": [["../../kenney_ruins/graveyard/fire-basket", "height", 1.3], ["../../kenney_ruins/graveyard/fire-basket", "height", 1.3]],
+	"chest": [["../survival/chest", "length", 1.2], ["../survival/chest", "length", 1.2]],
+	"workbench": [["../survival/workbench", "length", 1.8], ["../survival/workbench", "length", 1.8]],
+	"door_open": [["wall-wood-doorway-base", "length", 3.0], ["wall-doorway-square", "length", 3.0]],
+}
+
+
+static func piece_mesh(piece: String, tier: int) -> Mesh:
+	if not PIECE_MODELS.has(piece):
+		return wall_mesh(tier)
+	var choice: Array = PIECE_MODELS[piece][0 if tier <= 1 else 1]
+	var mesh: Mesh = ModelCatalog.entry_mesh({"path": PIECE_DIR + str(choice[0]) + ".glb", "kind": str(choice[1]), "size": float(choice[2])})
+	return mesh if mesh != null else wall_mesh(tier)
 
 
 ## The wall model of a tier, or a timber box when the packs are missing.
@@ -74,11 +134,43 @@ func set_wetness_step(step: int) -> void:
 			model.set_wetness_step(_wetness_step)
 
 
+## Reusable local diagnostics for network-quality debug overlays.
+## Server-side privacy and gameplay snapshots are never modified.
+func network_jitter_stats() -> Dictionary:
+	return _snapshot_buffer.get_stats()
+
+
+## Native/script read-only counters used by the online profiler.
+## Scalar getters avoid allocating a full stats Dictionary per sample.
+func network_missing_snapshot_estimate() -> int:
+	if not _snapshot_buffer.has_method("get_estimated_missing_snapshots"):
+		return 0
+	return int(_snapshot_buffer.get_estimated_missing_snapshots())
+
+
+func network_recovery_hold_remaining() -> int:
+	if not _snapshot_buffer.has_method("get_recovery_hold_remaining"):
+		return 0
+	return int(_snapshot_buffer.get_recovery_hold_remaining())
+
+
 func update_from(client) -> void:
-	# The render clock follows the server clock a fixed delay behind, gently, so it never jumps backwards.
-	_snapshot_time = float(client.server_time)
-	if _render_time < 0.0 or absf(_render_time - (_snapshot_time - INTERPOLATION_DELAY)) > 0.5:
-		_render_time = _snapshot_time - INTERPOLATION_DELAY
+	# This method runs every render frame, not on every network event.
+	# Only new *server timestamps* may update the measured arrival jitter.
+	var incoming_time: float = float(client.server_time)
+	if not is_finite(incoming_time) or incoming_time < 0.0:
+		return
+	if incoming_time < _snapshot_time:
+		if _snapshot_time - incoming_time <= 0.5:
+			return # Out-of-order sample: keep the newest authoritative pose.
+		# Reconnect to an earlier server epoch: flush visual history only.
+		_snapshot_buffer.reset()
+		_history.clear()
+		_render_time = -1.0
+	_snapshot_time = incoming_time
+	_snapshot_buffer.observe(_snapshot_time, float(Time.get_ticks_usec()) * 0.000001)
+	if _render_time < 0.0 or absf(_render_time - (_snapshot_time - _snapshot_buffer.delay)) > 0.5:
+		_render_time = _snapshot_time - _snapshot_buffer.delay
 	var seen: Dictionary = {}
 	for id in client.players:
 		_touch("player:%d" % id, "player", client.players[id], seen)
@@ -94,6 +186,9 @@ func update_from(client) -> void:
 		_touch("bag:%d" % id, "bag", client.bags[id], seen)
 	for id in client.barricades:
 		_touch("barricade:%d" % id, "barricade", client.barricades[id], seen)
+	for id in client.farm_plots:
+		_touch("plot:%d" % id, "plot", client.farm_plots[id], seen)
+		FarmPlotVisual.update(_nodes["plot:%d" % id], client.farm_plots[id])
 	for id in client.campfires:
 		_touch("campfire:%d" % id, "campfire", client.campfires[id], seen)
 	for id in client.shelters:
@@ -119,6 +214,7 @@ func update_from(client) -> void:
 			_targets.erase(key)
 			_history.erase(key)
 			_last_hp.erase(key)
+			_tag_epoch.erase(key)
 
 
 func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> void:
@@ -128,6 +224,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		add_child(_nodes[key])
 		_nodes[key].position = Vector3(entity["x"], entity["y"], entity["z"])
 	_targets[key] = {"position": Vector3(entity["x"], entity["y"], entity["z"]), "yaw": float(entity.get("yaw", 0.0))}
+	if (kind == "player" or kind == "zombie") and float(_tag_epoch.get(key, -1.0)) != _snapshot_time:
+		EngineFeatures.sync_runtime_tags(_nodes[key], kind, entity)
+		_tag_epoch[key] = _snapshot_time
 	if (kind == "player" or kind == "zombie") and entity.has("hp"):
 		var hp: float = float(entity["hp"])
 		var before: float = float(_last_hp.get(key, hp))
@@ -136,7 +235,8 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			var hit_model := (_nodes[key] as Node3D).get_node_or_null("Model")
 			if hit_model != null and hit_model.has_method("hit_flash"):
 				# Bigger hits flash brighter (fraction of the pre-hit HP).
-				hit_model.hit_flash(0.5 + (before - hp) / maxf(before, 1.0) * 2.0)
+				var strength: float = 0.5 + (before - hp) / maxf(before, 1.0) * 2.0
+				hit_model.hit_flash(EngineFeatures.hit_feedback_strength(_nodes[key], strength))
 	if kind == "player" or kind == "zombie":
 		# Moving things keep a short history on the server clock; they are drawn a little in the past, between two
 		# real samples, so uneven packet arrival does not show as stutter.
@@ -172,7 +272,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 				label.text += " [EXPOSED]"
 		elif kind == "player":
 			label.text = ("%s%s" % [
-				"OUTLAW " if bool(entity.get("outlaw", false)) else "", str(entity["name"])]) if entity["alive"] else "%s (dead)" % entity["name"]
+				("OUTLAW " if bool(entity.get("outlaw", false)) else "") + (("[%s] " % str(entity.get("faction", "")).capitalize()) if bool(entity.get("faction_flagged", false)) else ""), str(entity["name"])]) if entity["alive"] else "%s (dead)" % entity["name"]
 		elif kind == "bag":
 			label.text = LootLabel.for_bag(entity)
 			label.visible = not label.text.is_empty()
@@ -195,9 +295,22 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		# The tier's wall model, turned to its facing, darkening as it is damaged.
 		var barricade_mesh: MeshInstance3D = _nodes[key].get_node("Wall")
 		var tier: int = Structures.tier_of(entity)
-		if int(barricade_mesh.get_meta("tier", 0)) != tier:
+		var piece: String = str(entity.get("piece", ""))
+		if piece == "door" and bool(entity.get("open", true)):
+			piece = "door_open" # An open door shows the empty frame.
+		if piece == "lamp" and not _nodes[key].has_node("Light"):
+			var glow := OmniLight3D.new()
+			glow.name = "Light"
+			glow.position = Vector3(0, 1.2, 0)
+			glow.light_color = Color(1.0, 0.72, 0.4)
+			glow.light_energy = 1.6
+			glow.omni_range = 9.0
+			glow.shadow_enabled = false
+			_nodes[key].add_child(glow)
+		if int(barricade_mesh.get_meta("tier", 0)) != tier or str(barricade_mesh.get_meta("piece", "")) != piece:
 			barricade_mesh.set_meta("tier", tier)
-			barricade_mesh.mesh = wall_mesh(tier)
+			barricade_mesh.set_meta("piece", piece)
+			barricade_mesh.mesh = piece_mesh(piece, tier) if piece != "" else wall_mesh(tier)
 			if barricade_mesh.material_overlay == null:
 				var wear := StandardMaterial3D.new()
 				wear.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -209,7 +322,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 	if kind == "zombie":
 		# A zombie that has locked on to someone flushes red.
 		var model: Node3D = _nodes[key].get_node("Model")
-		var base: Color = ZOMBIE_LOOK[entity["type"]]["tint"]
+		var base: Color = zombie_look(str(entity["type"]))["tint"]
 		if bool(entity.get("raid_enraged", false)):
 			base = Color(1.0, 0.12, 0.12)
 		elif bool(entity.get("raid_boss", false)):
@@ -217,11 +330,19 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		elif bool(entity.get("elite", false)):
 			base = Color(0.98, 0.65, 0.18)
 		var blocked: bool = bool(entity.get("melee_blocked", false))
-		var staggered: bool = float(entity.get("stagger_seconds", 0.0)) > 0.0
-		var pinned: bool = float(entity.get("snared_seconds", 0.0)) > 0.0
-		var exposed: bool = float(entity.get("sunder_seconds", 0.0)) > 0.0
+		# The native tag store is now the source for this visual cue when available.
+		# The snapshot fallback keeps stock Godot clients fully compatible.
+		var staggered: bool = EngineFeatures.runtime_effect_remaining(_nodes[key],
+			"Runtime.Status.Staggered", float(entity.get("stagger_seconds", 0.0))) > 0.0
+		var pinned: bool = EngineFeatures.runtime_effect_remaining(_nodes[key],
+			"Runtime.Status.Snared", float(entity.get("snared_seconds", 0.0))) > 0.0
+		var exposed: bool = EngineFeatures.runtime_effect_remaining(_nodes[key],
+			"Runtime.Status.Sundered", float(entity.get("sunder_seconds", 0.0))) > 0.0
 		var wound_phase: String = str(entity.get("wound_phase", ""))
-		var resolve: bool = int(entity.get("resolve_stacks", 0)) >= 2 and float(entity.get("resolve_seconds", 0.0)) > 0.0
+		var fallback_resolve: int = int(entity.get("resolve_stacks", 0)) if float(entity.get("resolve_seconds", 0.0)) > 0.0 else 0
+		var resolve: bool = EngineFeatures.runtime_stack_count(_nodes[key],
+			"Runtime.Status.Resolve", fallback_resolve) >= 2 and EngineFeatures.runtime_effect_remaining(
+			_nodes[key], "Runtime.Status.Resolve", float(entity.get("resolve_seconds", 0.0))) > 0.0
 		var tint: Color = base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base
 		if wound_phase == "limping":
 			tint = base.lerp(Color(0.54, 0.52, 0.66), 0.65)
@@ -237,6 +358,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			tint = base.lerp(Color(1.0, 0.84, 0.25), 0.65)
 		if staggered:
 			tint = base.lerp(Color(0.38, 0.8, 1.0), 0.7)
+		# Layered control cues preserve the existing status tint priorities.
+		if EngineFeatures.zombie_control_count(_nodes[key], entity) >= 2:
+			tint = tint.lerp(Color(0.97, 0.28, 0.88), 0.22)
 		model.set_tint(tint)
 		model.set_zombie_state(int(entity["state"]))
 	# Snapshot-driven priority is purely visual: never changes server AI or damage.
@@ -248,6 +372,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		bike.set_panniers(bool(entity.get("bike_panniers", false)))
 		bike.set_lamp(bool(entity.get("bike_lamp_lit", false)))
 		bike.set_riding(bool(entity.get("mounted", false)) and bool(entity.get("alive", false)))
+		_nodes[key].get_node("Raft").set_rafting(bool(entity.get("rafting", false)) and bool(entity.get("alive", false)))
 		var player_model: Node3D = _nodes[key].get_node("Model")
 		if player_model.pack_mode:
 			# Sneaking and riding are real poses; the weapon they carry is in their hand.
@@ -275,10 +400,10 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		pool_disk.height = 0.04
 		puddle.mesh = pool_disk
 		puddle.position.y = 0.07
-		var poison := StandardMaterial3D.new()
-		poison.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		poison.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		poison.albedo_color = Color(0.55, 0.45, 0.08, 0.55)
+		var poison := ShaderMaterial.new()
+		poison.shader = preload("res://shaders/toxic_pool.gdshader")
+		poison.set_shader_parameter("liquid", preload("res://assets/gore/poison_liquid.png"))
+		poison.set_shader_parameter("radius", pool_disk.top_radius)
 		puddle.material_override = poison
 		root.add_child(puddle)
 		return root
@@ -435,6 +560,9 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 				pole.material_override = wood
 				root.add_child(pole)
 		return root
+	if kind == "plot":
+		root.add_child(FarmPlotVisual.make(str(entity.get("crop", "carrot"))))
+		return root
 	if kind == "campfire":
 		var wood := MeshInstance3D.new()
 		var wood_mesh := CylinderMesh.new()
@@ -500,7 +628,7 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 	model.name = "Model"
 	var height := 2.0
 	if kind == "zombie":
-		var look: Dictionary = ZOMBIE_LOOK[entity["type"]]
+		var look: Dictionary = zombie_look(str(entity["type"]))
 		var zombie_model: String = look["model"]
 		if entity["type"] == "walker" and int(entity["id"]) % 2 == 1:
 			zombie_model = "Orc_Female"
@@ -512,6 +640,11 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		var hue := float(abs(int(entity["id"]) * 2654435761 % 1000)) / 1000.0
 		var character: String = Assets.CHARACTER_NAMES[int(abs(int(entity["id"]))) % Assets.CHARACTER_NAMES.size()]
 		model.setup(Color.WHITE if Assets.has_characters() else Color.from_hsv(hue, 0.45, 1.0), 2.0, 1.0, character, false, int(abs(int(entity["id"]))) / Assets.CHARACTER_NAMES.size())
+	# Boss and elite visual IK gets its own weighted CPU share when
+	# ordinary infected crowd the camera. This does not affect AI or hits.
+	if kind == "zombie" and (bool(entity.get("elite", false)) or
+			bool(entity.get("raid_boss", false))):
+		model.animation_budget_group = 2
 	model.set_wetness_step(_wetness_step)
 	root.add_child(model)
 	if _world != null and GraphicsQuality.level() >= 2: # High and Ultra; no-op without the native class.
@@ -525,6 +658,10 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		var bike := TrailBikeVisual.new()
 		bike.name = "TrailBike"
 		root.add_child(bike)
+		var raft := RaftVisual.new()
+		raft.name = "Raft"
+		raft.position.y = 0.05
+		root.add_child(raft)
 		var flare := HandFlareVisual.new()
 		flare.name = "HandFlare"
 		root.add_child(flare)
@@ -611,7 +748,11 @@ func _unregister_anim_lod(node: Node) -> void:
 
 ## A zombie that just left the snapshot (killed) falls as a ragdoll instead of vanishing, within the tier budget.
 func _try_ragdoll(node: Node3D) -> bool:
-	if _world == null or _corpses.size() >= Ragdoll.budget(GraphicsQuality.level()):
+	var fresh := 0
+	for corpse in _corpses:
+		if float(corpse["age"]) < Ragdoll.SETTLE_SECONDS:
+			fresh += 1
+	if _world == null or fresh >= Ragdoll.budget(GraphicsQuality.level()):
 		return false
 	var model := node.get_node_or_null("Model")
 	if model == null or not model.has_method("start_ragdoll"):
@@ -629,9 +770,20 @@ func _try_ragdoll(node: Node3D) -> bool:
 	return true
 
 
+## Bodies stay where they fell while they still carry loot, glowing so you know to search them.
 func _update_corpses(delta: float) -> void:
 	for i in range(_corpses.size() - 1, -1, -1):
 		var corpse: Dictionary = _corpses[i]
+		corpse["life"] = float(corpse.get("life", 0.0)) + delta
+		if not corpse.has("bag") and float(corpse["life"]) < 3.0 and is_instance_valid(corpse["node"]):
+			_link_corpse_bag(corpse)
+		var bag_key: String = str(corpse.get("bag", ""))
+		var holds_loot: bool = bag_key != "" and _nodes.has(bag_key) and float(corpse["life"]) < CORPSE_MAX_SECONDS
+		_set_corpse_glow(corpse, holds_loot)
+		if holds_loot:
+			# Keep the body settled and searchable; the basket stand-in is hidden behind it.
+			corpse["age"] = minf(float(corpse["age"]) + delta, Ragdoll.SETTLE_SECONDS - 0.01)
+			continue
 		corpse["age"] = float(corpse["age"]) + delta
 		var burn_t: float = CorpseBurn.progress(float(corpse["age"]), Ragdoll.SETTLE_SECONDS, Ragdoll.SINK_SECONDS)
 		if burn_t > 0.0:
@@ -648,6 +800,11 @@ func _update_corpses(delta: float) -> void:
 			_corpses.remove_at(i)
 
 
+func _enter_tree() -> void:
+	# A newly opened world must not inherit CPU pressure from an old scene.
+	CharacterAnim.reset_adaptive_pose_budget()
+
+
 func _process(delta: float) -> void:
 	# Native full-rate combat slots follow the same live 4-tier graphics budget.
 	# The setter is called only on quality transitions, not each render frame.
@@ -659,11 +816,16 @@ func _process(delta: float) -> void:
 	_update_corpses(delta)
 	var blend := 1.0 - exp(-14.0 * delta)
 	if _render_time >= 0.0:
-		_render_time += delta
-		_render_time += ((_snapshot_time - INTERPOLATION_DELAY) - _render_time) * clampf(delta * 2.0, 0.0, 1.0)
+		# One native/fallback visual clock serves every entity in this frame.
+		# Rate is always nonnegative and never predicts beyond server data.
+		_render_time = NetworkJitterBuffer.advance_clock(
+			_render_time, _snapshot_time, _snapshot_buffer.delay, delta, self)
 	var anim_models: Array = []
 	for key in _nodes:
 		var node: Node3D = _nodes[key]
+		var periodic_pulses: Dictionary = {}
+		if key.begins_with("zombie:") or key.begins_with("player:"):
+			periodic_pulses = EngineFeatures.tick_runtime_effects(node, delta)
 		var target: Dictionary = _targets[key]
 		var sampled: Array = _sample(key)
 		if sampled.is_empty():
@@ -673,18 +835,39 @@ func _process(delta: float) -> void:
 			target["yaw"] = sampled[1]
 		if key.begins_with("bag"):
 			LootDropBounce.apply(node, delta, GraphicsQuality.level())
-		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("fish_trap") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("ember") or key.begins_with("spit")):
+			_float_on_water(node)
+		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("plot") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("fish_trap") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("ember") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			var model: Node3D = node.get_node("Model")
 			model.update_motion(delta)
+			# Gameplay Cues coalesce replicated status starts and periodic pulses.
+			# Dispatch is cosmetic only; no combat events or RPCs originate here.
+			if key.begins_with("zombie:"):
+				var cues: Array = GameplayCues.frame_events(node, periodic_pulses)
+				if GraphicsQuality.level() >= 2 and model.has_method("status_pulse"):
+					for cue in cues:
+						if str(cue.get("event", "")) == "stopped":
+							continue
+						var pulse_color: Color = GameplayCues.pulse_color(str(cue.get("tag", "")))
+						if pulse_color.a > 0.0:
+							model.call("status_pulse", pulse_color)
+							break
 			anim_models.append(model)
 			if key.begins_with("player:"):
 				var bike = node.get_node("TrailBike")
 				if bike.visible:
 					bike.set_riding(true, model.speed, delta)
-	# Animation LOD / crowd budget, foot IK terrain source and head look-at (character_anim.gd).
+	_apply_leaps(delta)
+	# Only optional procedural IK follows the completed main-thread CPU
+	# process-time pressure. Do not use total frame delta (which includes
+	# GPU wait or throttled rendering) or touch combat/network scheduling.
+	var last_process_us: int = clampi(roundi(float(Performance.get_monitor(
+		Performance.TIME_PROCESS)) * 1000000.0), 0, 1000000)
+	var pose_budget_us: int = CharacterAnim.adaptive_full_pose_budget_us(
+		GraphicsQuality.level(), last_process_us)
+	# Animation LOD / crowd budget, foot IK terrain source and head look-at.
 	CharacterAnim.apply_crowd(anim_models, get_viewport().get_camera_3d(), GraphicsQuality.level(),
-		_world.height_at if _world != null else Callable())
+		_world.height_at if _world != null else Callable(), pose_budget_us)
 
 
 ## Position and facing of a moving entity at the render time, between the two samples around it; past the newest
@@ -714,15 +897,38 @@ func _sample(key: String) -> Array:
 			var host: Node3D = _nodes.get(key) as Node3D
 			var position: Vector3 = SnapshotSmoothing.sample_position(
 				previous, older, newer, following, k, host)
-			return [position, lerp_angle(float(older[2]), float(newer[2]), k)]
+			# UE-style simulated-proxy angular smoothing shares the trusted
+			# server snapshot history, without extrapolation or facing overshoot.
+			var yaw: float = SnapshotSmoothing.sample_yaw(
+				previous, older, newer, following, k, _rotation_smoother)
+			return [position, yaw]
 	return [history[-1][1], history[-1][2]]
 
 
 ## A swing or a shot by another player.
-func play_attack(peer_id: int, weapon_id: String, ranged: bool) -> void:
+func play_attack(peer_id: int, weapon_id: String, ranged: bool, direction: Vector2 = Vector2.ZERO) -> void:
 	var key := "player:%d" % peer_id
 	if _nodes.has(key):
-		_nodes[key].get_node("Model").play_action(attack_animation(weapon_id, ranged))
+		var model: Node3D = _nodes[key].get_node("Model")
+		model.play_action(attack_animation(weapon_id, ranged))
+		if not ranged and direction != Vector2.ZERO:
+			warp_model(model, (_nodes[key] as Node3D).global_position, weapon_id, direction, key)
+
+
+## Motion warping: the swinging model glides toward the enemy in front of it.
+func warp_model(model: Node3D, origin: Vector3, weapon_id: String, direction: Vector2, key: String = "") -> void:
+	if model == null:
+		return
+	var targets: Array = []
+	for other_key in _nodes:
+		if other_key == key or not (str(other_key).begins_with("zombie:") or str(other_key).begins_with("player:")):
+			continue
+		var other := _nodes[other_key] as Node3D
+		if other != null and other.visible:
+			targets.append(other.global_position)
+	var warp: Dictionary = MotionWarp.solve(origin, direction, Combat.weapon_reach(weapon_id), targets)
+	if not warp.is_empty():
+		MotionWarp.play(model, warp["offset"])
 
 
 ## Which animation a weapon uses.
@@ -749,6 +955,14 @@ func play_action_on(kind: String, id: int, animation_name: String) -> void:
 
 
 ## A flinch on whoever was struck.
+## The character model of an entity, or null.
+func model_of(kind: String, id: int) -> Node3D:
+	var key := "%s:%d" % [kind, id]
+	if _nodes.has(key) and is_instance_valid(_nodes[key]) and _nodes[key].has_node("Model"):
+		return _nodes[key].get_node("Model") as Node3D
+	return null
+
+
 func play_hit(kind: String, id: int, heavy: bool = false) -> void:
 	var key := "%s:%d" % [kind, id]
 	if _nodes.has(key) and _nodes[key].has_node("Model"):
@@ -794,3 +1008,83 @@ func nearest_of_kind(point: Vector3, kind: String, count: int, radius: float) ->
 	for i in mini(count, found.size()):
 		result.append(found[i][1])
 	return result
+
+
+func _link_corpse_bag(corpse: Dictionary) -> void:
+	var at: Vector3 = (corpse["node"] as Node3D).position
+	for key in _nodes:
+		if str(key).begins_with("bag:") and Vector2(_nodes[key].position.x - at.x, _nodes[key].position.z - at.z).length() < 1.6:
+			corpse["bag"] = key
+			var basket = _nodes[key].get_child(0)
+			if basket is MeshInstance3D:
+				(basket as MeshInstance3D).visible = false # The body itself is what you loot.
+			return
+
+
+func _set_corpse_glow(corpse: Dictionary, on: bool) -> void:
+	if bool(corpse.get("glowing", false)) == on or not is_instance_valid(corpse["model"]):
+		return
+	corpse["glowing"] = on
+	var overlay: ShaderMaterial = null
+	if on:
+		overlay = ShaderMaterial.new()
+		overlay.shader = LOOT_GLOW_SHADER
+	for mesh in (corpse["model"] as Node).find_children("*", "MeshInstance3D", true, false):
+		(mesh as MeshInstance3D).material_overlay = overlay
+
+
+## A tree ambusher's drop: an arc from the branch to the ground in front of its prey.
+func leap(id: int, from: Vector3, to: Vector3) -> void:
+	var key := "zombie:%d" % id
+	if not _nodes.has(key):
+		return
+	_leaps[key] = {"from": from, "to": to, "t": 0.0}
+	play_hit("zombie", id, true)
+
+
+func _apply_leaps(delta: float) -> void:
+	for key in _leaps.keys():
+		var leap_state: Dictionary = _leaps[key]
+		leap_state["t"] = float(leap_state["t"]) + delta
+		var k: float = clampf(float(leap_state["t"]) / LEAP_SECONDS, 0.0, 1.0)
+		if not _nodes.has(key) or k >= 1.0:
+			_leaps.erase(key)
+			continue
+		var p: Vector3 = (leap_state["from"] as Vector3).lerp(leap_state["to"], k)
+		p.y += sin(k * PI) * 1.2 # Up off the branch, then down hard.
+		_nodes[key].position = p
+
+
+## A short red "!" over an infected that is winding up a leap or charge.
+func telegraph(id: int, seconds: float, charge: bool) -> void:
+	var key := "zombie:%d" % id
+	if not _nodes.has(key):
+		return
+	var mark := Label3D.new()
+	mark.text = "!!" if charge else "!"
+	mark.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	mark.no_depth_test = true
+	mark.pixel_size = 0.012
+	mark.font_size = 64
+	mark.outline_size = 12
+	mark.modulate = Color(1.0, 0.22, 0.12)
+	mark.position = Vector3(0, 2.35, 0)
+	_nodes[key].add_child(mark)
+	var tween := mark.create_tween()
+	tween.tween_property(mark, "scale", Vector3.ONE * 1.4, maxf(seconds, 0.1) * 0.5).set_trans(Tween.TRANS_BACK)
+	tween.tween_property(mark, "modulate:a", 0.0, maxf(seconds, 0.1) * 0.5)
+	tween.tween_callback(mark.queue_free)
+
+
+## Buoyancy: loot dropped into the sea, a river or a lake floats and bobs on the surface.
+func _float_on_water(node: Node3D) -> void:
+	if _world == null:
+		return
+	var p: Vector3 = node.position
+	var surface: float = _world.water_level_at(p.x, p.z)
+	if _world.ground_at(p.x, p.z) >= surface:
+		return
+	var t: float = Time.get_ticks_msec() * 0.001 + p.x * 0.13
+	node.position.y = surface + 0.08 + sin(t * 1.7) * 0.07
+	node.rotation.x = sin(t * 1.3) * 0.12
+	node.rotation.z = cos(t * 1.1) * 0.12

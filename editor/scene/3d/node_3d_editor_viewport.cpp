@@ -210,7 +210,7 @@ void ViewportNavigationControl::_update_navigation() {
 
 			Vector3 forward;
 			if (viewport->view_3d_controller->get_freelook_scheme() == View3DController::FreelookScheme::FREELOOK_FULLY_AXIS_LOCKED) {
-				// Forward/backward keys will always go straight forward/backward, never moving on the Y axis.
+				// Forward/backward keys will always go horizontally forward/backward, never moving on the Y axis.
 				forward = Vector3(0, 0, delta_normalized.y).rotated(Vector3(0, 1, 0), viewport->camera->get_rotation().y);
 			} else {
 				// Forward/backward keys will be relative to the camera pitch.
@@ -3027,7 +3027,11 @@ void Node3DEditorViewport::_sinput(const Ref<InputEvent> &p_event) {
 
 		// Freelook doesn't work in orthogonal mode or when previewing without pilot mode.
 		if (!view_3d_controller->is_orthogonal() && !(previewing && !pilot_preview_enabled) && ED_IS_SHORTCUT("spatial_editor/freelook_toggle", event_mod)) {
-			view_3d_controller->set_freelook_enabled(!view_3d_controller->is_freelook_enabled());
+			// Only allow Shift+F to toggle freelook off if right mouse button is not pressed.
+			// This lets users press Shift and F independently during right-mouse-activated freelook.
+			if (!view_3d_controller->is_freelook_enabled() || !Input::get_singleton()->is_mouse_button_pressed(MouseButton::RIGHT)) {
+				view_3d_controller->set_freelook_enabled(!view_3d_controller->is_freelook_enabled());
+			}
 		} else if (k->get_keycode() == Key::ESCAPE) {
 			view_3d_controller->set_freelook_enabled(false);
 		}
@@ -3984,6 +3988,10 @@ void Node3DEditorViewport::_update_view_3d_controller(bool p_update_all) {
 	view_3d_controller->set_shortcut(View3DController::SHORTCUT_FREELOOK_RIGHT, ED_GET_SHORTCUT("spatial_editor/freelook_right"));
 	view_3d_controller->set_shortcut(View3DController::SHORTCUT_FREELOOK_UP, ED_GET_SHORTCUT("spatial_editor/freelook_up"));
 	view_3d_controller->set_shortcut(View3DController::SHORTCUT_FREELOOK_DOWN, ED_GET_SHORTCUT("spatial_editor/freelook_down"));
+	view_3d_controller->set_shortcut(View3DController::SHORTCUT_FREELOOK_GLOBAL_UP, ED_GET_SHORTCUT("spatial_editor/freelook_global_up"));
+	view_3d_controller->set_shortcut(View3DController::SHORTCUT_FREELOOK_GLOBAL_DOWN, ED_GET_SHORTCUT("spatial_editor/freelook_global_down"));
+	view_3d_controller->set_shortcut(View3DController::SHORTCUT_FREELOOK_LOCAL_UP, ED_GET_SHORTCUT("spatial_editor/freelook_local_up"));
+	view_3d_controller->set_shortcut(View3DController::SHORTCUT_FREELOOK_LOCAL_DOWN, ED_GET_SHORTCUT("spatial_editor/freelook_local_down"));
 	view_3d_controller->set_shortcut(View3DController::SHORTCUT_FREELOOK_SPEED_MOD, ED_GET_SHORTCUT("spatial_editor/freelook_speed_modifier"));
 	view_3d_controller->set_shortcut(View3DController::SHORTCUT_FREELOOK_SLOW_MOD, ED_GET_SHORTCUT("spatial_editor/freelook_slow_modifier"));
 
@@ -4581,9 +4589,9 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 			bool current = view_display_menu->get_popup()->is_item_checked(idx);
 			current = !current;
 			uint32_t layers = camera->get_cull_mask();
-			layers &= ~(1 << GIZMO_EDIT_LAYER);
+			layers &= ~(1u << GIZMO_EDIT_LAYER);
 			if (current) {
-				layers |= (1 << GIZMO_EDIT_LAYER);
+				layers |= (1u << GIZMO_EDIT_LAYER);
 			}
 			camera->set_cull_mask(layers);
 			view_display_menu->get_popup()->set_item_checked(idx, current);
@@ -4620,9 +4628,9 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 			bool current = view_display_menu->get_popup()->is_item_checked(idx);
 			current = !current;
 			uint32_t layers = camera->get_cull_mask();
-			layers &= ~(1 << GIZMO_GRID_LAYER);
+			layers &= ~(1u << GIZMO_GRID_LAYER);
 			if (current) {
-				layers |= (1 << GIZMO_GRID_LAYER);
+				layers |= (1u << GIZMO_GRID_LAYER);
 			}
 			camera->set_cull_mask(layers);
 			view_display_menu->get_popup()->set_item_checked(idx, current);
@@ -5910,6 +5918,11 @@ bool Node3DEditorViewport::_create_instance(Node *p_parent, const String &p_path
 	undo_redo->add_undo_method(p_parent, "remove_child", instantiated_scene);
 	undo_redo->add_do_method(editor_selection, "add_node", instantiated_scene);
 
+	if (EDITOR_GET("docks/scene_tree/enable_editable_children_by_default")) {
+		undo_redo->add_do_method(EditorNode::get_singleton()->get_edited_scene(), "set_editable_instance", instantiated_scene, true);
+		undo_redo->add_do_method(instantiated_scene, "set_display_folded", true);
+	}
+
 	String new_name = p_parent->validate_child_name(instantiated_scene);
 	EditorDebuggerNode *ed = EditorDebuggerNode::get_singleton();
 	undo_redo->add_do_method(ed, "live_debug_instantiate_node", EditorNode::get_singleton()->get_edited_scene()->get_path_to(p_parent), p_path, new_name);
@@ -6915,8 +6928,13 @@ void Node3DEditorViewport::_load_viewport_inputs() {
 	register_shortcut_action("spatial_editor/freelook_backwards", TTRC("Freelook Backwards"), Key::S, true);
 	register_shortcut_action("spatial_editor/freelook_up", TTRC("Freelook Up"), Key::E, true);
 	register_shortcut_action("spatial_editor/freelook_down", TTRC("Freelook Down"), Key::Q, true);
+	register_shortcut_action("spatial_editor/freelook_global_up", TTRC("Freelook Global Up"), Key::SPACE, true);
+	register_shortcut_action("spatial_editor/freelook_global_down", TTRC("Freelook Global Down"), Key::CTRL, true); // Ctrl even on macOS.
+	register_shortcut_action("spatial_editor/freelook_local_up", TTRC("Freelook Local Up"), Key::R, true);
+	register_shortcut_action("spatial_editor/freelook_local_down", TTRC("Freelook Local Down"), Key::F, true);
 	register_shortcut_action("spatial_editor/freelook_speed_modifier", TTRC("Freelook Speed Modifier"), Key::SHIFT);
 	register_shortcut_action("spatial_editor/freelook_slow_modifier", TTRC("Freelook Slow Modifier"), Key::ALT);
+	register_shortcut_action("spatial_editor/freelook_toggle", TTRC("Toggle Freelook"), KeyModifierMask::SHIFT | Key::F);
 }
 
 Node3DEditorViewport::Node3DEditorViewport(Node3DEditor *p_spatial_editor, int p_index) {
@@ -7130,8 +7148,7 @@ Node3DEditorViewport::Node3DEditorViewport(Node3DEditor *p_spatial_editor, int p
 	preview_camera = memnew(CheckBox);
 	preview_camera->set_text(TTRC("Preview"));
 	preview_camera->set_tooltip_text(TTRC("Preview through the selected camera.\nHold Shift while clicking to also enable Pilot mode."));
-	// Using Control even on macOS to avoid conflict with Quick Open shortcut.
-	preview_camera->set_shortcut(ED_SHORTCUT("spatial_editor/toggle_camera_preview", TTRC("Toggle Camera Preview"), KeyModifierMask::CTRL | Key::P));
+	preview_camera->set_shortcut(ED_SHORTCUT("spatial_editor/toggle_camera_preview", TTRC("Toggle Camera Preview"), KeyModifierMask::SHIFT | Key::P));
 	vbox->add_child(preview_camera);
 	preview_camera->set_h_size_flags(SIZE_SHRINK_BEGIN);
 	preview_camera->set_theme_type_variation("CheckBoxNoIconTintNoDim");
@@ -7141,7 +7158,7 @@ Node3DEditorViewport::Node3DEditorViewport(Node3DEditor *p_spatial_editor, int p
 	pilot_camera = memnew(CheckBox);
 	pilot_camera->set_text(TTRC("Pilot"));
 	pilot_camera->set_tooltip_text(TTRC("Enable pilot mode for the preview camera.\nAllows WASD movement and mouse look when in preview mode."));
-	pilot_camera->set_shortcut(ED_SHORTCUT("spatial_editor/toggle_pilot_preview", TTRC("Toggle Pilot Mode in Preview")));
+	pilot_camera->set_shortcut(ED_SHORTCUT("spatial_editor/toggle_pilot_preview", TTRC("Toggle Pilot Mode in Preview"), KeyModifierMask::SHIFT | Key::R));
 	vbox->add_child(pilot_camera);
 	pilot_camera->set_h_size_flags(SIZE_SHRINK_BEGIN);
 	pilot_camera->set_theme_type_variation("CheckBoxNoIconTintNoDim");

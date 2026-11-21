@@ -7,7 +7,7 @@ def configure(env):
 
 
 def get_doc_classes():
-    return ["EnvironmentQuery3D"]
+    return ["EnvironmentQuery3D", "EnvironmentQueryTickBudget"]
 
 
 def get_doc_path():

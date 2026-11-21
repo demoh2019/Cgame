@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeCooldown" inherits="BehaviorTreeDecorator" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Blocks repeating a successful child task until its cooldown expires.</brief_description>
+	<description>
+		After the child returns [constant BehaviorTreeTask.SUCCESS], this decorator stores a countdown in the current runner's execution memory and returns success. Subsequent evaluations during the cooldown return [constant BehaviorTreeTask.FAILURE] without running the child. The cooldown advances by the delta of evaluations of this decorator; after it expires, child execution is allowed again. [constant BehaviorTreeTask.RUNNING] does not start a cooldown, and failed children do not start one.
+		This is a branch-scoped policy: [method BehaviorTreeRunner.reset] or a parent that clears the branch (such as a preempting reactive selector) also clears the cooldown. For persistent event cooldowns independent of tree restarts, use [AIActionCooldowns] instead. A missing child fails safely.
+	</description>
+	<methods>
+		<method name="set_duration"><return type="void" /><param index="0" name="duration" type="float" /><description>Sets the finite nonnegative cooldown duration in simulated seconds. A zero duration disables throttling.</description></method>
+		<method name="get_duration" qualifiers="const"><return type="float" /><description>Returns the cooldown duration.</description></method>
+	</methods>
+	<members>
+		<member name="duration" type="float" default="1.0">Success-triggered cooldown in simulation seconds.</member>
+	</members>
+</class>

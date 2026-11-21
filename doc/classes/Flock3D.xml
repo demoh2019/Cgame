@@ -71,6 +71,9 @@
 		<member name="separation_radius" type="float" setter="set_separation_radius" getter="get_separation_radius" default="1.6">
 			Distance below which agents push each other apart.
 		</member>
+		<member name="simulation_seed" type="int" setter="set_simulation_seed" getter="get_simulation_seed" default="1592594996">
+			Cgame extension: explicitly sets the 64-bit seed for native flock initialization. After this property is set, rebuilding the flock (including scene-tree entry or changing [member agent_count] for graphics quality) reinitializes agents from the same seed, producing repeatable initial positions and velocities. If this property has never been explicitly set, the existing evolving random behavior of older Flock3D scenes is preserved. Set it before starting the simulation to reproduce a procedural world's birds. The same seed yields the same flock for the same agent count, but results need not match the GDScript fallback boids implementation exactly.
+		</member>
 		<member name="speed" type="float" setter="set_speed" getter="get_speed" default="6.0">
 			Cruise speed. Agents stay between 60% and 130% of it.
 		</member>

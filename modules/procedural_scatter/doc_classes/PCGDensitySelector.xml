@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PCGDensitySelector" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Pure, bounded per-point density remapping and stable-ID probability filtering for procedural generation.
+	</brief_description>
+	<description>
+		Implements two Unreal PCG-inspired stages: linear density remapping and density-based point selection. Density values are finite floats in [0, 1], and inputs are limited to 16,384 points. The methods do not access the scene tree, global random generator, physics, or GPU. Invalid input returns an empty array. Empty valid input also yields empty output.
+	</description>
+	<methods>
+		<method name="remap_densities" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="densities" type="PackedFloat32Array" />
+			<param index="1" name="input_min" type="float" default="0.0" />
+			<param index="2" name="input_max" type="float" default="1.0" />
+			<param index="3" name="output_min" type="float" default="0.0" />
+			<param index="4" name="output_max" type="float" default="1.0" />
+			<param index="5" name="clamp_input" type="bool" default="true" />
+			<description>
+				Linearly maps density from the finite input interval to the output interval and clamps final results to [0, 1]. The input interval must be ordered and lie in [0, 1]; output endpoints can be reversed for inverse density curves. When [param clamp_input] is true, input values are clamped to the given interval before remapping. All values are validated before any output is produced.
+			</description>
+		</method>
+		<method name="select_indices" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="densities" type="PackedFloat32Array" />
+			<param index="1" name="stable_ids" type="PackedInt64Array" />
+			<param index="2" name="seed" type="int" default="0" />
+			<param index="3" name="max_selected" type="int" default="4096" />
+			<description>
+				Selects original candidate indices using the probability in each density and a reproducible 32-bit hash of the point stable ID and seed. Stable IDs are integers in [0, 2147483647] and seed must be nonnegative. Density zero is always discarded, one is always accepted. The same ID and seed produce the same decision regardless of the order of points. The output is in original input order, truncated after at most 4096 accepted indices; truncation necessarily makes output composition depend on input order. This method performs no spacing or physics checks.
+			</description>
+		</method>
+	</methods>
+</class>

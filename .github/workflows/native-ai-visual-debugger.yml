@@ -1,0 +1,99 @@
+name: Native BehaviorTree visual debugger and Albion After inspector
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/behavior_tree.*'
+      - 'modules/behavior_tree/tests/test_behavior_tree_inspector.h'
+      - 'modules/behavior_tree/register_types.cpp'
+      - 'modules/behavior_tree/doc_classes/BehaviorTreeRunner.xml'
+      - 'modules/behavior_tree/demo_reactive_ai/**'
+      - 'game/addons/cgame_bt_debugger/**'
+      - 'game/project.godot'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_native_infected_senses.gd'
+      - '.github/workflows/native-ai-visual-debugger.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/behavior_tree.*'
+      - 'modules/behavior_tree/tests/test_behavior_tree_inspector.h'
+      - 'modules/behavior_tree/register_types.cpp'
+      - 'modules/behavior_tree/doc_classes/BehaviorTreeRunner.xml'
+      - 'modules/behavior_tree/demo_reactive_ai/**'
+      - 'game/addons/cgame_bt_debugger/**'
+      - 'game/project.godot'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_native_infected_senses.gd'
+      - '.github/workflows/native-ai-visual-debugger.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-editor-game:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-ai-visual-debugger
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-ai-visual-debugger
+        continue-on-error: true
+      - name: Run native complete tree inspector tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[BehaviorTreeInspector]*" 2>&1 | tee ai-visual-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' ai-visual-native.log; then exit 1; fi
+      - name: Import the demo with its enabled editor dock
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path modules/behavior_tree/demo_reactive_ai --editor --import --quit 2>&1 | tee ai-visual-demo-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' ai-visual-demo-import.log; then exit 1; fi
+      - name: Run live hierarchical debug panel smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path modules/behavior_tree/demo_reactive_ai --script res://tests/smoke_demo.gd 2>&1 | tee ai-visual-demo-smoke.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^ERROR:' ai-visual-demo-smoke.log; then exit 1; fi
+          grep -F 'PASS: AI perception, wall LOS, memory, reactive priorities and reset' ai-visual-demo-smoke.log
+      - name: Import Albion After with its enabled editor dock
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee ai-visual-game-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' ai-visual-game-import.log; then exit 1; fi
+      - name: Run canonical Albion After server regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 600s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee ai-visual-game-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' ai-visual-game-tests.log; then exit 1; fi
+      - name: Publish logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-visual-debugger-results
+          if-no-files-found: ignore
+          path: ai-visual-*.log

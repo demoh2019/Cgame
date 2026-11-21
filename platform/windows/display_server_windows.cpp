@@ -226,6 +226,8 @@ Vector2i _logical_to_physical(const Vector2i &p_point) {
 }
 
 Vector2i DisplayServerWindows::_get_screen_expand_offset(int p_screen) const {
+	constexpr int FS_TRANSP_BORDER = 2;
+
 	Vector2i p1 = _logical_to_physical(screen_get_position(p_screen));
 	Vector2i p2 = _logical_to_physical(screen_get_position(p_screen) + screen_get_size(p_screen));
 
@@ -246,16 +248,16 @@ Vector2i DisplayServerWindows::_get_screen_expand_offset(int p_screen) const {
 	}
 
 	if (screen_down == -1) {
-		return Vector2i(0, 2);
+		return Vector2i(0, FS_TRANSP_BORDER);
 	} else if (screen_right == -1) {
-		return Vector2i(2, 0);
+		return Vector2i(FS_TRANSP_BORDER, 0);
 	} else {
 		int diff_d = screen_get_refresh_rate(p_screen) - screen_get_refresh_rate(screen_down);
 		int diff_r = screen_get_refresh_rate(p_screen) - screen_get_refresh_rate(screen_right);
 		if (diff_d < diff_r) {
-			return Vector2i(0, 2);
+			return Vector2i(0, FS_TRANSP_BORDER);
 		} else {
-			return Vector2i(2, 0);
+			return Vector2i(FS_TRANSP_BORDER, 0);
 		}
 	}
 }
@@ -478,11 +480,12 @@ public:
 		}
 
 		LPWSTR lpw_path = nullptr;
-		p_item->GetDisplayName(SIGDN_FILESYSPATH, &lpw_path);
-		if (!lpw_path) {
+		HRESULT hr = p_item->GetDisplayName(SIGDN_FILESYSPATH, &lpw_path);
+		if (FAILED(hr)) {
 			return S_FALSE;
 		}
 		String path = String::utf16((const char16_t *)lpw_path).replace_char('\\', '/').trim_prefix(R"(\\?\)").simplify_path();
+		CoTaskMemFree(lpw_path);
 		if (!path.begins_with(root.simplify_path())) {
 			return S_FALSE;
 		}
@@ -2116,6 +2119,13 @@ void DisplayServerWindows::gl_window_make_current(DisplayServerEnums::WindowID p
 	if (gl_manager_native) {
 		gl_manager_native->window_make_current(p_window_id);
 	}
+	if (windows.has(p_window_id)) {
+		WindowData &wd = windows[p_window_id];
+		Vector2i off = (wd.multiwindow_fs || (!wd.fullscreen && wd.borderless && wd.maximized)) ? _get_screen_expand_offset(window_get_current_screen(p_window_id)) : Vector2i();
+		RasterizerGLES3::set_screen_y_offset(off.y);
+	} else {
+		RasterizerGLES3::set_screen_y_offset(0);
+	}
 #endif
 }
 
@@ -2992,6 +3002,10 @@ void DisplayServerWindows::window_set_flag(DisplayServerEnums::WindowFlags p_fla
 				return;
 			}
 			wd.always_on_top = p_enabled;
+			if (wd.fullscreen) {
+				SetWindowPos(wd.hWnd, _is_always_on_top_recursive(p_window) ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOSENDCHANGING | SWP_NOMOVE | SWP_NOSIZE | ((wd.no_focus || wd.is_popup) ? SWP_NOACTIVATE : 0));
+				return;
+			}
 			_update_window_style(p_window);
 		} break;
 		case DisplayServerEnums::WINDOW_FLAG_SHARP_CORNERS: {

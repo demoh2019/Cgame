@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AISimulationLOD2D" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Deterministic distance-based frequency policy for optional AI simulation LOD.</brief_description>
+	<description>
+		AISimulationLOD2D selects between near, medium and far update periods without running AI logic itself. Games supply the distance to their nearest eligible viewer and decide which work is safe to delay. Positive infinity represents no eligible viewers. The class does not sample physics, decide authority, spawn agents, or pause movement, combat, damage, status effects and navigation.
+		Use [method get_staggered_interval] once to spread the initial passive update phase among agents with stable non-negative IDs. Later scheduled updates should use [method get_interval]. Urgent or close-by agents always run at the near frequency. There is no random generator or mutable per-agent state in this class.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="configure_intervals">
+			<return type="bool" />
+			<param index="0" name="near_seconds" type="float" />
+			<param index="1" name="medium_seconds" type="float" />
+			<param index="2" name="far_seconds" type="float" />
+			<description>Atomically changes all three intervals when they satisfy [code]0 &lt; near &lt;= medium &lt;= far &lt;= 2[/code] seconds. Invalid input returns false without modifying settings.</description>
+		</method>
+		<method name="get_near_interval" qualifiers="const">
+			<return type="float" />
+		</method>
+		<method name="get_medium_interval" qualifiers="const">
+			<return type="float" />
+		</method>
+		<method name="get_far_interval" qualifiers="const">
+			<return type="float" />
+		</method>
+		<method name="get_interval" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="distance" type="float" />
+			<param index="1" name="near_distance" type="float" />
+			<param index="2" name="far_distance" type="float" />
+			<param index="3" name="urgent" type="bool" default="false" />
+			<description>Returns near, medium or far update interval. Thresholds are inclusive: distance equal to near_distance uses near cadence, and distance equal to far_distance uses medium cadence. Invalid thresholds, negative distance or NaN conservatively return near interval. Positive infinity means no eligible viewer and uses far interval. urgent always returns near interval.</description>
+		</method>
+		<method name="plan_passive_scan" qualifiers="const">
+			<return type="Vector2" />
+			<param index="0" name="agent_id" type="int" />
+			<param index="1" name="distance" type="float" />
+			<param index="2" name="near_distance" type="float" />
+			<param index="3" name="far_distance" type="float" />
+			<param index="4" name="previous_interval" type="float" />
+			<param index="5" name="hysteresis" type="float" />
+			<param index="6" name="already_staggered" type="bool" />
+			<param index="7" name="urgent" type="bool" default="false" />
+			<description>
+				Combines distance-based interval selection, one-time deterministic startup staggering and per-agent hysteresis into a single native call. Returns [code]Vector2(nominal_interval, next_scan_delay)[/code]. The caller must store the nominal interval and remember whether the initial distant scan has been staggered. This class holds no per-agent state. Urgent decisions return near cadence without staggering. This is only for optional passive target acquisition; never delay attacks, movement, damage or authority. Calls with invalid distance or thresholds retain existing conservative scalar policy.
+			</description>
+		</method>
+		<method name="get_staggered_interval" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="agent_id" type="int" />
+			<param index="1" name="distance" type="float" />
+			<param index="2" name="near_distance" type="float" />
+			<param index="3" name="far_distance" type="float" />
+			<param index="4" name="urgent" type="bool" default="false" />
+			<description>One-time passive update delay with deterministic agent ID phase. Distant agents receive one of 16 equally spaced slots from 1/16 through 16/16 of their tier interval. Near/urgent and negative IDs use near interval. Do not use this for every tick or for authoritative combat updates.</description>
+		</method>
+	</methods>
+</class>

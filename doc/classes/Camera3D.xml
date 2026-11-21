@@ -7,9 +7,21 @@
 		[Camera3D] is a special node that displays what is visible from its current location. Cameras register themselves in the nearest [Viewport] node (when ascending the tree). Only one camera can be active per viewport. If no viewport is available ascending the tree, the camera will register in the global viewport. In other words, a camera just provides 3D display capabilities to a [Viewport], and, without one, a scene registered in that [Viewport] (or higher viewports) can't be displayed.
 	</description>
 	<tutorials>
-		<link title="Third Person Shooter (TPS) Demo">https://godotengine.org/asset-library/asset/2710</link>
+		<link title="Third Person Shooter (TPS) Demo">https://store.godotengine.org/asset/godot-foundation/third-person-shooter-demo/</link>
 	</tutorials>
 	<methods>
+		<method name="add_directional_spatial_trauma">
+			<return type="void" />
+			<param index="0" name="source" type="Vector3" />
+			<param index="1" name="listener" type="Vector3" />
+			<param index="2" name="amount" type="float" />
+			<param index="3" name="inner_radius" type="float" />
+			<param index="4" name="outer_radius" type="float" />
+			<description>
+				Adds location-aware trauma with an extra camera-local visual translation oriented towards the world [param source]. Inspired by Unreal Engine world camera shakes with epicenter orientation. Uses the same smooth distance attenuation as [method add_spatial_trauma], with full intensity inside [param inner_radius] and zero at or beyond [param outer_radius]. The listener can be the player position instead of an elevated camera's optical center.
+				Direction is bounded and decays over time using [member shake_decay]. Combined noise and directional translation is limited to the authored [member shake_max_offset] per axis. Coincident source and listener create nondirectional trauma; invalid positions, radii, and non-positive or nonfinite amounts are ignored. Large positive finite amounts are clamped before accumulation. This does not modify [Node3D] transforms, player control, physics, or server authority. Apply accessibility scaling to [param amount] before calling it. Provided by Cgame.
+			</description>
+		</method>
 		<method name="add_spatial_trauma">
 			<return type="void" />
 			<param index="0" name="source" type="Vector3" />
@@ -40,6 +52,15 @@
 			<return type="Projection" />
 			<description>
 				Returns the projection matrix that this camera uses to render to its associated viewport. The camera must be part of the scene tree to function.
+			</description>
+		</method>
+		<method name="get_pixels_per_meter_at_positions" qualifiers="const">
+			<return type="PackedFloat64Array" />
+			<param index="0" name="world_points" type="PackedVector3Array" />
+			<description>
+				Returns the projected number of logical viewport pixels per world meter at each point, in original input order. All valid entries match [method get_pixels_per_meter_at_position] exactly, including the camera's current projection, aspect mode, frustum offset, adjusted camera transform and zero for positions on or behind the focal plane in perspective/frustum modes. Orthogonal projection returns a distance-independent pixel density.
+				In contrast to calling the scalar method for every point, this Cgame extension computes the camera projection and inverse transform only once for the entire batch. Supports up to [b]4096[/b] points per call and requires the camera to be inside a scene tree. Empty input, invalid world positions, oversized groups or unavailable viewport projection return an empty array instead of partial values; callers can fall back to the scalar API. This is a CPU-side screen-coverage estimate for instanced geometry LOD, foliage, billboards and editor tools, not GPU occlusion/frustum culling, mesh simplification or an automatic render-budget system.
+				[b]Note:[/b] As with the scalar method, results use the logical viewport height. Multiply by [member Viewport.scaling_3d_scale] to account for dynamic 3D render resolution where appropriate. These values are unaffected by gameplay authority, physics and world streaming.
 			</description>
 		</method>
 		<method name="get_pixels_per_meter_at_position" qualifiers="const">
@@ -90,6 +111,12 @@
 			<return type="RID" />
 			<description>
 				Returns the RID of a pyramid shape encompassing the camera's view frustum, ignoring the camera's near plane. The tip of the pyramid represents the position of the camera.
+			</description>
+		</method>
+		<method name="get_shake_direction_impulse" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the current camera-local, unit-length-bounded directional impulse added by [method add_directional_spatial_trauma], before multiplication by the maximum translation offset. It is read-only and decays over time. [method set_trauma] with value zero clears it immediately. Useful for debugging camera feedback.
 			</description>
 		</method>
 		<method name="get_shake_rotation" qualifiers="const">

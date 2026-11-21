@@ -1,7 +1,9 @@
 extends Node3D
+const GraphicsAreaLights = preload("res://scripts/client/graphics_area_lights.gd")
 ## AAA-style campfire: animated HDR flame (bloom-driven), flickering warm light with
 ## soft shadows on high-end, rising ember particles and screen-space heat haze.
 ## Unreal/Unity fires combine exactly these four layers. Purely visual, client-only.
+const VegetationWind = preload("res://scripts/client/vegetation_wind.gd")
 
 const FLAME_SHADER := preload("res://assets/shaders/campfire_flame.gdshader")
 const HAZE_SHADER := preload("res://assets/shaders/heat_haze.gdshader")
@@ -54,6 +56,8 @@ func build(level: int, rendering_method: String) -> void:
 	light.omni_attenuation = 1.4
 	light.shadow_enabled = rich
 	light.shadow_blur = 2.0
+	# Burning logs are a ~35 cm emitter: PCSS softens their shadows on High/Ultra.
+	GraphicsAreaLights.register(light, 0.35)
 	# Engine-native flicker when available (no per-frame script work).
 	if "light_flicker" in light:
 		light.set("light_flicker", 0.35)
@@ -267,6 +271,6 @@ func _update_smoke_wind(delta: float) -> void:
 	if _wind_left > 0.0:
 		return
 	_wind_left = 0.5
-	var wind: Variant = RenderingServer.global_shader_parameter_get(&"aa_vegetation_wind")
+	var wind: Variant = VegetationWind.current
 	if wind is Vector3:
 		_smoke_pm.gravity = _smoke_pm.gravity.lerp(smoke_drift(wind), 0.35)

@@ -3,6 +3,7 @@ extends RefCounted
 ## and a predicted position for the local player that is corrected whenever the server answers.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
@@ -11,6 +12,7 @@ const Survival = preload("res://scripts/shared/survival.gd")
 const WadingTravel = preload("res://scripts/shared/wading_travel.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 const PartySupplyBeacon = preload("res://scripts/client/party_supply_beacon.gd")
+const PcgSpawns = preload("res://scripts/server/pcg_spawns.gd")
 
 signal snapshot_received
 signal event_received(event: Dictionary)
@@ -28,6 +30,7 @@ var players: Dictionary = {} # id -> entity from the latest snapshot
 var zombies: Dictionary = {}
 var barricades: Dictionary = {} # Nearby defenses from the server.
 var campfires: Dictionary = {} # Nearby temporary warmth sources, server-provided.
+var farm_plots: Dictionary = {} # Nearby homestead crop plots, server-provided.
 var shelters: Dictionary = {} # Replicated temporary weather cover.
 var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
 var smoke_clouds: Dictionary = {} # Interest-limited, temporary visual smoke.
@@ -69,6 +72,7 @@ func _init(p_net) -> void:
 
 func on_welcome(world_seed: int, _tick_rate: int) -> void:
 	world = WorldGen.new(world_seed)
+	PcgSpawns.attach(world) # Same deterministic crate list as the server; only presentation (the server stays authoritative).
 	welcomed = true
 	peer_id = net.multiplayer.get_unique_id()
 	predicted_stamina = Defs.MAX_STAMINA
@@ -143,6 +147,9 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	smoke_clouds.clear()
 	for entity in snapshot.get("smoke_clouds", []):
 		smoke_clouds[int(entity["id"])] = entity
+	farm_plots.clear()
+	for plot in snapshot.get("farm_plots", []):
+		farm_plots[int(plot["id"])] = plot
 	campfires.clear()
 	for entity in snapshot.get("campfires", []):
 		campfires[int(entity["id"])] = entity
@@ -160,7 +167,11 @@ func on_snapshot(snapshot: Dictionary) -> void:
 		for entity in snapshot["barricades"]:
 			var id: int = int(entity["id"])
 			barricades[id] = entity
-			world.add_dynamic_blocker(id, float(entity["x"]), float(entity["z"]), 0.85)
+			var piece: String = str(entity.get("piece", ""))
+			if HousePieces.valid(piece):
+				world.add_structure_blockers(id, HousePieces.blockers_of(entity))
+			else:
+				world.add_dynamic_blocker(id, float(entity["x"]), float(entity["z"]), 0.85)
 	depleted.clear()
 	for id in snapshot["depleted"]:
 		depleted[id] = true
@@ -188,6 +199,7 @@ func _reconcile(snapshot: Dictionary) -> void:
 		var duration: float = float(entry["dt"])
 		var moving := Vector2(float(replay_input["x"]), float(replay_input["z"])).length_squared() > 0.00001
 		replay_input["mounted"] = bool(you.get("mounted", false))
+		replay_input["raft"] = inventory.count("raft") > 0
 		replay_input["bike_integrity"] = float(you.get("bike_integrity", 100.0))
 		replay_input["tire_grip_seconds"] = float(you.get("tire_grip_seconds", 0.0))
 		replay_input["cargo_factor"] = BikeCargo.movement_factor(inventory,
@@ -230,6 +242,7 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float, crou
 	running = running and float(you.get("fracture", 0.0)) <= 0.0
 	running = running and WadingTravel.can_sprint(world, predicted)
 	var input := {"x": move.x, "z": move.y, "sprint": running, "mounted": mounted, "crouch": crouch,
+		"raft": inventory.count("raft") > 0,
 		"cargo_factor": factor, "speed_bonus": float(you.get("speed_bonus", 0.0)),
 		"injury_factor": Survival.fracture_speed_factor(float(you.get("fracture", 0.0))),
 		"tire_grip_seconds": float(you.get("tire_grip_seconds", 0.0)),
@@ -291,8 +304,21 @@ func fish(baited: bool = false, storm_cast: bool = false) -> void:
 	net.c_fish.rpc_id(1, baited, storm_cast)
 
 
+func enchant(item_id: String) -> void:
+	net.c_enchant.rpc_id(1, item_id)
+
+
+func repair_gear() -> void:
+	net.c_repair_gear.rpc_id(1)
+
+
 func craft(recipe: String, times: int = 1) -> void:
 	net.c_craft.rpc_id(1, recipe, times)
+
+
+## Albion-style focus craft: spends focus at a city workbench to get materials back.
+func craft_focus(recipe: String, times: int = 1) -> void:
+	net.c_craft_focus.rpc_id(1, recipe, times)
 
 
 func craft_from_stash(recipe: String, times: int = 1) -> void:
@@ -553,8 +579,30 @@ func attack(direction: Vector2) -> void:
 	net.c_attack.rpc_id(1, direction.x, direction.y)
 
 
+func power_attack(direction: Vector2, charge: float) -> void:
+	net.c_power_attack.rpc_id(1, direction.x, direction.y, charge)
+
+
+func kick(direction: Vector2) -> void:
+	net.c_kick.rpc_id(1, direction.x, direction.y)
+
+
+func rage() -> void:
+	net.c_rage.rpc_id(1)
+
+
 func skill(direction: Vector2) -> void:
 	net.c_skill.rpc_id(1, direction.x, direction.y)
+
+
+## Weapon ultimate (E): a charged version of the weapon skill with its own cooldown.
+func skill_ultimate(direction: Vector2) -> void:
+	net.c_skill_ultimate.rpc_id(1, direction.x, direction.y)
+
+
+## Armor abilities: "armor" (Iron Skin), "head" (Second Wind), "feet" (Sprint).
+func gear_skill(slot: String) -> void:
+	net.c_gear_skill.rpc_id(1, slot)
 
 
 func stagger_finisher() -> void:
@@ -583,6 +631,15 @@ func parry() -> void:
 	net.c_parry.rpc_id(1)
 
 
+func arcane_bolt(direction: Vector2) -> void:
+	net.c_arcane_bolt.rpc_id(1, direction.x, direction.y)
+
+
+func ultimate() -> void:
+	# The server picks every target inside the blast; the client sends nothing else.
+	net.c_ultimate.rpc_id(1)
+
+
 func dodge(direction: Vector2) -> void:
 	# Server owns the travel distance and cooldown; reconciliation handles positioning.
 	net.c_dodge.rpc_id(1, direction.x, direction.y)
@@ -604,6 +661,29 @@ func loot_sweep() -> void:
 func build(point: Vector2, yaw: float = 0.0) -> void:
 	if point.is_finite():
 		net.c_build.rpc_id(1, point.x, point.y, yaw)
+
+
+func toggle_door(id: int) -> void:
+	net.c_toggle_door.rpc_id(1, id)
+
+
+## The nearest door piece within reach, or -1.
+func nearest_door(point: Vector3) -> int:
+	var best := -1
+	var best_distance: float = HousePieces.DOOR_REACH
+	for item in barricades.values():
+		if str(item.get("piece", "")) != "door":
+			continue
+		var d := Vector2(float(item["x"]) - point.x, float(item["z"]) - point.z).length()
+		if d < best_distance:
+			best_distance = d
+			best = int(item["id"])
+	return best
+
+
+func build_piece(piece: String, point: Vector2, facing: float = 0.0) -> void:
+	if point.is_finite():
+		net.c_build_piece.rpc_id(1, piece, point.x, point.y, facing)
 
 
 func repair(id: int) -> void:
@@ -774,3 +854,40 @@ func nearest_loot(point: Vector3, radius: float) -> Dictionary:
 					best = {"id": crate["id"], "kind": "crate", "x": crate["x"], "z": crate["z"]}
 					best_distance = distance
 	return best
+
+
+## Albion-style buy orders (escrowed silver; sellers fill them at the hub).
+func market_bid(item_id: String, quantity: int, price: int) -> void:
+	net.c_market_bid.rpc_id(1, item_id, quantity, price)
+
+
+func market_fill(bid_id: int, quantity: int) -> void:
+	net.c_market_fill.rpc_id(1, bid_id, quantity)
+
+
+func market_cancel_bid(bid_id: int) -> void:
+	net.c_market_cancel_bid.rpc_id(1, bid_id)
+
+
+## Faction warfare: "enlist" (with a faction id), "flag", "unflag", "redeem".
+func faction(action: String, faction_id: String = "") -> void:
+	net.c_faction.rpc_id(1, action, faction_id)
+
+
+## Homestead farming: plant a carried seed in front of you / harvest your nearest ripe plot.
+func plant(seed_id: String) -> void:
+	net.c_plant.rpc_id(1, seed_id)
+
+
+func harvest() -> void:
+	net.c_harvest.rpc_id(1)
+
+
+## Guild bank at the hub: "list", "deposit" (any member) or "withdraw" (officers).
+func guild_bank(action: String, item_id: String = "", quantity: int = 0) -> void:
+	net.c_guild_bank.rpc_id(1, action, item_id, quantity)
+
+
+## Guild alliances (leaders, hub): "invite" (target peer), "accept", "leave", "status".
+func alliance(action: String, target_peer: int = -1) -> void:
+	net.c_alliance.rpc_id(1, action, target_peer)

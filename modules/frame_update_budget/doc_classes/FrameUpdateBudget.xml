@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="FrameUpdateBudget" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>A bounded frame-rate scheduler for optional, main-thread gameplay presentation tasks.</brief_description>
+	<description>
+		Register up to 64 named lanes, call [method begin_frame] once per rendering frame, then call [method consume] for each lane that needs an update. A nonzero result is the elapsed time since that lane's last update, capped at 0.16 seconds. The caller performs the actual update on the main thread. This class never touches a [SceneTree], starts threads or executes callbacks.
+		Each quality tier (0 through 3) has a target frequency and a maximum number of updates per frame. Slow frames reduce the slot budget. Optional microsecond CPU budgets additionally defer regular work after the caller reports enough consumed time; they are soft limits because an individual update cannot be interrupted once started. Forced updates and quality changes bypass the slot limit so visibility changes are immediate. Due lanes are reserved at the start of a frame by accumulated time, with a rotating tiebreaker; this avoids starving late-called effects when the update budget is smaller than the number of registered lanes. Optional soft per-lane deferral deadlines can promote a visually important, already-due lane over cheaper work after a configurable number of missed frame reservations, without executing any scene callbacks or increasing the configured slot count.
+	</description>
+	<methods>
+		<method name="register_lane">
+			<return type="bool" />
+			<param index="0" name="lane" type="StringName" />
+			<description>Adds a lane; returns false on duplicates, an empty name or when 64 lanes are registered.</description>
+		</method>
+		<method name="unregister_lane">
+			<return type="bool" />
+			<param index="0" name="lane" type="StringName" />
+			<description>Removes a lane and its accumulated elapsed time.</description>
+		</method>
+		<method name="get_lane_count" qualifiers="const">
+			<return type="int" />
+		</method>
+		<method name="configure">
+			<return type="bool" />
+			<param index="0" name="quality_rates" type="PackedFloat64Array" />
+			<param index="1" name="quality_slots" type="PackedInt32Array" />
+			<description>Atomically updates four positive target frequencies (up to 240 Hz) and four update budgets (1 to 64).</description>
+		</method>
+		<method name="begin_frame">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<param index="1" name="quality" type="int" />
+			<description>Begins a rendering frame. Validates elapsed time, updates slow-frame pressure, and reserves at most the allowed number of due lanes before the caller's update order can influence scheduling.</description>
+		</method>
+		<method name="set_frame_time_budget_us">
+			<return type="bool" />
+			<param index="0" name="budget_us" type="int" />
+			<description>Sets the soft main-thread CPU budget, 0–1000000 microseconds. Zero disables the time cap. Returns false without changing the setting for invalid input.</description>
+		</method>
+		<method name="get_frame_time_budget_us" qualifiers="const"><return type="int" /></method>
+		<method name="set_lane_max_deferred_frames">
+			<return type="bool" />
+			<param index="0" name="lane" type="StringName" />
+			<param index="1" name="frames" type="int" />
+			<description>Sets a per-lane soft deadline, 0–120 frames. Zero (default) disables deadline promotion, retaining the original cost/importance scheduler. Once the lane has been due but not reserved for the configured number of frames, it wins priority over normal due lanes even if its learned CPU cost exceeds the estimated frame budget. The scheduler still grants at most the configured per-frame slots and normal execution checks still obey the soft measured CPU cap. Forced/profile-change updates remain unchanged. Returns false for an invalid frame count or unregistered lane; use this only for non-critical visual work.</description>
+		</method>
+		<method name="get_lane_max_deferred_frames" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="lane" type="StringName" />
+			<description>Configured soft deferral deadline, 0 when disabled, or -1 for an unknown lane. Configuration survives [method reset].</description>
+		</method>
+		<method name="get_deadline_overdue_lane_count" qualifiers="const">
+			<return type="int" />
+			<description>Current number of registered lanes whose missed-reservation count has reached an enabled soft deadline. Does not include lanes without deadlines. Counts can remain nonzero until a reserved lane is actually consumed. Intended for profiling starvation pressure, not as a real-time task-execution guarantee.</description>
+		</method>
+		<method name="set_lane_rate_scale">
+			<return type="bool" />
+			<param index="0" name="lane" type="StringName" />
+			<param index="1" name="scale" type="float" />
+			<description>Sets a lane's relative update frequency, 0.75–2.0 inclusive. A value of 1.0 uses the current quality tier's default rate. Unlike [method set_lane_importance], this changes when the lane becomes eligible, not its priority among eligible lanes. Invalid/unknown/nonfinite inputs return false without changing state. Changes take effect on the next [method begin_frame]; they never bypass the frame time or slot limits.</description>
+		</method>
+		<method name="get_lane_rate_scale" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="lane" type="StringName" />
+			<description>Returns the lane's rate multiplier (default 1.0), or -1.0 for an unknown lane. Survives [method reset].</description>
+		</method>
+		<method name="set_lane_importance">
+			<return type="bool" />
+			<param index="0" name="lane" type="StringName" />
+			<param index="1" name="importance" type="float" />
+			<description>Sets a registered lane's scheduling significance, from 0.25 to 4.0. Non-finite or out-of-range values return false. A higher value prioritizes scene-relevant optional work, but overdue lanes retain starvation protection.</description>
+		</method>
+		<method name="get_lane_importance" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="lane" type="StringName" />
+			<description>Returns the current significance or -1 for an unknown lane. Default importance is 1.</description>
+		</method>
+		<method name="get_lane_estimated_cost_us" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="lane" type="StringName" />
+			<description>Returns the learned exponential moving average cost in microseconds, 0 if unsampled, or -1 for an unknown lane. Measurements are supplied explicitly through [method record_cost].</description>
+		</method>
+		<method name="get_lane_last_frame_cost_us" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="lane" type="StringName" />
+			<description>Returns caller-reported CPU microseconds for this lane in the previous completed frame, 0 if idle, or -1 if unknown. Current-frame measurements are not exposed partially. This is distinct from the learned cost estimate and does not measure GPU time. Reset clears the sample.</description>
+		</method>
+		<method name="get_reserved_estimated_cost_us" qualifiers="const">
+			<return type="int" />
+			<description>Returns the sum of learned costs for lanes reserved at the last [method begin_frame] call. This is a scheduling estimate, not an actual CPU/GPU timer.</description>
+		</method>
+		<method name="record_cost">
+			<return type="bool" />
+			<param index="0" name="lane" type="StringName" />
+			<param index="1" name="elapsed_us" type="int" />
+			<description>Reports the measured CPU cost after a lane's update. Unknown lanes or negative/excessive values are rejected; the frame total saturates to prevent overflow. This never samples GPU time.</description>
+		</method>
+		<method name="current_frame_cost_us" qualifiers="const"><return type="int" /></method>
+		<method name="last_frame_cost_us" qualifiers="const"><return type="int" /></method>
+		<method name="consume">
+			<return type="float" />
+			<param index="0" name="lane" type="StringName" />
+			<param index="1" name="delta" type="float" />
+			<param index="2" name="force" type="bool" default="false" />
+			<description>Returns the bounded elapsed time when an update is allowed and its per-frame reservation is available, or zero otherwise. A regular reservation can be used once per frame. Reserved lanes are chosen using importance, accumulated elapsed time, starvation age and their learned CPU cost. Forced updates bypass the budget.</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>Clears lane timers and pressure while retaining registered lanes, the profile, and lifetime diagnostic counters.</description>
+		</method>
+		<method name="updated_total" qualifiers="const"><return type="int" /></method>
+		<method name="skipped_total" qualifiers="const"><return type="int" /></method>
+		<method name="current_budget" qualifiers="const"><return type="int" /></method>
+		<method name="pressure_percent" qualifiers="const"><return type="float" /></method>
+		<method name="last_frame_counts" qualifiers="const"><return type="Vector2i" /></method>
+	</methods>
+</class>

@@ -216,7 +216,7 @@ Files extracted from upstream source:
 ## embree
 
 - Upstream: https://github.com/embree/embree
-- Version: 4.4.0 (ff9381774dc99fea81a932ad276677aad6a3d4dd, 2025)
+- Version: 4.4.1 (f590db83ef6559387df7f6d8725c34fb7acf851d, 2026)
 - License: Apache 2.0
 
 Files extracted from upstream:
@@ -374,7 +374,7 @@ Files extracted from upstream source:
 ## gamepadmotionhelpers
 
 - Upstream: https://github.com/JibbSmart/GamepadMotionHelpers
-- Version: git (39b578aacf34c3a1c584d8f7f194adc776f88055, 2023)
+- Version: git (f1a76007ec058122a4bb6f19c816c6c0c7b7f12a, 2026)
 - License: MIT
 
 Files extracted from upstream source:
@@ -507,13 +507,17 @@ Files generated from upstream source:
   https://github.com/unicode-org/icu/blob/master/docs/userguide/icu_data/buildtool.md
   for instructions).
 
-1. Download and extract both `icu4c-{version}-src.tgz` and `icu4c-{version}-data.zip`
+1. Download and extract both `icu4c-{version}-sources.tgz` and `icu4c-{version}-data.zip`
   (replace `data` subfolder from the main source archive)
 2. Build ICU with default options: `./runConfigureICU {PLATFORM} && make`
-3. Reconfigure ICU with custom data config:
+3. Reconfigure ICU with full custom data config:
    `ICU_DATA_FILTER_FILE={GODOT_SOURCE}/thirdparty/icu4c/godot_data.json ./runConfigureICU {PLATFORM} --with-data-packaging=common`
 4. Delete `data/out` folder and rebuild data: `cd data && rm -rf ./out && make`
 5. Copy `source/data/out/icudt{ICU_VERSION}l.dat` to the `{GODOT_SOURCE}/thirdparty/icu4c/icudt_godot.dat`
+6. Reconfigure ICU with minimal custom data config:
+   `ICU_DATA_FILTER_FILE={GODOT_SOURCE}/thirdparty/icu4c/godot_data_min.json ./runConfigureICU {PLATFORM} --with-data-packaging=common`
+7. Delete `data/out` folder and rebuild data: `cd data && rm -rf ./out && make`
+8. Copy `source/data/out/icudt{ICU_VERSION}l.dat` to the `{GODOT_SOURCE}/thirdparty/icu4c/icudt_godot_min.dat`
 
 Patches:
 
@@ -563,13 +567,13 @@ Patches:
 ## libjpeg-turbo
 
 - Upstream: https://github.com/libjpeg-turbo/libjpeg-turbo
-- Version: 3.1.3 (af9c1c268520a29adf98cad5138dafe612b3d318, 2025)
+- Version: 3.1.4.1 (9217719d3a58633923b096af4c1d50d304768a64, 2026)
 - License: BSD-3-Clause and IJG
 
 Files extracted from upstream source:
 
 - `src/*.{c,h}` except for:
-  * `cdjpeg.c cjpeg.c djpeg.c example.c jcdiffct.c jclhuff.c jclossls.c jcstest.c jddiffct.c jdlhuff.c jdlossls.c jlossls.h jpegtran.c rdbmp.c rdcolmap.c rdgif.c rdjpgcom.c rdppm.c rdswitch.c rdtarga.c strtest.c tjbench.c tjcomp.c tjdecomp.c tjtran.c tjunittest.c tjutil.c wrbmp.c wrgif.c wrjpgcom.c wrppm.c wrtarga.c`
+  * `bmpsizetest.c cdjpeg.c cjpeg.c djpeg.c example.c jcdiffct.c jclhuff.c jclossls.c jcstest.c jddiffct.c jdlhuff.c jdlossls.c jlossls.h jpegtran.c rdbmp.c rdcolmap.c rdgif.c rdjpgcom.c rdppm.c rdswitch.c rdtarga.c strtest.c tjbench.c tjcomp.c tjdecomp.c tjtran.c tjunittest.c tjutil.c wrbmp.c wrgif.c wrjpgcom.c wrppm.c wrtarga.c`
 - `LICENSE.md`
 - `README.ijg`
 
@@ -685,7 +689,7 @@ See `linuxbsd_headers/README.md`.
 ## manifold
 
 - Upstream: https://github.com/elalish/manifold
-- Version: 3.5.2 (11235e6b8ebea2dbed8aec4285685aafd3d95667, 2026)
+- Version: 3.5.4 (ce50d78021d64507f89e8c9fc2c2e51018117857, 2026)
 - License: Apache 2.0
 
 File extracted from upstream source:
@@ -843,7 +847,7 @@ Collection of single-file libraries used in Godot components.
   * License: MIT
 - `FastNoiseLite.h`
   * Upstream: https://github.com/Auburn/FastNoiseLite
-  * Version: 1.1.0 (ee2f4eaeaffeaa599342544b22e62cb2f9cea570, 2023)
+  * Version: 1.1.1 (7ccfbc16eb1c932568f177d63a9ba51d89bbe516, 2024)
   * License: MIT
   * Patches:
     - `FastNoiseLite-0001-namespace-warnings.patch` ([GH-88526](https://github.com/godotengine/godot/pull/88526))
@@ -888,7 +892,7 @@ Collection of single-file libraries used in Godot components.
     - `polypartition-0002-shadow-warning.patch` ([GH-66808](https://github.com/godotengine/godot/pull/66808))
 - `qoa.{c,h}`
   * Upstream: https://github.com/phoboslab/qoa
-  * Version: git (1bf9bc04673df55dc554021b768006836f69d53a, 2026)
+  * Version: git (93b0680030d1312e7a2829e53272353cc1de6ece, 2026)
   * License: MIT
   * Modifications: Added implementation through `qoa.c`.
 - `r128.{c,h}`
@@ -906,7 +910,7 @@ Collection of single-file libraries used in Godot components.
     - `smaz-0002-decompress-input-bounds.patch` ([GH-124701](https://github.com/godotengine/godot/pull/124701))
 - `smolv.{cpp,h}`
   * Upstream: https://github.com/aras-p/smol-v
-  * Version: git (9dd54c379ac29fa148cb1b829bb939ba7381d8f4, 2024)
+  * Version: git (6303e979b59153ee7007fd14e06d3fed8687b64c, 2026)
   * License: Public Domain or MIT
 - `stb_rect_pack.h`
   * Upstream: https://github.com/nothings/stb
@@ -1176,7 +1180,7 @@ Patches:
 ## tinyexr
 
 - Upstream: https://github.com/syoyo/tinyexr
-- Version: 3.2.0 (6f470c9ab24bf3992bc512ce07e8ecb00d9bf105, 2026)
+- Version: 3.4.0 (9b565f64599fe25accf6ba41245c07587c4fa7f4, 2026)
 - License: BSD-3-Clause
 
 Files extracted from upstream source:

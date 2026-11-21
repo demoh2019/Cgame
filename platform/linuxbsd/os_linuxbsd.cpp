@@ -91,6 +91,8 @@
 #ifdef __linux__
 #include "platform/linuxbsd/cgroup_cpu_quota.h"
 
+#include "core/config/project_settings.h"
+
 #include <sched.h>
 #endif
 

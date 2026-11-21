@@ -7,19 +7,24 @@ const ReverbZones = preload("res://scripts/client/reverb_zones.gd")
 const AudioMix = preload("res://scripts/client/audio_mix.gd")
 const AudioSurfaces = preload("res://scripts/client/audio_surfaces.gd")
 const AudioVoices = preload("res://scripts/client/audio_voices.gd")
+const AudioVirtualVoices = preload("res://scripts/client/audio_virtual_voices.gd")
 const AudioSpatial = preload("res://scripts/client/audio_spatial.gd")
 const AudioDucking = preload("res://scripts/client/audio_ducking.gd")
+const AudioMixSnapshots = preload("res://scripts/client/audio_mix_snapshots.gd")
 const AudioAmbient = preload("res://scripts/client/audio_ambient.gd")
 const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 ## Optional engine SoundConcurrencyManager (null on a binary without the gameplay_fx module).
 const CONCURRENCY_GROUPS := {"enemy_hurt": 4, "coin": 3, "blaster": 4, "blaster_repeater": 4, "break": 3}
 var _concurrency: Node = null
 var _concurrency_tried := false
+var _native_voice_admission: Object = null
+var _voice_hold_rejections: int = 0
 var _sfx_bus := -1
 var _sfx_lowpass := -1
 var _rain: AudioStreamPlayer
 var _wind: AudioStreamPlayer
 var _voices: Array = [] # Active 3D sources, including bounded obstacle probes.
+var _virtual_voices := AudioVirtualVoices.new() # Refused long sounds, still advancing in time.
 # Unreal-style sound obstruction checks: only static geometry on layer 1,
 # no per-frame physics casts for every active sound.
 const OBSTRUCTION_RAYS_PER_TICK := 3
@@ -29,9 +34,13 @@ var _obstruction_clock := 0.0
 var _listener := Vector3.ZERO
 var _ground := Callable()
 var _humidity := 0.0
-var _duck_target := 0.0
 var _duck := 0.0
-var _duck_hold := 0.0
+var _duck_sources: Dictionary = {} # Old binaries: independent event holds in GDScript.
+var _native_duck: Object = null # Native AudioDuckMix, a data-only mixer.
+var _native_mix_snapshots: Object = null # Unreal Control Bus Mix-style layered profiles.
+var _script_mix_snapshots: Dictionary = {} # Older Cgame/stock Godot parity.
+var _mix_zone: String = "" # Only change zone mix when the listener moves zones.
+var _storm_mix_active: bool = false
 var _surface := "grass"
 var _cutoff := AudioSpatial.OPEN_CUTOFF
 
@@ -61,6 +70,9 @@ func _ready() -> void:
 	_sfx_bus = ReverbZones.ensure_bus()
 	_sfx_lowpass = AudioMix.ensure_lowpass(ReverbZones.BUS)
 	AudioMix.load_all()
+	_native_duck = EngineFeatures.make("AudioDuckMix")
+	_native_mix_snapshots = EngineFeatures.make("AudioMixSnapshotController")
+	_native_voice_admission = EngineFeatures.make("AudioVoiceAdmissionPlanner")
 	_ambience = AudioStreamPlayer.new()
 	_ambience.bus = "Ambience"
 	_ambience.stream = Assets.sound("ambience")
@@ -172,6 +184,11 @@ func play_sting(track: String, volume_db: float = -9.0) -> void:
 
 func mark_combat() -> void:
 	_combat_left = COMBAT_SECONDS
+	# A short Unreal Control Bus Mix-style combat focus stage reduces
+	# ambient masking of important attack cues. Repeated hits extend its
+	# life without resetting the existing fade; user sliders still apply.
+	_activate_timed_mix_snapshot("Combat.Focus",
+		{"Ambience": -3.0, "Music": -1.0}, 0.15, COMBAT_SECONDS, 1.5)
 
 
 func set_footsteps(active: bool) -> void:
@@ -184,11 +201,69 @@ func set_footsteps(active: bool) -> void:
 		_steps.stop()
 
 
-func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> void:
+## Gore foley (CC0, assets/gore): wet flesh hits and bone cracks, with pitch variation.
+const FLESH := [preload("res://assets/gore/flesh_1.ogg"), preload("res://assets/gore/flesh_2.ogg"), preload("res://assets/gore/flesh_3.ogg")]
+const BONE := [preload("res://assets/gore/bone_break_1.ogg"), preload("res://assets/gore/bone_break_2.ogg"),
+	preload("res://assets/gore/bone_break_3.ogg"), preload("res://assets/gore/bone_break_4.ogg")]
+
+
+func play_gore(bone: bool, position: Vector3, volume_db: float = -6.0) -> void:
+	if not enabled:
+		return
+	var pool: Array = BONE if bone else FLESH
+	var player := AudioStreamPlayer3D.new()
+	player.stream = pool[randi() % pool.size()]
+	player.volume_db = volume_db
+	player.pitch_scale = randf_range(0.88, 1.12)
+	player.unit_size = 10.0
+	player.max_distance = 60.0
+	player.bus = ReverbZones.BUS
+	add_child(player)
+	player.global_position = position
+	player.play()
+	player.finished.connect(player.queue_free)
+
+
+## Native anti-thrashing planner when available. Older engine builds use
+## the equivalent GDScript policy rather than an unprotected legacy API.
+func _choose_voice_victim(snapshot: Array, sound_name: String,
+		loudness: float, priority: int) -> int:
+	if _native_voice_admission != null and _native_voice_admission.has_method("select_victim_stable"):
+		return int(_native_voice_admission.call("select_victim_stable",
+			snapshot, sound_name, loudness, priority,
+			AudioVoices.MAX_VOICES, AudioVoices.SAME_SOUND_MAX,
+			AudioVoices.STEAL_HOLD_SECONDS, AudioVoices.STEAL_EARLY_OVERRIDE_DB))
+	return AudioVoices.prioritized_victim_stable(snapshot, sound_name, loudness, priority)
+
+
+func get_voice_hold_rejections() -> int:
+	return _voice_hold_rejections
+
+
+func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0, from_position: float = 0.0) -> void:
 	if not enabled:
 		return
 	var stream := Assets.sound(sound_name)
 	if stream == null:
+		return
+	# Plan sound admission before creating a 3D voice Node.
+	var distance := position.distance_to(_listener)
+	var loudness := AudioVoices.audibility(volume_db, distance, 14.0)
+	var priority: int = AudioVoices.priority_for(sound_name)
+	var now := Time.get_ticks_msec() / 1000.0
+	var snapshot: Array = []
+	for v in _voices:
+		snapshot.append({"name": v["name"], "audibility": v["audibility"],
+			"age": maxf(0.0, now - float(v["born"])),
+			"priority": int(v.get("priority", 0))})
+	var cull: int = _choose_voice_victim(snapshot, sound_name, loudness, priority)
+	if cull == AudioVoices.DROP_NEW:
+		# Count only voice holds, not ordinary too-quiet or malformed requests.
+		# This comparison is evaluated only on rejection, not the hot play path.
+		if AudioVoices.prioritized_victim(snapshot, sound_name, loudness, priority) >= 0:
+			_voice_hold_rejections += 1
+			# Long sounds go virtual: time keeps running and they resume when a voice frees.
+			_virtual_voices.add(sound_name, position, volume_db, now - from_position, stream.get_length())
 		return
 	var player := AudioStreamPlayer3D.new()
 	player.stream = stream
@@ -196,17 +271,6 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	player.unit_size = 14.0
 	player.max_distance = 90.0
 	player.bus = ReverbZones.BUS
-	var distance := position.distance_to(_listener)
-	# Voice limiting: cull the quietest/oldest voice, or drop this one when it is the weakest.
-	var loudness := AudioVoices.audibility(volume_db, distance, player.unit_size)
-	var now := Time.get_ticks_msec() / 1000.0
-	var snapshot: Array = []
-	for v in _voices:
-		snapshot.append({"name": v["name"], "audibility": v["audibility"], "age": now - float(v["born"])})
-	var cull := AudioVoices.victim(snapshot, sound_name, loudness)
-	if cull == AudioVoices.DROP_NEW:
-		player.free()
-		return
 	if cull >= 0:
 		var old: Dictionary = _voices[cull]
 		_voices.remove_at(cull)
@@ -240,7 +304,7 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	add_child(player)
 	player.global_position = position
 	var record := {
-		"player": player, "name": sound_name,
+		"player": player, "name": sound_name, "priority": priority,
 		"audibility": loudness + AudioSpatial.obstruction_db(initial_obstruction),
 		"born": now, "base_audibility": loudness, "terrain_blocked": occluded,
 		"obstruction": initial_obstruction,
@@ -252,8 +316,18 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	_voices.append(record)
 	player.finished.connect(func() -> void:
 		_voices.erase(record)
-		player.queue_free())
-	player.play()
+		player.queue_free()
+		_promote_virtual_voice.call_deferred())
+	player.play(maxf(0.0, from_position))
+
+
+## A real voice just freed: bring back the loudest virtual voice at its current offset.
+func _promote_virtual_voice() -> void:
+	if _virtual_voices.voices.is_empty():
+		return
+	var entry: Dictionary = _virtual_voices.promote(Time.get_ticks_msec() / 1000.0, _listener)
+	if not entry.is_empty():
+		play_at(str(entry["name"]), entry["position"], float(entry["volume_db"]), float(entry["offset"]))
 
 
 ## Scene physics is read only during physics ticks. This detects wooden
@@ -326,7 +400,13 @@ func _physics_process(delta: float) -> void:
 			continue
 		var target: float = float(record.get("target_obstruction", 0.0))
 		var old_amount: float = float(record.get("obstruction", 0.0))
-		var amount: float = move_toward(old_amount, target, delta * 6.0)
+		var native_smoothing: bool = player.has_method("advance_obstruction_amount")
+		var amount: float
+		if native_smoothing:
+			amount = float(player.call("advance_obstruction_amount", target, delta,
+				AudioSpatial.OBSTRUCTION_ATTACK_SECONDS, AudioSpatial.OBSTRUCTION_RELEASE_SECONDS))
+		else:
+			amount = AudioSpatial.smooth_obstruction(old_amount, target, delta)
 		if absf(amount - old_amount) > 0.0001:
 			record["obstruction"] = amount
 			# Muffled shots should lose voice-priority against clear,
@@ -334,7 +414,8 @@ func _physics_process(delta: float) -> void:
 			record["audibility"] = float(record.get("base_audibility", record["audibility"])) \
 				+ AudioSpatial.obstruction_db(amount)
 			if player.has_method("set_obstruction_amount"):
-				player.call("set_obstruction_amount", amount)
+				if not native_smoothing:
+					player.call("set_obstruction_amount", amount)
 			else:
 				var base_cutoff: float = float(record["original_cutoff"])
 				player.attenuation_filter_cutoff_hz = AudioSpatial.obstruction_cutoff(base_cutoff, amount)
@@ -377,6 +458,83 @@ func update_reverb(underground: bool, biome: String, delta: float) -> void:
 	ReverbZones.blend(ReverbZones.reverb(_sfx_bus), ReverbZones.zone_for(underground, biome), 1.0 - exp(-2.0 * delta))
 
 
+## Named bus snapshots live independently of temporary sound-event ducks.
+## The C++ module only calculates offsets; we compose them with user sliders.
+func _activate_mix_snapshot(source: String, offsets: Dictionary, fade_seconds: float) -> void:
+	if _native_mix_snapshots != null:
+		_native_mix_snapshots.call("activate_mix", StringName(source), offsets, fade_seconds)
+	else:
+		AudioMixSnapshots.activate_mix(_script_mix_snapshots, source, offsets, fade_seconds)
+
+
+func _activate_timed_mix_snapshot(source: String, offsets: Dictionary,
+		attack_seconds: float, hold_seconds: float, release_seconds: float) -> void:
+	if _native_mix_snapshots != null and _native_mix_snapshots.has_method("activate_timed_mix"):
+		_native_mix_snapshots.call("activate_timed_mix", StringName(source),
+			offsets, attack_seconds, hold_seconds, release_seconds)
+	else:
+		# Old native engines can still run their manually managed zone mixes.
+		# This timed profile is tracked in script only, then combined below.
+		AudioMixSnapshots.activate_timed_mix(_script_mix_snapshots, source,
+			offsets, attack_seconds, hold_seconds, release_seconds)
+
+
+func _deactivate_mix_snapshot(source: String, fade_seconds: float) -> void:
+	if _native_mix_snapshots != null:
+		_native_mix_snapshots.call("deactivate_mix", StringName(source), fade_seconds)
+	else:
+		AudioMixSnapshots.deactivate_mix(_script_mix_snapshots, source, fade_seconds)
+
+
+func _snapshot_bus_db(bus: String) -> float:
+	var native_offset := 0.0
+	if _native_mix_snapshots != null:
+		native_offset = float(_native_mix_snapshots.call("get_bus_offset_db", StringName(bus)))
+	# When a pre-timed Cgame build has native zone mixing but no timed API,
+	# combine its zone contribution with the scripted combat focus mix.
+	return maxf(-60.0, native_offset + AudioMixSnapshots.bus_offset_db(_script_mix_snapshots, bus))
+
+
+## Unreal Audio Volume / Control Bus Mix-style independent, layered profiles.
+## Storm has hysteresis: a fluctuating forecast cannot re-trigger every frame.
+func _update_environment_mix_snapshots(underground: bool, biome: String,
+		storm: float, delta: float) -> void:
+	var zone: String = ReverbZones.zone_for(underground, biome)
+	if zone != _mix_zone:
+		if _mix_zone == "underground":
+			_deactivate_mix_snapshot("Zone.Underground", 1.25)
+		elif _mix_zone == "forest":
+			_deactivate_mix_snapshot("Zone.Forest", 1.25)
+		if zone == "underground":
+			_activate_mix_snapshot("Zone.Underground", {
+				"Music": -3.0, "Ambience": -4.0, "SFX": -2.0}, 1.25)
+		elif zone == "forest":
+			_activate_mix_snapshot("Zone.Forest", {
+				"Ambience": -1.5, "SFX": -0.5}, 1.25)
+		_mix_zone = zone
+	if is_finite(storm):
+		if not _storm_mix_active and storm >= 0.70:
+			_activate_mix_snapshot("Weather.Storm", {
+				"Music": -2.0, "Ambience": -1.0, "SFX": -0.75}, 2.0)
+			_storm_mix_active = true
+		elif _storm_mix_active and storm <= 0.55:
+			_deactivate_mix_snapshot("Weather.Storm", 2.0)
+			_storm_mix_active = false
+	if _native_mix_snapshots != null:
+		_native_mix_snapshots.call("tick", delta)
+	# Script timed mixes may coexist with native zone mixes on older Cgame
+	# binaries, while native timed builds have an empty script dictionary.
+	AudioMixSnapshots.tick(_script_mix_snapshots, delta)
+
+
+## Do not resubmit identical AudioServer bus gain every render frame.
+static func _apply_bus_gain(bus: String, gain_db: float) -> void:
+	var index: int = AudioServer.get_bus_index(bus)
+	gain_db = maxf(-80.0, gain_db)
+	if index >= 0 and absf(AudioServer.get_bus_volume_db(index) - gain_db) > 0.01:
+		AudioServer.set_bus_volume_db(index, gain_db)
+
+
 ## Per-frame environment audio: listener filtering, surface footsteps, weather loops, biome bed, music ducking.
 ## `storm` 0..1, `wind` is the wind speed, `covered` = sheltered or underground.
 func update_environment(listener: Vector3, ground_height: Callable, underground: bool, biome: String,
@@ -401,25 +559,31 @@ func update_environment(listener: Vector3, ground_height: Callable, underground:
 	_ambience.volume_db = lerpf(_ambience.volume_db, float(bed["db"]), 1.0 - exp(-1.5 * delta))
 	_rain.volume_db = lerpf(_rain.volume_db, AudioAmbient.rain_db(storm, covered), 1.0 - exp(-2.0 * delta))
 	_wind.volume_db = lerpf(_wind.volume_db, AudioAmbient.wind_db(wind, storm, underground), 1.0 - exp(-2.0 * delta))
-	# Sidechain-style ducking of music and ambience.
-	_duck_hold = maxf(_duck_hold - delta, 0.0)
-	if _duck_hold <= 0.0:
-		_duck_target = 0.0
-	_duck = AudioDucking.step(_duck, _duck_target, delta)
-	var music_bus := AudioServer.get_bus_index("Music")
-	if music_bus != -1:
-		AudioServer.set_bus_volume_db(music_bus, AudioMix.linear_to_db(AudioMix.volumes["Music"]) + _duck if AudioMix.volumes["Music"] > 0.0001 else -80.0)
-	var amb_bus := AudioServer.get_bus_index("Ambience")
-	if amb_bus != -1:
-		AudioServer.set_bus_volume_db(amb_bus, AudioMix.linear_to_db(AudioMix.volumes["Ambience"]) + _duck * 0.4 if AudioMix.volumes["Ambience"] > 0.0001 else -80.0)
+	# Long-lived zone/weather mix profiles are separate from transient audio ducks.
+	_update_environment_mix_snapshots(underground, biome, storm, delta)
+	# Native Unreal-style duck bus mixer, with independent event holds.
+	# The fallback follows the same target and 40/4 dB/s envelope exactly.
+	if _native_duck != null:
+		_duck = float(_native_duck.call("tick", delta))
+	else:
+		_duck = AudioDucking.tick_sources(_duck_sources, _duck, delta)
+	# Sum user volume, independent named zone/weather offsets and event ducking.
+	# Muted user sliders remain muted even when a profile is activated.
+	var music_gain: float = AudioMix.linear_to_db(AudioMix.volumes["Music"]) + _duck + _snapshot_bus_db("Music") if AudioMix.volumes["Music"] > 0.0001 else -80.0
+	var ambience_gain: float = AudioMix.linear_to_db(AudioMix.volumes["Ambience"]) + _duck * 0.4 + _snapshot_bus_db("Ambience") if AudioMix.volumes["Ambience"] > 0.0001 else -80.0
+	var effects_gain: float = AudioMix.linear_to_db(AudioMix.volumes["SFX"]) + _snapshot_bus_db("SFX") if AudioMix.volumes["SFX"] > 0.0001 else -80.0
+	_apply_bus_gain("Music", music_gain)
+	_apply_bus_gain("Ambience", ambience_gain)
+	_apply_bus_gain("SFX", effects_gain)
 
 
-## Dips music for a big event (kept for HOLD seconds, deepest dip wins).
-func duck(depth_db: float) -> void:
-	if depth_db < _duck_target:
-		_duck_target = depth_db
-	if depth_db < 0.0:
-		_duck_hold = AudioDucking.HOLD
+## Dip music for one named event. Retrigger resets only that source's hold.
+## Legacy call sites without a name keep the established shared "Generic" key.
+func duck(depth_db: float, source: String = "Generic") -> void:
+	if _native_duck != null:
+		_native_duck.call("trigger", StringName(source), depth_db, AudioDucking.HOLD)
+	else:
+		AudioDucking.trigger_source(_duck_sources, source, depth_db, AudioDucking.HOLD)
 
 
 var _slider := 0
@@ -452,7 +616,7 @@ func surface() -> String:
 func on_event(event: Dictionary, local_peer: int, ground_height: Callable) -> void:
 	_ground = ground_height
 	if event.get("peer", local_peer) == local_peer or event["type"] in ["zombie_died", "knockback"]:
-		duck(AudioDucking.depth_for(str(event["type"])))
+		duck(AudioDucking.depth_for(str(event["type"])), str(event["type"]))
 	var position := Vector3.ZERO
 	if event.has("x") and event.has("z"):
 		position = Vector3(event["x"], float(ground_height.call(event["x"], event["z"])) + 1.0, event["z"])

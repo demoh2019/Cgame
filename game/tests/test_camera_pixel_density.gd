@@ -38,6 +38,17 @@ func run(t) -> void:
 		"camera rotation invalidates stale grass LOD")
 	t.check(chunk_source.contains("_grass_last_camera_y"),
 		"camera height changes invalidate stale grass LOD")
+	t.current = "live streamed grass tile LOD batches native screen-space projection"
+	t.check(chunk_source.contains('view_camera.has_method("get_pixels_per_meter_at_positions")'),
+		"real chunk LOD feature-detects new native batch projection")
+	t.check(chunk_source.contains('view_camera.call("get_pixels_per_meter_at_positions", tile_centers)'),
+		"real streamed grass batches all tile centers into one camera query")
+	t.check(chunk_source.contains("batch_density.size() == _grass_tiles.size()"),
+		"invalid native results fall back atomically to scalar selection")
+	t.check(chunk_source.contains('view_camera.call("get_pixels_per_meter_at_position", tile_center)'),
+		"old engines retain per-tile scalar projection compatibility")
+	t.check(chunk_source.contains("_grass_tiles.size() <= 4096"),
+		"bounded native batch preserves the scalar path for large groups")
 
 	t.current = "native Camera3D method in fork, including orthographic mode"
 	var camera := Camera3D.new()
@@ -73,4 +84,40 @@ func run(t) -> void:
 		"orthographic pixel density is positive and finite")
 	t.near(ortho_near, ortho_far, 0.001,
 		"orthographic detail is independent of world-space depth")
+
+	t.current = "native Camera3D bulk projected grass coverage parity"
+	if camera.has_method("get_pixels_per_meter_at_positions"):
+		var points := PackedVector3Array([
+			Vector3(0, 0, -10), Vector3(2, 0, -20),
+			Vector3(0, 0, 10), Vector3(0, 0, -40)])
+		var orthogonal_batch: PackedFloat64Array = camera.call(
+			"get_pixels_per_meter_at_positions", points)
+		t.eq(orthogonal_batch.size(), points.size(),
+			"native orthographic batch returns one pixel density per tile")
+		for i in points.size():
+			t.near(orthogonal_batch[i], float(camera.call(
+				"get_pixels_per_meter_at_position", points[i])), 0.00001,
+				"native orthographic batch equals scalar camera projection")
+		camera.set_perspective(38.0, 0.05, 500.0)
+		var perspective_batch: PackedFloat64Array = camera.call(
+			"get_pixels_per_meter_at_positions", points)
+		t.eq(perspective_batch.size(), points.size(),
+			"native perspective batch preserves all tile results")
+		for i in points.size():
+			t.near(perspective_batch[i], float(camera.call(
+				"get_pixels_per_meter_at_position", points[i])), 0.00001,
+				"native perspective batch equals scalar camera projection")
+		t.eq(perspective_batch[2], 0.0,
+			"grass behind camera has zero screen-space detail")
+		var oversized := PackedVector3Array()
+		oversized.resize(4097)
+		var rejected: PackedFloat64Array = camera.call(
+			"get_pixels_per_meter_at_positions", oversized)
+		t.eq(rejected.size(), 0, "over 4096 points reject the entire native batch")
+		var malformed := PackedVector3Array([
+			Vector3(0, 0, -10), Vector3(NAN, 0, -20)])
+		rejected = camera.call("get_pixels_per_meter_at_positions", malformed)
+		t.eq(rejected.size(), 0, "nonfinite late tile rejects the entire native batch")
+	else:
+		t.check(true, "older Cgame and stock Godot keep scalar screen-space LOD")
 	camera.free()

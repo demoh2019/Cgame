@@ -78,3 +78,104 @@ static func should_cast(role: String, distance: float, currently_casting: bool) 
 	if radius <= 0.0:
 		return false
 	return distance <= maxf(0.0, radius + (HYSTERESIS if currently_casting else -HYSTERESIS))
+
+## 128-slot native HLOD-style solar-shadow significance budget.
+## Role preference: structures before trees before tiny bush shadows.
+## All bounds are world-space, so large nearby groups survive culling.
+const SHADOW_CAPS := [0, 8, 16, 24]
+static var _shadow_native: Object = null
+static var _shadow_native_checked := false
+
+
+static func cap_for_quality(quality: int) -> int:
+	return SHADOW_CAPS[clampi(quality, 0, 3)]
+
+
+static func role_index(role: String) -> int:
+	match role:
+		"bush":
+			return 0
+		"tree":
+			return 1
+		"structure":
+			return 2
+	return 3
+
+
+## Returns source indices ordered by visual significance; no scene mutations.
+## The pure GDScript fallback matches the native geometric and ranking rules.
+static func select_shadow_casters(bounds_min: PackedVector3Array,
+		bounds_max: PackedVector3Array, roles: PackedByteArray,
+		current: PackedByteArray, camera: Vector3, budget: int,
+		prefer_native: bool = true) -> PackedInt32Array:
+	var radii := PackedFloat64Array([
+		radius_for("bush"), radius_for("tree"), radius_for("structure")])
+	if prefer_native:
+		if not _shadow_native_checked:
+			_shadow_native_checked = true
+			if ClassDB.class_exists("SignificanceBudgetPlanner"):
+				var instance: Object = ClassDB.instantiate("SignificanceBudgetPlanner")
+				if instance != null and instance.has_method("select_shadow_casters"):
+					_shadow_native = instance
+		if _shadow_native != null:
+			return _shadow_native.call("select_shadow_casters", bounds_min, bounds_max,
+				roles, current, camera, radii, budget, HYSTERESIS)
+	return _select_shadow_fallback(bounds_min, bounds_max, roles, current,
+		camera, radii, budget, HYSTERESIS)
+
+
+static func _select_shadow_fallback(bounds_min: PackedVector3Array,
+		bounds_max: PackedVector3Array, roles: PackedByteArray,
+		current: PackedByteArray, camera: Vector3, radii: PackedFloat64Array,
+		budget: int, hysteresis: float) -> PackedInt32Array:
+	var empty := PackedInt32Array()
+	var n: int = bounds_min.size()
+	if n != bounds_max.size() or n != roles.size() or n != current.size() or \
+			n > 16384 or radii.size() != 3 or budget < 0 or budget > 128 or \
+			not camera.is_finite() or not is_finite(hysteresis) or \
+			hysteresis < 0.0 or hysteresis > 1000.0:
+		return empty
+	for radius in radii:
+		if not is_finite(radius) or radius < 0.0 or radius > 1000000.0:
+			return empty
+	for i in n:
+		var lo: Vector3 = bounds_min[i]
+		var hi: Vector3 = bounds_max[i]
+		if not lo.is_finite() or not hi.is_finite() or \
+				lo.x > hi.x or lo.y > hi.y or lo.z > hi.z or \
+				roles[i] > 3 or current[i] > 1 or \
+				absf(lo.x) > 1000000.0 or absf(hi.x) > 1000000.0 or \
+				absf(lo.z) > 1000000.0 or absf(hi.z) > 1000000.0:
+			return empty
+	if budget == 0:
+		return empty
+	var eligible: Array[Dictionary] = []
+	for i in n:
+		var role: int = int(roles[i])
+		if role == 3 or radii[role] <= 0.0:
+			continue
+		var lo: Vector3 = bounds_min[i]
+		var hi: Vector3 = bounds_max[i]
+		var dx: float = maxf(maxf(lo.x - camera.x, camera.x - hi.x), 0.0)
+		var dz: float = maxf(maxf(lo.z - camera.z, camera.z - hi.z), 0.0)
+		var distance: float = sqrt(dx * dx + dz * dz)
+		var active: bool = current[i] == 1
+		var allowed: float = maxf(0.0, radii[role] +
+			(hysteresis if active else -hysteresis))
+		if distance > allowed:
+			continue
+		eligible.append({"index": i, "role": role,
+			"adjusted": maxf(0.0, distance - (hysteresis if active else 0.0)),
+			"distance": distance})
+	eligible.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if a["role"] != b["role"]:
+			return int(a["role"]) > int(b["role"])
+		if a["adjusted"] != b["adjusted"]:
+			return float(a["adjusted"]) < float(b["adjusted"])
+		if a["distance"] != b["distance"]:
+			return float(a["distance"]) < float(b["distance"])
+		return int(a["index"]) < int(b["index"]))
+	var chosen := PackedInt32Array()
+	for i in mini(budget, eligible.size()):
+		chosen.append(int(eligible[i]["index"]))
+	return chosen

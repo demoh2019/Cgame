@@ -30,6 +30,7 @@ var _photo_dist := 20.0
 var _photo_target := Vector3.ZERO
 var _look_smooth := Vector3.ZERO
 var _fov := BASE_FOV
+var base_fov := BASE_FOV # online_main sets the first-person lens here; kicks add on top.
 
 
 # --- pure helpers ---------------------------------------------------------------------------------------------------
@@ -162,7 +163,7 @@ func on_event(event: Dictionary, my_peer: int, distance: float) -> void:
 			_hurt = maxf(_hurt, hurt_intensity(damage))
 			_aberration = maxf(_aberration, hurt_intensity(damage))
 		_start_stop(hit_stop(damage, false, on_zombie and distance < 4.0))
-	elif kind == "zombie_died" or kind == "finishing_strike":
+	elif kind == "zombie_died" or kind == "finishing_strike" or kind == "ground_finisher" or kind == "knockdown":
 		_start_stop(hit_stop(damage, true, distance < 6.0))
 
 
@@ -192,7 +193,7 @@ func update(delta: float, you: Dictionary, move_input: Vector2, speed: float, qu
 	# Frost creeps in slowly (~25 s) and melts faster (~8 s); off on Performance.
 	var frost_target: float = clampf(cold, 0.0, 1.0) * 0.8 if quality_level >= 1 else 0.0
 	_frost = move_toward(_frost, frost_target, d * (0.03 if frost_target > _frost else 0.12))
-	_fov = lerpf(_fov, fov_target(BASE_FOV, sprinting, riding, speed), 1.0 - exp(-5.0 * d))
+	_fov = lerpf(_fov, fov_target(base_fov, sprinting, riding, speed), 1.0 - exp(-5.0 * d))
 	if camera != null:
 		camera.fov = _fov
 	zoom_mul = lerpf(zoom_mul, zoom_multiplier(sprinting, riding, speed), 1.0 - exp(-3.0 * d))

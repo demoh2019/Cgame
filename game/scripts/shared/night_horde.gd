@@ -7,7 +7,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 
 const CHECK_EVERY_TICKS := 20
 const START_DELAY := 480.0
-const COOLDOWN_SECONDS := 780.0
+const COOLDOWN_SECONDS := 480.0
 const RETRY_SECONDS := 60.0
 const MAX_DURATION := 300.0
 const CACHE_DURATION := 240.0
@@ -18,6 +18,8 @@ const MIN_INFECTED_SEPARATION := 3.5
 const MIN_SPAWN_SEPARATION := 5.0
 const RADII := [18.0, 22.0, 26.0]
 const ANGLES := 16
+const SCATTER_COUNT := 32
+const GOLDEN_ANGLE := 2.39996322972865332 # Same fixed constant as native C++.
 
 
 static func kinds(zone: int) -> Array[String]:
@@ -26,6 +28,60 @@ static func kinds(zone: int) -> Array[String]:
 	if zone == 3:
 		return ["runner", "brute", "spitter", "runner"]
 	return []
+
+
+## Low-correlation fallback candidates across the full horde annulus.
+## Phase is derived from the same server-owned integer offset as the rings.
+## No RNG is consumed; every returned point is still untrusted geometry.
+static func scatter_candidates(center: Vector2, offset: int = 0,
+		prefer_native: bool = true) -> PackedVector2Array:
+	var output := PackedVector2Array()
+	if not center.is_finite():
+		return output
+	var phase: float = TAU * float(posmod(offset, ANGLES)) / float(ANGLES)
+	var native := PackedVector3Array()
+	if prefer_native and ClassDB.class_exists("EnvironmentQuery3D") \
+			and ClassDB.class_has_method("EnvironmentQuery3D", "sample_fibonacci_annulus"):
+		native = ClassDB.class_call_static("EnvironmentQuery3D", "sample_fibonacci_annulus",
+			Vector3(center.x, 0.0, center.y), float(RADII[0]),
+			float(RADII[RADII.size() - 1]), SCATTER_COUNT, phase)
+	if native.size() == SCATTER_COUNT:
+		for point in native:
+			output.append(Vector2(point.x, point.z))
+		return output
+	var minimum_squared: float = float(RADII[0]) * float(RADII[0])
+	var difference_squared: float = float(RADII[-1]) * float(RADII[-1]) - minimum_squared
+	for index in SCATTER_COUNT:
+		var fraction: float = (float(index) + 0.5) / float(SCATTER_COUNT)
+		var radius: float = sqrt(minimum_squared + difference_squared * fraction)
+		var angle: float = phase + GOLDEN_ANGLE * float(index)
+		output.append(center + Vector2(cos(angle), sin(angle)) * radius)
+	return output
+
+
+## One server-authoritative vetting pipeline for concentric ring AND scatter.
+## Neither native nor GDScript candidate generation authorizes a spawn.
+static func _is_spawn_site_valid(world, center: Vector2, point: Vector2,
+		zone: int, survivors: Array[Vector3], infected: Dictionary,
+		selected: Array[Dictionary]) -> bool:
+	if not point.is_finite() or point.distance_to(center) > MAX_PLAYER_DISTANCE or \
+			world.zone_at(point.x, point.y) != zone or \
+			world.is_safe(point.x, point.y) or world.is_water(point.x, point.y) or \
+			world.normal_at(point.x, point.y).y < 0.75 or \
+			not Movement._is_free(world, point):
+		return false
+	for survivor in survivors:
+		if survivor.is_finite() and point.distance_to(
+				Vector2(survivor.x, survivor.z)) < MIN_PLAYER_SEPARATION:
+			return false
+	for enemy in infected.values():
+		if enemy.is_alive() and enemy.position.is_finite() and \
+				point.distance_to(Vector2(enemy.position.x, enemy.position.z)) < MIN_INFECTED_SEPARATION:
+			return false
+	for prior in selected:
+		if point.distance_to(Vector2(float(prior["x"]), float(prior["z"]))) < MIN_SPAWN_SEPARATION:
+			return false
+	return true
 
 
 static func sites(world, origin: Vector3, survivors: Array[Vector3],
@@ -45,35 +101,17 @@ static func sites(world, origin: Vector3, survivors: Array[Vector3],
 		for angle_index in ANGLES:
 			var angle: float = TAU * float(posmod(angle_index + offset, ANGLES)) / float(ANGLES)
 			var point := center + Vector2.from_angle(angle) * float(radius)
-			if point.distance_to(center) > MAX_PLAYER_DISTANCE or \
-					world.zone_at(point.x, point.y) != zone or \
-					world.is_safe(point.x, point.y) or world.is_water(point.x, point.y) or \
-					world.normal_at(point.x, point.y).y < 0.75 or \
-					not Movement._is_free(world, point):
-				continue
-			var clear := true
-			for survivor in survivors:
-				if survivor.is_finite() and point.distance_to(
-						Vector2(survivor.x, survivor.z)) < MIN_PLAYER_SEPARATION:
-					clear = false
-					break
-			if not clear:
-				continue
-			for enemy in infected.values():
-				if enemy.is_alive() and enemy.position.is_finite() and \
-						point.distance_to(Vector2(enemy.position.x, enemy.position.z)) < MIN_INFECTED_SEPARATION:
-					clear = false
-					break
-			if not clear:
-				continue
-			for prior in result:
-				if point.distance_to(Vector2(float(prior["x"]), float(prior["z"]))) < MIN_SPAWN_SEPARATION:
-					clear = false
-					break
-			if clear:
+			if _is_spawn_site_valid(world, center, point, zone, survivors, infected, result):
 				result.append({"x": point.x, "z": point.y, "kind": expected[result.size()]})
 				if result.size() >= target:
 					return result
+	# Only use spatial scatter if all original 48 ring candidates were
+	# insufficient. No extra count or loot; identical server safety checks.
+	for point in scatter_candidates(center, offset):
+		if _is_spawn_site_valid(world, center, point, zone, survivors, infected, result):
+			result.append({"x": point.x, "z": point.y, "kind": expected[result.size()]})
+			if result.size() >= target:
+				return result
 	return result
 
 

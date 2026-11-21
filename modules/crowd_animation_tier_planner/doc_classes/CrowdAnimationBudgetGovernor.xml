@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CrowdAnimationBudgetGovernor" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Adaptively limits optional crowd IK work when main-thread frame processing is overloaded.</brief_description>
+	<description>
+		An opt-in, bounded numerical governor for the microsecond allowance used by [CrowdAnimationTierPlanner.cap_full_pose_cost]. Inspired by Unreal Engine's Animation Budget Allocator, but only controls optional procedural IK. It never changes animation tiers by itself, skips a combat pose, modifies scene objects or changes network/physics simulation.
+		The caller reports each completed frame's main-thread CPU processing time, ideally from [Performance] monitor [constant Performance.TIME_PROCESS], converted to microseconds. A quarter-weight smoothed sample triggers a 25 percent optional budget reduction after two consecutive 12-sample high-pressure windows (greater than 95 percent of target). Three 12-sample low-pressure windows (below 70 percent) restore one eighth of the configured maximum per step. The unchanged neutral band avoids flickering.
+		The floor of an enabled nonzero allowance is 25 percent of the maximum (at least 1 microsecond). This is a soft predictive policy, not real-time deadline enforcement: other workloads, GPU waits and animation mixer time are outside the measured pose-work allowance.
+	</description>
+	<tutorials>
+		<link title="Animation Budget Allocator in Unreal Engine">https://dev.epicgames.com/documentation/unreal-engine/animation-budget-allocator-in-unreal-engine</link>
+	</tutorials>
+	<methods>
+		<method name="configure">
+			<return type="bool" />
+			<param index="0" name="max_budget_us" type="int" />
+			<param index="1" name="target_process_us" type="int" default="12500" />
+			<description>Sets the optional full-pose budget (0–100000 microseconds) and CPU process-time target (1000–100000 microseconds). Returns [code]false[/code] without changing current state for malformed settings. Reapplying identical settings preserves samples and pressure; changing either setting resets all evidence and restores the configured allowance.</description>
+		</method>
+		<method name="get_current_budget_us" qualifiers="const">
+			<return type="int" />
+			<description>Returns the current optional IK microsecond allowance. When disabled, the full configured maximum is returned. Zero means no full-pose slots are expected from the caller's quality profile.</description>
+		</method>
+		<method name="get_frames_observed" qualifiers="const">
+			<return type="int" />
+			<description>Returns the number of valid, nonzero processing samples observed, saturated at one million. Missing samples and disabled periods are ignored.</description>
+		</method>
+		<method name="get_max_budget_us" qualifiers="const">
+			<return type="int" />
+			<description>Configured maximum optional work-unit allowance, in microseconds.</description>
+		</method>
+		<method name="get_pressure_percent" qualifiers="const">
+			<return type="int" />
+			<description>Smoothed CPU process time divided by the configured target, as an integer percentage capped at 1000. A value above 100 indicates sustained main-thread process load above the target.</description>
+		</method>
+		<method name="get_smoothed_process_us" qualifiers="const">
+			<return type="int" />
+			<description>Quarter-weight integer EMA of valid main-thread process durations, in microseconds. Zero before the first sample.</description>
+		</method>
+		<method name="get_target_process_us" qualifiers="const">
+			<return type="int" />
+			<description>CPU process-time target in microseconds (default 12500).</description>
+		</method>
+		<method name="is_enabled" qualifiers="const">
+			<return type="bool" />
+			<description>Whether valid samples can affect the optional animation budget.</description>
+		</method>
+		<method name="observe_process_time">
+			<return type="int" />
+			<param index="0" name="elapsed_us" type="int" />
+			<description>Observes a bounded completed-frame CPU process duration, 0–1000000 microseconds, and returns the current optional pose-work allowance. Zero is ignored as an unknown sample. Invalid inputs return -1 without modifying history. Calls are expected once per completed frame; the caller controls timing and application of the returned budget.</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>Clears CPU pressure evidence and restores the configured maximum allowance, without changing settings or enabled state.</description>
+		</method>
+		<method name="set_enabled">
+			<return type="void" />
+			<param index="0" name="enabled" type="bool" />
+			<description>Disabled governors report the maximum budget and collect no samples. Enabling after a pause resets stale pressure history.</description>
+		</method>
+	</methods>
+</class>

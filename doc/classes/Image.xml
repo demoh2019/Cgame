@@ -4,10 +4,9 @@
 		Image datatype.
 	</brief_description>
 	<description>
-		Native image datatype. Contains image data which can be converted to an [ImageTexture] and provides commonly used [i]image processing[/i] methods. The maximum width and height for an [Image] are [constant MAX_WIDTH] and [constant MAX_HEIGHT].
+		Native image datatype. Contains image data which can be converted to an [ImageTexture] and provides commonly used [i]image processing[/i] methods. The maximum width and height for an [Image] are [constant MAX_WIDTH] and [constant MAX_HEIGHT], but the maximum pixel count is [code]268435456[/code] (which means that a square image can be 16384×16384 at most).
 		An [Image] cannot be assigned to a texture property of an object directly (such as [member Sprite2D.texture]), and has to be converted manually to an [ImageTexture] first.
 		[b]Note:[/b] Methods that modify the image data cannot be used on VRAM-compressed images. Use [method decompress] to convert the image to an uncompressed format first.
-		[b]Note:[/b] The maximum image size is 16384×16384 pixels due to graphics hardware limitations. Larger images may fail to import.
 	</description>
 	<tutorials>
 		<link title="Importing images">$DOCS_URL/tutorials/assets_pipeline/importing_images.html</link>
@@ -457,7 +456,7 @@
 			<param index="1" name="height" type="int" />
 			<param index="2" name="interpolation" type="int" enum="Image.Interpolation" default="1" />
 			<description>
-				Resizes the image to the given [param width] and [param height]. New pixels are calculated using the [param interpolation] mode defined via [enum Interpolation] constants.
+				Resizes the image to the given [param width] and [param height]. New pixels are calculated using the [param interpolation] mode.
 				[b]Note:[/b] If the image's format is [constant FORMAT_RGBA4444], [constant FORMAT_RGB565], or [constant FORMAT_RGBE9995], it will be temporarily converted to either [constant FORMAT_RGBA8] or [constant FORMAT_RGBAH]. This can affect the quality of the resized image.
 			</description>
 		</method>
@@ -466,7 +465,7 @@
 			<param index="0" name="square" type="bool" default="false" />
 			<param index="1" name="interpolation" type="int" enum="Image.Interpolation" default="1" />
 			<description>
-				Resizes the image to the nearest power of 2 for the width and height. If [param square] is [code]true[/code], sets width and height to be the same. New pixels are calculated using the [param interpolation] mode defined via [enum Interpolation] constants.
+				Resizes the image to the nearest power of 2 for the width and height. If [param square] is [code]true[/code], sets width and height to be the same. New pixels are calculated using the [param interpolation] mode.
 			</description>
 		</method>
 		<method name="rgbe_to_srgb">
@@ -610,6 +609,15 @@
 				This is the same as [method set_pixelv], but with a two integer arguments instead of a [Vector2i] argument.
 				[b]Note:[/b] Depending on the image's format, the color set here may be clamped or lose precision. Do not assume the color returned by [method get_pixel] to be identical to the one set here; any comparisons will likely need to use an approximation like [method Color.is_equal_approx].
 				[b]Note:[/b] On grayscale image formats, only the red channel of [param color] is used (and alpha if relevant). The green and blue channels are ignored.
+			</description>
+		</method>
+		<method name="set_pixels_rect">
+			<return type="void" />
+			<param index="0" name="rect" type="Rect2i" />
+			<param index="1" name="colors" type="PackedColorArray" />
+			<description>
+				Cgame extension: writes a fully contained rectangular block of pixels from [param colors] into the image in row-major order (left to right, top to bottom). [param colors] must contain exactly [code]rect.size.x * rect.size.y[/code] entries. The rectangle must have positive size and fit completely inside the image; partially out-of-bounds rectangles are rejected rather than clipped. For invalid input, an empty or compressed image, the method reports an error and leaves the image unchanged.
+				Uses the same format conversion as [method set_pixel], including grayscale, 8-bit and HDR formats. As with [method set_pixel], this updates CPU image data only, not an existing GPU [ImageTexture]; call [method ImageTexture.update] after writing if needed. Mipmaps are not regenerated automatically. Batch writes avoid repeated GDScript-to-native calls when generating procedural maps, masks and textures.
 			</description>
 		</method>
 		<method name="set_pixelv">

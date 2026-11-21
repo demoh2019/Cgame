@@ -1,0 +1,83 @@
+name: Native multi-threat environment query and raid spawns
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/environment_query/environment_query_3d.h'
+      - 'modules/environment_query/environment_query_3d.cpp'
+      - 'modules/environment_query/doc_classes/EnvironmentQuery3D.xml'
+      - 'tests/scene/test_environment_query_3d.cpp'
+      - 'game/scripts/shared/raid_reinforcements.gd'
+      - 'game/tests/test_raid_multi_threat_query.gd'
+      - 'game/tests/test_raid_reinforcements.gd'
+      - 'game/tests/run_raid_eqs.gd'
+      - 'game/tests/run_all.gd'
+      - '.github/workflows/native-multi-threat-eqs.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/environment_query/environment_query_3d.h'
+      - 'modules/environment_query/environment_query_3d.cpp'
+      - 'tests/scene/test_environment_query_3d.cpp'
+      - 'game/scripts/shared/raid_reinforcements.gd'
+      - 'game/tests/test_raid_multi_threat_query.gd'
+      - 'game/tests/test_raid_reinforcements.gd'
+      - '.github/workflows/native-multi-threat-eqs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-eqs-raid-spawning:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-multi-threat-eqs
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-multi-threat-eqs
+        continue-on-error: true
+      - name: Native EQS multi-actor query regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[EnvironmentQuery3D]*"
+          timeout 240s "$BIN" --headless --test --test-case="*Resource roundtrip preserves parameters*"
+      - name: Import Albion After
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee multi-threat-import.log
+      - name: Server-owned raid spawn regression with native EQS
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --script res://tests/run_raid_eqs.gd 2>&1 | tee multi-threat-tests.log
+          grep -E '^RAID EQS TOTAL: [0-9]+ checks, 0 failures$' multi-threat-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' multi-threat-tests.log; then exit 1; fi
+      - name: Export diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-threat-eqs-regressions
+          if-no-files-found: ignore
+          path: |
+            multi-threat-import.log
+            multi-threat-tests.log

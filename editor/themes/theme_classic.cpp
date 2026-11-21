@@ -642,8 +642,8 @@ void ThemeClassic::populate_standard_styles(const Ref<EditorTheme> &p_theme, Edi
 			p_theme->set_constant("scrollbar_margin_top", "Tree", 0);
 			p_theme->set_constant("scrollbar_margin_right", "Tree", 0);
 			p_theme->set_constant("scrollbar_margin_bottom", "Tree", 0);
-			p_theme->set_constant("scrollbar_h_separation", "Tree", EDSCALE_RND(1));
-			p_theme->set_constant("scrollbar_v_separation", "Tree", EDSCALE_RND(1));
+			p_theme->set_constant("scrollbar_h_separation", "Tree", 0);
+			p_theme->set_constant("scrollbar_v_separation", "Tree", 0);
 
 			Color relationship_line_color = p_config.mono_color * Color(1, 1, 1, p_config.relationship_line_opacity);
 
@@ -1207,6 +1207,7 @@ void ThemeClassic::populate_standard_styles(const Ref<EditorTheme> &p_theme, Edi
 		p_theme->set_stylebox("grabber_area", "HSlider", EditorThemeManager::make_flat_stylebox(p_config.contrast_color_1, 0, background_margin, 0, background_margin, p_config.corner_radius));
 		p_theme->set_stylebox("grabber_area_highlight", "HSlider", EditorThemeManager::make_flat_stylebox(p_config.contrast_color_1, 0, background_margin, 0, background_margin));
 		p_theme->set_constant("center_grabber", "HSlider", 0);
+		p_theme->set_constant("grabber_anchored", "HSlider", 0);
 		p_theme->set_constant("grabber_offset", "HSlider", 0);
 
 		// VSlider.
@@ -1216,6 +1217,7 @@ void ThemeClassic::populate_standard_styles(const Ref<EditorTheme> &p_theme, Edi
 		p_theme->set_stylebox("grabber_area", "VSlider", EditorThemeManager::make_flat_stylebox(p_config.contrast_color_1, background_margin, 0, background_margin, 0, p_config.corner_radius));
 		p_theme->set_stylebox("grabber_area_highlight", "VSlider", EditorThemeManager::make_flat_stylebox(p_config.contrast_color_1, background_margin, 0, background_margin, 0));
 		p_theme->set_constant("center_grabber", "VSlider", 0);
+		p_theme->set_constant("grabber_anchored", "VSlider", 0);
 		p_theme->set_constant("grabber_offset", "VSlider", 0);
 	}
 
@@ -2477,6 +2479,41 @@ void ThemeClassic::populate_editor_styles(const Ref<EditorTheme> &p_theme, Edito
 	{
 		p_theme->set_type_variation("EditorHelpBitTooltipTitle", "EditorHelpBitTitle");
 		p_theme->set_type_variation("EditorHelpBitTooltipContent", "EditorHelpBitContent");
+	}
+
+	// EditorToaster & EditorToast.
+	{
+		Ref<StyleBoxFlat> base_toast_style = p_config.base_style->duplicate();
+		base_toast_style->set_corner_radius_all(p_config.corner_radius * EDSCALE);
+		base_toast_style->set_content_margin_all(p_config.base_margin * 1.5 * EDSCALE);
+		base_toast_style->set_bg_color(p_config.base_color.lerp(p_config.mono_color, 0.05));
+		if (p_config.draw_extra_borders) {
+			base_toast_style->set_border_width_all(Math::round(EDSCALE));
+			base_toast_style->set_border_color(p_config.extra_border_color_1);
+		}
+
+		Ref<StyleBoxFlat> warning_toast_style = base_toast_style->duplicate();
+		warning_toast_style->set_bg_color(p_config.base_color.lerp(p_config.warning_color, 0.05));
+
+		Ref<StyleBoxFlat> error_toast_style = base_toast_style->duplicate();
+		error_toast_style->set_bg_color(p_config.base_color.lerp(p_config.error_color, 0.05));
+
+		// Progress styles.
+		Ref<StyleBoxFlat> base_progress_style = base_toast_style->duplicate();
+		base_progress_style->set_bg_color(p_config.base_color.lerp(p_config.mono_color, 0.07));
+
+		Ref<StyleBoxFlat> warning_progress_style = base_progress_style->duplicate();
+		warning_progress_style->set_bg_color(p_config.base_color.lerp(p_config.warning_color, 0.08));
+
+		Ref<StyleBoxFlat> error_progress_style = base_progress_style->duplicate();
+		error_progress_style->set_bg_color(p_config.base_color.lerp(p_config.error_color, 0.08));
+
+		p_theme->set_stylebox("info", "EditorToast", base_toast_style);
+		p_theme->set_stylebox("info_progress", "EditorToast", base_progress_style);
+		p_theme->set_stylebox("warning", "EditorToast", warning_toast_style);
+		p_theme->set_stylebox("warning_progress", "EditorToast", warning_progress_style);
+		p_theme->set_stylebox("error", "EditorToast", error_toast_style);
+		p_theme->set_stylebox("error_progress", "EditorToast", error_progress_style);
 	}
 
 	// Asset Store.

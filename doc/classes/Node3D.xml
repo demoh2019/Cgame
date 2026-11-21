@@ -47,6 +47,16 @@
 				Returns all the [EditorNode3DGizmo] objects attached to this node. Only works in the editor.
 			</description>
 		</method>
+		<method name="advance_network_render_time" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="render_time" type="float" />
+			<param index="1" name="latest_server_time" type="float" />
+			<param index="2" name="delay" type="float" />
+			<param index="3" name="delta" type="float" />
+			<description>
+				Advances a presentation-only clock for interpolating remote entities between received server snapshots. [param render_time] is the existing visual time in server seconds, [param latest_server_time] is the newest received server timestamp, [param delay] is the target buffer duration, and [param delta] is the rendered frame duration. The playback rate is kept between 0.4 and 1.6, and time never exceeds the latest authoritative timestamp. A clock offset above 0.5 seconds explicitly rebases to support reconnects. This method never changes node transforms, physics, or server authority.
+			</description>
+		</method>
 		<method name="interpolate_network_snapshot">
 			<return type="Vector3" />
 			<param index="0" name="from" type="Vector3" />

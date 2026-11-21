@@ -1,0 +1,97 @@
+name: Native significance budgets and dungeon lighting parity
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/significance_budget/**'
+      - 'game/scripts/client/dungeon_light_budget.gd'
+      - 'game/scripts/client/fx_scalability_policy.gd'
+      - 'game/scripts/client/effects.gd'
+      - 'game/tests/test_fx_scalability_budget.gd'
+      - 'game/tests/run_fx_scalability_budget.gd'
+      - 'game/tests/test_dungeon_light_budget.gd'
+      - 'game/tests/run_dungeon_light_budget.gd'
+      - '.github/workflows/native-significance-light-budget.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/significance_budget/**'
+      - 'game/scripts/client/dungeon_light_budget.gd'
+      - 'game/scripts/client/fx_scalability_policy.gd'
+      - 'game/scripts/client/effects.gd'
+      - 'game/tests/test_fx_scalability_budget.gd'
+      - 'game/tests/run_fx_scalability_budget.gd'
+      - 'game/tests/test_dungeon_light_budget.gd'
+      - 'game/tests/run_dungeon_light_budget.gd'
+      - '.github/workflows/native-significance-light-budget.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  significance-budget:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native significance regression
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*SignificanceBudget*" 2>&1 | tee significance-native.log
+      - name: Parse game scripts
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee significance-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' significance-import.log; then exit 1; fi
+      - name: Native and GDScript dungeon light parity
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_dungeon_light_budget.gd 2>&1 | tee significance-game.log
+          grep -E '^SIGNIFICANCE LIGHTS TOTAL: [0-9]+ checks, 0 failures$' significance-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' significance-game.log; then exit 1; fi
+      - name: Native and GDScript Niagara-like effects budget
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_fx_scalability_budget.gd 2>&1 | tee significance-fx-game.log
+          grep -E '^FX SCALABILITY TOTAL: [0-9]+ checks, 0 failures$' significance-fx-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' significance-fx-game.log; then exit 1; fi
+      - name: Parse Days After prototype
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path games/days_after --editor --import --quit 2>&1 | tee days-after-prototype-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' days-after-prototype-import.log; then exit 1; fi
+      - name: Days After prototype smoke
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path games/days_after --script res://smoke_test.gd 2>&1 | tee days-after-prototype-smoke.log
+          grep -F 'PASS: scene, bounded visual LOD,' days-after-prototype-smoke.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' days-after-prototype-smoke.log; then exit 1; fi
+      - name: Store regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: significance-light-budget-logs
+          if-no-files-found: ignore
+          path: |
+            significance-native.log
+            significance-import.log
+            significance-game.log
+            significance-fx-game.log
+            days-after-prototype-import.log
+            days-after-prototype-smoke.log

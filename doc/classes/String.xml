@@ -7,6 +7,7 @@
 		This is the built-in string Variant type (and the one used by GDScript). Strings may contain any number of Unicode characters, and expose methods useful for manipulating and generating strings. Strings are reference-counted and use a copy-on-write approach (every modification to a string returns a new [String]), so passing them around is cheap in resources.
 		Some string methods have corresponding variations. Variations suffixed with [code]n[/code] ([method countn], [method findn], [method replacen], etc.) are [b]case-insensitive[/b] (they make no distinction between uppercase and lowercase letters). Method variations prefixed with [code]r[/code] ([method rfind], [method rsplit], etc.) are reversed, and start from the end of the string, instead of the beginning.
 		To convert any [Variant] to or from a string, see [method @GlobalScope.str], [method @GlobalScope.str_to_var], and [method @GlobalScope.var_to_str].
+		In GDScript, strings can be delimited using either double quotes ([code]"..."[/code]) or single quotes ([code]'...'[/code]). You can also use raw string literals (r-strings) ([code]r"..."[/code] or [code]r'...'[/code]). Raw string literals don't process escape sequences such as [code]\n[/code], so the string is created as it is written in the source code.
 		[b]Note:[/b] In a boolean context, a string will evaluate to [code]false[/code] if it is empty ([code]""[/code]). Otherwise, a string will always evaluate to [code]true[/code].
 	</description>
 	<tutorials>
@@ -92,7 +93,7 @@
 		<method name="capitalize" qualifiers="const">
 			<return type="String" />
 			<description>
-				Returns a copy of the string with changed appearance. Replaces underscores ([code]_[/code]) and hyphens ([code]-[/code]) with spaces, adds spaces before uppercase letters in the middle of a word, converts all letters to lowercase, then converts the first one and each one following a space to uppercase.
+				Returns a copy of the string with the following changes: replaces underscores ([code]_[/code]) and hyphens ([code]-[/code]) with spaces, adds spaces before uppercase letters in the middle of a word, converts all letters to lowercase, then converts the first one and each one following a space to uppercase.
 				[codeblocks]
 				[gdscript]
 				"move_local_x".capitalize()   # Returns "Move Local X"
@@ -345,11 +346,11 @@
 			<param index="0" name="delimiter" type="String" />
 			<description>
 				Returns the total number of slices when the string is split with the given [param delimiter] (see [method split]).
-				Use [method get_slice] to extract a specific slice.
 				[codeblock]
-				print("i/am/example/string".get_slice_count("/")) # Prints '4'.
-				print("i am example string".get_slice_count("/")) # Prints '1'.
+				print("i/am/example/hi".get_slice_count("/")) # Prints 4
+				print("i am example hi".get_slice_count("/")) # Prints 1
 				[/codeblock]
+				Use [method get_slice] to extract a specific slice.
 			</description>
 		</method>
 		<method name="get_slicec" qualifiers="const">

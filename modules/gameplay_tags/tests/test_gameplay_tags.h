@@ -33,6 +33,7 @@
 
 #include "../animation_lod_controller.h"
 #include "../gameplay_tag_container.h"
+#include "../gameplay_tag_stack_container.h"
 #include "scene/animation/animation_player.h"
 
 #include "tests/test_macros.h"
@@ -83,6 +84,192 @@ TEST_CASE("[GameplayTags] container add/remove/has") {
 	CHECK(c->get_tag_count() == 1);
 }
 
+TEST_CASE("[GameplayTags] branch replacement is atomic and respects hierarchy boundaries") {
+	Ref<GameplayTagContainer> c;
+	c.instantiate();
+	c->add_tag("Enemy.Infected.Elite");
+	c->add_tag("Runtime.State.Alive");
+	c->add_tag("Runtime.Status.Staggered");
+	c->add_tag("RuntimeExtra.Keep");
+
+	PackedStringArray before = c->get_matching_tags("Runtime");
+	CHECK(before.size() == 2);
+	CHECK(c->get_matching_tags("Runtime.State", true).is_empty());
+	CHECK(c->get_matching_tags("Runtime.State").size() == 1);
+
+	PackedStringArray next;
+	next.push_back("Runtime.State.Dead");
+	next.push_back("Runtime.Status.Snared");
+	CHECK(c->replace_tag_branch("Runtime", next));
+	CHECK(c->get_tag_count() == 4);
+	CHECK(c->has_tag("Runtime.State.Dead", true));
+	CHECK_FALSE(c->has_tag("Runtime.State.Alive", true));
+	CHECK_FALSE(c->has_tag("Runtime.Status.Staggered", true));
+	CHECK(c->has_tag("Enemy.Infected.Elite", true));
+	CHECK(c->has_tag("RuntimeExtra.Keep", true));
+
+	// Re-applying an identical authoritative snapshot is idempotent.
+	PackedStringArray stable = c->get_tags();
+	CHECK(c->replace_tag_branch("Runtime", next));
+	CHECK(c->get_tags() == stable);
+
+	PackedStringArray invalid;
+	invalid.push_back("Runtime.State.Alive");
+	invalid.push_back("Other.Escaped");
+	CHECK_FALSE(c->replace_tag_branch("Runtime", invalid));
+	CHECK(c->get_tags() == stable);
+	invalid.clear();
+	invalid.push_back("Runtime.Status.Snared");
+	invalid.push_back("Runtime.Status.Snared");
+	CHECK_FALSE(c->replace_tag_branch("Runtime", invalid));
+	CHECK_FALSE(c->replace_tag_branch("", next));
+	CHECK_FALSE(c->replace_tag_branch("Runtime..State", next));
+	CHECK(c->get_tags() == stable);
+
+	CHECK(c->replace_tag_branch("Runtime", PackedStringArray()));
+	CHECK(c->get_matching_tags("Runtime").is_empty());
+	CHECK(c->has_tag("Enemy", false));
+	CHECK(c->has_tag("RuntimeExtra", false));
+}
+
+TEST_CASE("[GameplayTags] counted tags, hierarchy and bounded deltas") {
+	Ref<GameplayTagStackContainer> c;
+	c.instantiate();
+	CHECK(c->is_empty());
+	CHECK(c->add_stacks("Runtime.Status.Resolve", 2));
+	CHECK(c->add_stacks("Runtime.Status.Staggered"));
+	CHECK(c->add_stacks("Runtime.State.Alive"));
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 2);
+	CHECK(c->get_stack_count("Runtime.Status") == 3);
+	CHECK(c->get_stack_count("Runtime") == 4);
+	CHECK(c->get_stack_count("Runtime.St") == 0); // Dotted boundary, not prefix.
+	CHECK(c->has_tag("Runtime.Status.Resolve", true));
+	CHECK_FALSE(c->add_stacks("Runtime.Status.Resolve", 65535)); // Overflow.
+	CHECK_FALSE(c->add_stacks("Runtime..Broken"));
+	CHECK_FALSE(c->add_stacks("Runtime.Status.Resolve", -2));
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 2);
+	CHECK(c->remove_stacks("Runtime.Status.Resolve") == 1);
+	CHECK(c->remove_stacks("Runtime.Status.Resolve", 10) == 1);
+	CHECK(c->remove_stacks("Runtime.Status.Resolve") == 0);
+	CHECK_FALSE(c->has_tag("Runtime.Status.Resolve"));
+	CHECK(c->get_tag_count() == 2);
+}
+
+TEST_CASE("[GameplayTags] atomic snapshots reject corruption and isolate dictionary copies") {
+	Ref<GameplayTagStackContainer> c;
+	c.instantiate();
+	Dictionary initial;
+	initial[StringName("Runtime.Status.Resolve")] = 3;
+	initial[StringName("Runtime.Life.Alive")] = 1;
+	CHECK(c->replace_stacks(initial));
+	CHECK(c->replace_stacks(initial)); // Repeated snapshot is a no-op.
+	initial[StringName("Runtime.Status.Resolve")] = 99;
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 3);
+	Dictionary returned = c->get_stacks();
+	returned[StringName("Runtime.Life.Alive")] = 500;
+	CHECK(c->get_stack_count("Runtime.Life.Alive", true) == 1);
+
+	Dictionary bad;
+	bad[StringName("Runtime.Status.Resolve")] = 5;
+	bad[StringName("Runtime..Malformed")] = 2;
+	CHECK_FALSE(c->replace_stacks(bad));
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 3);
+	bad.erase(StringName("Runtime..Malformed"));
+	bad[StringName("Runtime.Status.Poisoned")] = -1;
+	CHECK_FALSE(c->replace_stacks(bad));
+	bad[StringName("Runtime.Status.Poisoned")] = 1.5;
+	CHECK_FALSE(c->replace_stacks(bad));
+	bad[StringName("Runtime.Status.Poisoned")] = 65536;
+	CHECK_FALSE(c->replace_stacks(bad));
+	CHECK(c->get_tag_count() == 2);
+	CHECK(c->replace_stacks(Dictionary()));
+	CHECK(c->is_empty());
+}
+
+TEST_CASE("[GameplayTags] atomic scoped stack replacement preserves independent effects") {
+	Ref<GameplayTagStackContainer> c;
+	c.instantiate();
+	CHECK(c->add_stacks("Runtime.Status.Resolve", 3));
+	CHECK(c->add_stacks("Runtime.Status.Staggered", 1));
+	CHECK(c->add_stacks("Local.Preview.Bleeding", 2));
+	CHECK(c->add_stacks("RuntimeExtra.Keep", 1));
+
+	Dictionary next;
+	next[StringName("Runtime.Status.Resolve")] = 4;
+	next[StringName("Runtime.State.Alive")] = 1;
+	CHECK(c->replace_stack_branch("Runtime", next));
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 4);
+	CHECK(c->get_stack_count("Runtime.Status.Staggered", true) == 0);
+	CHECK(c->get_stack_count("Runtime.State.Alive", true) == 1);
+	CHECK(c->get_stack_count("Local.Preview.Bleeding", true) == 2);
+	CHECK(c->get_stack_count("RuntimeExtra.Keep", true) == 1);
+	// Repeating the authoritative snapshot does not change anything.
+	CHECK(c->replace_stack_branch("Runtime", next));
+	CHECK(c->get_tag_count() == 4);
+
+	Dictionary invalid = next.duplicate();
+	invalid[StringName("Outside.Escaped")] = 1;
+	CHECK_FALSE(c->replace_stack_branch("Runtime", invalid));
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 4);
+	invalid.erase(StringName("Outside.Escaped"));
+	invalid[StringName("Runtime.Status.Resolve")] = 65536;
+	CHECK_FALSE(c->replace_stack_branch("Runtime", invalid));
+	invalid[StringName("Runtime.Status.Resolve")] = 0;
+	CHECK_FALSE(c->replace_stack_branch("Runtime", invalid));
+	invalid[StringName("Runtime.Status.Resolve")] = 2.5;
+	CHECK_FALSE(c->replace_stack_branch("Runtime", invalid));
+	CHECK_FALSE(c->replace_stack_branch("Runtime..Invalid", next));
+	CHECK_FALSE(c->replace_stack_branch("", next));
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 4);
+
+	Dictionary ambiguous;
+	ambiguous[String("Runtime.Status.Resolve")] = 1;
+	ambiguous[StringName("Runtime.Status.Resolve")] = 2;
+	CHECK_FALSE(c->replace_stack_branch("Runtime", ambiguous));
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 4);
+
+	CHECK(c->replace_stack_branch("Runtime", Dictionary()));
+	CHECK(c->get_stack_count("Runtime") == 0);
+	CHECK(c->get_stack_count("Local.Preview.Bleeding", true) == 2);
+	CHECK(c->get_stack_count("RuntimeExtra.Keep", true) == 1);
+}
+
+TEST_CASE("[GameplayTags] distinct matching query cardinality and hierarchy boundaries") {
+	Ref<GameplayTagContainer> c;
+	c.instantiate();
+	c->add_tag("Enemy.Infected.Elite");
+	c->add_tag("Runtime.Status.Staggered");
+	c->add_tag("Runtime.Status.Snared");
+	CHECK(c->count_matching_queries({ "Runtime.Status.Staggered", "Runtime.Status.Staggered", "Runtime.Status.Snared" }, true) == 2);
+	CHECK(c->count_matching_queries({ "Runtime.Status", "Runtime", "Runtime.Status.Snared" }) == 3);
+	CHECK(c->count_matching_queries({ "Runtime.Status", "Runtime", "Runtime.Status.Snared" }, true) == 1);
+	CHECK(c->count_matching_queries({ "Runtime.Statu", "Runtime.Status.Missing", "" }) == 0);
+	CHECK(c->count_matching_queries(PackedStringArray()) == 0);
+
+	Ref<GameplayTagQuery> query;
+	query.instantiate();
+	query->set_any_tags({ "Runtime.Status.Snared", "Runtime.Status.Staggered", "Runtime.Status.Staggered" });
+	CHECK(query->get_min_any_matches() == 1);
+	CHECK(query->matches(c));
+	query->set_min_any_matches(2);
+	CHECK(query->matches(c));
+	query->set_min_any_matches(3); // Repeated query entries are not separate states.
+	CHECK_FALSE(query->matches(c));
+	ERR_PRINT_OFF
+	query->set_min_any_matches(0);
+	query->set_min_any_matches(65);
+	ERR_PRINT_ON
+	CHECK(query->get_min_any_matches() == 3);
+	query->set_min_any_matches(2);
+	query->set_none_tags({ "Enemy.Infected" });
+	CHECK_FALSE(query->matches(c)); // Negative conditions still win.
+	query->set_none_tags(PackedStringArray());
+	c->remove_tag("Runtime.Status.Snared");
+	CHECK_FALSE(query->matches(c));
+	query->set_any_tags(PackedStringArray());
+	CHECK(query->matches(c)); // Empty any_tags means no threshold to enforce.
+}
+
 TEST_CASE("[GameplayTags] query all/any/none") {
 	Ref<GameplayTagContainer> c;
 	c.instantiate();
@@ -110,6 +297,65 @@ TEST_CASE("[GameplayTags] query all/any/none") {
 	q->set_any_tags(any);
 	CHECK(q->matches(c));
 	CHECK_FALSE(q->matches(Ref<GameplayTagContainer>())); // Null behaves as empty.
+}
+
+TEST_CASE("[GameplayTags] query supports counted thresholds, hierarchy and negative gates") {
+	Ref<GameplayTagStackContainer> stacks;
+	stacks.instantiate();
+	CHECK(stacks->add_stacks("Runtime.Status.Resolve.Strong", 1));
+	CHECK(stacks->add_stacks("Runtime.Status.Resolve.Weak", 1));
+	CHECK(stacks->add_stacks("Runtime.Status.Snared", 1));
+	CHECK(stacks->add_stacks("Enemy.Infected.Elite", 1));
+
+	Ref<GameplayTagQuery> query;
+	query.instantiate();
+	PackedStringArray all;
+	all.push_back("Runtime.Status.Resolve");
+	query->set_all_tags(all);
+	query->set_min_stack_count(2);
+	CHECK(query->matches_stacks(stacks)); // Parent aggregate: 1 + 1.
+	CHECK_FALSE(query->matches_stacks(Ref<GameplayTagStackContainer>()));
+	Ref<GameplayTagStackContainer> empty_stacks;
+	empty_stacks.instantiate();
+	CHECK_FALSE(query->matches_stacks(empty_stacks));
+	CHECK(query->get_min_stack_count() == 2);
+
+	PackedStringArray any;
+	any.push_back("Missing.Status");
+	any.push_back("Runtime.Status");
+	query->set_any_tags(any);
+	CHECK(query->matches_stacks(stacks));
+	any.remove_at(1);
+	query->set_any_tags(any);
+	CHECK_FALSE(query->matches_stacks(stacks));
+	query->set_any_tags(PackedStringArray());
+
+	PackedStringArray none;
+	none.push_back("Runtime.Status.Snared"); // 1 is below the 2-stack threshold.
+	query->set_none_tags(none);
+	CHECK(query->matches_stacks(stacks));
+	CHECK(stacks->add_stacks("Runtime.Status.Snared", 1));
+	CHECK_FALSE(query->matches_stacks(stacks));
+	query->set_none_tags(PackedStringArray());
+
+	query->set_exact(true);
+	CHECK_FALSE(query->matches_stacks(stacks)); // No exact "Runtime.Status.Resolve".
+	all.clear();
+	all.push_back("Runtime.Status.Snared");
+	query->set_all_tags(all);
+	CHECK(query->matches_stacks(stacks));
+	query->set_min_stack_count(0);
+	CHECK(query->get_min_stack_count() == 1);
+	query->set_min_stack_count(70000);
+	CHECK(query->get_min_stack_count() == 65535);
+	CHECK_FALSE(query->matches_stacks(stacks));
+	query->set_min_stack_count(2);
+
+	Ref<GameplayTagContainer> boolean_tags;
+	boolean_tags.instantiate();
+	boolean_tags->add_tag("Runtime.Status.Snared");
+	CHECK(query->matches(boolean_tags)); // Threshold only applies to counted matching.
+	CHECK(stacks->get_stack_count("Runtime.Status.Resolve") == 2); // Query is read-only.
 }
 
 TEST_CASE("[AnimationLODController] update_interval") {

@@ -16,7 +16,84 @@ func _at(world, point: Vector2) -> Vector3:
 	return Vector3(point.x, world.height_at(point.x, point.y), point.y)
 
 
+## The actual _tick_world() alarm pathway must produce identical private
+## notifications with native batched counts and the old exhaustive scan.
+static func _dense_camp_alarm_server(force_fallback: bool) -> Dictionary:
+	var sim := GameServer.new(WorldGen.new(932), 932)
+	sim.time = 2.1
+	if force_fallback:
+		sim._pack_spatial_grid = RefCounted.new()
+	var owner = sim.add_player(341, "Alarm owner")
+	owner.position = Vector3(200.0, WorldGen.HUB_HEIGHT, 200.0)
+	for i in range(4):
+		var id: int = 88000 + i
+		sim.campfires[id] = {
+			"id": id, "x": 200.0 + float(i) * 200.0,
+			"y": WorldGen.HUB_HEIGHT, "z": 200.0,
+			"expires": 100.0, "alarm_owner": owner.id,
+			"alarm_group": 0, "alarm_until": 90.0,
+			"alarm_next_scan": 2.0, "alarm_next_alert": 0.0,
+		}
+	for i in range(32):
+		var position := Vector3(1400.0 + float(i) * 30.0, WorldGen.HUB_HEIGHT, 1400.0)
+		if i == 0 or i == 4 or i == 5 or i == 6:
+			position = Vector3(200.0, WorldGen.HUB_HEIGHT, 200.0)
+		elif i == 1:
+			position = Vector3(220.0, WorldGen.HUB_HEIGHT, 200.0)
+		elif i == 2:
+			position = Vector3(200.0, WorldGen.HUB_HEIGHT + 8.0, 200.0)
+		elif i == 3:
+			position = Vector3(200.0, WorldGen.HUB_HEIGHT + 9.0, 200.0)
+		elif i == 7:
+			position = Vector3(400.0, WorldGen.HUB_HEIGHT, 200.0)
+		elif i == 8:
+			position = Vector3(600.0, WorldGen.HUB_HEIGHT, 200.0)
+		var infected := Zombie.new(95000 + i, "walker", position)
+		if i == 4:
+			infected.raid_boss = true # Existing alarm counts all actual living infected.
+		sim.zombies[infected.id] = infected
+	sim._tick_world(0.1)
+	var alarms: Array = []
+	for event in sim.events:
+		if event.get("type", "") == "camp_alarm":
+			alarms.append({"peer": int(event["peer"]),
+				"count": int(event["count"]), "x": float(event["x"])})
+	var schedules: Array = []
+	for id in sim.campfires:
+		var fire: Dictionary = sim.campfires[id]
+		schedules.append({"id": id,
+			"next_scan": float(fire.get("alarm_next_scan", 0.0)),
+			"next_alert": float(fire.get("alarm_next_alert", 0.0))})
+	var stats: Dictionary = sim.get_camp_alarm_query_stats()
+	return {"alarms": alarms, "schedules": schedules, "stats": stats}
+
+
 func run(t) -> void:
+	t.current = "Native Mass-style camp cylinder counts preserve real server events"
+	var old_server: Dictionary = _dense_camp_alarm_server(true)
+	var fast_server: Dictionary = _dense_camp_alarm_server(false)
+	var native_available: bool = ClassDB.class_exists("AIProximityGrid2D") \
+		and ClassDB.class_has_method("AIProximityGrid2D", "query_cylinder_counts_batch")
+	t.eq(fast_server["alarms"], old_server["alarms"],
+		"native cylinders emit the same private bounded alarm events as full scanning")
+	t.eq(fast_server["schedules"], old_server["schedules"],
+		"native prefilter cannot change scan interval or alert cooldown")
+	t.eq(fast_server["alarms"], [
+		{"peer": 341, "count": 5, "x": 200.0},
+		{"peer": 341, "count": 1, "x": 400.0},
+		{"peer": 341, "count": 1, "x": 600.0},
+	], "same live infected, bosses, vertical gates and five-enemy cap")
+	t.eq(bool(fast_server["stats"].get("native", false)), native_available,
+		"actual server tick uses native cylinder batch only where available")
+	t.check(not bool(old_server["stats"].get("native", false)),
+		"forced legacy server uses original GDScript scans")
+	if native_available:
+		t.eq(int(fast_server["stats"]["centers"]), 4,
+			"native batch processes all due camp alarms together")
+		t.eq(int(fast_server["stats"]["targets"]), 32,
+			"native query considers the real living infected cohort")
+
+
 	t.current = "paid camp sentry recipe and strict fire geometry"
 	t.check(Defs.is_item(CampAlarm.ITEM_ID), "alarm kit is a real craftable item")
 	t.eq(Defs.recipes()[CampAlarm.ITEM_ID]["inputs"],

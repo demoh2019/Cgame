@@ -185,7 +185,7 @@ void Camera3D::_physics_interpolated_changed() {
 
 void Camera3D::_advance_shake(double p_delta) {
 	const bool was_shaking = shake_translation_current != Vector3() || shake_rotation_current != Vector3();
-	if (!(shake.trauma > 0.0)) {
+	if (!(shake.trauma > 0.0) && shake_direction_impulse == Vector3()) {
 		if (was_shaking) {
 			shake_translation_current = Vector3();
 			shake_rotation_current = Vector3();
@@ -193,8 +193,20 @@ void Camera3D::_advance_shake(double p_delta) {
 		return;
 	}
 	shake.advance(p_delta, shake_decay, shake_frequency);
+	// Direction is visual-only. Like trauma, it decays in real frame time;
+	// it never moves the Camera3D node or any authoritative game transform.
+	if (p_delta > 0.0 && Math::is_finite(p_delta)) {
+		const real_t step = real_t(MIN(double(shake_decay) * p_delta, 1.0));
+		shake_direction_impulse = shake_direction_impulse.move_toward(Vector3(), step);
+	}
 	const real_t intensity = shake.get_intensity(shake_trauma_exponent);
-	shake_translation_current = shake.get_translation_unit() * shake_max_offset * intensity;
+	const Vector3 local = shake.get_translation_unit() * intensity + shake_direction_impulse;
+	// Preserve the authored per-axis maximum, even when several directional
+	// events stack on top of stochastic trauma shake.
+	shake_translation_current = Vector3(
+			CLAMP(local.x, real_t(-1.0), real_t(1.0)),
+			CLAMP(local.y, real_t(-1.0), real_t(1.0)),
+			CLAMP(local.z, real_t(-1.0), real_t(1.0))) * shake_max_offset;
 	shake_rotation_current = shake.get_rotation_unit() * shake_max_rotation * intensity;
 }
 
@@ -216,9 +228,34 @@ void Camera3D::add_spatial_trauma(const Vector3 &p_source, const Vector3 &p_list
 	}
 }
 
+void Camera3D::add_directional_spatial_trauma(const Vector3 &p_source, const Vector3 &p_listener,
+		real_t p_amount, real_t p_inner_radius, real_t p_outer_radius) {
+	if (!Math::is_finite(p_amount) || p_amount <= real_t(0.0)) {
+		return;
+	}
+	const real_t falloff = CameraShake::spatial_falloff(p_listener, p_source, p_inner_radius, p_outer_radius);
+	if (!(falloff > real_t(0.0))) {
+		return;
+	}
+	// Reuse the exact spatial attenuation and safe network-value clamp as
+	// add_spatial_trauma, but orient an extra visual kick to the epicenter.
+	const real_t amount = MIN(p_amount, real_t(1.0)) * falloff;
+	const Vector3 delta = p_source - p_listener;
+	if (delta.is_finite() && delta.length_squared() > real_t(CMP_EPSILON2)) {
+		const Vector3 local_direction = get_global_transform().basis.orthonormalized().xform_inv(delta.normalized());
+		if (local_direction.is_finite()) {
+			shake_direction_impulse = (shake_direction_impulse + local_direction * amount).limit_length(real_t(1.0));
+		}
+	}
+	// Coincident source/listener still receives normal trauma, just no
+	// arbitrary direction. Accessibility scaling happens in the game.
+	add_trauma(amount);
+}
+
 void Camera3D::set_trauma(real_t p_trauma) {
 	shake.set_trauma(p_trauma);
 	if (!(shake.trauma > 0.0)) {
+		shake_direction_impulse = Vector3();
 		shake_translation_current = Vector3();
 		shake_rotation_current = Vector3();
 		_update_camera();
@@ -278,7 +315,7 @@ void Camera3D::set_desired_process_modes(bool p_process_internal, bool p_physics
 
 void Camera3D::_update_process_mode() {
 	// A shaking camera needs a per-frame tick even if nothing else asked for one.
-	const bool shaking = shake.trauma > 0.0 || shake_translation_current != Vector3() || shake_rotation_current != Vector3();
+	const bool shaking = shake.trauma > 0.0 || shake_direction_impulse != Vector3() || shake_translation_current != Vector3() || shake_rotation_current != Vector3();
 	set_process_internal(_desired_process_internal || shaking);
 	set_physics_process_internal(_desired_physics_process_internal);
 }
@@ -305,7 +342,7 @@ void Camera3D::_notification(int p_what) {
 		} break;
 
 		case NOTIFICATION_INTERNAL_PROCESS: {
-			if (shake.trauma > 0.0 || shake_translation_current != Vector3() || shake_rotation_current != Vector3()) {
+			if (shake.trauma > 0.0 || shake_direction_impulse != Vector3() || shake_translation_current != Vector3() || shake_rotation_current != Vector3()) {
 				_advance_shake(get_process_delta_time());
 				_update_camera();
 				if (!(shake.trauma > 0.0)) {
@@ -436,6 +473,54 @@ real_t Camera3D::get_pixels_per_meter_at_position(const Vector3 &p_world_pos) co
 		return 0.0;
 	}
 	return focal_y_pixels / depth;
+}
+
+// Batch screen-space density: used by instanced grass tile LOD, where
+// calling get_pixels_per_meter_at_position() for each tile would repeatedly
+// recompute the same projection matrix and camera inverse per refresh.
+// The scalar method's visibility and projection semantics are preserved.
+PackedFloat64Array Camera3D::get_pixels_per_meter_at_positions(const PackedVector3Array &p_world_positions) const {
+	PackedFloat64Array result;
+	const int count = p_world_positions.size();
+	ERR_FAIL_COND_V_MSG(!is_inside_tree() || count > 4096, result,
+			"Camera3D batch projection requires a camera in the scene tree and at most 4096 points.");
+	if (count == 0) {
+		return result;
+	}
+	// Reject the entire request before allocating output: a malformed late
+	// world position must not leave the first half of a tile group updated.
+	for (int i = 0; i < count; ++i) {
+		if (!p_world_positions[i].is_finite()) {
+			return PackedFloat64Array();
+		}
+	}
+	const Size2 viewport_size = get_viewport()->get_visible_rect().size;
+	if (!Math::is_finite(viewport_size.y) || viewport_size.y <= 0.0) {
+		return result;
+	}
+	const Projection projection = get_camera_projection();
+	const real_t focal_y_pixels = Math::abs(projection.columns[1][1]) * viewport_size.y * 0.5;
+	if (!Math::is_finite(focal_y_pixels) || focal_y_pixels <= 0.0) {
+		return result;
+	}
+	const bool orthogonal = mode == PROJECTION_ORTHOGONAL;
+	Transform3D inverse_camera;
+	if (!orthogonal) {
+		inverse_camera = get_camera_transform().affine_inverse();
+	}
+	result.resize(count);
+	double *pixels = result.ptrw();
+	for (int i = 0; i < count; ++i) {
+		if (orthogonal) {
+			pixels[i] = double(focal_y_pixels);
+			continue;
+		}
+		const Vector3 camera_space = inverse_camera.xform(p_world_positions[i]);
+		const real_t depth = -camera_space.z;
+		pixels[i] = Math::is_finite(depth) && depth > CMP_EPSILON ?
+				double(focal_y_pixels / depth) : 0.0;
+	}
+	return result;
 }
 
 // Inverse projection footprint for a fixed pixel-sized object. Reuses the
@@ -850,6 +935,7 @@ void Camera3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_camera_transform"), &Camera3D::get_camera_transform);
 	ClassDB::bind_method(D_METHOD("get_camera_projection"), &Camera3D::get_camera_projection);
 	ClassDB::bind_method(D_METHOD("get_pixels_per_meter_at_position", "world_point"), &Camera3D::get_pixels_per_meter_at_position);
+	ClassDB::bind_method(D_METHOD("get_pixels_per_meter_at_positions", "world_points"), &Camera3D::get_pixels_per_meter_at_positions);
 	ClassDB::bind_method(D_METHOD("get_world_size_for_pixel_diameter_at_position", "world_point", "pixel_diameter"), &Camera3D::get_world_size_for_pixel_diameter_at_position);
 	ClassDB::bind_method(D_METHOD("get_fov"), &Camera3D::get_fov);
 	ClassDB::bind_method(D_METHOD("get_frustum_offset"), &Camera3D::get_frustum_offset);
@@ -865,9 +951,11 @@ void Camera3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_projection", "mode"), &Camera3D::set_projection);
 	ClassDB::bind_method(D_METHOD("add_trauma", "amount"), &Camera3D::add_trauma);
 	ClassDB::bind_method(D_METHOD("add_spatial_trauma", "source", "listener", "amount", "inner_radius", "outer_radius"), &Camera3D::add_spatial_trauma);
+	ClassDB::bind_method(D_METHOD("add_directional_spatial_trauma", "source", "listener", "amount", "inner_radius", "outer_radius"), &Camera3D::add_directional_spatial_trauma);
 	ClassDB::bind_method(D_METHOD("set_trauma", "trauma"), &Camera3D::set_trauma);
 	ClassDB::bind_method(D_METHOD("get_trauma"), &Camera3D::get_trauma);
 	ClassDB::bind_method(D_METHOD("get_shake_translation"), &Camera3D::get_shake_translation);
+	ClassDB::bind_method(D_METHOD("get_shake_direction_impulse"), &Camera3D::get_shake_direction_impulse);
 	ClassDB::bind_method(D_METHOD("get_shake_rotation"), &Camera3D::get_shake_rotation);
 	ClassDB::bind_method(D_METHOD("set_shake_max_offset", "offset"), &Camera3D::set_shake_max_offset);
 	ClassDB::bind_method(D_METHOD("get_shake_max_offset"), &Camera3D::get_shake_max_offset);
@@ -1008,9 +1096,9 @@ void Camera3D::set_cull_mask_value(int p_layer_number, bool p_value) {
 	ERR_FAIL_COND_MSG(p_layer_number > 20, "Render layer number must be between 1 and 20 inclusive.");
 	uint32_t mask = get_cull_mask();
 	if (p_value) {
-		mask |= 1 << (p_layer_number - 1);
+		mask |= 1u << (p_layer_number - 1);
 	} else {
-		mask &= ~(1 << (p_layer_number - 1));
+		mask &= ~(1u << (p_layer_number - 1));
 	}
 	set_cull_mask(mask);
 }
@@ -1018,7 +1106,7 @@ void Camera3D::set_cull_mask_value(int p_layer_number, bool p_value) {
 bool Camera3D::get_cull_mask_value(int p_layer_number) const {
 	ERR_FAIL_COND_V_MSG(p_layer_number < 1, false, "Render layer number must be between 1 and 20 inclusive.");
 	ERR_FAIL_COND_V_MSG(p_layer_number > 20, false, "Render layer number must be between 1 and 20 inclusive.");
-	return layers & (1 << (p_layer_number - 1));
+	return layers & (1u << (p_layer_number - 1));
 }
 
 Vector<Plane> Camera3D::get_frustum() const {

@@ -269,6 +269,9 @@ public:
 	Vector3 get_global_position() const;
 	// Visual-only, monotonic cubic snapshot interpolation for simulated
 	// proxies. Endpoints are authoritative; no scene/physics state changes.
+	// Advance a presentation-only network clock without rewind or extrapolation.
+	real_t advance_network_render_time(real_t p_render_time, real_t p_latest_server_time,
+			real_t p_delay, real_t p_delta) const;
 	Vector3 interpolate_network_snapshot(const Vector3 &p_from, const Vector3 &p_to,
 			const Vector3 &p_from_velocity, const Vector3 &p_to_velocity,
 			real_t p_snapshot_delta, real_t p_fraction) const;

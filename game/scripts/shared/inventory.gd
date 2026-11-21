@@ -4,6 +4,7 @@ extends RefCounted
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const TrailBackpack = preload("res://scripts/shared/trail_backpack.gd")
+const GearDurability = preload("res://scripts/shared/gear_durability.gd")
 
 var slots: Array = [] # Each is {} or {"id": String, "count": int}.
 var weapon: String = ""
@@ -11,6 +12,7 @@ var armor: String = ""
 # Worn pieces besides the body armor: slot -> item id. Each slot takes items of the kind with the same name.
 const GEAR_SLOTS := ["head", "cape", "hands", "feet"]
 var gear: Dictionary = {}
+var wear: Dictionary = {} # item id -> durability 0..100 (absent = pristine). Shared by a stack.
 
 
 func _init(p_slots: int = Defs.INVENTORY_SLOTS) -> void:
@@ -182,7 +184,7 @@ func take_everything() -> Dictionary:
 
 
 func to_dict() -> Dictionary:
-	return {"slots": slots.duplicate(true), "weapon": weapon, "armor": armor, "gear": gear.duplicate()}
+	return {"slots": slots.duplicate(true), "weapon": weapon, "armor": armor, "gear": gear.duplicate(), "wear": wear.duplicate()}
 
 
 func load_dict(data: Dictionary) -> void:
@@ -190,3 +192,61 @@ func load_dict(data: Dictionary) -> void:
 	weapon = data.get("weapon", "")
 	armor = data.get("armor", "")
 	gear = (data.get("gear", {}) as Dictionary).duplicate() if data.get("gear", {}) is Dictionary else {}
+	wear = {}
+	var saved_wear: Variant = data.get("wear", {})
+	if saved_wear is Dictionary:
+		for id in saved_wear:
+			if not Defs.item(str(id)).is_empty():
+				wear[str(id)] = GearDurability.clamp_durability(float(saved_wear[id]))
+
+
+## Durability of an item (100 when never damaged).
+func durability(id: String) -> float:
+	return float(wear.get(id, GearDurability.MAX))
+
+
+## 1.0 normally, 0.5 for broken (0%) gear.
+func effectiveness(id: String) -> float:
+	return GearDurability.effectiveness(durability(id))
+
+
+func damage_item(id: String, amount: float) -> void:
+	if id == "" or amount <= 0.0 or count(id) < 1:
+		return
+	var left: float = GearDurability.clamp_durability(durability(id) - amount)
+	if left >= GearDurability.MAX:
+		wear.erase(id)
+	else:
+		wear[id] = left
+
+
+## Wear on everything worn for protection (one received hit).
+func wear_worn(amount: float = GearDurability.ARMOR_WEAR_PER_HIT) -> void:
+	for piece in worn():
+		damage_item(str(piece), amount)
+
+
+## Wear on every equipped item (weapon and protection), e.g. on a kept-gear death.
+func wear_equipped(amount: float) -> void:
+	damage_item(weapon, amount)
+	wear_worn(amount)
+
+
+## Silver needed to repair every damaged carried item.
+func repair_cost() -> int:
+	var total := 0
+	for id in wear.keys():
+		if count(str(id)) > 0:
+			total += GearDurability.repair_cost(float(Defs.item(str(id)).get("value", 1)), GearDurability.MAX - durability(str(id)))
+	return total
+
+
+## Restores every carried damaged item to 100%. Returns the item ids repaired.
+func repair_all() -> Array:
+	var repaired: Array = []
+	for id in wear.keys():
+		if count(str(id)) > 0:
+			repaired.append(str(id))
+	for id in repaired:
+		wear.erase(id)
+	return repaired

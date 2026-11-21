@@ -30,7 +30,11 @@
 
 #include "multimesh.h"
 
+#include "core/math/math_funcs.h"
+
+#include "core/math/random_pcg.h"
 #include "core/object/class_db.h"
+#include "core/variant/array.h"
 #include "servers/rendering/rendering_server.h"
 
 #ifndef DISABLE_DEPRECATED
@@ -208,6 +212,126 @@ void MultiMesh::set_buffer(const Vector<float> &p_buffer) {
 	RS::get_singleton()->multimesh_set_buffer(multimesh, p_buffer);
 }
 
+
+bool MultiMesh::set_instance_transform_color_buffer(const Array &p_transforms, const Vector<Color> &p_colors) {
+	ERR_FAIL_COND_V_MSG(transform_format != TRANSFORM_3D, false, "Full transform/color uploads require a 3D MultiMesh.");
+	ERR_FAIL_COND_V_MSG(!use_colors, false, "Enable use_colors for a full transform/color upload.");
+	ERR_FAIL_COND_V_MSG(use_custom_data, false, "Transform/color uploads cannot overwrite MultiMeshes with custom instance data.");
+	ERR_FAIL_COND_V_MSG(p_transforms.size() != instance_count || p_colors.size() != instance_count, false, "Full transform/color arrays must match instance_count.");
+
+	// Validate the *entire* payload before packing or touching the renderer.
+	// This preserves the previous buffer on malformed data, unlike repeated
+	// per-instance writes where a later bad slot can leave partial updates.
+	for (int i = 0; i < instance_count; i++) {
+		ERR_FAIL_COND_V_MSG(p_transforms[i].get_type() != Variant::TRANSFORM3D, false, "Each instance must provide Transform3D.");
+		const Transform3D transform = p_transforms[i];
+		ERR_FAIL_COND_V_MSG(!transform.is_finite(), false, "Instance transforms must be finite.");
+		const Color &color = p_colors[i];
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(color.r) || !Math::is_finite(color.g) || !Math::is_finite(color.b) || !Math::is_finite(color.a), false, "Instance colors must be finite.");
+	}
+	if (instance_count == 0) {
+		return true;
+	}
+
+	// Reuse the fork's native 3D record packer (12 matrix + 4 RGBA floats)
+	// and submit the whole contiguous buffer to RenderingServer just once.
+	const Vector<float> packed = pack_transform_buffer(p_transforms, p_colors);
+	ERR_FAIL_COND_V_MSG(packed.size() != instance_count * 16, false, "Native packing did not produce a valid MultiMesh buffer.");
+	set_buffer(packed);
+	return true;
+}
+
+Vector<float> MultiMesh::pack_transform_buffer(const Array &p_transforms, const Vector<Color> &p_colors) const {
+	// This is a pure CPU operation: set_buffer() performs the single upload.
+	ERR_FAIL_COND_V_MSG(transform_format != TRANSFORM_3D, Vector<float>(), "Native transform packing requires a 3D MultiMesh.");
+	ERR_FAIL_COND_V_MSG(use_custom_data, Vector<float>(), "Native transform packing does not support custom instance data.");
+	ERR_FAIL_COND_V_MSG(p_transforms.size() != instance_count, Vector<float>(), "Transform count must match MultiMesh instance_count.");
+	ERR_FAIL_COND_V_MSG(p_colors.size() != (use_colors ? instance_count : 0), Vector<float>(),
+			"Color count must match colored instance_count, or be empty for untinted instances.");
+	for (int i = 0; i < instance_count; i++) {
+		ERR_FAIL_COND_V_MSG(p_transforms[i].get_type() != Variant::TRANSFORM3D, Vector<float>(),
+				"Every instance must supply a Transform3D.");
+	}
+
+	const int stride = use_colors ? 16 : 12;
+	Vector<float> packed;
+	packed.resize(instance_count * stride);
+	float *w = packed.ptrw();
+	for (int i = 0; i < instance_count; i++) {
+		const Transform3D t = p_transforms[i];
+		const Vector3 x = t.basis.get_column(0);
+		const Vector3 y = t.basis.get_column(1);
+		const Vector3 z = t.basis.get_column(2);
+		const int o = i * stride;
+		w[o + 0] = x.x;
+		w[o + 1] = y.x;
+		w[o + 2] = z.x;
+		w[o + 3] = t.origin.x;
+		w[o + 4] = x.y;
+		w[o + 5] = y.y;
+		w[o + 6] = z.y;
+		w[o + 7] = t.origin.y;
+		w[o + 8] = x.z;
+		w[o + 9] = y.z;
+		w[o + 10] = z.z;
+		w[o + 11] = t.origin.z;
+		if (use_colors) {
+			const Color &c = p_colors[i];
+			w[o + 12] = c.r;
+			w[o + 13] = c.g;
+			w[o + 14] = c.b;
+			w[o + 15] = c.a;
+		}
+	}
+	return packed;
+}
+
+AABB MultiMesh::transformed_mesh_bounds(const Array &p_transforms, real_t p_margin) const {
+	ERR_FAIL_COND_V_MSG(mesh.is_null() || p_transforms.is_empty(), AABB(),
+			"Mesh and at least one transform are required to calculate scenery bounds.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_margin) || p_margin < 0.0, AABB(), "Bounds margin must be finite and nonnegative.");
+	for (int i = 0; i < p_transforms.size(); i++) {
+		ERR_FAIL_COND_V_MSG(p_transforms[i].get_type() != Variant::TRANSFORM3D, AABB(), "Every instance must supply a Transform3D.");
+	}
+	const AABB mesh_bounds = mesh->get_aabb();
+	const Transform3D first = p_transforms[0];
+	AABB result = first.xform(mesh_bounds);
+	for (int i = 1; i < p_transforms.size(); i++) {
+		const Transform3D t = p_transforms[i];
+		result.merge_with(t.xform(mesh_bounds));
+	}
+	return result.grow(p_margin);
+}
+
+Vector<float> MultiMesh::shuffled_instance_buffer(const Vector<float> &p_buffer, uint64_t p_seed) const {
+	// MultiMesh buffers contain interleaved transform, color, and custom data.
+	// Shuffle records, not floats, so distance-based visible_instance_count
+	// produces scattered coverage without corrupting matrix rows or tints.
+	const int stride = (transform_format == TRANSFORM_2D ? 8 : 12) +
+			(use_colors ? 4 : 0) + (use_custom_data ? 4 : 0);
+	if (instance_count <= 1 || p_buffer.size() != instance_count * stride) {
+		return p_buffer;
+	}
+	Vector<float> shuffled = p_buffer;
+	float *records = shuffled.ptrw(); // Copy-on-write; do not mutate caller data.
+	RandomPCG rng;
+	rng.seed(p_seed);
+	for (int i = instance_count - 1; i > 0; --i) {
+		const int other = rng.random(0, i);
+		if (i == other) {
+			continue;
+		}
+		const int a = i * stride;
+		const int b = other * stride;
+		for (int channel = 0; channel < stride; ++channel) {
+			const float saved = records[a + channel];
+			records[a + channel] = records[b + channel];
+			records[b + channel] = saved;
+		}
+	}
+	return shuffled;
+}
+
 Vector<float> MultiMesh::get_buffer() const {
 	return RS::get_singleton()->multimesh_get_buffer(multimesh);
 }
@@ -261,6 +385,35 @@ void MultiMesh::set_physics_interpolation_quality(PhysicsInterpolationQuality p_
 	RenderingServer::get_singleton()->multimesh_set_physics_interpolation_quality(multimesh, (RSE::MultimeshPhysicsInterpolationQuality)p_quality);
 }
 
+bool MultiMesh::set_instance_transforms_batch(const PackedInt32Array &p_indices, const TypedArray<Transform3D> &p_transforms) {
+	ERR_FAIL_COND_V_MSG(transform_format != TRANSFORM_3D, false, "Sparse transform batches require 3D MultiMesh format.");
+	ERR_FAIL_COND_V_MSG(p_indices.size() != p_transforms.size(), false, "Indices and transforms must have equal lengths.");
+	if (p_indices.is_empty()) {
+		return true;
+	}
+
+	// Validate the complete request before touching any RenderingServer state.
+	PackedInt32Array sorted = p_indices;
+	sorted.sort();
+	for (int i = 0; i < sorted.size(); i++) {
+		ERR_FAIL_INDEX_V_MSG(sorted[i], instance_count, false, "Sparse transform index is out of bounds.");
+		if (i > 0) {
+			ERR_FAIL_COND_V_MSG(sorted[i] == sorted[i - 1], false, "Sparse transform indices must be unique.");
+		}
+	}
+	for (int i = 0; i < p_transforms.size(); i++) {
+		const Transform3D transform = p_transforms[i];
+		ERR_FAIL_COND_V_MSG(!transform.is_finite(), false, "Sparse instance transforms must be finite.");
+	}
+
+	// One script-to-engine entry point; still K RenderingServer updates.
+	for (int i = 0; i < p_indices.size(); i++) {
+		const Transform3D transform = p_transforms[i];
+		RenderingServer::get_singleton()->multimesh_instance_set_transform(multimesh, p_indices[i], transform);
+	}
+	return true;
+}
+
 void MultiMesh::set_instance_transform(int p_instance, const Transform3D &p_transform) {
 	ERR_FAIL_INDEX_MSG(p_instance, instance_count, "Instance index out of bounds. Instance index must be less than `instance_count` and greater than or equal to zero.");
 	ERR_FAIL_COND_MSG(transform_format == TRANSFORM_2D, "Can't set Transform3D on a Multimesh configured to use Transform2D. Ensure that you have set the `transform_format` to `TRANSFORM_3D`.");
@@ -284,6 +437,36 @@ Transform2D MultiMesh::get_instance_transform_2d(int p_instance) const {
 	ERR_FAIL_INDEX_V_MSG(p_instance, instance_count, Transform2D(), "Instance index out of bounds. Instance index must be less than `instance_count` and greater than or equal to zero.");
 	ERR_FAIL_COND_V_MSG(transform_format == TRANSFORM_3D, Transform2D(), "Can't get Transform2D on a Multimesh configured to use Transform3D. Ensure that you have set the `transform_format` to `TRANSFORM_2D`.");
 	return RenderingServer::get_singleton()->multimesh_instance_get_transform_2d(multimesh, p_instance);
+}
+
+bool MultiMesh::set_instance_colors_batch(const PackedInt32Array &p_indices, const PackedColorArray &p_colors) {
+	ERR_FAIL_COND_V_MSG(!use_colors, false, "Enable use_colors before batch-updating instance colors.");
+	ERR_FAIL_COND_V_MSG(p_indices.size() != p_colors.size(), false, "Instance color indices and values must have matching lengths.");
+	if (p_indices.is_empty()) {
+		return true;
+	}
+
+	// Validate everything before the first renderer update. Unsorted indices
+	// are allowed but duplicates and out-of-range slots would be ambiguous.
+	PackedInt32Array sorted = p_indices;
+	sorted.sort();
+	for (int i = 0; i < sorted.size(); i++) {
+		ERR_FAIL_INDEX_V_MSG(sorted[i], instance_count, false, "Instance color batch index is out of bounds.");
+		if (i > 0) {
+			ERR_FAIL_COND_V_MSG(sorted[i] == sorted[i - 1], false, "Instance color batch indices must be unique.");
+		}
+	}
+	for (int i = 0; i < p_colors.size(); i++) {
+		const Color &color = p_colors[i];
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(color.r) || !Math::is_finite(color.g) || !Math::is_finite(color.b) || !Math::is_finite(color.a), false, "Instance color components must be finite.");
+	}
+
+	// Reduce script calls while retaining per-instance RenderingServer writes.
+	// The whole buffer need not be reuploaded for sparse color changes.
+	for (int i = 0; i < p_indices.size(); i++) {
+		RenderingServer::get_singleton()->multimesh_instance_set_color(multimesh, p_indices[i], p_colors[i]);
+	}
+	return true;
 }
 
 void MultiMesh::set_instance_color(int p_instance, const Color &p_color) {
@@ -385,10 +568,12 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_physics_interpolation_quality", "quality"), &MultiMesh::set_physics_interpolation_quality);
 	ClassDB::bind_method(D_METHOD("get_physics_interpolation_quality"), &MultiMesh::get_physics_interpolation_quality);
 	ClassDB::bind_method(D_METHOD("set_instance_transform", "instance", "transform"), &MultiMesh::set_instance_transform);
+	ClassDB::bind_method(D_METHOD("set_instance_transforms_batch", "indices", "transforms"), &MultiMesh::set_instance_transforms_batch);
 	ClassDB::bind_method(D_METHOD("set_instance_transform_2d", "instance", "transform"), &MultiMesh::set_instance_transform_2d);
 	ClassDB::bind_method(D_METHOD("get_instance_transform", "instance"), &MultiMesh::get_instance_transform);
 	ClassDB::bind_method(D_METHOD("get_instance_transform_2d", "instance"), &MultiMesh::get_instance_transform_2d);
 	ClassDB::bind_method(D_METHOD("set_instance_color", "instance", "color"), &MultiMesh::set_instance_color);
+	ClassDB::bind_method(D_METHOD("set_instance_colors_batch", "indices", "colors"), &MultiMesh::set_instance_colors_batch);
 	ClassDB::bind_method(D_METHOD("get_instance_color", "instance"), &MultiMesh::get_instance_color);
 	ClassDB::bind_method(D_METHOD("set_instance_custom_data", "instance", "custom_data"), &MultiMesh::set_instance_custom_data);
 	ClassDB::bind_method(D_METHOD("get_instance_custom_data", "instance"), &MultiMesh::get_instance_custom_data);
@@ -399,6 +584,10 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_aabb"), &MultiMesh::get_aabb);
 
 	ClassDB::bind_method(D_METHOD("get_buffer"), &MultiMesh::get_buffer);
+	ClassDB::bind_method(D_METHOD("set_instance_transform_color_buffer", "transforms", "colors"), &MultiMesh::set_instance_transform_color_buffer);
+	ClassDB::bind_method(D_METHOD("pack_transform_buffer", "transforms", "colors"), &MultiMesh::pack_transform_buffer);
+	ClassDB::bind_method(D_METHOD("transformed_mesh_bounds", "transforms", "margin"), &MultiMesh::transformed_mesh_bounds);
+	ClassDB::bind_method(D_METHOD("shuffled_instance_buffer", "buffer", "seed"), &MultiMesh::shuffled_instance_buffer);
 	ClassDB::bind_method(D_METHOD("set_buffer", "buffer"), &MultiMesh::set_buffer);
 
 	ClassDB::bind_method(D_METHOD("set_buffer_interpolated", "buffer_curr", "buffer_prev"), &MultiMesh::set_buffer_interpolated);

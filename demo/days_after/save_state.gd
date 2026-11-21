@@ -7,6 +7,7 @@ const SAVE_PATH := "user://days_after_player.json"
 const MAX_ITEMS := 1000000
 const MAX_XP := 100000000
 const MAX_COORDINATE := 100000.0
+const EquipmentDurability = preload("res://equipment_durability.gd")
 
 
 static func snapshot(player: Node3D) -> Dictionary:
@@ -19,6 +20,7 @@ static func snapshot(player: Node3D) -> Dictionary:
             "thirst": float(player.get("thirst"))
         },
         "inventory": (player.get("inventory") as Dictionary).duplicate(true),
+        "durability": (player.get("durability") as Dictionary).duplicate(true),
         "experience": {
             "gathering": (player.get("gathering_xp") as Dictionary).duplicate(true),
             "crafting": int(player.get("crafting_xp")),
@@ -65,6 +67,9 @@ static func validate_snapshot(data: Variant) -> bool:
         return false
     if not _valid_stack_map(inventory, MAX_ITEMS):
         return false
+    # Optional to preserve compatibility with existing version-1 saves.
+    if not EquipmentDurability.valid_map(data.get("durability", {}), inventory):
+        return false
     for stat in ["health", "hunger", "thirst"]:
         var value: Variant = stats.get(stat)
         if not (value is int or value is float) or float(value) < 0.0 or float(value) > 100.0:
@@ -106,6 +111,7 @@ static func apply_snapshot(player: Node3D, data: Variant) -> bool:
     player.set("hunger", float(stats["hunger"]))
     player.set("thirst", float(stats["thirst"]))
     player.set("inventory", (data["inventory"] as Dictionary).duplicate(true))
+    player.set("durability", (data.get("durability", {}) as Dictionary).duplicate(true))
     player.set("gathering_xp", (experience["gathering"] as Dictionary).duplicate(true))
     player.set("crafting_xp", int(experience["crafting"]))
     player.set("combat_xp", int(experience["combat"]))

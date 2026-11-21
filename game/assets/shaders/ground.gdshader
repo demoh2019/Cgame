@@ -2,6 +2,7 @@ shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
 global uniform float aa_weather_rain;
+global uniform float aa_snow_cover; // Winter Data Layer, 0..1 (data_layers.gd).
 global uniform float aa_ground_contact_strength;
 // Precomputed coarser-height target in UV2; interpolated on GPU per engine chunk.
 instance uniform float aa_lod_morph = 0.0;
@@ -49,8 +50,12 @@ uniform sampler2D contact_map : hint_default_white, filter_linear, repeat_disabl
 uniform vec2 chunk_origin = vec2(0.0);
 uniform float chunk_size = 64.0;
 uniform float biome_texels = 17.0;
-uniform float tile_meters = 6.0;
-uniform float normal_strength = 0.8;
+uniform float tile_meters = 4.5;
+uniform float albedo_texels = 1024.0; // Per-layer texture width, for the magnification test.
+uniform float normal_texels = 1024.0;
+// Poly Haven displacement per layer (0.5 = flat for layers without one), for close-range parallax.
+uniform sampler2DArray height_layers : filter_linear_mipmap, repeat_enable;
+uniform float normal_strength = 1.7;
 // Per-layer multiplier that moves the photo's average colour to the game's palette (computed on load).
 uniform vec3 layer_tint[13];
 // Average color of each material: cheap residual retains all biome transitions when texture taps are limited.
@@ -117,12 +122,67 @@ void vertex() {
 
 // Distant terrain keeps the existing broad-scale tiling, but skips nearby microdetail samples.
 // The blending weight tends smoothly to zero, avoiding hard texture LOD boundaries.
+// Close to the camera a 1k texture over a 6 m tile is magnified several times and looks smeared.
+// Wherever the near tile is magnified (under ~1 texel per pixel) the same layer is also sampled at a
+// 4.5x finer, rotated scale and applied as luminance detail: crisp grit underfoot, no extra textures.
+const float AA_MICRO_SCALE = 0.22;
+const float AA_PARALLAX_DEPTH = 0.14; // Metres of apparent relief at full displacement contrast.
+const float AA_CAVITY_STRENGTH = 0.5; // How dark the deepest cracks and gaps between stones get.
+
+// Parallax occlusion mapping: march the view ray through the layer's height field (4-14 steps,
+// fewer when the view is steep or far) so raised stones occlude what lies behind them.
+// Returns the corrected terrain position in metres and the height found there (in .z).
+vec3 aa_parallax(float layer, vec2 p, vec3 view_world, vec2 lod_dx, vec2 lod_dy, float fade) {
+	float grazing = 1.0 - clamp(view_world.y, 0.0, 1.0);
+	int steps = int(mix(4.0, 14.0, fade * grazing));
+	vec2 shift = -view_world.xz / max(view_world.y, 0.25) * AA_PARALLAX_DEPTH * fade;
+	float step_depth = 1.0 / float(steps);
+	float ray_depth = 0.0;
+	vec2 offset = vec2(0.0);
+	vec2 delta = shift * step_depth;
+	float surface = 1.0 - textureGrad(height_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy).r;
+	float previous_surface = surface;
+	for (int i = 0; i < 14; i++) {
+		if (i >= steps || ray_depth >= surface) {
+			break;
+		}
+		previous_surface = surface;
+		offset += delta;
+		ray_depth += step_depth;
+		surface = 1.0 - textureGrad(height_layers, vec3((p + offset) / tile_meters, layer), lod_dx, lod_dy).r;
+	}
+	// Refine between the last two steps.
+	float after = surface - ray_depth;
+	float before = previous_surface - (ray_depth - step_depth);
+	float t = clamp(after / min(after - before, -0.0001), 0.0, 1.0);
+	vec2 final_offset = offset - delta * t;
+	float height = 1.0 - mix(surface, previous_surface, t);
+	return vec3(p + final_offset, height);
+}
+const mat2 AA_MICRO_ROT = mat2(vec2(0.8776, 0.4794), vec2(-0.4794, 0.8776));
+
+float aa_micro_weight(vec2 lod_dx, vec2 lod_dy) {
+	float texels_per_pixel = max(length(lod_dx), length(lod_dy)) * albedo_texels;
+	return 1.0 - smoothstep(0.35, 1.3, texels_per_pixel);
+}
+
 vec3 top_albedo(float layer, vec2 p, float mixer, float detail_fade, vec2 lod_dx, vec2 lod_dy) {
-	vec3 far_tile = textureGrad(albedo_layers, vec3(p / (tile_meters * 3.3) + 0.37, layer), lod_dx / 3.3, lod_dy / 3.3).rgb;
-	float near_weight = (1.0 - mixer) * detail_fade;
+	float far_scale = max(3.3, 20.0 / tile_meters);
+	vec3 far_tile = textureGrad(albedo_layers, vec3(p / (tile_meters * far_scale) + 0.37, layer), lod_dx / far_scale, lod_dy / far_scale).rgb;
+	// Near the camera the sharp near tile dominates; the noise mixer only breaks tiling further away.
+	float near_weight = detail_fade * (1.0 - mixer * mix(0.35, 1.0, 1.0 - detail_fade));
 	if (near_weight > 0.001) {
 		vec3 near_tile = textureGrad(albedo_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy).rgb;
 		far_tile = mix(far_tile, near_tile, near_weight);
+		float micro_w = aa_micro_weight(lod_dx, lod_dy) * detail_fade;
+		if (micro_w > 0.01) {
+			vec2 mp = AA_MICRO_ROT * (p / (tile_meters * AA_MICRO_SCALE)) + 0.21;
+			vec3 micro = textureGrad(albedo_layers, vec3(mp, layer), AA_MICRO_ROT * lod_dx / AA_MICRO_SCALE,
+				AA_MICRO_ROT * lod_dy / AA_MICRO_SCALE).rgb;
+			float base_l = max(dot(near_tile, vec3(0.299, 0.587, 0.114)), 0.04);
+			float micro_l = dot(micro, vec3(0.299, 0.587, 0.114));
+			far_tile *= mix(1.0, clamp(micro_l / base_l, 0.55, 1.6), micro_w * 0.65);
+		}
 	}
 	return far_tile * layer_tint[int(layer)];
 }
@@ -134,6 +194,15 @@ vec4 top_normal(float layer, vec2 p, float detail_fade, vec2 lod_dx, vec2 lod_dy
 	if (detail_fade > 0.001) {
 		vec4 mapped = textureGrad(normal_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy);
 		normal = mix(normal, vec4(mapped.rgb * 2.0 - 1.0, mapped.a), detail_fade);
+		// Matching fine-scale bumps where the near normal map is magnified (normals are 512 px).
+		float micro_w = (1.0 - smoothstep(0.2, 0.7, max(length(lod_dx), length(lod_dy)) * normal_texels)) * detail_fade;
+		if (micro_w > 0.01) {
+			vec2 mp = AA_MICRO_ROT * (p / (tile_meters * AA_MICRO_SCALE)) + 0.21;
+			vec3 micro = textureGrad(normal_layers, vec3(mp, layer), AA_MICRO_ROT * lod_dx / AA_MICRO_SCALE,
+				AA_MICRO_ROT * lod_dy / AA_MICRO_SCALE).rgb * 2.0 - 1.0;
+			normal.xy += micro.xy * micro_w * 0.6;
+			normal.xyz = normalize(normal.xyz);
+		}
 	}
 	return normal;
 }
@@ -180,6 +249,9 @@ void fragment() {
 		lod_dx += dFdx(warp / tile_meters);
 		lod_dy += dFdy(warp / tile_meters);
 	}
+	// Direction from the surface toward the camera, in world space, for parallax.
+	vec3 view_world = normalize(CAMERA_POSITION_WORLD - world_position);
+	float parallax_fade = 1.0 - smoothstep(8.0, 18.0, camera_distance);
 	vec2 cliff_dx_zy = dFdx(world_position.zy / tile_meters);
 	vec2 cliff_dy_zy = dFdy(world_position.zy / tile_meters);
 	vec2 cliff_dx_xy = dFdx(world_position.xy / tile_meters);
@@ -228,6 +300,10 @@ void fragment() {
 	}
 	w[5] = cliff;
 	float snow = smoothstep(88.0, 108.0, h + (broad - 0.5) * 14.0) * (1.0 - smoothstep(0.32, 0.55, slope));
+	// Winter Data Layer: snow settles everywhere above the shoreline, thinner on slopes and in patches.
+	float winter = aa_snow_cover * smoothstep(1.2, 3.0, h) * (1.0 - smoothstep(0.28, 0.5, slope))
+		* smoothstep(0.25, 0.6, broad + 0.35);
+	snow = max(snow, winter);
 	for (int i = 0; i < 8; i++) {
 		w[i] *= 1.0 - snow;
 	}
@@ -398,8 +474,20 @@ void fragment() {
 			}
 			normal_sample = vec4(0.0, 0.0, 1.0, cliff_coherence);
 		} else {
-			c = top_albedo(layer, material_p, mixer, detail_fade, lod_dx, lod_dy);
-			normal_sample = top_normal(layer, material_p, detail_fade, lod_dx, lod_dy);
+			// Parallax offset: pebbles and clods appear raised at grazing angles near the camera.
+			vec2 layer_p = material_p;
+			float layer_height = 0.5;
+			if (parallax_fade > 0.01) {
+				vec3 marched = aa_parallax(layer, material_p, view_world, lod_dx, lod_dy, parallax_fade);
+				layer_p = marched.xy;
+				layer_height = marched.z;
+			} else if (detail_fade > 0.01) {
+				layer_height = textureGrad(height_layers, vec3(material_p / tile_meters, layer), lod_dx, lod_dy).r;
+			}
+			c = top_albedo(layer, layer_p, mixer, detail_fade, lod_dx, lod_dy);
+			// Cavities: cracks, gaps between pebbles and hollows under leaves fall into shadow.
+			c *= mix(1.0, mix(1.0 - AA_CAVITY_STRENGTH, 1.0, smoothstep(0.05, 0.65, layer_height)), detail_fade);
+			normal_sample = top_normal(layer, layer_p, detail_fade, lod_dx, lod_dy);
 		}
 		// Replace the approximate layer color with the actual PBR texture; the
 		// unselected layers still contribute their average palette color.

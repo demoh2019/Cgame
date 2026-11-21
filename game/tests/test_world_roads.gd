@@ -8,8 +8,44 @@ const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 
 
 func run(t) -> void:
-	t.current = "roads"
 	var world := WorldGen.new(1337)
+	t.current = "procedural road nearest-neighbor graph"
+	var sample_places: Array = [
+		{"x": 0.0, "z": 0.0},
+		{"x": 2.0, "z": 0.0},
+		{"x": -2.0, "z": 0.0},
+		{"x": 0.0, "z": 4.0},
+		{"x": 50.0, "z": 50.0},
+	]
+	var scalar_links: Dictionary = WorldRoads.compute_links(sample_places, 4.1, 1, 2, true)
+	var generated_links: Dictionary = WorldRoads.compute_links(sample_places, 4.1, 1, 2)
+	t.eq(generated_links, scalar_links, "native and GDScript graph topology agree")
+	t.check(generated_links.has(Vector2i(0, 1)), "first equidistant neighbor is selected")
+	t.check(generated_links.has(Vector2i(0, 2)), "second equidistant neighbor is selected")
+	t.check(generated_links.has(Vector2i(0, 3)), "a point on the radius boundary connects")
+	t.eq(generated_links.size(), 3, "distant sites do not create out-of-range road edges")
+	t.eq(WorldRoads.compute_links(sample_places, 0.0, 2, 4).size(), 0, "zero radius excludes separated sites")
+	if Geometry2D.has_method("get_nearest_neighbors"):
+		var points := PackedVector2Array([Vector2.ZERO, Vector2(2.0, 0.0),
+				Vector2(-2.0, 0.0), Vector2(0.0, 4.0)])
+		var nearest: Array = Geometry2D.call("get_nearest_neighbors", points, 2, 4.1)
+		t.eq(nearest.size(), 4, "native API returns one index list per point")
+		t.eq(PackedInt32Array(nearest[0]), PackedInt32Array([1, 2]), "nearest point ordering is stable")
+
+	# Compare the full generated road graph from actual island locations.
+	var region_places: Array = [{"x": 0.0, "z": 0.0}]
+	for rx in range(-3, 4):
+		for rz in range(-3, 4):
+			for site in world.poi.sites_in_region(rx, rz):
+				if WorldRoads.LINKED_KINDS.has(str(site["kind"])):
+					region_places.append({"x": float(site["x"]), "z": float(site["z"])})
+	var expected_links: Dictionary = WorldRoads.compute_links(region_places, WorldRoads.MAX_LINK,
+			WorldRoads.NEIGHBOURS, WorldRoads.HUB_LINKS, true)
+	var real_links: Dictionary = WorldRoads.compute_links(region_places)
+	t.eq(real_links, expected_links, "island road graph matches stock-Godot fallback")
+	t.check(region_places.size() >= 10, "road graph parity covers multiple inhabited regions")
+
+	t.current = "roads"
 	var roads: Array = world.roads.all_roads()
 	t.check(roads.size() > 150, "many roads join the island (%d)" % roads.size())
 	var from_hub := 0
@@ -33,6 +69,80 @@ func run(t) -> void:
 				t.check(not world.is_water(float(sign["x"]), float(sign["z"])), "a signpost stands on land")
 			pieces += world.roads.pieces_in_cell(Vector2i(cx, cz)).size()
 	t.check(signs > 100 and pieces > 500, "signposts (%d) and road pieces (%d) are spread over the chunks" % [signs, pieces])
+	# Authoritative road speed/grip uses the new native geometry API when available,
+	# while stock Godot continues to use the original scalar implementation.
+	t.current = "road coverage parity"
+	var sample_count := 0
+	for cell_x in range(-8, 9):
+		for cell_z in range(-8, 9):
+			var cell := Vector2i(cell_x, cell_z)
+			var segments: Array = world.roads.pieces_in_cell(cell)
+			if segments.is_empty():
+				continue
+			var a: Vector2 = segments[0][0]
+			var b: Vector2 = segments[0][1]
+			for offset in [Vector2.ZERO, Vector2(0.6, -0.8), Vector2(5.0, 2.0)]:
+				var point: Vector2 = (a + b) * 0.5 + offset
+				if world.is_water(point.x, point.y):
+					continue
+				var reference: float = WorldRoads.coverage_on_segments(point, segments)
+				t.near(world.roads.coverage_at(point.x, point.y), reference, 0.00011, "native road grip matches scalar")
+				sample_count += 1
+			if sample_count >= 100:
+				break
+		if sample_count >= 100:
+			break
+	t.check(sample_count >= 15, "road grip parity checks cover inhabited cells")
+	if Geometry2D.has_method("get_closest_point_on_segments"):
+		var endpoints := PackedVector2Array([Vector2(0, 0), Vector2(10, 0), Vector2(2, 2), Vector2(2, 2)])
+		var result: Dictionary = Geometry2D.call("get_closest_point_on_segments", Vector2(4, 3), endpoints)
+		t.eq(int(result.get("segment_index", -1)), 0, "nearest segment index is stable")
+		t.near(float(result.get("distance", -1.0)), 3.0, 0.00001, "nearest segment distance")
+		t.near(float(result.get("t", -1.0)), 0.4, 0.00001, "nearest segment interpolation")
+		t.check(Geometry2D.call("get_closest_point_on_segments", Vector2.ZERO, PackedVector2Array()).is_empty(), "empty segments return no hit")
+
+	t.current = "road mask native rasterization parity"
+	var mask_segments: Array = [
+		[Vector2(1.0, 2.5), Vector2(13.0, 2.5)],
+		[Vector2(6.5, -4.0), Vector2(6.5, 12.0)],
+		[Vector2(11.5, 9.5), Vector2(11.5, 9.5)],
+		[Vector2(-8.0, 8.5), Vector2(4.0, 8.5)]
+	]
+	var scalar_mask: PackedByteArray = WorldRoads.rasterize_mask(mask_segments, Vector2.ZERO, 16, 2.1, 1.2, true)
+	var render_mask: PackedByteArray = WorldRoads.rasterize_mask(mask_segments, Vector2.ZERO, 16, 2.1, 1.2)
+	t.eq(render_mask.size(), 16 * 16, "native/scalar road masks have the expected texture length")
+	t.eq(int(render_mask[2 * 16 + 4]), 255, "road center fills its pixel")
+	t.eq(int(render_mask[9 * 16 + 11]), 255, "zero-length segment paints a round cap")
+	var maximum_difference := 0
+	for i in scalar_mask.size():
+		maximum_difference = maxi(maximum_difference, absi(int(render_mask[i]) - int(scalar_mask[i])))
+	t.check(maximum_difference <= 1, "native road mask agrees with scalar rasterization within L8 quantization")
+	var empty_mask: PackedByteArray = WorldRoads.rasterize_mask([], Vector2.ZERO, 8)
+	t.eq(empty_mask.size(), 64, "empty segment input returns a blank mask")
+	t.check(empty_mask.count(0) == 64, "empty segment mask remains transparent")
+
+	# Real road cells verify world-to-local offset and boundary clipping.
+	var checked_cells := 0
+	for cx in range(-5, 6):
+		for cz in range(-5, 6):
+			var test_cell := Vector2i(cx, cz)
+			var local_pieces: Array = world.roads.pieces_in_cell(test_cell)
+			if local_pieces.is_empty():
+				continue
+			var local_origin: Vector2 = Vector2(test_cell) * Defs.CHUNK_SIZE
+			var scalar: PackedByteArray = WorldRoads.rasterize_mask(local_pieces, local_origin, 16, 2.1, 1.2, true)
+			var rendered: PackedByteArray = WorldRoads.rasterize_mask(local_pieces, local_origin, 16, 2.1, 1.2)
+			var max_error := 0
+			for j in scalar.size():
+				max_error = maxi(max_error, absi(int(scalar[j]) - int(rendered[j])))
+			t.check(max_error <= 1, "chunk road mask native/fallback parity")
+			checked_cells += 1
+			if checked_cells >= 6:
+				break
+		if checked_cells >= 6:
+			break
+	t.check(checked_cells >= 3, "real road mask parity checks sampled road cells")
+
 	var again := WorldGen.new(1337)
 	t.eq(again.roads.all_roads().size(), roads.size(), "the same seed lays the same roads")
 
