@@ -12,7 +12,9 @@ static func set_rect(image: Image, rect: Rect2i, colors: PackedColorArray,
 		return false
 	if rect.size.x > image.get_width() or rect.size.y > image.get_height():
 		return false
-	if rect.position.x > image.get_width() - rect.size.x or 			rect.position.y > image.get_height() - rect.size.y:
+	if rect.position.x > image.get_width() - rect.size.x:
+		return false
+	if rect.position.y > image.get_height() - rect.size.y:
 		return false
 	if colors.size() != rect.size.x * rect.size.y:
 		return false

@@ -488,7 +488,7 @@ public:
 	Color get_pixel(int p_x, int p_y) const;
 	void set_pixelv(const Point2i &p_point, const Color &p_color);
 	void set_pixel(int p_x, int p_y, const Color &p_color);
-	// Row-major bulk update of a clipped, fully contained image rectangle.
+	// Row-major bulk update of a fully contained image rectangle.
 	void set_pixels_rect(const Rect2i &p_rect, const Vector<Color> &p_colors);
 
 	const uint8_t *ptr() const;
