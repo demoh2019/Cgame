@@ -4,6 +4,8 @@ extends RefCounted
 ## unnecessarily draw all flowers when just one corner enters the view.
 ## Subdivide only busy meshes into 32 m tiles to keep draw-call costs bounded.
 
+const SceneryDensityLod = preload("res://scripts/client/scenery_density_lod.gd")
+
 const TILE_SIZE := 32.0
 const SPLIT_MIN_INSTANCES := 48
 const MAX_SCENERY_INSTANCES := 65536
@@ -871,20 +873,29 @@ static func colorful_plant(name: String) -> bool:
 
 ## Visual-only props: instancing stays on the GPU and no physics/server nodes are made.
 static func add(parent: Node3D, mesh: Mesh, transforms: Array[Transform3D], draw_distance: float, cast_shadows: bool = false, fade_margin: float = 8.0,
-		tint_variation: bool = false, world_origin: Vector2 = Vector2.ZERO) -> Array[MultiMeshInstance3D]:
+		tint_variation: bool = false, world_origin: Vector2 = Vector2.ZERO,
+		density_scalable: bool = false) -> Array[MultiMeshInstance3D]:
 	var result: Array[MultiMeshInstance3D] = []
 	if mesh == null or transforms.is_empty():
 		return result
 	for group in partition(transforms):
+		# Bit-reversed deterministic instance order distributes a visible prefix
+		# across the full original placement sequence. Never touch RNG.
+		# Opt-in only: decorative plants, not loot, rocks or interactive nodes.
+		var ordered: Array[Transform3D] = group
+		if density_scalable:
+			ordered = SceneryDensityLod.distribute_transforms(group)
 		var multimesh := MultiMesh.new()
 		multimesh.transform_format = MultiMesh.TRANSFORM_3D
 		multimesh.use_colors = tint_variation
 		multimesh.mesh = mesh
-		multimesh.instance_count = group.size()
-		multimesh.buffer = packed_group_for(multimesh, group, tint_variation, world_origin)
+		multimesh.instance_count = ordered.size()
+		multimesh.buffer = packed_group_for(multimesh, ordered, tint_variation, world_origin)
 		var instance := MultiMeshInstance3D.new()
 		instance.multimesh = multimesh
-		instance.custom_aabb = bounds_for_instance(multimesh, mesh, group)
+		instance.custom_aabb = bounds_for_instance(multimesh, mesh, ordered)
+		if density_scalable:
+			instance.set_meta("aa_density_scalable", true)
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast_shadows else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		instance.visibility_range_end = draw_distance
 		instance.visibility_range_end_margin = fade_margin
