@@ -677,3 +677,49 @@ and 16K source caps. **No frame-time improvement is claimed without
 running the native build and profiling actual hardware.**
 
 Reference: [Unreal Instanced Static Mesh Component](https://dev.epicgames.com/documentation/en-us/unreal-engine/instanced-static-mesh-component-in-unreal-engine).
+
+## Artist-authored polygon biome masks (native CPU)
+
+`PCGPolygonMask3D.sample_factors(positions, polygon,
+feather_distance=0.0, invert=false)` adds a **closed arbitrary XZ
+polygon** density mask, inspired by Unreal PCG's polygon/spline
+surface and density-layer workflows.
+
+```gdscript
+var mask := PCGPolygonMask3D.new()
+var factors := mask.sample_factors(candidates, clearing_vertices, 3.5)
+for i in factors.size():
+    existing_densities[i] *= factors[i]
+# Use the existing stable-ID density sampler on the combined values.
+```
+
+- The authored polygon is **implicitly closed** (last vertex connects
+  to first), supports clockwise or counterclockwise winding and
+  concave outlines, and evaluates points independently in the XZ
+  ground plane, ignoring height after finite-input validation.
+- Factor 0 inside or on the contour. Beyond the contour it increases
+  with a smoothstep and reaches 1 by `feather_distance` metres.
+  Zero feather is a hard mask. `invert=true` preserves density
+  inside and smoothly removes it outside the authored region.
+- Only simple polygons are supported: no crossing, self-touching,
+  duplicate start/end or zero-area/zero-length contours. All input is
+  checked before any output is returned. Hard caps: 16,384 candidate
+  positions, 3–256 polygon points, finite coordinates within ±10
+  million, feather 0–10,000 m. Invalid batches fail atomically.
+- One bounded O(vertices²) polygon validity pass and a fast expanded
+  bounds test before per-point edge distance checks; worst-case
+  O(candidates × vertices), no scene traversal, physics or RNG.
+- Designed for **combining** with established native trail masks,
+  biome densities and stable-ID seeded sampling rather than
+  replacing those stages. The native API is stateless and independent
+  of rendering or world chunk lifetime.
+
+In the playable Days After prototype, an irregular western ruin-yard
+outline now reduces vegetation to zero within the plot and gradually
+returns the existing biome density over 3.5 metres outside it.
+A matching GDScript fallback keeps stock Godot working. Native unit
+tests and game smoke verify concave boundaries, inversion, atomic
+validation, mask parity and that the playable clearing stays empty.
+
+Reference: [Unreal Engine PCG node reference, Polygon 2D and spline
+sampling](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).

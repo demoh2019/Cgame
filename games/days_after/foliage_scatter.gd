@@ -36,6 +36,18 @@ const TRAIL_POINTS = [
     Vector3(-2.0, 0.0, -12.0),
     Vector3(-7.0, 0.0, -26.0),
 ]
+# Hand-authored concave clearing around the old western ruin approach.
+# Unlike a rectangular/spherical exclusion, vegetation tapers gradually at
+# its irregular edge; the native mask is evaluated only on regeneration.
+const RUIN_CLEARING_FEATHER: float = 3.5
+const RUIN_CLEARING_POLYGON = [
+    Vector3(-21.0, 0.0, -17.0),
+    Vector3(-15.0, 0.0, -20.0),
+    Vector3(-11.0, 0.0, -16.0),
+    Vector3(-10.0, 0.0, -11.0),
+    Vector3(-15.0, 0.0, -8.0),
+    Vector3(-20.0, 0.0, -11.0),
+]
 const ZONE_CENTERS = [
     Vector3(0.0, 0.0, 3.0),    # Player spawn
     Vector3(-2.0, 0.0, -3.0),  # Water scavenging cluster
@@ -378,6 +390,81 @@ func verify_trail_native_fallback_parity() -> bool:
     return true
 
 
+func get_ruin_clearing_polygon() -> PackedVector3Array:
+    return PackedVector3Array(RUIN_CLEARING_POLYGON)
+
+
+func get_ruin_clearing_feather() -> float:
+    return RUIN_CLEARING_FEATHER
+
+
+func _sample_polygon_fallback(positions: PackedVector3Array,
+        invert: bool = false) -> PackedFloat32Array:
+    var polygon := get_ruin_clearing_polygon()
+    var factors := PackedFloat32Array()
+    var feather_squared: float = RUIN_CLEARING_FEATHER * RUIN_CLEARING_FEATHER
+    for point in positions:
+        var inside: bool = false
+        var nearest_squared: float = INF
+        for edge in range(polygon.size()):
+            var a: Vector3 = polygon[edge]
+            var b: Vector3 = polygon[(edge + 1) % polygon.size()]
+            var dx: float = b.x - a.x
+            var dz: float = b.z - a.z
+            var distance_squared: float = dx * dx + dz * dz
+            var along: float = clampf(
+                ((point.x - a.x) * dx + (point.z - a.z) * dz) /
+                distance_squared, 0.0, 1.0)
+            var offset_x: float = point.x - (a.x + along * dx)
+            var offset_z: float = point.z - (a.z + along * dz)
+            nearest_squared = minf(nearest_squared,
+                offset_x * offset_x + offset_z * offset_z)
+            if ((a.z > point.z) != (b.z > point.z)) and (
+                    point.x < a.x + (point.z - a.z) * dx / dz):
+                inside = not inside
+        var factor: float = 0.0
+        if not inside and nearest_squared > 1.0e-12:
+            if nearest_squared >= feather_squared:
+                factor = 1.0
+            else:
+                var t: float = sqrt(nearest_squared) / RUIN_CLEARING_FEATHER
+                factor = t * t * (3.0 - 2.0 * t)
+        factors.push_back(1.0 - factor if invert else factor)
+    return factors
+
+
+func get_polygon_factors(prefer_native: bool = true,
+        invert: bool = false) -> PackedFloat32Array:
+    var positions := _make_candidates()
+    if prefer_native and ClassDB.class_exists("PCGPolygonMask3D"):
+        var mask: Object = ClassDB.instantiate("PCGPolygonMask3D")
+        if mask != null and mask.has_method("sample_factors"):
+            var native: PackedFloat32Array = mask.call("sample_factors",
+                positions, get_ruin_clearing_polygon(),
+                RUIN_CLEARING_FEATHER, invert)
+            if native.size() == positions.size():
+                return native
+    return _sample_polygon_fallback(positions, invert)
+
+
+func verify_polygon_native_fallback_parity() -> bool:
+    var outside_native: PackedFloat32Array = get_polygon_factors()
+    var outside_script: PackedFloat32Array = get_polygon_factors(false)
+    var inside_native: PackedFloat32Array = get_polygon_factors(true, true)
+    var inside_script: PackedFloat32Array = get_polygon_factors(false, true)
+    if (outside_native.size() != GRID_SIZE * GRID_SIZE
+            or outside_native.size() != outside_script.size()
+            or inside_native.size() != outside_native.size()
+            or inside_script.size() != outside_native.size()):
+        return false
+    for i in outside_native.size():
+        if (absf(outside_native[i] - outside_script[i]) > 0.00002
+                or absf(inside_native[i] - inside_script[i]) > 0.00002
+                or absf(outside_native[i] + inside_native[i] - 1.0) > 0.00002):
+            return false
+    return true
+
+
 func _make_densities(prefer_native: bool = true) -> PackedFloat32Array:
     var densities := PackedFloat32Array()
     for index in range(GRID_SIZE * GRID_SIZE):
@@ -397,8 +484,11 @@ func _make_densities(prefer_native: bool = true) -> PackedFloat32Array:
     # Feed this smooth trail-distance mask into the seeded native density
     # sampler; no per-instance physics or extra renderer draw calls.
     var trail_factors: PackedFloat32Array = get_trail_factors(prefer_native)
+    var clearing_factors: PackedFloat32Array = get_polygon_factors(prefer_native)
+    # Combine orthogonal PCG masks multiplicatively. Stable cell IDs,
+    # seeded variants and LOD behavior remain unchanged.
     for i in range(densities.size()):
-        densities.set(i, densities[i] * trail_factors[i])
+        densities.set(i, densities[i] * trail_factors[i] * clearing_factors[i])
     return densities
 
 
