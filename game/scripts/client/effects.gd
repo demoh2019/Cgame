@@ -2,6 +2,8 @@ extends Node3D
 const RainVfx = preload("res://scripts/client/rain_vfx.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const SnowVfx = preload("res://scripts/client/snow_vfx.gd")
+const PoolScript = preload("res://addons/runtime_pool/node_pool.gd")
+const BurstScene = preload("res://scripts/client/pooled_burst.tscn")
 
 ## Short-lived particle effects (hits, deaths, pickups, level ups, dust), the rain that follows the camera, and the life
 ## of the wilds around the player: pollen drifting in the sun, butterflies, leaves falling in the forest, fireflies at night.
@@ -14,6 +16,7 @@ var _pollen: CPUParticles3D
 var _butterflies: CPUParticles3D
 var _leaves: CPUParticles3D
 var _fireflies: CPUParticles3D
+var _burst_pool # Cgame RuntimeNodePool instance
 
 const BUTTERFLY_SHADER := """
 shader_type spatial;
@@ -41,6 +44,13 @@ func _ready() -> void:
 	add_child(_rain)
 	_snow = SnowVfx.new()
 	add_child(_snow)
+	_burst_pool = PoolScript.new()
+	_burst_pool.name = "BurstPool"
+	_burst_pool.template = BurstScene
+	_burst_pool.prewarm_count = 12
+	_burst_pool.max_idle = 24
+	_burst_pool.max_active = 48
+	add_child(_burst_pool)
 	_build_ambience()
 
 ## A soft round dot, white with an alpha falloff, for pollen and fireflies.
@@ -240,39 +250,14 @@ func ring(position: Vector3, color: Color, radius: float = 4.0, seconds: float =
 
 ## A puff of particles: `color` fades out, `speed` is the initial speed, `size` the particle size in meters.
 func burst(position: Vector3, color: Color, count: int = 14, speed: float = 3.0, lifetime: float = 0.6, size: float = 0.14, gravity: float = 7.0, up: float = 0.6) -> void:
-	var particles := CPUParticles3D.new()
-	particles.one_shot = true
-	particles.emitting = false
-	particles.amount = count
-	particles.lifetime = lifetime
-	particles.explosiveness = 0.95
-	particles.direction = Vector3(0, up, 0)
-	particles.spread = 80.0
-	particles.initial_velocity_min = speed * 0.5
-	particles.initial_velocity_max = speed
-	particles.gravity = Vector3(0, -gravity, 0)
-	particles.scale_amount_min = 0.7
-	particles.scale_amount_max = 1.3
-	var mesh := SphereMesh.new()
-	mesh.radius = size
-	mesh.height = size * 2.0
-	mesh.radial_segments = 6
-	mesh.rings = 3
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.emission_enabled = color.get_luminance() > 0.7
-	material.emission = color
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED if color.get_luminance() > 0.7 else BaseMaterial3D.SHADING_MODE_PER_PIXEL
-	mesh.material = material
-	particles.mesh = mesh
-	var fade := Gradient.new()
-	fade.set_color(0, Color.WHITE)
-	fade.set_color(1, Color(1, 1, 1, 0))
-	particles.color_ramp = fade
-	add_child(particles)
+	if _burst_pool == null:
+		return
+	var particles: CPUParticles3D = _burst_pool.acquire(self) as CPUParticles3D
+	if particles == null:
+		return
 	particles.global_position = position
-	particles.emitting = true
-	get_tree().create_timer(lifetime + 0.5).timeout.connect(particles.queue_free)
+	particles.call("configure_burst", color, count, speed, lifetime, size, gravity, up)
+
 
 
 func hit_zombie(position: Vector3) -> void:
