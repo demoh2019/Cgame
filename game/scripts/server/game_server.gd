@@ -91,6 +91,7 @@ const BikeGrip = preload("res://scripts/shared/bike_grip.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const TreeAmbush = preload("res://scripts/shared/tree_ambush.gd")
 const InfectedPounce = preload("res://scripts/shared/infected_pounce.gd")
+const DataLayers = preload("res://scripts/shared/data_layers.gd")
 const Brawl = preload("res://scripts/shared/brawl.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
 const ParryRiposte = preload("res://scripts/shared/parry_riposte.gd")
@@ -468,6 +469,9 @@ var _acid_last_hit: Dictionary = {} # Peer -> last pooled acid hit time; no stac
 var _acid_wall_last_hit: Dictionary = {} # Wall id -> last corrosion time; no overlap stacking.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
 var market_orders: Dictionary = {} # id -> escrowed listing (goods held by the market).
+var data_layers: Array = [] # Active Data Layers (data_layers.gd), sent to every client.
+var data_layers_override = null # Array from --layers, or null to follow the calendar.
+var _layers_checked_at := -INF
 var pounces: Dictionary = {} # zombie id -> {kind, phase, t, target, from, to}
 var pounce_ready_at: Dictionary = {} # zombie id -> server time its next leap/charge is allowed
 var downed_until: Dictionary = {} # zombie id -> server time it gets back up (knocked down).
@@ -7075,12 +7079,23 @@ func _on_player_death(victim: Player, killer: int) -> void:
 
 # --- The simulation tick -------------------------------------------------------------------------------
 
+func _tick_data_layers() -> void:
+	if time - _layers_checked_at < 60.0:
+		return
+	_layers_checked_at = time
+	var wanted: Array = data_layers_override if data_layers_override is Array else DataLayers.scheduled(Time.get_unix_time_from_system())
+	if wanted != data_layers:
+		data_layers = wanted.duplicate()
+		events.append({"type": "data_layers", "layers": data_layers})
+
+
 func tick(delta: float) -> void:
 	# Events from commands that arrived since the last tick are kept: the network layer drains them.
 	if events.size() > 2000:
 		events = events.slice(events.size() - 1000)
 	time += delta
 	tick_count += 1
+	_tick_data_layers()
 	_tick_market()
 	_tick_trades()
 	parties.expire(time)
@@ -9740,6 +9755,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"tent_camouflaged": PortableShelter.camouflaged(shelters, player.position,
 				time, player.crouching, player.noise_timer, _alive(player)),
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
+			"data_layers": data_layers,
 			"wind_chill": WindChill.visible(world, player.position, time,
 				player.survival.wetness,
 				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else "",

@@ -748,6 +748,8 @@ func build(p_world, p_cell: Vector2i) -> void:
 	var data: Dictionary = _world.chunk(cell)
 	_build_objects(data)
 	_add_outdoor_reflection_anchors(origin, data)
+	_layer_sites = data.get("pois", [])
+	set_data_layers(active_layers)
 
 
 ## Only the containing chunk creates a cheap site marker, never a GPU probe.
@@ -2314,3 +2316,95 @@ func _animate_vegetation(delta: float) -> void:
 		if sink >= 1.0:
 			node.queue_free()
 			_falling.remove_at(i)
+
+
+# --- Data Layers (data_layers.gd): content switched on and off for the whole server ---------------------
+
+static var active_layers: Array = [] # Set by the client from the server's list; new chunks read it.
+var _layer_sites: Array = []
+var _layer_nodes: Dictionary = {} # layer -> Node3D
+
+
+func set_data_layers(layers: Array) -> void:
+	for layer in _layer_nodes.keys():
+		if not layers.has(layer):
+			_layer_nodes[layer].queue_free()
+			_layer_nodes.erase(layer)
+	if layers.has("festival") and not _layer_nodes.has("festival"):
+		var node := _build_festival()
+		if node != null:
+			_layer_nodes["festival"] = node
+
+
+## Harvest festival: strings of lanterns on posts around each settlement or camp centre in this
+## chunk, and piles of pumpkins. A couple of real lights per site, the rest glow by emission.
+func _build_festival() -> Node3D:
+	var origin := WorldGen.cell_origin(cell)
+	var root := Node3D.new()
+	root.name = "LayerFestival"
+	var glow := StandardMaterial3D.new()
+	glow.albedo_color = Color(1.0, 0.62, 0.22)
+	glow.emission_enabled = true
+	glow.emission = Color(1.0, 0.55, 0.18)
+	glow.emission_energy_multiplier = 2.2
+	var wood := StandardMaterial3D.new()
+	wood.albedo_color = Color(0.32, 0.22, 0.14)
+	var pumpkin_mat := StandardMaterial3D.new()
+	pumpkin_mat.albedo_color = Color(0.92, 0.45, 0.08)
+	pumpkin_mat.roughness = 0.6
+	var placed := 0
+	for site in _layer_sites:
+		if not ["village", "camp", "farm", "city", "outpost", "dock"].has(str(site.get("kind", ""))):
+			continue
+		var centre := Vector2(float(site["x"]), float(site["z"]))
+		if WorldGen.cell_of(centre.x, centre.y) != cell:
+			continue # Each site is decorated once, by the chunk holding its centre.
+		var radius: float = clampf(float(site.get("radius", 20.0)) * 0.45, 7.0, 18.0)
+		var posts := 8
+		for k in posts:
+			var angle: float = TAU * float(k) / float(posts)
+			var at: Vector2 = centre + Vector2.from_angle(angle) * radius
+			var ground: float = _world.height_at(at.x, at.y)
+			var post := MeshInstance3D.new()
+			var pole := CylinderMesh.new()
+			pole.top_radius = 0.05
+			pole.bottom_radius = 0.06
+			pole.height = 2.4
+			post.mesh = pole
+			post.material_override = wood
+			post.position = Vector3(at.x - origin.x, ground + 1.2, at.y - origin.y)
+			root.add_child(post)
+			var lantern := MeshInstance3D.new()
+			var box := BoxMesh.new()
+			box.size = Vector3(0.22, 0.3, 0.22)
+			lantern.mesh = box
+			lantern.material_override = glow
+			lantern.position = post.position + Vector3(0, 1.3, 0)
+			root.add_child(lantern)
+			if k % 4 == 0:
+				var light := OmniLight3D.new()
+				light.light_color = Color(1.0, 0.6, 0.25)
+				light.light_energy = 1.4
+				light.omni_range = 9.0
+				light.shadow_enabled = false
+				light.position = lantern.position
+				root.add_child(light)
+			# Pumpkins at the foot of every other post.
+			if k % 2 == 1:
+				for p in 3:
+					var pumpkin := MeshInstance3D.new()
+					var sphere := SphereMesh.new()
+					var size: float = 0.22 + 0.08 * float(p)
+					sphere.radius = size
+					sphere.height = size * 1.4
+					pumpkin.mesh = sphere
+					pumpkin.material_override = pumpkin_mat
+					var offset := Vector2.from_angle(angle + 0.6 * float(p)) * 0.55
+					pumpkin.position = Vector3(at.x + offset.x - origin.x, _world.height_at(at.x + offset.x, at.y + offset.y) + size * 0.55, at.y + offset.y - origin.y)
+					root.add_child(pumpkin)
+		placed += 1
+	if placed == 0:
+		root.free()
+		return null
+	add_child(root)
+	return root

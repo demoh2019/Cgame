@@ -11,7 +11,7 @@ How the game world is built: `WorldGen.height_at` (shared, deterministic, server
 | World Partition | PARTIAL | `modules/world_partition` (`WorldPartition3D`) — engine-side, the game streams with `WorldStreamer` |
 | Automatic cell splitting | MISSING | — |
 | World Partition Editor | MISSING | — |
-| Data Layers | MISSING | — |
+| Data Layers | **PRESENT (batch 5)** | `data_layers.gd`: server-wide runtime layers chosen by the calendar or forced with `--layers winter,festival` / `--layers none`; sent to clients, applied live. `winter` settles snow on all low ground (`aa_snow_cover` in `ground.gdshader`, eased over 20 s); `festival` puts lantern posts, lights and pumpkins around settlements and camps (`ChunkView.set_data_layers`) |
 | One File Per Actor | MISSING | — |
 | Automatic HLOD build | MISSING | — |
 | Hierarchical World Streaming | PARTIAL | `WorldPartition3D` tiers; game: one ring + staged scenery (`decor_streaming_policy.gd`) |
@@ -27,7 +27,7 @@ How the game world is built: `WorldGen.height_at` (shared, deterministic, server
 | Infinite World Streaming | PARTIAL | unbounded cells; the game world is a finite island |
 | Seamless World Transitions | PARTIAL | hub ↔ wilderness without loading; dungeons are a far coordinate region |
 | Streaming Dependencies | PARTIAL | two-phase residency (`chunk_visual_details_ready`) |
-| World Streaming Profiler | PARTIAL | counters + `Performance` custom monitors |
+| World Streaming Profiler | **PRESENT (batch 5)** | Ctrl+F3 overlay (`streaming_profiler.gd`): frame-time graph, FPS/draw calls, loaded/pending/queued cells, visual details pending, far-field and sea-map progress, active data layers, and a mini-map of loaded cells around you |
 
 ## Terrain
 
@@ -89,6 +89,6 @@ How the game world is built: `WorldGen.height_at` (shared, deterministic, server
 | Foliage HLOD | **PRESENT (batch 2)** | distant woods as one MultiMesh of impostors beyond the real-tree radius (150 m). Density and species follow the biome; positions are a seeded scatter, not the exact far trees |
 | Foliage Collision Streaming | MISSING | server-side collision circles only |
 
-## Next batches (by player-visible value)
+## Not done (from the original list)
 
-1. Data Layers (seasonal/event content toggles) and a streaming profiler panel.
+Editor-side tools and offline pipelines that do not fit a procedurally generated, server-authoritative world: World Partition Editor, automatic cell splitting, One File Per Actor, automatic HLOD build for hand-placed levels, Landscape Edit Layers, Vegetation Painting, Virtual Heightfields, hardware Terrain Tessellation, async terrain collision. Their engine-side building blocks are listed above where they exist.

@@ -9,6 +9,7 @@ const FarField = preload("res://scripts/client/far_field.gd")
 const SeaSurface = preload("res://scripts/client/sea_surface.gd")
 const Buoyancy = preload("res://scripts/client/buoyancy.gd")
 const RaftVisual = preload("res://scripts/client/raft_visual.gd")
+const StreamingProfiler = preload("res://scripts/client/streaming_profiler.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
@@ -222,6 +223,7 @@ var _fp_body_refresh := 0.0
 var _brawl_meter: Control
 var _far_field: Node3D
 var _raft_visual: Node3D
+var _profiler: Control # World streaming profiler (Ctrl+F3).
 var _sea # SeaSurface: depth map for shore-aware swell.
 var _last_charge: Dictionary = {} # peer -> charge of their latest swing (for power-hit gore).
 var _underwater_tint: ColorRect # Blue murk while the camera is below the surface.
@@ -1830,6 +1832,7 @@ func _process(delta: float) -> void:
 		streamer.focus_position = position
 		if _far_field != null:
 			_far_field.update(position)
+		_apply_data_layers(delta)
 		# Cheap, local movement hint for native chunk queue ordering. Server
 		# correction and teleports never prefetch in an unrelated direction.
 		var moved: Vector3 = position - _stream_previous_position
@@ -2491,6 +2494,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	# Ctrl+F11 cycles graphics quality without consuming the existing F11 medicine shortcut.
+	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_F3:
+		if _profiler == null:
+			_profiler = StreamingProfiler.new()
+			_profiler.streamer = streamer
+			_profiler.client = client
+			_profiler.far_field = _far_field
+			_profiler.sea = _sea
+			hud.add_child(_profiler)
+		_profiler.visible = not _profiler.visible
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_F11:
 		_set_auto_graphics(false)
 		GraphicsQuality.cycle()
@@ -3333,3 +3347,25 @@ func _apply_underwater_fog(under: bool, depth: float) -> void:
 		env.fog_sky_affect = _dry_fog["sky"]
 		env.fog_light_energy = _dry_fog["energy"]
 		_dry_fog = {}
+
+
+# --- Data Layers: follow the server's list (winter snow, festival decor) -------------------------------
+
+var _layers_applied: Array = []
+var _snow_cover := 0.0
+
+
+func _apply_data_layers(delta: float) -> void:
+	var layers: Array = client.you.get("data_layers", [])
+	if layers != _layers_applied:
+		_layers_applied = layers.duplicate()
+		ChunkView.active_layers = _layers_applied
+		for cell in streamer.get_loaded_cells():
+			var chunk = streamer.get_chunk(cell)
+			if chunk != null and chunk.has_method("set_data_layers"):
+				chunk.set_data_layers(_layers_applied)
+	# Snow settles and melts over ~20 s rather than popping.
+	var target: float = 1.0 if _layers_applied.has("winter") else 0.0
+	if not is_equal_approx(_snow_cover, target):
+		_snow_cover = move_toward(_snow_cover, target, delta / 20.0)
+		RenderingServer.global_shader_parameter_set("aa_snow_cover", _snow_cover)
