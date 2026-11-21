@@ -126,6 +126,23 @@ class WorldPartition3D : public Node3D {
 	HashMap<String, NavigationAgentEntry> navigation_agents;
 	static constexpr int MAX_NAVIGATION_AGENTS = 128;
 	static constexpr int MAX_PATH_SEARCH_CELLS = 512; // Bound synchronous grid route queries.
+	static constexpr int MAX_CELL_PATH_CACHE_ENTRIES = 128;
+	int max_cell_path_cache_entries = 64; // Zero disables route caching.
+	struct CellPathCacheEntry {
+		Array route; // Includes empty results, which are cached too.
+		uint64_t registration_revision = 0;
+		uint64_t loaded_revision = 0;
+		uint64_t last_access = 0;
+		bool loaded_only = false;
+	};
+	mutable HashMap<String, CellPathCacheEntry> cell_path_cache;
+	mutable uint64_t cell_path_cache_serial = 0;
+	mutable int cell_path_cache_hits = 0;
+	mutable int cell_path_cache_misses = 0;
+	uint64_t cell_registration_revision = 0;
+	uint64_t cell_loading_revision = 0;
+	void _invalidate_cell_path_cache(bool p_registered_topology);
+	Array _find_cell_path_uncached(const Vector2i &p_from, const Vector2i &p_to, bool p_loaded_only) const;
 	static constexpr int MAX_NAVMESH_TILE_RESOLUTION = 32;
 	static constexpr int MAX_NAVMESH_TILE_BLOCKERS = 256;
 	mutable int last_navigation_tile_retested_triangles = 0; // Diagnostic only; main-thread builders.
@@ -265,6 +282,12 @@ public:
 	// Deterministic shortest cardinal route through registered cell scenes.
 	// When p_loaded_only is true, every path cell must be instantiated.
 	Array find_cell_path(const Vector2i &p_from, const Vector2i &p_to, bool p_loaded_only = false) const;
+	void set_max_cell_path_cache_entries(int p_count);
+	int get_max_cell_path_cache_entries() const;
+	int get_cell_path_cache_entry_count() const;
+	int get_cell_path_cache_hit_count() const;
+	int get_cell_path_cache_miss_count() const;
+	void clear_cell_path_cache();
 	// Build a bounded terrain NavMesh tile from row-major sampled local vertices.
 	// Each blocker stores local (X, Z, radius) in Vector3(x, y, z).
 	Ref<NavigationMesh> build_navigation_tile(const PackedVector3Array &p_vertices, int p_resolution, const PackedVector3Array &p_blockers, real_t p_agent_radius = 0.45, real_t p_max_slope_degrees = 45.0) const;
