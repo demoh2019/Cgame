@@ -61,6 +61,8 @@ public:
 
 	// Atomic full-snapshot replacement: an invalid entry leaves the old state intact.
 	bool replace_stacks(const Dictionary &p_stacks);
+	// Atomic scoped snapshot. Preserve stacks outside the requested hierarchy.
+	bool replace_stack_branch(const StringName &p_query, const Dictionary &p_replacements);
 	void set_stacks(const Dictionary &p_stacks) { replace_stacks(p_stacks); }
 	Dictionary get_stacks() const { return stacks.duplicate(); }
 };

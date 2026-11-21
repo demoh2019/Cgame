@@ -186,6 +186,54 @@ TEST_CASE("[GameplayTags] atomic snapshots reject corruption and isolate diction
 	CHECK(c->is_empty());
 }
 
+TEST_CASE("[GameplayTags] atomic scoped stack replacement preserves independent effects") {
+	Ref<GameplayTagStackContainer> c;
+	c.instantiate();
+	CHECK(c->add_stacks("Runtime.Status.Resolve", 3));
+	CHECK(c->add_stacks("Runtime.Status.Staggered", 1));
+	CHECK(c->add_stacks("Local.Preview.Bleeding", 2));
+	CHECK(c->add_stacks("RuntimeExtra.Keep", 1));
+
+	Dictionary next;
+	next[StringName("Runtime.Status.Resolve")] = 4;
+	next[StringName("Runtime.State.Alive")] = 1;
+	CHECK(c->replace_stack_branch("Runtime", next));
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 4);
+	CHECK(c->get_stack_count("Runtime.Status.Staggered", true) == 0);
+	CHECK(c->get_stack_count("Runtime.State.Alive", true) == 1);
+	CHECK(c->get_stack_count("Local.Preview.Bleeding", true) == 2);
+	CHECK(c->get_stack_count("RuntimeExtra.Keep", true) == 1);
+	// Repeating the authoritative snapshot does not change anything.
+	CHECK(c->replace_stack_branch("Runtime", next));
+	CHECK(c->get_tag_count() == 4);
+
+	Dictionary invalid = next.duplicate();
+	invalid[StringName("Outside.Escaped")] = 1;
+	CHECK_FALSE(c->replace_stack_branch("Runtime", invalid));
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 4);
+	invalid.erase(StringName("Outside.Escaped"));
+	invalid[StringName("Runtime.Status.Resolve")] = 65536;
+	CHECK_FALSE(c->replace_stack_branch("Runtime", invalid));
+	invalid[StringName("Runtime.Status.Resolve")] = 0;
+	CHECK_FALSE(c->replace_stack_branch("Runtime", invalid));
+	invalid[StringName("Runtime.Status.Resolve")] = 2.5;
+	CHECK_FALSE(c->replace_stack_branch("Runtime", invalid));
+	CHECK_FALSE(c->replace_stack_branch("Runtime..Invalid", next));
+	CHECK_FALSE(c->replace_stack_branch("", next));
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 4);
+
+	Dictionary ambiguous;
+	ambiguous[String("Runtime.Status.Resolve")] = 1;
+	ambiguous[StringName("Runtime.Status.Resolve")] = 2;
+	CHECK_FALSE(c->replace_stack_branch("Runtime", ambiguous));
+	CHECK(c->get_stack_count("Runtime.Status.Resolve", true) == 4);
+
+	CHECK(c->replace_stack_branch("Runtime", Dictionary()));
+	CHECK(c->get_stack_count("Runtime") == 0);
+	CHECK(c->get_stack_count("Local.Preview.Bleeding", true) == 2);
+	CHECK(c->get_stack_count("RuntimeExtra.Keep", true) == 1);
+}
+
 TEST_CASE("[GameplayTags] query all/any/none") {
 	Ref<GameplayTagContainer> c;
 	c.instantiate();

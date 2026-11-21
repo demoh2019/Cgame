@@ -71,6 +71,22 @@ func run(t) -> void:
 		EngineFeatures.sync_runtime_tags(actor, "zombie", infected)
 		t.eq(EngineFeatures.runtime_stack_count(actor, "Runtime.Status.Resolve"), 0,
 			"expired resolve stacks disappear on the following snapshot")
+		if native_stacks != null and native_stacks.has_method("replace_stack_branch"):
+			t.current = "independent client effects survive runtime snapshots"
+			t.check(bool(native_stacks.call("add_stacks", StringName("Local.Preview.Bleeding"), 2)),
+				"create independent local effect")
+			infected["resolve_seconds"] = 4.0
+			EngineFeatures.sync_runtime_tags(actor, "zombie", infected)
+			t.eq(EngineFeatures.runtime_stack_count(actor, "Runtime.Status.Resolve"), 3,
+				"runtime branch still refreshes")
+			t.eq(int(native_stacks.call("get_stack_count", StringName("Local.Preview.Bleeding"), true)), 2,
+				"local bleeding survives runtime refresh")
+			infected["resolve_seconds"] = 0.0
+			EngineFeatures.sync_runtime_tags(actor, "zombie", infected)
+			t.eq(EngineFeatures.runtime_stack_count(actor, "Runtime.Status.Resolve"), 0,
+				"expired runtime stack cleared")
+			t.eq(int(native_stacks.call("get_stack_count", StringName("Local.Preview.Bleeding"), true)), 2,
+				"local branch still intact after expiry")
 	else:
 		t.eq(EngineFeatures.runtime_stack_count(actor, "Runtime.Status.Resolve", 3), 3,
 			"stock Godot retains snapshot fallback for resolve presentation")
