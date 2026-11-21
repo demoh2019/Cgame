@@ -38,6 +38,35 @@
 #include "scene/3d/node_3d.h"
 #include "scene/resources/packed_scene.h"
 
+real_t WorldStreamer::_auxiliary_effective_radius() const {
+	// Limit the added residency to a tiny region (maximum two cell widths)
+	// no matter which game or editor script sets the auxiliary source.
+	return MIN(auxiliary_source_radius, cell_size * real_t(2.0));
+}
+
+bool WorldStreamer::_auxiliary_is_near_focus(const Vector3 &p_focus) const {
+	if (!auxiliary_source_active || !auxiliary_source_position.is_finite() || !p_focus.is_finite()) {
+		return false;
+	}
+	Vector3 offset = auxiliary_source_position - p_focus;
+	if (axes == AXES_XZ) {
+		offset.y = 0.0;
+	} else if (axes == AXES_XY) {
+		offset.z = 0.0;
+	}
+	// A quest marker on the far side of the map must never become a
+	// second independent island of fully instantiated world chunks.
+	return offset.length() <= load_radius + cell_size;
+}
+
+bool WorldStreamer::_cell_requested(const Vector3 &p_focus, const Vector3i &p_cell) const {
+	if (WorldStreamingGrid::distance_to_cell(p_focus, p_cell, cell_size, _grid_axes()) <= load_radius) {
+		return true;
+	}
+	return _auxiliary_is_near_focus(p_focus) &&
+			WorldStreamingGrid::distance_to_cell(auxiliary_source_position, p_cell, cell_size, _grid_axes()) <= _auxiliary_effective_radius();
+}
+
 bool WorldStreamer::_get_focus_position(Vector3 &r_position) const {
 	if (is_inside_tree() && !focus.is_empty()) {
 		Node *node = get_node_or_null(focus);
@@ -181,7 +210,6 @@ void WorldStreamer::_run_generator_queue(int &r_instantiation_budget, uint64_t p
 	const bool have_focus = _get_focus_position(position);
 	// Queued work must still be within the *load* radius. The larger unload
 	// radius is only for keeping existing cells alive after moving away.
-	const real_t request_radius = load_radius;
 	uint32_t consumed = 0;
 	while (consumed < generate_queue.size() && r_instantiation_budget > 0) {
 		// A single generator call cannot be interrupted. After at least one
@@ -195,7 +223,7 @@ void WorldStreamer::_run_generator_queue(int &r_instantiation_budget, uint64_t p
 			continue;
 		}
 		// The focus may have moved on while the cell waited in the queue.
-		if (!have_focus || WorldStreamingGrid::distance_to_cell(position, cell, cell_size, _grid_axes()) > request_radius) {
+		if (!have_focus || !_cell_requested(position, cell)) {
 			continue;
 		}
 		// Generator calls can be expensive even when a chunk is missing or fails.
@@ -236,7 +264,6 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 	}
 	Vector3 position;
 	const bool have_focus = _get_focus_position(position);
-	const real_t request_radius = load_radius;
 
 	struct Ready {
 		Vector3i cell;
@@ -285,9 +312,7 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 	}
 	for (const Vector3i &cell : ready_cells) {
 		const String path = loading[cell];
-		const real_t distance = have_focus ?
-				WorldStreamingGrid::distance_to_cell(position, cell, cell_size, _grid_axes()) : real_t(0.0);
-		const bool still_wanted = have_focus && distance <= request_radius && !loaded.has(cell);
+		const bool still_wanted = have_focus && _cell_requested(position, cell) && !loaded.has(cell);
 		if (!still_wanted) {
 			// The focus moved on while loading: release the result and drop it.
 			loading.erase(cell);
@@ -323,18 +348,63 @@ void WorldStreamer::_update_streaming() {
 	}
 	WorldStreamingGrid::cells_to_unload(position, keep_radius, cell_size, _grid_axes(), loaded_cells, to_unload);
 	for (const Vector3i &cell : to_unload) {
+		// Keep explicitly prefetched cells while their source stays nearby,
+		// even when they are just beyond the ordinary player unload radius.
+		if (_auxiliary_is_near_focus(position) &&
+				WorldStreamingGrid::distance_to_cell(auxiliary_source_position, cell, cell_size, _grid_axes()) <= _auxiliary_effective_radius()) {
+			continue;
+		}
 		_unload_cell(cell);
 	}
 
 	LocalVector<Vector3i> wanted;
 	bool truncated = false;
 	WorldStreamingGrid::cells_in_radius(position, load_radius, cell_size, _grid_axes(), wanted, WorldStreamingGrid::MAX_CELLS, &truncated);
-	// World Partition-style streaming source prediction: prioritize only
-	// cells that are already inside the real load radius. Never enlarge the
-	// resident set or unload cells based on estimated movement.
+	// Camera/motion hints reprioritize only the main focus cells; the
+	// optional explicit auxiliary source may add a separately bounded set.
+	// Predicted velocity never enlarges resident world memory.
+
 	WorldStreamingGrid::prioritize_cells_for_motion_and_view(wanted, position,
 			velocity_hint, lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
 			view_direction, view_priority, cell_size, _grid_axes());
+	// A nearby cinematic/waypoint target may contribute a handful of extra
+	// cells outside the player sphere. Never sacrifice the bounded player
+	// set; interleave at most one auxiliary cell per three primary cells,
+	// and always load the player's own cell first.
+	if (_auxiliary_is_near_focus(position) && wanted.size() < WorldStreamingGrid::MAX_CELLS) {
+		LocalVector<Vector3i> near_source;
+		WorldStreamingGrid::cells_in_radius(auxiliary_source_position, _auxiliary_effective_radius(),
+				cell_size, _grid_axes(), near_source, 64);
+		HashSet<Vector3i> seen;
+		for (const Vector3i &cell : wanted) {
+			seen.insert(cell);
+		}
+		LocalVector<Vector3i> extra;
+		for (const Vector3i &cell : near_source) {
+			if (!seen.has(cell) && wanted.size() + extra.size() < WorldStreamingGrid::MAX_CELLS) {
+				seen.insert(cell);
+				extra.push_back(cell);
+			}
+		}
+		if (!extra.is_empty()) {
+			LocalVector<Vector3i> interleaved;
+			interleaved.reserve(wanted.size() + extra.size());
+			uint32_t main_index = 0;
+			uint32_t extra_index = 0;
+			if (!wanted.is_empty()) {
+				interleaved.push_back(wanted[main_index++]);
+			}
+			while (main_index < wanted.size() || extra_index < extra.size()) {
+				for (int i = 0; i < 3 && main_index < wanted.size(); i++) {
+					interleaved.push_back(wanted[main_index++]);
+				}
+				if (extra_index < extra.size()) {
+					interleaved.push_back(extra[extra_index++]);
+				}
+			}
+			wanted = interleaved;
+		}
+	}
 	// Compare future camera turns against the last actually published queue,
 	// not the previous render frame. Ordinary motion still uses the old rate.
 	last_queued_view_direction = view_direction;
@@ -450,6 +520,30 @@ void WorldStreamer::_notification(int p_what) {
 			_run_generator_queue(frame_budget, frame_started_usec);
 		} break;
 	}
+}
+
+void WorldStreamer::set_auxiliary_source(const Vector3 &p_position, real_t p_radius) {
+	ERR_FAIL_COND_MSG(!p_position.is_finite() || !Math::is_finite(p_radius) || p_radius <= 0.0,
+			"WorldStreamer auxiliary source requires a finite position and positive finite radius.");
+	const real_t bounded_radius = MIN(p_radius, cell_size * real_t(2.0));
+	if (auxiliary_source_active && auxiliary_source_position == p_position && auxiliary_source_radius == bounded_radius) {
+		return;
+	}
+	auxiliary_source_position = p_position;
+	auxiliary_source_radius = bounded_radius;
+	auxiliary_source_active = true;
+	// Rescan the queue on the next internal frame; do not instantiate extra
+	// scene nodes inside the map's input callback.
+	time_since_update = MAX(time_since_update, update_interval);
+}
+
+void WorldStreamer::clear_auxiliary_source() {
+	if (!auxiliary_source_active) {
+		return;
+	}
+	auxiliary_source_active = false;
+	auxiliary_source_radius = 0.0;
+	time_since_update = MAX(time_since_update, update_interval);
 }
 
 void WorldStreamer::mark_visual_details_ready(const Vector3i &p_cell) {
@@ -651,6 +745,11 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_view_direction"), &WorldStreamer::get_view_direction);
 	ClassDB::bind_method(D_METHOD("set_view_priority", "weight"), &WorldStreamer::set_view_priority);
 	ClassDB::bind_method(D_METHOD("get_view_priority"), &WorldStreamer::get_view_priority);
+	ClassDB::bind_method(D_METHOD("set_auxiliary_source", "position", "radius"), &WorldStreamer::set_auxiliary_source);
+	ClassDB::bind_method(D_METHOD("clear_auxiliary_source"), &WorldStreamer::clear_auxiliary_source);
+	ClassDB::bind_method(D_METHOD("has_auxiliary_source"), &WorldStreamer::has_auxiliary_source);
+	ClassDB::bind_method(D_METHOD("get_auxiliary_source_position"), &WorldStreamer::get_auxiliary_source_position);
+	ClassDB::bind_method(D_METHOD("get_auxiliary_source_radius"), &WorldStreamer::get_auxiliary_source_radius);
 	ClassDB::bind_method(D_METHOD("set_fast_view_refresh_degrees", "degrees"), &WorldStreamer::set_fast_view_refresh_degrees);
 	ClassDB::bind_method(D_METHOD("get_fast_view_refresh_degrees"), &WorldStreamer::get_fast_view_refresh_degrees);
 	ClassDB::bind_method(D_METHOD("set_max_concurrent_loads", "count"), &WorldStreamer::set_max_concurrent_loads);

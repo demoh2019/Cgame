@@ -71,3 +71,41 @@ static func apply_view(streamer: WorldStreamer, camera: Camera3D,
 	var direction: Vector3 = ground_view(camera)
 	if not streamer.view_direction.is_equal_approx(direction):
 		streamer.view_direction = direction
+
+
+## Nearby personal map markers become a bounded second streaming source.
+## Distant quest/map markers remain purely UI: they cannot load a second island
+## or bypass the player's authoritative chunk residency and CPU budgets.
+static func waypoint_radius(cell_size: float, mounted: bool) -> float:
+	if not is_finite(cell_size) or cell_size <= 0.0:
+		return 0.0
+	return minf(cell_size * (2.0 if mounted else 1.5), 48.0)
+
+
+static func waypoint_is_near(point: Vector2, player: Vector3,
+		load_radius: float, cell_size: float) -> bool:
+	if not point.is_finite() or not player.is_finite() or \
+			not is_finite(load_radius) or not is_finite(cell_size) or \
+			load_radius <= 0.0 or cell_size <= 0.0:
+		return false
+	return point.distance_to(Vector2(player.x, player.z)) <= load_radius + cell_size
+
+
+## Called after focus_position updates, once per frame. Only the fork's
+## WorldStreamer implements this opt-in API; ordinary script code stays
+## compatible with projects that run on a binary without the extension.
+static func apply_waypoint(streamer: WorldStreamer, waypoint: Vector2,
+		player: Vector3, mounted: bool) -> void:
+	if streamer == null or not streamer.has_method("set_auxiliary_source"):
+		return
+	var is_active: bool = bool(streamer.call("has_auxiliary_source"))
+	if not waypoint_is_near(waypoint, player, streamer.load_radius, streamer.cell_size):
+		if is_active:
+			streamer.call("clear_auxiliary_source")
+		return
+	var radius: float = waypoint_radius(streamer.cell_size, mounted)
+	var destination := Vector3(waypoint.x, 0.0, waypoint.y)
+	if not is_active or \
+			not (streamer.call("get_auxiliary_source_position") as Vector3).is_equal_approx(destination) or \
+			not is_equal_approx(float(streamer.call("get_auxiliary_source_radius")), radius):
+		streamer.call("set_auxiliary_source", destination, radius)

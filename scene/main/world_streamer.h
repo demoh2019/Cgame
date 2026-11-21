@@ -65,6 +65,12 @@ private:
 	// These hints reorder eligible work, never grow the resident set.
 	Vector3 view_direction;
 	real_t view_priority = 0.0;
+	// Optional secondary streaming source for cinematic targets or nearby
+	// waypoints. Its radius and distance from focus are both bounded, so
+	// arbitrarily distant map pins cannot load remote chunks into memory.
+	bool auxiliary_source_active = false;
+	Vector3 auxiliary_source_position;
+	real_t auxiliary_source_radius = 0.0;
 	// 0 = legacy update cadence. A large camera turn may rebuild the
 	// scheduling queue sooner, subject to a 50 ms minimum CPU interval.
 	real_t fast_view_refresh_degrees = 0.0;
@@ -98,6 +104,9 @@ private:
 
 	WorldStreamingGrid::Axes _grid_axes() const { return WorldStreamingGrid::Axes(axes); }
 	bool _get_focus_position(Vector3 &r_position) const;
+	real_t _auxiliary_effective_radius() const;
+	bool _auxiliary_is_near_focus(const Vector3 &p_focus) const;
+	bool _cell_requested(const Vector3 &p_focus, const Vector3i &p_cell) const;
 	String _path_for_cell(const Vector3i &p_cell) const;
 	Node *_get_parent_for_chunks() const;
 	void _forget_dead_chunks();
@@ -136,6 +145,14 @@ public:
 	void set_fast_view_refresh_degrees(real_t p_degrees);
 	real_t get_fast_view_refresh_degrees() const { return fast_view_refresh_degrees; }
 	real_t get_view_priority() const { return view_priority; }
+	// One bounded extra streaming source, independent of the camera/motion
+	// priority hints. Setting a remote target stores it but does not load it
+	// until it approaches the main focus. Clear to restore legacy behavior.
+	void set_auxiliary_source(const Vector3 &p_position, real_t p_radius);
+	void clear_auxiliary_source();
+	bool has_auxiliary_source() const { return auxiliary_source_active; }
+	Vector3 get_auxiliary_source_position() const { return auxiliary_source_position; }
+	real_t get_auxiliary_source_radius() const { return auxiliary_source_active ? _auxiliary_effective_radius() : real_t(0.0); }
 	void set_max_concurrent_loads(int p_count);
 	int get_max_concurrent_loads() const { return max_concurrent_loads; }
 	void set_max_instantiations_per_frame(int p_count);
