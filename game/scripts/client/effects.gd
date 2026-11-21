@@ -295,7 +295,7 @@ func flush_bursts() -> void:
 		# No camera during headless tests means all candidates are equivalent
 		# on visibility. Do not cull a critical event merely for being behind us.
 		visible.append(1 if camera == null or camera.is_position_in_frustum(effect["position"]) else 0)
-	var chosen: PackedInt32Array = FxPolicy.select_visible_indices(
+	var chosen: PackedInt32Array = FxPolicy.select_visible_ranged_indices(
 		distances, priorities, categories, visible, GraphicsQuality.level(), _native_fx_budget)
 	var actual: int = 0
 	for index in chosen:
