@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameSpatialQuery" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		EQS-style spatial query graph: generators, tests (filters and scorers) and ranked items.
+	</brief_description>
+	<description>
+		Native port of the Cgame GDScript spatial query graph. The asset is a plain, serialisable [Dictionary]; [Callable]s are supplied through the context. Naming follows Unreal's Environment Query System and the engine's [code]EnvironmentQuery3D[/code]: result entries use the same [code]position[/code], [code]index[/code] and [code]score[/code] keys, ordering is descending score with the source index breaking ties, and [method get_candidates] exports the generated positions so an [code]EnvironmentQuery3D[/code] can score the same candidate set. Response curves come from [CgameUtilityAI].
+		[b]Asset:[/b] [code]{name, generators: [..], tests: [..], combine: "weighted" | "iaus", max_results, min_score}[/code]. Use [method new_asset], [method make_generator], [method make_test], [method add_generator] and [method add_test] to build one.
+		[b]Generators:[/b] [code]grid {half_extents, spacing}[/code], [code]ring {radius, count}[/code], [code]navmesh {radius, count}[/code] and [code]actors {actor_type, radius}[/code]. At most [constant MAX_ITEMS] items are generated.
+		[b]Tests:[/b] [code]{type: distance | dot | trace | path_length | custom, name, weight, min, max, invert, curve, slope, shift, score, filter_min, filter_max, to: querier | target, axis: facing | to_target, callable}[/code]. A test normalises its raw value from [code][min, max][/code] to [code][0, 1][/code], optionally inverts it and shapes it with a [enum CgameUtilityAI.Response] curve. Items whose raw value falls outside [code]filter_min[/code] / [code]filter_max[/code] are discarded; tests with [code]score: false[/code] only filter.
+		[b]Context:[/b] [code]{querier: Vector3, facing: Vector3, target: Vector3, navmesh_points: Callable(center, radius, count) -&gt; Array[Vector3], actors: [{position, type, id}], trace: Callable(from, to) -&gt; bool (true = clear), path_length: Callable(from, to) -&gt; float (negative = unreachable), custom: {name: Callable(position, context, item) -&gt; float}}[/code].
+		Queries can be time-sliced: call [method start], then [method step] once per frame until it returns [code]true[/code]; the result equals a full [method run].
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_generator" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="asset" type="Dictionary" />
+			<param index="1" name="generator" type="Dictionary" />
+			<description>
+				Appends [param generator] to [param asset] and returns its index.
+			</description>
+		</method>
+		<method name="add_test" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="asset" type="Dictionary" />
+			<param index="1" name="test" type="Dictionary" />
+			<description>
+				Appends [param test] to [param asset] and returns its index.
+			</description>
+		</method>
+		<method name="debug" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns debug information: [code]{name, generated, generators: [{type, count}], evaluated, passed, steps, filtered_by: {test: n}, tests: {name: {evaluated, filtered, min, max, mean}}}[/code]. [code]steps[/code] and [code]tests[/code] are filled once the query has finished. Empty before the first [method start].
+			</description>
+		</method>
+		<method name="get_candidates" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns the positions of all generated items in generation order (indexable with the [code]index[/code] of a result).
+			</description>
+		</method>
+		<method name="is_done" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when no query is in flight (or none was started).
+			</description>
+		</method>
+		<method name="make_generator" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="type" type="String" />
+			<param index="1" name="params" type="Dictionary" default="{}" />
+			<description>
+				Creates a generator [Dictionary] of [param type] ([code]grid[/code], [code]ring[/code], [code]navmesh[/code] or [code]actors[/code]) with default parameters, overridden by [param params].
+			</description>
+		</method>
+		<method name="make_test" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="type" type="String" />
+			<param index="1" name="params" type="Dictionary" default="{}" />
+			<description>
+				Creates a test [Dictionary] of [param type] ([code]distance[/code], [code]dot[/code], [code]trace[/code], [code]path_length[/code] or [code]custom[/code]) with default parameters, overridden by [param params]. Unnamed tests are named [code]"&lt;type&gt;_&lt;index&gt;"[/code] when the query starts.
+			</description>
+		</method>
+		<method name="new_asset" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="asset_name" type="String" default="&quot;query&quot;" />
+			<description>
+				Creates an empty query asset.
+			</description>
+		</method>
+		<method name="progress" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the fraction of generated items that have been evaluated, in [code][0, 1][/code].
+			</description>
+		</method>
+		<method name="results" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the ranked results of the last finished query: dictionaries with [code]position[/code], [code]index[/code], [code]score[/code], [code]passed[/code], [code]tests[/code] (per test [code]raw[/code] and [code]score[/code]) and, for actor items, [code]actor[/code].
+			</description>
+		</method>
+		<method name="run">
+			<return type="Array" />
+			<param index="0" name="asset" type="Dictionary" />
+			<param index="1" name="context" type="Dictionary" />
+			<description>
+				Runs the whole query synchronously and returns the ranked [method results].
+			</description>
+		</method>
+		<method name="start">
+			<return type="int" />
+			<param index="0" name="asset" type="Dictionary" />
+			<param index="1" name="context" type="Dictionary" />
+			<description>
+				Generates all items (cheap) and prepares the tests for time-sliced evaluation. Returns the number of generated items.
+			</description>
+		</method>
+		<method name="step">
+			<return type="bool" />
+			<param index="0" name="budget_items" type="int" />
+			<description>
+				Evaluates up to [param budget_items] items (at least one). Returns [code]true[/code] once the query has finished.
+			</description>
+		</method>
+		<method name="validate" qualifiers="static">
+			<return type="PackedStringArray" />
+			<param index="0" name="asset" type="Dictionary" />
+			<description>
+				Returns error strings for an asset without generators, unknown generator or test types, and scoring tests whose [code]max[/code] is not greater than [code]min[/code]. An empty array means the asset is valid.
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="MAX_ITEMS" value="65536">
+			Maximum number of generated items; further items are dropped.
+		</constant>
+	</constants>
+</class>

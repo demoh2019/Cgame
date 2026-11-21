@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameFormations" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Group formation slot layouts, optimal slot assignment and obstacle-aware slot shifting.
+	</brief_description>
+	<description>
+		Native port of the Cgame GDScript formation helpers. Slot layouts are expressed in leader space: [code]+X[/code] is the leader's forward direction and [code]+Y[/code] the leader's right (screen-space 2D, y down). Slot 0 of [code]"wedge"[/code] and [code]"column"[/code] sits on the leader. Supported kinds are [code]"line"[/code], [code]"wedge"[/code], [code]"circle"[/code] and [code]"column"[/code] (see [method get_kinds]); unknown kinds fall back to a column.
+		Members are matched to slots with the Hungarian (Kuhn-Munkres) algorithm, which minimises the total member to slot distance, for up to [constant HUNGARIAN_LIMIT] members and slots; larger groups use a greedy nearest-free-slot pass. All methods are static and deterministic.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="assign" qualifiers="static">
+			<return type="PackedInt32Array" />
+			<param index="0" name="slots_world" type="PackedVector2Array" />
+			<param index="1" name="members" type="PackedVector2Array" />
+			<description>
+				Returns an array where entry [code]i[/code] is the slot index assigned to member [code]i[/code], minimising the total member to slot distance. If there are more members than slots, the surplus members receive [code]-1[/code].
+			</description>
+		</method>
+		<method name="assignment_cost" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="slots_world" type="PackedVector2Array" />
+			<param index="1" name="members" type="PackedVector2Array" />
+			<param index="2" name="assignment" type="PackedInt32Array" />
+			<description>
+				Returns the total member to slot distance of [param assignment]. Entries of [code]-1[/code] are skipped.
+			</description>
+		</method>
+		<method name="blend" qualifiers="static">
+			<return type="PackedVector2Array" />
+			<param index="0" name="from_slots" type="PackedVector2Array" />
+			<param index="1" name="to_slots" type="PackedVector2Array" />
+			<param index="2" name="t" type="float" />
+			<description>
+				Linearly blends two layouts. The result has the size of [param to_slots]; slots without a counterpart in [param from_slots] start at their goal. [param t] is clamped to [code][0, 1][/code].
+			</description>
+		</method>
+		<method name="get_kinds" qualifiers="static">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the supported formation kinds: [code]line[/code], [code]wedge[/code], [code]circle[/code] and [code]column[/code].
+			</description>
+		</method>
+		<method name="shift_slots" qualifiers="static">
+			<return type="PackedVector2Array" />
+			<param index="0" name="slots_world" type="PackedVector2Array" />
+			<param index="1" name="walkable" type="Callable" />
+			<param index="2" name="leader_pos" type="Vector2" />
+			<param index="3" name="spacing" type="float" />
+			<param index="4" name="rings" type="int" default="6" />
+			<description>
+				Moves slots that are not walkable to the nearest walkable position found by a ring search, keeping at least [code]spacing * 0.5[/code] from slots already placed. Walkable slots are never moved. If no ring yields a position, the slot is pulled toward [param leader_pos]. [param walkable] is called as [code]walkable(position: Vector2) -&gt; bool[/code].
+			</description>
+		</method>
+		<method name="slots" qualifiers="static">
+			<return type="PackedVector2Array" />
+			<param index="0" name="kind" type="String" />
+			<param index="1" name="count" type="int" />
+			<param index="2" name="spacing" type="float" />
+			<description>
+				Returns [param count] slot offsets in leader space, at least [param spacing] apart. Returns an empty array when [param count] is not positive.
+			</description>
+		</method>
+		<method name="smooth" qualifiers="static">
+			<return type="PackedVector2Array" />
+			<param index="0" name="current" type="PackedVector2Array" />
+			<param index="1" name="goal" type="PackedVector2Array" />
+			<param index="2" name="dt" type="float" />
+			<param index="3" name="rate" type="float" default="6.0" />
+			<description>
+				Frame-rate independent smoothing of the current slot positions toward [param goal], for use when the formation kind or size changes. Equivalent to [method blend] with [code]1 - exp(-rate * dt)[/code].
+			</description>
+		</method>
+		<method name="targets" qualifiers="static">
+			<return type="PackedVector2Array" />
+			<param index="0" name="leader_pos" type="Vector2" />
+			<param index="1" name="leader_heading" type="float" />
+			<param index="2" name="kind" type="String" />
+			<param index="3" name="count" type="int" />
+			<param index="4" name="spacing" type="float" />
+			<description>
+				Returns world-space slot targets for a leader at [param leader_pos] facing [param leader_heading] (radians).
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="HUNGARIAN_LIMIT" value="64">
+			Largest group (members and slots) assigned with the Hungarian algorithm; larger groups use the greedy fallback.
+		</constant>
+	</constants>
+</class>

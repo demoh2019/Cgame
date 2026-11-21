@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameUtilityAI" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Utility AI response curves, IAUS score combination and infected prey scoring.
+	</brief_description>
+	<description>
+		Native port of the Cgame GDScript Utility AI helpers (Dave Mark's Infinite Axis Utility System). Each option is scored by multiplying normalised considerations shaped by response curves, with a compensation factor so options with many considerations are not unfairly punished. All methods are static and deterministic.
+		[method infected_target_score] additionally scores infected prey choice: proximity dominates, but a wounded straggler, the survivor already being chased and a noisy survivor each tip the balance.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="best" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="scores" type="PackedFloat32Array" />
+			<description>
+				Returns the index of the best scoring option. Ties keep the earliest index; returns [code]-1[/code] when no option scores above zero.
+			</description>
+		</method>
+		<method name="combine" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="scores" type="PackedFloat32Array" />
+			<description>
+				Multiplies the (clamped to [code][0, 1][/code]) considerations and applies the IAUS compensation factor. Returns [code]0.0[/code] for an empty array or when any consideration is zero (veto).
+			</description>
+		</method>
+		<method name="curve" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="kind" type="int" enum="CgameUtilityAI.Response" />
+			<param index="1" name="x" type="float" />
+			<param index="2" name="slope" type="float" default="1.0" />
+			<param index="3" name="shift" type="float" default="0.0" />
+			<description>
+				Evaluates a response curve. [param x] is clamped to [code][0, 1][/code] first and the result is clamped to the same range. [param slope] and [param shift] reshape the curve ([constant LINEAR]: [code]x * slope + shift[/code]; [constant LOGISTIC]: steepness and horizontal offset; [constant STEP]: threshold offset from [code]0.5[/code]).
+			</description>
+		</method>
+		<method name="infected_target_score" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="distance" type="float" />
+			<param index="1" name="leash" type="float" />
+			<param index="2" name="health_fraction" type="float" />
+			<param index="3" name="is_current" type="bool" />
+			<param index="4" name="noisy" type="bool" />
+			<description>
+				Scores a prey candidate for an infected. Returns [code]0.0[/code] for non-finite distances or a non-positive [param leash]. Beyond the leash a new target scores [code]0.0[/code] while the current focus keeps [code]0.01[/code] so it is never dropped by scoring. Within the leash the score is an inverse-quadratic proximity term (floored at [code]0.02[/code]) multiplied by bonuses for wounded prey (up to +35%), the current target (+25%) and noisy prey (+15%).
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="LINEAR" value="0" enum="Response">
+			Straight line: [code]x * slope + shift[/code].
+		</constant>
+		<constant name="QUADRATIC" value="1" enum="Response">
+			Eases in: [code]x * x[/code].
+		</constant>
+		<constant name="INVERSE_QUADRATIC" value="2" enum="Response">
+			Eases out: [code]1 - (1 - x)^2[/code].
+		</constant>
+		<constant name="LOGISTIC" value="3" enum="Response">
+			S-curve centred at [code]0.5 + shift[/code] with steepness [code]10 * slope[/code].
+		</constant>
+		<constant name="STEP" value="4" enum="Response">
+			[code]1.0[/code] when [code]x &gt;= 0.5 + shift[/code], otherwise [code]0.0[/code].
+		</constant>
+	</constants>
+</class>

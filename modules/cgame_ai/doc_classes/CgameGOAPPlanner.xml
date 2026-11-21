@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameGOAPPlanner" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Deterministic Goal-Oriented Action Planning (A* over world states).
+	</brief_description>
+	<description>
+		Native port of the Cgame GDScript GOAP planner, as popularised by F.E.A.R. Each action is a [Dictionary] [code]{"name": String, "cost": float, "preconditions": {key: value}, "effects": {key: value}}[/code]. The search is an A* over world states; the heuristic is the number of unsatisfied goal keys scaled by the cheapest action cost. Ties resolve by insertion order, so the same input always yields the same plan.
+		[codeblock]
+		var actions = [
+		    {"name": "craft", "cost": 1.0, "preconditions": {}, "effects": {"weapon": true}},
+		    {"name": "hunt", "cost": 2.0, "preconditions": {"weapon": true}, "effects": {"food": true}},
+		]
+		var plan = CgameGOAPPlanner.plan(actions, {}, {"food": true})  # ["craft", "hunt"]
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="plan" qualifiers="static">
+			<return type="PackedStringArray" />
+			<param index="0" name="actions" type="Array" />
+			<param index="1" name="state" type="Dictionary" />
+			<param index="2" name="goal" type="Dictionary" />
+			<param index="3" name="max_nodes" type="int" default="2048" />
+			<description>
+				Returns the action names of the cheapest plan that reaches [param goal] from [param state]. The result is empty when the goal is already satisfied, unreachable, or when [param max_nodes] expansions are exhausted.
+			</description>
+		</method>
+	</methods>
+</class>

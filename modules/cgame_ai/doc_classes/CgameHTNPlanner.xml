@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameHTNPlanner" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Deterministic Hierarchical Task Network planner for game AI.
+	</brief_description>
+	<description>
+		Native port of the Cgame GDScript HTN planner, in the style of the planners used by Horizon Zero Dawn and Transformers: Fall of Cybertron. The domain is plain data:
+		- A compound task is an [Array] of methods tried in declaration order. Each method is a [Dictionary] [code]{"preconditions": {key: value}, "subtasks": ["a", "b"]}[/code].
+		- A primitive task is a [Dictionary] [code]{"preconditions": {key: value}, "effects": {key: value}}[/code].
+		Planning decomposes depth first, simulates effects on a copy of the world state and backtracks to the next method whenever a branch dead-ends. Results are fully deterministic.
+		[codeblock]
+		var domain = {
+		    "root": [{"preconditions": {}, "subtasks": ["kick"]}],
+		    "kick": {"preconditions": {}, "effects": {"open": true}},
+		}
+		var plan = CgameHTNPlanner.plan(domain, "root", {})  # ["kick"]
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="plan" qualifiers="static">
+			<return type="PackedStringArray" />
+			<param index="0" name="domain" type="Dictionary" />
+			<param index="1" name="root_task" type="String" />
+			<param index="2" name="state" type="Dictionary" />
+			<param index="3" name="max_steps" type="int" default="256" />
+			<description>
+				Returns the primitive task names to execute, or an empty array when [param root_task] cannot be decomposed within [param max_steps] expansions (this also terminates recursive domains). Unknown tasks and methods whose preconditions do not hold in the simulated state are skipped. Preconditions compare each key with [code]==[/code] semantics against [param state].
+			</description>
+		</method>
+	</methods>
+</class>

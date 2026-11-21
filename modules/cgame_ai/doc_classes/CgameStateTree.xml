@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameStateTree" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Hierarchical StateTree runtime with enter conditions, tasks, evaluators, prioritised transitions and linked subtrees.
+	</brief_description>
+	<description>
+		Native port of the Cgame GDScript StateTree, in the spirit of Unreal Engine 5's StateTree. Assets are plain [Dictionary] data; behaviour is supplied through [Callable]s registered by name, which acts as a whitelist (an asset that references an unregistered name is rejected by [method validate] and [method set_asset]).
+		[b]Asset layout:[/b]
+		[codeblock]
+		{
+		    "name": String, "root": String,
+		    "evaluators": [String | {"fn": String, "args": Dictionary}],
+		    "states": {
+		        id: {
+		            "children": [id], "conditions": [cond], "tasks": [task],
+		            "link": subtree_name,
+		            "transitions": [{
+		                "trigger": "on_completed" | "on_failed" | "on_tick" | "on_event",
+		                "event": String, "condition": cond,
+		                "target": id | "$succeeded" | "$failed",
+		                "priority": int
+		            }]
+		        }
+		    }
+		}
+		[/codeblock]
+		A [code]cond[/code] is a registered condition name, [code]{"fn", "args", "not"}[/code], a built-in context compare [code]{"key", "op", "value"}[/code] ([code]op[/code] is one of [code]==[/code], [code]!=[/code], [code]&lt;[/code], [code]&lt;=[/code], [code]&gt;[/code], [code]&gt;=[/code]) or an [Array] of conditions that must all pass. A [code]task[/code] is a registered task name or [code]{"fn", "args"}[/code]. A state without tasks never completes by itself.
+		[b]Selection:[/b] from the root, the first child (depth first) whose enter conditions pass; a state with children but no selectable child is not selectable. When a transition fires, the highest [code]priority[/code] wins, then the deepest state, then declaration order.
+		[b]Linked subtrees:[/b] a state with [code]"link"[/code] gets the subtree's root as its last child. Subtree states are namespaced as [code]"&lt;linking state&gt;/&lt;id&gt;"[/code].
+		[b]Callable signatures:[/b]
+		- Task [code]enter(ctx: Dictionary, params: Dictionary)[/code], [code]tick(ctx: Dictionary, dt: float, params: Dictionary) -&gt; int[/code] (a [enum Status] value) and [code]exit(ctx: Dictionary, params: Dictionary)[/code]. [code]params[/code] is the task's [code]args[/code] plus [code]"_state"[/code] (the id of the owning state).
+		- Condition [code](ctx: Dictionary, args: Dictionary) -&gt; bool[/code].
+		- Evaluator [code](ctx: Dictionary, dt: float, args: Dictionary) -&gt; Dictionary[/code]; a returned dictionary is merged into [code]ctx[/code].
+		While [code]on_event[/code] transitions are evaluated the context temporarily holds [code]_event[/code] and [code]_event_payload[/code]. The context [Dictionary] is shared by reference, so callables can mutate it directly.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="clear_trace">
+			<return type="void" />
+			<description>
+				Clears [member trace].
+			</description>
+		</method>
+		<method name="current_state" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns the id of the active leaf state, or an empty string when inactive.
+			</description>
+		</method>
+		<method name="debug_path" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns the active path joined with [code]/[/code], or [code]"(inactive)"[/code].
+			</description>
+		</method>
+		<method name="get_active_path" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the ids of the active states from the root down to the leaf. See also [member active_path].
+			</description>
+		</method>
+		<method name="get_errors" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the validation errors of the last [method set_asset] call. See also [member errors].
+			</description>
+		</method>
+		<method name="get_trace" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the recorded [code]"enter:id"[/code] / [code]"exit:id"[/code] entries. See also [member trace].
+			</description>
+		</method>
+		<method name="get_tree_status" qualifiers="const">
+			<return type="int" enum="CgameStateTree.Status" />
+			<description>
+				Returns the status of the tree. See also [member tree_status].
+			</description>
+		</method>
+		<method name="is_active" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="state_id" type="String" />
+			<description>
+				Returns [code]true[/code] if [param state_id] is on the active path.
+			</description>
+		</method>
+		<method name="is_running" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] while the tree is running. See also [member running].
+			</description>
+		</method>
+		<method name="register_condition">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="fn" type="Callable" />
+			<description>
+				Registers a condition [Callable] [code](ctx: Dictionary, args: Dictionary) -&gt; bool[/code] under [param name].
+			</description>
+		</method>
+		<method name="register_evaluator">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="fn" type="Callable" />
+			<description>
+				Registers an evaluator [Callable] [code](ctx: Dictionary, dt: float, args: Dictionary) -&gt; Dictionary[/code] under [param name]. Evaluators listed in the asset run at the start of every [method tick].
+			</description>
+		</method>
+		<method name="register_subtree">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="asset" type="Dictionary" />
+			<description>
+				Registers a subtree asset that states can reference with [code]"link"[/code]. Register subtrees before [method set_asset].
+			</description>
+		</method>
+		<method name="register_task">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="enter" type="Callable" default="Callable()" />
+			<param index="2" name="tick" type="Callable" default="Callable()" />
+			<param index="3" name="exit" type="Callable" default="Callable()" />
+			<description>
+				Registers a task under [param name]. [param enter], [param tick] and [param exit] are all optional; a task without [param tick] never completes on its own.
+			</description>
+		</method>
+		<method name="send_event">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="payload" type="Variant" default="null" />
+			<description>
+				Queues an event for the next [method tick]. Events are delivered to [code]on_event[/code] transitions whose [code]event[/code] equals [param name].
+			</description>
+		</method>
+		<method name="set_asset">
+			<return type="bool" />
+			<param index="0" name="asset" type="Dictionary" />
+			<description>
+				Validates, flattens linked subtrees and installs [param asset]. Returns [code]false[/code] on error; see [member errors].
+			</description>
+		</method>
+		<method name="start">
+			<return type="bool" />
+			<param index="0" name="context" type="Dictionary" />
+			<description>
+				Resets the runtime and selects the initial path, running the enter callables outer to inner. Returns [code]false[/code] when no asset is installed or no state is selectable (the tree status becomes [constant FAILED] in the latter case).
+			</description>
+		</method>
+		<method name="stop">
+			<return type="void" />
+			<param index="0" name="context" type="Dictionary" />
+			<description>
+				Exits the active path from the leaf outward and stops the tree.
+			</description>
+		</method>
+		<method name="tick">
+			<return type="int" enum="CgameStateTree.Status" />
+			<param index="0" name="dt" type="float" />
+			<param index="1" name="context" type="Dictionary" />
+			<description>
+				Advances the tree: runs evaluators, delivers queued events, ticks the tasks of the active states, then resolves [code]on_completed[/code] / [code]on_failed[/code] (from the innermost finished state outward) and [code]on_tick[/code] transitions. When a state completed or failed and nothing handles it, the tree finishes with [constant SUCCEEDED] or [constant FAILED]. Returns the resulting tree status.
+			</description>
+		</method>
+		<method name="validate" qualifiers="const">
+			<return type="PackedStringArray" />
+			<param index="0" name="asset" type="Dictionary" />
+			<description>
+				Validates [param asset] against the registered tasks, conditions, evaluators and subtrees. Checks the root, children, transition triggers and targets, conditions, hierarchy cycles and recursive links (depth is limited to [constant MAX_LINK_DEPTH]). Returns the list of error strings; an empty array means the asset is valid.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="active_path" type="PackedStringArray" setter="" getter="get_active_path">
+			The ids of the active states from the root down to the leaf. Read only.
+		</member>
+		<member name="errors" type="PackedStringArray" setter="" getter="get_errors">
+			Validation errors of the last [method set_asset] call. Read only.
+		</member>
+		<member name="running" type="bool" setter="" getter="is_running">
+			[code]true[/code] while the tree is running. Read only.
+		</member>
+		<member name="trace" type="PackedStringArray" setter="" getter="get_trace">
+			Trace of enter/exit calls ([code]"enter:id"[/code] / [code]"exit:id"[/code]) for debugging and tests. Cleared with [method clear_trace]. Read only.
+		</member>
+		<member name="tree_status" type="int" setter="" getter="get_tree_status" enum="CgameStateTree.Status">
+			Status of the tree: [constant RUNNING] while active, otherwise the final [constant SUCCEEDED] or [constant FAILED]. Read only.
+		</member>
+	</members>
+	<constants>
+		<constant name="RUNNING" value="0" enum="Status">
+			The task, state or tree is still running.
+		</constant>
+		<constant name="SUCCEEDED" value="1" enum="Status">
+			The task, state or tree completed successfully.
+		</constant>
+		<constant name="FAILED" value="2" enum="Status">
+			The task, state or tree failed.
+		</constant>
+		<constant name="MAX_LINK_DEPTH" value="8">
+			Maximum nesting depth of linked subtrees. Deeper (recursive) links are rejected by validation.
+		</constant>
+	</constants>
+</class>

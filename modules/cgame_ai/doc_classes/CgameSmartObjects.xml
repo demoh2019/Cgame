@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameSmartObjects" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Smart Object registry with slots, exclusive claims, interaction graphs and automatic placement.
+	</brief_description>
+	<description>
+		Native port of the Cgame GDScript Smart Object registry, inspired by the public concept of Unreal Engine's Smart Objects. It provides slots, exclusive claims with idle timeouts, query scoring, placement scoring / deterministic automatic placement and per-behavior interaction step graphs.
+		An object is a [Dictionary] [code]{id: String, position: Vector3, tags: Array, slots: [{offset: Vector3, behavior: String, tags: Array}]}[/code]. Positions are world [Vector3]; 2D areas ([Rect2]) map [code]x[/code] to world [code]x[/code] and [code]y[/code] to world [code]z[/code]. A behavior is an array of steps [code]{anim: String, duration: float, effect: String}[/code].
+		[b]Query:[/b] [method find] takes [code]{position, radius, required_tags, preferred_tags, behavior, include_claimed}[/code] and returns [code][{object, slot, position, distance, score}][/code], best score first (ties: object id, then slot index). The score is [code]1 - distance / radius[/code] plus the fraction of [code]preferred_tags[/code] present on the object or slot.
+		[b]Claims:[/b] [method claim] returns a handle greater than zero, or [code]0[/code] when the slot is unavailable. An idle claim expires after its timeout unless [method touch] is called; a timeout of [code]0[/code] never expires.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="advance">
+			<return type="Array" />
+			<param index="0" name="dt" type="float" />
+			<description>
+				Advances interactions and claim timeouts by [param dt] seconds. Returns the handles of interactions that finished during this call. Finished claims are released when [member release_on_complete] is enabled; claims that are not interacting expire when their timeout elapses.
+			</description>
+		</method>
+		<method name="auto_place" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="area" type="Rect2" />
+			<param index="1" name="count" type="int" />
+			<param index="2" name="rules" type="Dictionary" />
+			<param index="3" name="rng_seed" type="int" />
+			<description>
+				Deterministic automatic placement of up to [param count] objects inside [param area] using a [RandomNumberGenerator] seeded with [param rng_seed]. [param rules] is [code]{min_spacing, density, nav_reachable: Callable, candidates: int}[/code] ([code]candidates[/code] is the number of samples per object). Returns [Vector3] positions with [code]y = 0[/code]; objects without any valid sample are skipped.
+			</description>
+		</method>
+		<method name="claim">
+			<return type="int" />
+			<param index="0" name="object_id" type="String" />
+			<param index="1" name="slot_index" type="int" />
+			<param index="2" name="user" type="Variant" />
+			<param index="3" name="timeout" type="float" default="-1.0" />
+			<description>
+				Claims a slot exclusively for [param user]. Returns a handle greater than zero, or [code]0[/code] when the object or slot does not exist or the slot is already claimed. A negative [param timeout] uses [member default_claim_timeout]; [code]0[/code] never expires.
+			</description>
+		</method>
+		<method name="claim_user" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="handle" type="int" />
+			<description>
+				Returns the user of a claim, or [code]null[/code] for an unknown handle.
+			</description>
+		</method>
+		<method name="find" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="query" type="Dictionary" />
+			<description>
+				Finds slots matching [param query] and returns them ranked best first. See the class description for the query and result layout.
+			</description>
+		</method>
+		<method name="get_object" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Returns a copy of the registered object (with [code]tags[/code] and [code]slots[/code] defaults filled in), or an empty dictionary.
+			</description>
+		</method>
+		<method name="has_object" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Returns [code]true[/code] if an object with [param id] is registered.
+			</description>
+		</method>
+		<method name="interaction_state" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="handle" type="int" />
+			<description>
+				Returns [code]{step, anim, t, duration}[/code] of the current interaction step, or an empty dictionary when the claim is not interacting.
+			</description>
+		</method>
+		<method name="is_claimed" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="handle" type="int" />
+			<description>
+				Returns [code]true[/code] if [param handle] refers to a live claim.
+			</description>
+		</method>
+		<method name="is_slot_free" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="String" />
+			<param index="1" name="slot_index" type="int" />
+			<description>
+				Returns [code]true[/code] if the slot is not claimed.
+			</description>
+		</method>
+		<method name="object_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of registered objects.
+			</description>
+		</method>
+		<method name="placement_score" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="candidate_pos" type="Vector3" />
+			<param index="1" name="nav_reachable" type="Callable" />
+			<param index="2" name="density" type="float" />
+			<param index="3" name="placed" type="Array" default="[]" />
+			<param index="4" name="min_spacing" type="float" default="0.0" />
+			<description>
+				Returns a score in [code][0, 1][/code] for putting a new object at [param candidate_pos]. The score is [code]0[/code] when [param nav_reachable] (a [code]Callable(Vector3) -&gt; bool[/code], optional) rejects the position or when it is closer than [param min_spacing] to a registered object or a position in [param placed]. [param density] is the number of neighbours within [code]2.5 * min_spacing[/code] that are tolerated before the score falls off; the score never drops below [code]0.05[/code] once valid.
+			</description>
+		</method>
+		<method name="register_behavior">
+			<return type="void" />
+			<param index="0" name="behavior" type="String" />
+			<param index="1" name="steps" type="Array" />
+			<description>
+				Registers the interaction steps of [param behavior]. Each step is [code]{anim, duration, effect}[/code]; a non-empty [code]effect[/code] is reported to [member on_effect] when the step is entered.
+			</description>
+		</method>
+		<method name="register_object">
+			<return type="bool" />
+			<param index="0" name="object" type="Dictionary" />
+			<description>
+				Registers (or replaces) an object. Returns [code]false[/code] when [code]id[/code] or [code]position[/code] is missing or the position is not a [Vector3]. The dictionary is copied.
+			</description>
+		</method>
+		<method name="release">
+			<return type="bool" />
+			<param index="0" name="handle" type="int" />
+			<description>
+				Releases a claim. Returns [code]false[/code] for an unknown handle (a double release is a no-op).
+			</description>
+		</method>
+		<method name="slot_position" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="object" type="Dictionary" />
+			<param index="1" name="slot_index" type="int" />
+			<description>
+				Returns the world position of a slot of [param object]: the object position plus the slot offset.
+			</description>
+		</method>
+		<method name="start_interaction">
+			<return type="bool" />
+			<param index="0" name="handle" type="int" />
+			<description>
+				Starts the behavior steps of the claimed slot. Returns [code]false[/code] for an unknown handle or a slot whose behavior has no registered steps.
+			</description>
+		</method>
+		<method name="touch">
+			<return type="void" />
+			<param index="0" name="handle" type="int" />
+			<description>
+				Resets the idle timeout of a claim (the user is still on its way).
+			</description>
+		</method>
+		<method name="unregister_object">
+			<return type="void" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Removes an object and releases all of its claims.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="default_claim_timeout" type="float" setter="set_default_claim_timeout" getter="get_default_claim_timeout" default="10.0">
+			Idle timeout in seconds of claims created without an explicit timeout.
+		</member>
+		<member name="on_effect" type="Callable" setter="set_on_effect" getter="get_on_effect" default="Callable()">
+			Called as [code](effect: String, user: Variant, object_id: String)[/code] when an interaction enters a step with an effect.
+		</member>
+		<member name="release_on_complete" type="bool" setter="set_release_on_complete" getter="get_release_on_complete" default="true">
+			If [code]true[/code], a claim is released as soon as its interaction finishes.
+		</member>
+	</members>
+</class>
