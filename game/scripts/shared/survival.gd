@@ -24,6 +24,11 @@ var scent_mask_seconds: float = 0.0 # Temporary herb camouflage, server-owned.
 var stamina: float = Defs.MAX_STAMINA
 var stamina_recovery_delay: float = 0.0
 var alive: bool = true
+# Gear-skill effects (server-owned, short-lived): Iron Skin and Second Wind.
+var guard_seconds: float = 0.0
+var guard_reduction: float = 0.0
+var regen_seconds: float = 0.0
+var regen_per_second: float = 0.0
 
 
 ## The same eligibility math runs on the server and client prediction.
@@ -47,6 +52,7 @@ func try_sprint(seconds: float) -> bool:
 
 ## Advances the clock. Returns the damage taken from hunger or thirst this step.
 func tick(delta: float) -> float:
+	_tick_gear_effects(delta)
 	if not alive:
 		return 0.0
 	# Mask duration follows authoritative survival simulation only.
@@ -115,6 +121,8 @@ func weather_tick(delta: float, severity: float) -> float:
 func hurt(amount: float) -> float:
 	if not alive or amount <= 0.0:
 		return 0.0
+	if guard_seconds > 0.0:
+		amount *= 1.0 - clampf(guard_reduction, 0.0, 0.5)
 	var applied := minf(amount, health)
 	health -= applied
 	if health <= 0.0:
@@ -224,8 +232,28 @@ func reset() -> void:
 	wetness = 0.0
 	warmth_seconds = 0.0
 	scent_mask_seconds = 0.0
+	guard_seconds = 0.0
+	guard_reduction = 0.0
+	regen_seconds = 0.0
+	regen_per_second = 0.0
 	alive = true
 
 
 func to_dict() -> Dictionary:
 	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "food_poisoning": food_poisoning, "bleeding": bleeding, "fracture": fracture, "exposure": exposure, "wetness": wetness, "warmth_seconds": warmth_seconds, "scent_mask_seconds": scent_mask_seconds, "alive": alive}
+
+
+## Iron Skin wears off; Second Wind heals a little every tick until its duration ends.
+func _tick_gear_effects(delta: float) -> void:
+	if delta <= 0.0 or not is_finite(delta):
+		return
+	if guard_seconds > 0.0:
+		guard_seconds = maxf(0.0, guard_seconds - delta)
+		if guard_seconds <= 0.0:
+			guard_reduction = 0.0
+	if regen_seconds > 0.0:
+		var step: float = minf(delta, regen_seconds)
+		regen_seconds = maxf(0.0, regen_seconds - delta)
+		heal(regen_per_second * step)
+		if regen_seconds <= 0.0:
+			regen_per_second = 0.0

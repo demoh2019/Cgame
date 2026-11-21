@@ -46,6 +46,7 @@
 #include "core/os/os.h"
 #include "core/os/process_id.h"
 #include "core/os/thread_safe.h"
+#include "core/templates/hash_map.h"
 #include "core/variant/typed_array.h"
 
 namespace CoreBind {
@@ -981,6 +982,88 @@ Vector2 Geometry2D::get_closest_point_to_segment_uncapped(const Vector2 &p_point
 }
 
 
+PackedInt32Array Geometry2D::prune_points_min_distance(const PackedVector2Array &p_points, real_t p_min_distance, int p_max_kept) {
+	PackedInt32Array result;
+	ERR_FAIL_COND_V_MSG(p_points.size() > 8192, result, "A point-pruning batch may contain at most 8192 points.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_min_distance) || p_min_distance < 0.0, result,
+			"Minimum point separation must be finite and nonnegative.");
+	ERR_FAIL_COND_V_MSG(p_max_kept < -1 || p_max_kept > 8192, result,
+			"Maximum kept point count must be -1 or between 0 and 8192.");
+	const real_t min_distance_squared = p_min_distance * p_min_distance;
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(min_distance_squared), result,
+			"Squared minimum point separation must remain finite.");
+	const int count = p_points.size();
+	const Vector2 *points = p_points.ptr();
+	// Reject the entire batch before selecting any indices.
+	for (int i = 0; i < count; i++) {
+		ERR_FAIL_COND_V_MSG(!points[i].is_finite(), result, "Point coordinates must be finite.");
+	}
+	const int limit = p_max_kept < 0 ? count : MIN(p_max_kept, count);
+	if (limit == 0 || count == 0) {
+		return result;
+	}
+	// Each cell has side length min_distance. Multiple accepted points may
+	// occupy one cell near its opposite corners, so store index lists and
+	// examine all nine neighboring cells (rather than a single occupant).
+	// Extreme coordinate/radius ratios use an exact linear fallback to
+	// avoid unsafe float-to-int conversion; ordinary world tiles use the grid.
+	bool use_grid = p_min_distance > 0.0;
+	if (use_grid) {
+		for (int i = 0; i < count; i++) {
+			const real_t grid_x = points[i].x / p_min_distance;
+			const real_t grid_y = points[i].y / p_min_distance;
+			if (!Math::is_finite(grid_x) || !Math::is_finite(grid_y) ||
+					Math::abs(grid_x) > 1000000.0 || Math::abs(grid_y) > 1000000.0) {
+				use_grid = false;
+				break;
+			}
+		}
+	}
+	HashMap<Vector2i, Vector<int>> cells;
+	Vector<int> kept;
+	for (int i = 0; i < count && kept.size() < limit; i++) {
+		bool valid = true;
+		Vector2i cell;
+		if (use_grid) {
+			cell = Vector2i(Math::floor(points[i].x / p_min_distance), Math::floor(points[i].y / p_min_distance));
+			for (int y = -1; y <= 1 && valid; y++) {
+				for (int x = -1; x <= 1 && valid; x++) {
+					const Vector<int> *bucket = cells.getptr(cell + Vector2i(x, y));
+					if (bucket == nullptr) {
+						continue;
+					}
+					for (int index : *bucket) {
+						const real_t squared = points[i].distance_squared_to(points[index]);
+						if (squared < min_distance_squared) {
+							valid = false;
+							break;
+						}
+					}
+				}
+			}
+		} else if (p_min_distance > 0.0) {
+			for (int index : kept) {
+				if (points[i].distance_squared_to(points[index]) < min_distance_squared) {
+					valid = false;
+					break;
+				}
+			}
+		}
+		if (valid) {
+			kept.push_back(i);
+			if (use_grid) {
+				cells[cell].push_back(i);
+			}
+		}
+	}
+	ERR_FAIL_COND_V_MSG(result.resize(kept.size()) != OK, PackedInt32Array(), "Could not allocate selected point indices.");
+	int32_t *out = result.ptrw();
+	for (int i = 0; i < kept.size(); i++) {
+		out[i] = kept[i];
+	}
+	return result;
+}
+
 TypedArray<PackedInt32Array> Geometry2D::get_nearest_neighbors(const PackedVector2Array &p_points, int p_neighbor_count, real_t p_max_distance) {
 	TypedArray<PackedInt32Array> result;
 	ERR_FAIL_COND_V_MSG(p_points.size() > 4096, result, "Nearest-neighbor batches allow at most 4096 points.");
@@ -1085,6 +1168,74 @@ Dictionary Geometry2D::get_closest_point_on_segments(const Vector2 &p_point, con
 	result["distance"] = Math::sqrt(best_distance_squared);
 	result["segment_index"] = best_segment;
 	result["t"] = best_t;
+	return result;
+}
+
+
+PackedByteArray Geometry2D::distance_transform_8(const PackedByteArray &p_mask, const Vector2i &p_size, int p_max_distance) {
+	PackedByteArray result;
+	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2048 || p_size.y > 2048, result,
+			"Distance-transform dimensions must be between 1 and 2048 pixels per axis.");
+	ERR_FAIL_COND_V_MSG(p_max_distance < 0 || p_max_distance > 254, result,
+			"Distance-transform maximum radius must be between 0 and 254 pixels.");
+	const int width = p_size.x;
+	const int height = p_size.y;
+	const int count = width * height;
+	ERR_FAIL_COND_V_MSG(p_mask.size() != count, result, "Distance-transform mask size must equal width * height.");
+	ERR_FAIL_COND_V_MSG(result.resize(count) != OK, PackedByteArray(), "Could not allocate the distance field.");
+
+	const uint8_t *mask = p_mask.ptr();
+	uint8_t *distances = result.ptrw();
+	for (int i = 0; i < count; i++) {
+		distances[i] = mask[i] == 0 ? 255 : 0;
+	}
+	// Exact chessboard / Chebyshev distance on an 8-connected integer grid.
+	// Two raster passes propagate all possible shortest 8-neighbor paths.
+	// Value 255 is reserved for cells farther than p_max_distance.
+	const auto relax = [distances, p_max_distance](int p_index, int p_neighbor) {
+		if (distances[p_neighbor] < p_max_distance) {
+			const uint8_t candidate = distances[p_neighbor] + 1;
+			if (candidate < distances[p_index]) {
+				distances[p_index] = candidate;
+			}
+		}
+	};
+	for (int y = 0; y < height; y++) {
+		const int row = y * width;
+		for (int x = 0; x < width; x++) {
+			const int index = row + x;
+			if (x > 0) {
+				relax(index, index - 1);
+			}
+			if (y > 0) {
+				if (x > 0) {
+					relax(index, index - width - 1);
+				}
+				relax(index, index - width);
+				if (x + 1 < width) {
+					relax(index, index - width + 1);
+				}
+			}
+		}
+	}
+	for (int y = height - 1; y >= 0; y--) {
+		const int row = y * width;
+		for (int x = width - 1; x >= 0; x--) {
+			const int index = row + x;
+			if (x + 1 < width) {
+				relax(index, index + 1);
+			}
+			if (y + 1 < height) {
+				if (x + 1 < width) {
+					relax(index, index + width + 1);
+				}
+				relax(index, index + width);
+				if (x > 0) {
+					relax(index, index + width - 1);
+				}
+			}
+		}
+	}
 	return result;
 }
 
@@ -1333,7 +1484,9 @@ void Geometry2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_closest_point_to_segment_uncapped", "point", "s1", "s2"), &Geometry2D::get_closest_point_to_segment_uncapped);
 	ClassDB::bind_method(D_METHOD("get_closest_point_on_segments", "point", "segment_endpoints"), &Geometry2D::get_closest_point_on_segments);
 	ClassDB::bind_method(D_METHOD("get_nearest_neighbors", "points", "neighbor_count", "max_distance"), &Geometry2D::get_nearest_neighbors);
+	ClassDB::bind_method(D_METHOD("prune_points_min_distance", "points", "min_distance", "max_kept"), &Geometry2D::prune_points_min_distance, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("rasterize_segments_mask", "segment_endpoints", "size", "half_width", "softness"), &Geometry2D::rasterize_segments_mask);
+	ClassDB::bind_method(D_METHOD("distance_transform_8", "mask", "size", "max_distance"), &Geometry2D::distance_transform_8);
 
 	ClassDB::bind_method(D_METHOD("point_is_inside_triangle", "point", "a", "b", "c"), &Geometry2D::point_is_inside_triangle);
 

@@ -10,6 +10,8 @@ on:
       - 'modules/behavior_tree/doc_classes/AIProximityGrid2D.xml'
       - 'game/scripts/server/game_server.gd'
       - 'game/tests/test_zombie_pack.gd'
+      - 'game/scripts/shared/pack_neighbor_selection.gd'
+      - 'tests/scene/test_ai_nearest_pack_contract.py'
       - 'game/tests/run_pack_spatial.gd'
       - '.github/workflows/native-ai-proximity-grid.yml'
   push:
@@ -21,6 +23,8 @@ on:
       - 'modules/behavior_tree/doc_classes/AIProximityGrid2D.xml'
       - 'game/scripts/server/game_server.gd'
       - 'game/tests/test_zombie_pack.gd'
+      - 'game/scripts/shared/pack_neighbor_selection.gd'
+      - 'tests/scene/test_ai_nearest_pack_contract.py'
       - 'game/tests/run_pack_spatial.gd'
       - '.github/workflows/native-ai-proximity-grid.yml'
   workflow_dispatch:
@@ -29,7 +33,25 @@ permissions:
   contents: read
 
 jobs:
+  nearest-source-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            modules/behavior_tree/ai_proximity_grid_2d.h
+            modules/behavior_tree/ai_proximity_grid_2d.cpp
+            game/scripts/server/game_server.gd
+            game/scripts/shared/pack_neighbor_selection.gd
+            game/tests/test_zombie_pack.gd
+            tests/scene/test_ai_nearest_pack_contract.py
+          sparse-checkout-cone-mode: false
+      - name: Validate nearest-K game integration and reference crowd model
+        run: python3 tests/scene/test_ai_nearest_pack_contract.py -v
+
   native-and-game:
+    needs: nearest-source-contract
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:

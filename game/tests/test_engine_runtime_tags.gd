@@ -100,6 +100,15 @@ func run(t) -> void:
 		EngineFeatures.sync_runtime_tags(actor, "zombie", infected)
 		t.eq(EngineFeatures.runtime_stack_count(actor, "Runtime.Status.Resolve"), 3,
 			"native count reflects authoritative resolve stacks")
+		t.check(EngineFeatures.runtime_has_resolve(actor), "two-plus native Resolve stacks enable the visual effect")
+		if ClassDB.class_exists("GameplayTagQuery") and ClassDB.class_has_method("GameplayTagQuery", "matches_stacks"):
+			var counted_query: Object = ClassDB.instantiate("GameplayTagQuery")
+			counted_query.call("set_all_tags", PackedStringArray(["Runtime.Status.Resolve"]))
+			counted_query.call("set_min_stack_count", 2)
+			t.check(bool(counted_query.call("matches_stacks", actor.get_meta("tag_stacks"))),
+				"new engine resource evaluates a counted snapshot without GDScript dictionary copies")
+			t.check(not bool(counted_query.call("matches_stacks", null)),
+				"missing stack container never satisfies nonempty requirements")
 		var native_stacks: Object = actor.get_meta("tag_stacks") as Object
 		t.check(native_stacks != null, "counted tag container attached to rendered actor")
 		if native_stacks != null:
@@ -109,6 +118,7 @@ func run(t) -> void:
 		EngineFeatures.sync_runtime_tags(actor, "zombie", infected)
 		t.eq(EngineFeatures.runtime_stack_count(actor, "Runtime.Status.Resolve"), 0,
 			"expired resolve stacks disappear on the following snapshot")
+		t.check(not EngineFeatures.runtime_has_resolve(actor), "expired Resolve cannot keep its native visual gate")
 		if native_stacks != null and native_stacks.has_method("replace_stack_branch"):
 			t.current = "independent client effects survive runtime snapshots"
 			t.check(bool(native_stacks.call("add_stacks", StringName("Local.Preview.Bleeding"), 2)),
@@ -128,4 +138,8 @@ func run(t) -> void:
 	else:
 		t.eq(EngineFeatures.runtime_stack_count(actor, "Runtime.Status.Resolve", 3), 3,
 			"stock Godot retains snapshot fallback for resolve presentation")
+		t.check(EngineFeatures.runtime_has_resolve(actor, 3),
+			"stock Godot retains fallback Resolve tint at two-plus stacks")
+		t.check(not EngineFeatures.runtime_has_resolve(actor, 1),
+			"stock Godot rejects one-stack Resolve")
 	actor.free()

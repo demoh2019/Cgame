@@ -60,6 +60,7 @@ var unseen_seconds: float = 0.0 # Hunter: how long the target has been out of si
 var _sight_check: float = 0.0
 var _native_senses: Variant = null # Lazy per-infected memory; optional on stock Godot.
 var _ai_profiler: Variant = null # Opt-in per-infected target selection profiling.
+var _ai_trace: Variant = null # Opt-in server-only native target decision trace.
 var _ai_lod_staggered: bool = false # Phase only the first distant passive scan.
 static var _ai_lod_checked: bool = false
 static var _ai_lod_scheduler: Variant = null
@@ -135,6 +136,84 @@ func reset_ai_profile() -> void:
 		_ai_profiler.reset()
 
 
+## Opt-in trace of authoritative target selection. Source positions and target
+## choices must remain on the server. Unavailable on stock Godot.
+func enable_ai_trace(enabled: bool) -> bool:
+	if not enabled:
+		if _ai_trace != null:
+			_ai_trace.reset()
+			_ai_trace = null
+		return true
+	if _ai_trace == null:
+		if not ClassDB.class_exists("AIBehaviorTrace"):
+			return false
+		_ai_trace = ClassDB.instantiate("AIBehaviorTrace")
+	return _ai_trace != null
+
+
+func get_ai_trace_snapshot() -> Dictionary:
+	if _ai_trace == null:
+		return {"enabled": false, "tick_index": 0, "max_steps": 128,
+			"truncated": 0, "steps": []}
+	var snapshot: Dictionary = _ai_trace.get_snapshot()
+	snapshot["enabled"] = true
+	return snapshot
+
+
+func reset_ai_trace() -> void:
+	if _ai_trace != null:
+		_ai_trace.reset()
+
+
+## On-demand server-only visualization of the actual GDScript state machine.
+## Uses the same plain-data node layout as BehaviorTreeRunner.get_tree_snapshot()
+## without claiming that this state machine is a native BehaviorTree.
+func get_ai_state_visual_snapshot() -> Dictionary:
+	var states := ["IDLE", "WANDER", "CHASE", "ATTACK", "DEAD", "INVESTIGATE"]
+	var nodes: Array = [{
+		"path": "root",
+		"task_class": "ZombieStateMachine",
+		"depth": 0,
+		"executed": true,
+		"status": 0 if state == State.DEAD else 2,
+		"duration_usec": 0,
+	}]
+	for index in states.size():
+		var active: bool = state == index
+		nodes.append({
+			"path": "root/%d" % index,
+			"task_class": states[index],
+			"depth": 1,
+			"executed": active,
+			"status": (0 if state == State.DEAD else 2) if active else -1,
+			"duration_usec": 0,
+		})
+	var trace_snapshot: Dictionary = get_ai_trace_snapshot()
+	var steps: Array = trace_snapshot.get("steps", [])
+	var selection_status := -1
+	var selection_time := 0
+	if not steps.is_empty():
+		var scan: Dictionary = steps[0]
+		selection_status = int(scan.get("status", -1))
+		selection_time = int(scan.get("duration_usec", 0))
+	nodes.append({
+		"path": "root/6",
+		"task_class": "TargetSelection",
+		"depth": 1,
+		"executed": not steps.is_empty(),
+		"status": selection_status,
+		"duration_usec": selection_time,
+	})
+	return {
+		"nodes": nodes,
+		"node_count": nodes.size(),
+		"truncated": false,
+		"trace_truncated": int(trace_snapshot.get("truncated", 0)),
+		"trace_enabled": bool(trace_snapshot.get("enabled", false)),
+		"tick_index": int(trace_snapshot.get("tick_index", 0)),
+	}
+
+
 ## Server-side diagnostic query. Never include this in public game snapshots:
 ## it exposes AI target identity and last perceived target locations.
 func get_ai_debug_snapshot() -> Dictionary:
@@ -148,6 +227,8 @@ func get_ai_debug_snapshot() -> Dictionary:
 		"investigate_seconds": investigate_time,
 		"perception": _native_senses.get_debug_snapshot() if _native_senses != null else {},
 		"profiling": get_ai_profile_snapshot(),
+		"trace": get_ai_trace_snapshot(),
+		"visual_tree": get_ai_state_visual_snapshot(),
 		"pack_howl_cooldown_seconds": float(_native_howl_cooldowns.get_remaining(&"pack_howl")) if _native_howl_cooldowns != null else 0.0,
 		"native_simulation_lod": _ai_lod_scheduler != null,
 		"native_threat_arbitration": Threat.has_native(),
@@ -166,6 +247,8 @@ func is_alive() -> bool:
 func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator) -> Dictionary:
 	if state == State.DEAD:
 		return {}
+	if _ai_trace != null:
+		_ai_trace.begin_tick()
 	if _native_howl_cooldowns != null:
 		_native_howl_cooldowns.advance_time(maxf(delta, 0.0))
 	if _native_senses != null:
@@ -210,7 +293,12 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 		_ai_has_selected_once = true
 		if _ai_profiler != null and _ai_profiler.is_enabled():
 			_ai_profiler.begin_sample(&"target_selection")
+		var trace_token := -1
+		if _ai_trace != null:
+			trace_token = _ai_trace.begin_step("target_selection", "ZombieTargetSelection")
 		var nearest_viewer: float = _select_target(world, players, here)
+		if trace_token >= 0:
+			_ai_trace.end_step(trace_token, 0 if target_id != -1 else 1)
 		# This LOD applies ONLY to unengaged passive acquisition, not the
 		# per-frame motion, attack timers, projectile windups, threat decay,
 		# boss mechanics or active chase/attack target validation.

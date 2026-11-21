@@ -2,11 +2,19 @@
 
 A self-contained 2D sandbox for this fork's **resource-backed** behavior-tree runtime plus its native sight and hearing sensors. This project is separate from the canonical *Albion After* game in `game/`; the engine functionality is also wired into that game's server infected AI through `native_infected_senses.gd`.
 
+## Editor dock and playable visual inspector
+
+Open this project in the custom Cgame Godot editor. The enabled `Cgame BehaviorTree Inspector` addon opens a right-hand **Cgame AI** dock that shows all child Resource tasks of an edited scene's `BehaviorTreeRunner`, even branches not executed. Select the runner node and press **Refresh**; this editor-side inspector observes the edited scene, not the remote running game.
+
+Run the sandbox and press **T** to show or hide a separate live hierarchical panel, updated on every 0.2-second AI tick. It shows `SUCCESS` (green), `FAILURE` (red), `RUNNING` (amber) and `NOT RUN` (gray) with nested paths and elapsed CPU microseconds. The native `get_tree_snapshot()` returns at most 256 Resource occurrences and works independently of the separate performance profiler toggled with **P**.
+
 ## Run
 
 ```sh
 ./bin/godot.linuxbsd.editor.x86_64 --path modules/behavior_tree/demo_reactive_ai
 ```
+
+**Per-node debugger:** tracing is enabled in the demo by default. Press **T** to toggle its bounded runtime task history independently of **P** profiling. The HUD reports how many task nodes were entered on the latest AI tick and the active nested node path; the full detached timeline is available through `brain.get_trace_snapshot()`. The native engine records the precise Resource task type, status and inclusive CPU microseconds for each node. The automatic smoke test checks the root and nested chase branch.
 
 Move the blue survivor with **arrow keys**, press **F** to shout, **Space** near the infected to attack, **P** to enable/disable and reset AI CPU profiling, **R** to restart. The demo enables profiling initially so the bottom HUD line displays average/max behavior-tree decision time in microseconds. All other game NPCs default to unprofiled operation. Movement emits quieter footsteps. The wall blocks sight and attenuates sound. The NPC follows paths around the wall, remembers the player's last visible position, and investigates the last heard sound.
 

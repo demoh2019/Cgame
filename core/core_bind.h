@@ -342,7 +342,9 @@ public:
 	Vector2 get_closest_point_to_segment_uncapped(const Vector2 &p_point, const Vector2 &p_a, const Vector2 &p_b);
 	Dictionary get_closest_point_on_segments(const Vector2 &p_point, const PackedVector2Array &p_segment_endpoints);
 	TypedArray<PackedInt32Array> get_nearest_neighbors(const PackedVector2Array &p_points, int p_neighbor_count, real_t p_max_distance);
+	PackedInt32Array prune_points_min_distance(const PackedVector2Array &p_points, real_t p_min_distance, int p_max_kept = -1);
 	PackedByteArray rasterize_segments_mask(const PackedVector2Array &p_segment_endpoints, const Vector2i &p_size, real_t p_half_width, real_t p_softness);
+	PackedByteArray distance_transform_8(const PackedByteArray &p_mask, const Vector2i &p_size, int p_max_distance);
 	bool point_is_inside_triangle(const Vector2 &p_s, const Vector2 &p_a, const Vector2 &p_b, const Vector2 &p_c) const;
 
 	bool is_point_in_circle(const Vector2 &p_point, const Vector2 &p_circle_pos, real_t p_circle_radius);

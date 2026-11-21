@@ -81,3 +81,42 @@ References:
 - [Godot 4.6 CPU optimization](https://docs.godotengine.org/en/4.6/tutorials/performance/cpu_optimization.html)
 - [Unreal Engine Mass Gameplay overview](https://dev.epicgames.com/documentation/unreal-engine/overview-of-mass-gameplay-in-unreal-engine)
 - [Unreal animation budget allocator](https://dev.epicgames.com/documentation/unreal-engine/animation-budget-allocator-in-unreal-engine)
+
+## Native Cgame engine service (November 2026)
+
+`scene/main/adaptive_tick_governor.{h,cpp}` now provides the reusable
+**AdaptiveTickGovernor** C++ `RefCounted` class. It implements the same
+200-tick ring, nearest-rank p95, 20-tick active windows, sustained 90%/60%
+CPU pressure thresholds, 3-window overload/5-window recovery hysteresis
+and 2..10 optional-work budget as the original game script.
+
+Reusable engine API:
+- `observe_tick(elapsed_usec: int, active_users: int)` for validated CPU
+  measurements, without ever skipping any mandatory game simulation.
+- `get_budget_units()` for the caller's own optional workload (for Albion
+  After, only **future random incidents**).
+- `set_enabled(bool)`, `snapshot()`, `get_history_count()`,
+  `samples_oldest_first()`, and `reset()`.
+- `set_target_tick_ms(ms)` and `set_budget_range(min, max)` let other
+  Cgame applications choose their own tick rate and optional work range.
+
+`game/scripts/server/server_main.gd` automatically uses the native class
+on Cgame and keeps `ServerTickGovernor` as a feature-compatible fallback
+for stock Godot. No changes are required to network snapshots, ongoing
+infected AI, actual player physics, combat or disk persistence.
+
+`tests/scene/test_adaptive_tick_governor.cpp` tests native history, invalid
+and idle samples, hysteresis, disabled mode and configuration; the existing
+`game/tests/test_server_tick_governor.gd` now also checks native/script
+parity and bounded ring ordering. The dedicated GitHub Actions workflow
+`.github/workflows/native-adaptive-tick-governor.yml` compiles Cgame with
+native tests and runs Albion After's full GDScript suite.
+
+Design context: Unreal Mass Gameplay LOD and Unity DOTS use relevance and
+data-oriented work budgeting to focus CPU time on valuable work.
+References:
+- https://dev.epicgames.com/documentation/unreal-engine/overview-of-mass-gameplay-in-unreal-engine
+- https://learn.unity.com/article/c-and-dots-specific-performance-tips
+
+Neither build/test results nor an FPS/server-throughput improvement are
+claimed until a native CI run actually succeeds.

@@ -9,16 +9,21 @@ static func has(engine_class: String) -> bool:
 
 ## Tags a node with Gameplay Tags (meta "tags") when the engine provides GameplayTagContainer; a no-op otherwise.
 static func tag_node(node: Node, tags: Array) -> void:
-	if node == null or not has("GameplayTagContainer"):
+	if node == null:
 		return
-	var container = ClassDB.instantiate("GameplayTagContainer")
-	for tag in tags:
-		container.add_tag(StringName(str(tag)))
-	node.set_meta("tags", container)
+	if has("GameplayTagContainer"):
+		var container = ClassDB.instantiate("GameplayTagContainer")
+		for tag in tags:
+			container.add_tag(StringName(str(tag)))
+		node.set_meta("tags", container)
 	# Counted status effects are separate from boolean identity tags.
 	# Neither class is required by stock Godot binaries.
 	if has("GameplayTagStackContainer"):
 		node.set_meta("tag_stacks", ClassDB.instantiate("GameplayTagStackContainer"))
+	if has("GameplayEffectTimeline"):
+		node.set_meta("effect_timeline", ClassDB.instantiate("GameplayEffectTimeline"))
+	if has("GameplayAttributeSet"):
+		node.set_meta("attributes", ClassDB.instantiate("GameplayAttributeSet"))
 
 
 ## Creates an engine class by name and applies properties; returns null when the binary lacks it.
@@ -103,9 +108,9 @@ static func runtime_tags(kind: String, state: Dictionary) -> PackedStringArray:
 ## Replaces one namespace atomically, preserving static Enemy/Player identity.
 ## Old engine binaries simply retain the established rendering paths.
 static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) -> void:
-	if node == null or not node.has_meta("tags"):
+	if node == null:
 		return
-	var container: Object = node.get_meta("tags") as Object
+	var container: Object = node.get_meta("tags", null) as Object
 	if container != null and container.has_method("replace_tag_branch"):
 		container.call("replace_tag_branch", StringName("Runtime"), runtime_tags(kind, snapshot))
 	# A complete, validated snapshot prevents stale effect stacks after expiry.
@@ -124,10 +129,125 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 				stack_container.call("replace_stack_branch", StringName("Runtime"), counts)
 			else:
 				stack_container.call("replace_stacks", counts)
+	# Attribute snapshots are read-only presentation mirrors, never combat authority.
+	var attrs: Object = node.get_meta("attributes", null) as Object
+	if attrs != null and attrs.has_method("replace_snapshot"):
+		attrs.call("replace_snapshot", runtime_attribute_snapshot(kind, snapshot))
+	# Render-only native timers are independent from counted tag branches.
+	var timeline: Object = node.get_meta("effect_timeline", null) as Object
+	if timeline != null:
+		var effects: Dictionary = runtime_effect_snapshot(kind, snapshot)
+		var applied := false
+		# Preserve client-local visual timers and periodic pulses across server snapshots.
+		if timeline.has_method("replace_effect_branch"):
+			applied = bool(timeline.call("replace_effect_branch", StringName("Runtime"), effects))
+		elif timeline.has_method("replace_snapshot"):
+			applied = bool(timeline.call("replace_snapshot", effects))
+		if applied and timeline.has_method("set_periodic"):
+			# Only cosmetic pulses: gameplay and timer ownership remain server-side.
+			if effects.has(StringName("Runtime.Status.Sundered")):
+				timeline.call("set_periodic", StringName("Runtime.Status.Sundered"), 0.75, false)
+			if effects.has(StringName("Runtime.Status.Resolve")):
+				timeline.call("set_periodic", StringName("Runtime.Status.Resolve"), 1.1, false)
 
 
 ## Presentation-only stack counts. The server remains authoritative for combat.
 ## Falls back to the validated snapshot on stock Godot/older engine builds.
+## Render-side durations from the authoritative zombie snapshot.
+static func runtime_effect_snapshot(kind: String, snapshot: Dictionary) -> Dictionary:
+	var effects: Dictionary = {}
+	if kind != "zombie":
+		return effects
+	for pair in [
+		["stagger_seconds", "Runtime.Status.Staggered"],
+		["snared_seconds", "Runtime.Status.Snared"],
+		["sunder_seconds", "Runtime.Status.Sundered"],
+		["resolve_seconds", "Runtime.Status.Resolve"],
+	]:
+		var remaining: float = float(snapshot.get(pair[0], 0.0))
+		if not is_finite(remaining) or remaining <= 0.0:
+			continue
+		var stacks: int = 1
+		if pair[0] == "resolve_seconds":
+			stacks = int(snapshot.get("resolve_stacks", 0))
+			if stacks < 2:
+				continue
+		effects[StringName(pair[1])] = {
+			"remaining": minf(remaining, 604800.0), "stacks": clampi(stacks, 1, 65535)
+		}
+	return effects
+
+
+static func tick_runtime_effects(node: Node, delta: float) -> Dictionary:
+	if node == null or not is_finite(delta) or delta <= 0.0:
+		return {}
+	var timeline: Object = node.get_meta("effect_timeline", null) as Object
+	if timeline != null and timeline.has_method("tick"):
+		timeline.call("tick", delta)
+		if timeline.has_method("take_periodic_pulses"):
+			return timeline.call("take_periodic_pulses") as Dictionary
+	return {}
+
+
+static func runtime_effect_remaining(node: Node, tag: String, fallback: float = 0.0) -> float:
+	var timeline: Object = null
+	if node != null:
+		timeline = node.get_meta("effect_timeline", null) as Object
+	if timeline != null and timeline.has_method("get_remaining"):
+		return maxf(0.0, float(timeline.call("get_remaining", StringName(tag))))
+	return maxf(0.0, fallback) if is_finite(fallback) else 0.0
+
+
+## Derive read-only client attributes from the server-owned actor snapshot.
+## Effect sources are replaced atomically, so expired modifiers cannot persist.
+static func runtime_attribute_snapshot(kind: String, state: Dictionary) -> Dictionary:
+	var result: Dictionary = {"attributes": {}, "modifiers": []}
+	if kind != "zombie" and kind != "player":
+		return result
+	var health: float = float(state.get("hp", 0.0))
+	if not is_finite(health):
+		health = 0.0
+	var maximum: float = float(state.get("max_hp", maxf(1.0, health)))
+	if not is_finite(maximum):
+		maximum = 1.0
+	maximum = clampf(maximum, 1.0, 1000000000.0)
+	health = clampf(health, 0.0, maximum)
+	var attributes: Dictionary = {
+		StringName("Vital.Health"): {"base": health, "min": 0.0, "max": maximum},
+		StringName("Vital.MaxHealth"): {"base": maximum, "min": 1.0, "max": 1000000000.0},
+		StringName("Visual.HitResponse"): {"base": 1.0, "min": 0.5, "max": 1.75}
+	}
+	result["attributes"] = attributes
+	var modifiers: Array = []
+	if kind == "zombie":
+		var visual_bonuses: Dictionary = {
+			"Rank.Elite": 0.2 if bool(state.get("elite", false)) else 0.0,
+			"Rank.Boss": 0.15 if bool(state.get("raid_boss", false)) else 0.0,
+			"Status.Sundered": 0.25 if float(state.get("sunder_seconds", 0.0)) > 0.0 else 0.0,
+			"Status.Resolve": -0.15 if int(state.get("resolve_stacks", 0)) >= 2 and
+				float(state.get("resolve_seconds", 0.0)) > 0.0 else 0.0
+		}
+		for source in visual_bonuses:
+			var additive: float = float(visual_bonuses[source])
+			if additive != 0.0:
+				modifiers.append({
+					"source": StringName(source),
+					"attribute": StringName("Visual.HitResponse"),
+					"additive": additive, "percent": 0.0
+				})
+	result["modifiers"] = modifiers
+	return result
+
+
+static func runtime_attribute_value(node: Node, name: String, fallback: float = 0.0) -> float:
+	if node != null:
+		var attribute_set: Object = node.get_meta("attributes", null) as Object
+		if attribute_set != null and attribute_set.has_method("has_attribute") and
+				bool(attribute_set.call("has_attribute", StringName(name))):
+			return float(attribute_set.call("get_value", StringName(name)))
+	return fallback if is_finite(fallback) else 0.0
+
+
 static func runtime_stack_count(node: Node, tag: String, fallback: int = 0) -> int:
 	if node != null and node.has_meta("tag_stacks"):
 		var stack_container: Object = node.get_meta("tag_stacks") as Object
@@ -155,3 +275,41 @@ static func runtime_has(node: Node, tag: String, fallback: bool = false) -> bool
 		if container != null and container.has_method("replace_tag_branch") and container.has_method("has_tag"):
 			return bool(container.call("has_tag", StringName(tag), true))
 	return fallback
+
+
+static var _resolve_visual_query: Object = null # Native >=2 Resolve stack query, built once.
+static var _resolve_query_checked := false
+
+
+## Resolve visual gate: two or more Resolve stacks (native threshold query when available).
+static func runtime_has_resolve(node: Node, fallback_stacks: int = 0) -> bool:
+	if node != null and node.has_meta("tag_stacks"):
+		var stacks: Object = node.get_meta("tag_stacks") as Object
+		if stacks != null and stacks.has_method("get_stack_count"):
+			if not _resolve_query_checked:
+				_resolve_query_checked = true
+				if has("GameplayTagQuery") and ClassDB.class_has_method("GameplayTagQuery", "matches_stacks"):
+					var query: Object = ClassDB.instantiate("GameplayTagQuery")
+					if query != null and query.has_method("set_min_stack_count"):
+						query.call("set_all_tags", PackedStringArray(["Runtime.Status.Resolve"]))
+						query.call("set_min_stack_count", 2)
+						_resolve_visual_query = query
+			if _resolve_visual_query != null:
+				return bool(_resolve_visual_query.call("matches_stacks", stacks))
+	return runtime_stack_count(node, "Runtime.Status.Resolve", fallback_stacks) >= 2
+
+## Cosmetic only: stackable native hit feedback for rapid consecutive hits.
+## The Local.Visual namespace is never authoritative gameplay state.
+static func hit_feedback_strength(node: Node, base_strength: float) -> float:
+	if not is_finite(base_strength) or base_strength <= 0.0:
+		return 0.0
+	var scale: float = runtime_attribute_value(node, "Visual.HitResponse", 1.0)
+	var timeline: Object = null
+	if node != null:
+		timeline = node.get_meta("effect_timeline", null) as Object
+	if timeline != null and timeline.has_method("apply_effect") and timeline.has_method("get_stacks"):
+		var tag := StringName("Local.Visual.RecentHit")
+		if bool(timeline.call("apply_effect", tag, 0.22, 1, 4, 0)):
+			var hits: int = int(timeline.call("get_stacks", tag))
+			return base_strength * scale * (1.0 + 0.12 * float(clampi(hits, 1, 4) - 1))
+	return base_strength * scale

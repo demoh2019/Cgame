@@ -492,6 +492,83 @@ func c_craft_from_stash(recipe: String, times: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_enchant(item_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "enchant", sim.cmd_enchant(peer, str(item_id)))
+
+
+@rpc("any_peer", "reliable")
+func c_repair_gear() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "repair_gear", sim.cmd_repair_gear(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_alliance(action: String, target_peer: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "alliance", sim.cmd_alliance(peer, str(action), target_peer))
+
+
+@rpc("any_peer", "reliable")
+func c_guild_bank(action: String, item_id: String, quantity: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "guild_bank", sim.cmd_guild_bank(peer, str(action), str(item_id), quantity))
+
+
+@rpc("any_peer", "reliable")
+func c_plant(seed_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "farm", sim.cmd_plant(peer, str(seed_id)))
+
+
+@rpc("any_peer", "reliable")
+func c_harvest() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "farm", sim.cmd_harvest(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_faction(action: String, faction_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "faction", sim.cmd_faction(peer, str(action), str(faction_id)))
+
+
+@rpc("any_peer", "reliable")
+func c_market_bid(item_id: String, quantity: int, unit_price: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "market", sim.cmd_market_bid(peer, str(item_id), quantity, unit_price))
+
+
+@rpc("any_peer", "reliable")
+func c_market_fill(bid_id: int, quantity: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "market", sim.cmd_market_fill(peer, bid_id, quantity))
+
+
+@rpc("any_peer", "reliable")
+func c_market_cancel_bid(bid_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "market", sim.cmd_market_cancel_bid(peer, bid_id))
+
+
+@rpc("any_peer", "reliable")
+func c_craft_focus(recipe: String, times: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "craft", sim.cmd_craft(peer, str(recipe), times, false, true))
+
+
+@rpc("any_peer", "reliable")
 func c_craft(recipe: String, times: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -1037,6 +1114,20 @@ func c_skill(dir_x: float, dir_z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_skill_ultimate(dir_x: float, dir_z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "skill", sim.cmd_skill(peer, dir_x, dir_z, true))
+
+
+@rpc("any_peer", "reliable")
+func c_gear_skill(slot: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "gear_skill", sim.cmd_gear_skill(peer, str(slot)))
+
+
+@rpc("any_peer", "reliable")
 func c_stagger_finisher() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -1234,10 +1325,16 @@ func server_tick(delta: float) -> void:
 	snapshot_accumulator += delta
 	if snapshot_accumulator >= 1.0 / float(Defs.SNAPSHOT_RATE):
 		snapshot_accumulator = 0.0
+		# One spatial index build for all viewers, not one per connection.
+		# Conditional calls retain compatibility with simulated Net fixtures.
+		if sim.has_method("prepare_snapshot_interest"):
+			sim.prepare_snapshot_interest()
 		for peer in sim.players:
 			var snap: Dictionary = sim.snapshot_for(peer)
 			if not snap.is_empty():
 				s_snapshot.rpc_id(peer, snap)
+		if sim.has_method("finish_snapshot_interest"):
+			sim.finish_snapshot_interest()
 
 
 ## Long-range thunder is atmospheric audio, not a remotely visible

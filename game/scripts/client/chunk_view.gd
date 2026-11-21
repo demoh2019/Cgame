@@ -1297,6 +1297,21 @@ func _build_windmills(windmills: Array, origin: Vector2) -> void:
 	set_process(true)
 
 
+## WorldStreamer only requests cosmetic simulation changes. Terrain, collision,
+## loot, and server-authoritative entities remain resident and unchanged.
+var _streaming_simulation_active := true
+
+
+func set_streaming_simulation_active(active: bool) -> void:
+	if _streaming_simulation_active == active:
+		return
+	_streaming_simulation_active = active
+	set_process(active)
+	if active:
+		# Re-evaluate blades immediately on the first near-field update.
+		_grass_lod_elapsed = GRASS_LOD_INTERVAL
+
+
 func _process(delta: float) -> void:
 	_service_decor(self)
 	_grow_grass()

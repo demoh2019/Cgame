@@ -63,6 +63,17 @@
 				The operation may result in an outer polygon (boundary) and inner polygon (hole) produced which could be distinguished by calling [method is_polygon_clockwise].
 			</description>
 		</method>
+		<method name="prune_points_min_distance">
+			<return type="PackedInt32Array" />
+			<param index="0" name="points" type="PackedVector2Array" />
+			<param index="1" name="min_distance" type="float" />
+			<param index="2" name="max_kept" type="int" default="-1" />
+			<description>
+				Cgame extension: performs deterministic greedy 2D point self-pruning, returning indices of kept points in their original order. Each point is kept only when it is at least [param min_distance] away from [b]every previously kept point[/b]; exactly equal distances are allowed. The first candidate is always retained when [param max_kept] is positive or unlimited. This is an ordered filter, not a stochastic Poisson-disk generator or a reorder/sort operation. [param max_kept] limits the result count; -1 keeps all qualifying points.
+				Ordinary inputs use a 2D spatial hash with a 3×3 neighborhood query. Extreme coordinate-to-radius ratios fall back to an exact full scan rather than overflowing grid coordinates. The entire input is validated before pruning: at most 8192 finite points, finite nonnegative [param min_distance] with a finite squared value, and [param max_kept] between -1 and 8192. Invalid input returns an empty array. A zero minimum distance retains all points, including duplicates, up to the requested maximum. The input array is not modified.
+				Useful for procedural scatter placement, vegetation, props, decals and candidate collision filtering. Does not inspect actual mesh bounds or physics bodies.
+			</description>
+		</method>
 		<method name="get_nearest_neighbors">
 			<return type="PackedInt32Array[]" />
 			<param index="0" name="points" type="PackedVector2Array" />
@@ -81,6 +92,16 @@
 			<description>
 				Returns the nearest point on a collection of independent 2D line segments. [param segment_endpoints] stores pairs of endpoints in order: [code][a0, b0, a1, b1, ...][/code]. A zero-length segment is treated as a point. Returns a [Dictionary] with [code]point[/code] ([Vector2]), [code]distance[/code] ([float]), [code]segment_index[/code] ([int], zero-based), and [code]t[/code] ([float], from 0 at the first endpoint to 1 at the second). Equal-distance results deterministically choose the first matching segment.
 				Returns an empty dictionary for an empty set, an odd number of endpoints, a nonfinite coordinate or more than 32768 segments. Values are checked before any search. This is a linear CPU search; callers handling many queries should partition segments spatially.
+			</description>
+		</method>
+		<method name="distance_transform_8">
+			<return type="PackedByteArray" />
+			<param index="0" name="mask" type="PackedByteArray" />
+			<param index="1" name="size" type="Vector2i" />
+			<param index="2" name="max_distance" type="int" />
+			<description>
+				Cgame extension: produces a row-major 8-bit [i]chessboard/Chebyshev[/i] distance field from a binary [param mask]. Every nonzero mask pixel is a feature with distance 0, and all other pixels receive their minimum number of horizontal, vertical or diagonal grid steps to a feature. Uses two linear-time 8-neighbor raster passes; no Euclidean-distance or signed-distance approximation is implied. Diagonal steps cost one pixel just like cardinal steps, and feature positions outside the image are not considered.
+				Values within [param max_distance] (inclusive) are returned as integers; 255 denotes no feature within the requested radius. A zero radius returns zeros for feature pixels and 255 elsewhere. [param size] must have both dimensions between 1 and 2048, the [param mask] must contain exactly [code]size.x * size.y[/code] bytes, and [param max_distance] must be between 0 and 254. Invalid input returns an empty array and reports an error. The input mask remains unchanged. This API operates on CPU data, not a GPU texture.
 			</description>
 		</method>
 		<method name="rasterize_segments_mask">

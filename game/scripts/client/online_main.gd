@@ -45,6 +45,7 @@ const DamageDirection = preload("res://scripts/client/damage_direction.gd")
 const BloodDecals = preload("res://scripts/client/blood_decals.gd")
 const HoverOutline = preload("res://scripts/client/hover_outline.gd")
 const BlobShadow = preload("res://scripts/client/blob_shadow.gd")
+const AbilityBar = preload("res://scripts/client/ability_bar.gd")
 const WetDrips = preload("res://scripts/client/wet_drips.gd")
 const ZombieFlies = preload("res://scripts/client/zombie_flies.gd")
 const Dragonflies = preload("res://scripts/client/dragonflies.gd")
@@ -1294,6 +1295,20 @@ func _on_welcomed() -> void:
 	add_child(hud)
 	hud.setup(client)
 	camera_fx.hud = hud
+	# Albion-style gear ability bar above the bottom HUD edge.
+	var ability_bar := AbilityBar.new()
+	ability_bar.name = "AbilityBar"
+	ability_bar.client = client
+	ability_bar.aim = _aim_direction
+	ability_bar.anchor_left = 0.5
+	ability_bar.anchor_right = 0.5
+	ability_bar.anchor_top = 1.0
+	ability_bar.anchor_bottom = 1.0
+	ability_bar.offset_left = -310.0
+	ability_bar.offset_right = 310.0
+	ability_bar.offset_top = -168.0
+	ability_bar.offset_bottom = -124.0
+	hud.add_child(ability_bar)
 	_access.setup(client, camera, func() -> bool: return _build_mode or hud.is_menu_open() or _typing())
 	hud.social = social
 	skills_panel = SkillsPanel.new()
@@ -1324,6 +1339,13 @@ func _on_welcomed() -> void:
 	streamer.load_radius = 150.0
 	streamer.unload_radius = 220.0
 	streamer.update_interval = 0.15
+	# Unreal-style independent simulation tier: keep far terrain and props
+	# loaded, but pause ChunkView's grass/decor/shadow/windmill CPU updates.
+	# Only client cosmetics opt in; networking and collision stay untouched.
+	if "simulation_radius" in streamer:
+		streamer.simulation_radius = 110.0
+		streamer.simulation_hysteresis = 20.0
+		streamer.max_simulation_transitions_per_update = 4
 	# Recover from transient generator/resource failures without an unbounded retry loop.
 	# A null chunk remains an intentionally empty world cell.
 	# Older engine builds lack the retry API; skip it instead of erroring.
@@ -1359,6 +1381,12 @@ func _on_welcomed() -> void:
 			if not Performance.has_custom_monitor(monitor_name):
 				Performance.add_custom_monitor(monitor_name, monitor[1])
 				_ambient_monitors.append(monitor_name)
+	if streamer.has_method("get_simulation_active_count"):
+		var simulation_monitor: StringName = &"Albion/StreamSimulationActive"
+		if not Performance.has_custom_monitor(simulation_monitor):
+			Performance.add_custom_monitor(simulation_monitor,
+				Callable(streamer, "get_simulation_active_count"))
+			_ambient_monitors.append(simulation_monitor)
 	_access.set_world_streamer(streamer)
 	# Streamer is created after the initial renderer setup; apply its draw-distance budget now.
 	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
@@ -2214,6 +2242,19 @@ func _unhandled_input(event: InputEvent) -> void:
 			hud.say(volume_message)
 			get_viewport().set_input_as_handled()
 			return
+	# Albion-style ability bar: Alt+G weapon ultimate, Alt+H chest, Alt+J helmet, Alt+K boots.
+	if event is InputEventKey and event.pressed and not event.echo and event.alt_pressed and not _typing() \
+			and event.keycode in [KEY_G, KEY_H, KEY_J, KEY_K]:
+		if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+			if event.keycode == KEY_G:
+				var ult_direction: Vector2 = _aim_direction()
+				if ult_direction == Vector2.ZERO:
+					ult_direction = Vector2(sin(client.yaw), cos(client.yaw))
+				client.skill_ultimate(ult_direction)
+			else:
+				client.gear_skill({KEY_H: "armor", KEY_J: "head", KEY_K: "feet"}[event.keycode])
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo and not _typing():
 		match event.keycode:
 			KEY_K:

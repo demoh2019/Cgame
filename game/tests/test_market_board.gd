@@ -1,5 +1,5 @@
 extends RefCounted
-## Market board and inventory settlement: stock is never escrowed on posting,
+## Market board and inventory settlement: posting escrows the stock with the market,
 ## and buying uses the same all-or-nothing two-inventory rules as direct barter.
 
 const Defs = preload("res://scripts/shared/defs.gd")
@@ -98,7 +98,7 @@ func run(t) -> void:
 	var before_list: Dictionary = seller.inventory.to_dict()
 	var placed: Dictionary = server.cmd_market_create(100, "wood_1", 10, 5)
 	t.check(placed["ok"], "seller advertises 10 wood")
-	t.eq(seller.inventory.to_dict(), before_list, "posting is non-escrow: it removes nothing")
+	t.eq(seller.inventory.count("wood_1"), 2, "posting escrows the listed goods (12 - 10)")
 	var listing_id: int = int(placed["id"])
 	var visible: Dictionary = server.cmd_market_list(200)
 	t.eq(visible["orders"].size(), 1, "one listing visible to buyer")
@@ -118,7 +118,7 @@ func run(t) -> void:
 	t.eq(server.cmd_market_buy(200, listing_id, 4, GameServer.MARKET_MAX_REQUEST_ID + 1)["reason"],
 		"invalid_request_id", "oversized request ID rejected")
 	t.eq(server.market_orders[listing_id]["remaining"], 6, "six units remain listed")
-	t.eq(seller.inventory.count("wood_1"), 8, "seller debited four units")
+	t.eq(seller.inventory.count("wood_1"), 2, "escrowed goods were already taken; the sale debits nothing more")
 	t.eq(buyer.inventory.count("wood_1"), 4, "buyer owns four units")
 	t.eq(seller.inventory.count("silver"), 19, "seller paid once after tax")
 	t.eq(buyer.inventory.count("silver"), 80, "buyer spent twenty")
@@ -150,44 +150,43 @@ func run(t) -> void:
 	t.check(seller.dirty_inventory and buyer.dirty_inventory, "both inventories marked dirty")
 	t.check(seller.dirty_character and buyer.dirty_character, "both saves marked dirty")
 
-	t.current = "no trading outside the hub and no stale listings"
+	t.current = "escrowed listings survive the seller (offline sales, hub payouts)"
 	var next: Dictionary = server.cmd_market_create(100, "wood_1", 2, 9)
 	var next_id: int = int(next["id"])
-	seller.inventory.remove("wood_1", 2)
-	t.eq(server.cmd_market_buy(200, next_id, 2, 5)["reason"], "missing_items",
-		"advertised goods are not created when seller spends them")
-	server._tick_market()
-	t.check(not server.market_orders.has(next_id), "unbacked listing is pruned by server tick")
+	t.check(bool(next.get("ok", false)), "second listing escrows two more wood")
 	var remote = server.add_player(400, "Remote")
 	remote.inventory.add("wood_1", 2)
 	remote.position = Vector3(170.0, server.world.height_at(170.0, 170.0), 170.0)
 	t.eq(server.cmd_market_create(400, "wood_1", 1, 9)["reason"], "no_station",
 		"remote listing forbidden")
-	t.eq(server.cmd_market_buy(400, listing_id, 1, 1)["reason"], "no_station",
+	t.eq(server.cmd_market_buy(400, next_id, 1, 1)["reason"], "no_station",
 		"remote buying forbidden")
-	seller.inventory.add("wood_1", 2)
-	var cancellation := server.cmd_market_create(100, "wood_1", 1, 9)
-	var cancellation_id: int = int(cancellation["id"])
+	var seller_account: String = server._market_account(seller)
+	var silver_before_logout: int = seller.inventory.count("silver")
 	server.remove_player(100)
 	t.check(not server.market_buy_requests.has(100), "disconnect clears request state for recycled peer ids")
-	t.check(not server.market_orders.has(cancellation_id), "disconnect cancels online advert")
-	t.eq(server.cmd_market_cancel(100, cancellation_id)["reason"], "unknown_listing",
-		"cancelled listing cannot be reused")
+	t.check(server.market_orders.has(next_id), "escrowed listing stays up while the seller is offline")
+	var offline_sale: Dictionary = server.cmd_market_buy(200, next_id, 2, 5)
+	t.check(bool(offline_sale.get("ok", false)), "goods sell while the seller is away")
+	t.check(int(server.market_payouts.get(seller_account, 0)) > 0, "proceeds wait for the seller at the hub")
+	t.eq(silver_before_logout, 48, "earlier online sales were already paid")
 
-	t.current = "expiration and death cancel adverts without item losses"
+	t.current = "expiration returns goods; death does not cancel escrow"
 	var safe_seller = server.add_player(501, "Other Seller")
 	_hub(server, safe_seller)
 	safe_seller.inventory.add("wood_1", 6)
 	var expiry := server.cmd_market_create(501, "wood_1", 3, 8)
 	var expiry_id: int = int(expiry["id"])
+	t.eq(safe_seller.inventory.count("wood_1"), 3, "three wood held in escrow")
 	server.time += MarketBoard.LISTING_LIFETIME + 1.0
 	server._tick_market()
-	t.check(not server.market_orders.has(expiry_id), "expired advert is removed")
-	t.eq(safe_seller.inventory.count("wood_1"), 6, "expiration does not lose any goods")
+	t.check(not server.market_orders.has(expiry_id), "expired listing is removed")
+	server.cmd_market_list(501)
+	t.eq(safe_seller.inventory.count("wood_1"), 6, "unsold goods come back when collected at the hub")
 	var dying := server.cmd_market_create(501, "wood_1", 3, 8)
 	safe_seller.survival.hurt(10000.0)
 	server._on_player_death(safe_seller, 200)
-	t.check(not server.market_orders.has(int(dying["id"])), "death cancels advertised stock")
+	t.check(server.market_orders.has(int(dying["id"])), "death does not cancel escrowed stock (it is no longer carried)")
 
 	t.current = "non-escrow listing budgets and lowest-price-first browsing"
 	var order_book: Dictionary = {
@@ -218,7 +217,7 @@ func run(t) -> void:
 		{"item": "stone_1", "price": 99, "id": 7},
 		{"item": "wood_1", "price": 1, "id": 1}), "market groups by item before price")
 
-	t.current = "authoritative double-listing protection, partial fills and stale stock"
+	t.current = "escrow prevents double-listing; partial fills and cheapest-first browsing"
 	var depth := GameServer.new(WorldGen.new(39), 39)
 	var maker = depth.add_player(701, "Maker")
 	var rival = depth.add_player(702, "Rival")
@@ -230,41 +229,29 @@ func run(t) -> void:
 	rival.inventory.add("wood_1", 3)
 	taker.inventory.add("silver", 1000)
 	var expensive: Dictionary = depth.cmd_market_create(701, "wood_1", 7, 20)
-	t.check(bool(expensive.get("ok", false)), "first seven-unit advert is posted")
+	t.check(bool(expensive.get("ok", false)), "first seven-unit listing is posted")
+	t.eq(maker.inventory.count("wood_1"), 3, "the seven listed units move into escrow")
 	var old_id: int = int(expensive.get("id", -1))
 	var rejected: Dictionary = depth.cmd_market_create(701, "wood_1", 4, 15)
-	t.eq(rejected.get("reason", ""), "already_listed",
-		"seller cannot advertise eleven items while carrying ten")
-	t.eq(rejected.get("available", -1), 3, "server reports exactly three unlisted units")
-	t.eq(depth.market_orders.size(), 1, "rejected advert is never published")
+	t.check(not bool(rejected.get("ok", false)), "cannot list four more while carrying three")
+	t.eq(depth.market_orders.size(), 1, "rejected listing is never published")
 	var cheap: Dictionary = depth.cmd_market_create(701, "wood_1", 3, 15)
 	var bargain: Dictionary = depth.cmd_market_create(702, "wood_1", 3, 5)
 	t.check(cheap.get("ok", false) and bargain.get("ok", false),
 		"remaining stock and another seller may both be listed")
-	t.eq(maker.inventory.count("wood_1"), 10, "posting does not remove actual items")
+	t.eq(maker.inventory.count("wood_1"), 0, "all of the maker's wood is now in escrow")
 	var browsing: Array = depth.cmd_market_list(703)["orders"]
-	t.eq(browsing.size(), 3, "all three backed listings are visible")
+	t.eq(browsing.size(), 3, "all three listings are visible")
 	if browsing.size() == 3:
 		t.eq([browsing[0]["id"], browsing[1]["id"], browsing[2]["id"]],
 			[bargain["id"], cheap["id"], expensive["id"]],
 			"same-item offers sort by lowest price, not by creation order")
 	var sale: Dictionary = depth.cmd_market_buy(703, old_id, 4, 1)
 	t.check(sale.get("ok", false), "real partial fill settles normally")
-	t.eq(maker.inventory.count("wood_1"), 6, "four listed items are transferred")
-	t.eq(MarketBoard.listed_quantity(depth.market_orders, 701, "wood_1"), 6,
-		"remaining advertised quantities decrease with actual stock")
-	t.eq(depth.cmd_market_create(701, "wood_1", 1, 10).get("reason", ""), "already_listed",
-		"a partial fill does not reopen budget that was actually sold")
+	t.eq(taker.inventory.count("wood_1"), 4, "four listed items are delivered")
+	t.eq(int(depth.market_orders[old_id]["remaining"]), 3, "the listing keeps the other three")
+	t.eq(depth.cmd_market_create(701, "wood_1", 1, 10).get("ok", false), false,
+		"nothing left to list once everything is escrowed")
 	t.eq(depth.cmd_market_buy(703, old_id, 4, 1), sale,
-		"replayed purchase cannot release extra listing budget")
-	maker.inventory.remove("wood_1", 1)
-	var after_spending: Array = depth.cmd_market_list(703)["orders"]
-	t.eq(after_spending.size(), 2, "refresh automatically removes now-unbacked advert")
-	t.check(depth.market_orders.has(old_id), "oldest listing remains active first")
-	t.check(not depth.market_orders.has(int(cheap["id"])),
-		"newer competing listing is removed when merchant spends promised stock")
-	t.eq(depth.cmd_market_create(701, "wood_1", 2, 8).get("ok", false), true,
-		"seller can re-advertise stock left after deterministic pruning")
-	t.eq(depth.cmd_market_create(701, "wood_1", 1, 8).get("reason", ""), "already_listed",
-		"remaining stock cannot be promised a third time")
-	t.eq(rival.inventory.count("wood_1"), 3, "another seller's items remain untouched")
+		"replayed purchase returns the original result")
+	t.eq(rival.inventory.count("wood_1"), 0, "the rival's listed wood is escrowed too")

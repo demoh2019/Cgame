@@ -29,6 +29,7 @@ var players: Dictionary = {} # id -> entity from the latest snapshot
 var zombies: Dictionary = {}
 var barricades: Dictionary = {} # Nearby defenses from the server.
 var campfires: Dictionary = {} # Nearby temporary warmth sources, server-provided.
+var farm_plots: Dictionary = {} # Nearby homestead crop plots, server-provided.
 var shelters: Dictionary = {} # Replicated temporary weather cover.
 var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
 var smoke_clouds: Dictionary = {} # Interest-limited, temporary visual smoke.
@@ -144,6 +145,9 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	smoke_clouds.clear()
 	for entity in snapshot.get("smoke_clouds", []):
 		smoke_clouds[int(entity["id"])] = entity
+	farm_plots.clear()
+	for plot in snapshot.get("farm_plots", []):
+		farm_plots[int(plot["id"])] = plot
 	campfires.clear()
 	for entity in snapshot.get("campfires", []):
 		campfires[int(entity["id"])] = entity
@@ -296,8 +300,21 @@ func fish(baited: bool = false, storm_cast: bool = false) -> void:
 	net.c_fish.rpc_id(1, baited, storm_cast)
 
 
+func enchant(item_id: String) -> void:
+	net.c_enchant.rpc_id(1, item_id)
+
+
+func repair_gear() -> void:
+	net.c_repair_gear.rpc_id(1)
+
+
 func craft(recipe: String, times: int = 1) -> void:
 	net.c_craft.rpc_id(1, recipe, times)
+
+
+## Albion-style focus craft: spends focus at a city workbench to get materials back.
+func craft_focus(recipe: String, times: int = 1) -> void:
+	net.c_craft_focus.rpc_id(1, recipe, times)
 
 
 func craft_from_stash(recipe: String, times: int = 1) -> void:
@@ -574,6 +591,16 @@ func skill(direction: Vector2) -> void:
 	net.c_skill.rpc_id(1, direction.x, direction.y)
 
 
+## Weapon ultimate (E): a charged version of the weapon skill with its own cooldown.
+func skill_ultimate(direction: Vector2) -> void:
+	net.c_skill_ultimate.rpc_id(1, direction.x, direction.y)
+
+
+## Armor abilities: "armor" (Iron Skin), "head" (Second Wind), "feet" (Sprint).
+func gear_skill(slot: String) -> void:
+	net.c_gear_skill.rpc_id(1, slot)
+
+
 func stagger_finisher() -> void:
 	# Server picks the real stunned target; clients send no target ID.
 	net.c_stagger_finisher.rpc_id(1)
@@ -823,3 +850,40 @@ func nearest_loot(point: Vector3, radius: float) -> Dictionary:
 					best = {"id": crate["id"], "kind": "crate", "x": crate["x"], "z": crate["z"]}
 					best_distance = distance
 	return best
+
+
+## Albion-style buy orders (escrowed silver; sellers fill them at the hub).
+func market_bid(item_id: String, quantity: int, price: int) -> void:
+	net.c_market_bid.rpc_id(1, item_id, quantity, price)
+
+
+func market_fill(bid_id: int, quantity: int) -> void:
+	net.c_market_fill.rpc_id(1, bid_id, quantity)
+
+
+func market_cancel_bid(bid_id: int) -> void:
+	net.c_market_cancel_bid.rpc_id(1, bid_id)
+
+
+## Faction warfare: "enlist" (with a faction id), "flag", "unflag", "redeem".
+func faction(action: String, faction_id: String = "") -> void:
+	net.c_faction.rpc_id(1, action, faction_id)
+
+
+## Homestead farming: plant a carried seed in front of you / harvest your nearest ripe plot.
+func plant(seed_id: String) -> void:
+	net.c_plant.rpc_id(1, seed_id)
+
+
+func harvest() -> void:
+	net.c_harvest.rpc_id(1)
+
+
+## Guild bank at the hub: "list", "deposit" (any member) or "withdraw" (officers).
+func guild_bank(action: String, item_id: String = "", quantity: int = 0) -> void:
+	net.c_guild_bank.rpc_id(1, action, item_id, quantity)
+
+
+## Guild alliances (leaders, hub): "invite" (target peer), "accept", "leave", "status".
+func alliance(action: String, target_peer: int = -1) -> void:
+	net.c_alliance.rpc_id(1, action, target_peer)

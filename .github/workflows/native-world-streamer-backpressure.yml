@@ -11,6 +11,9 @@ on:
       - 'game/tests/test_world_streamer_backpressure.gd'
       - 'game/tests/run_all.gd'
       - 'tests/scene/test_world_streamer_backpressure.cpp'
+      - 'tests/scene/test_world_streamer_simulation_tiers.cpp'
+      - 'game/tests/test_world_streamer_simulation_tiers.gd'
+      - 'game/tests/run_simulation_tiers.gd'
       - 'tests/scene/test_world_streamer_backpressure_contract.py'
       - '.github/workflows/native-world-streamer-backpressure.yml'
   push:
@@ -22,6 +25,9 @@ on:
       - 'game/scripts/client/online_main.gd'
       - 'game/tests/test_world_streamer_backpressure.gd'
       - 'tests/scene/test_world_streamer_backpressure.cpp'
+      - 'tests/scene/test_world_streamer_simulation_tiers.cpp'
+      - 'game/tests/test_world_streamer_simulation_tiers.gd'
+      - 'game/tests/run_simulation_tiers.gd'
       - 'tests/scene/test_world_streamer_backpressure_contract.py'
       - '.github/workflows/native-world-streamer-backpressure.yml'
 
@@ -83,6 +89,14 @@ jobs:
           timeout 300s "$BIN" --headless --path game --script res://tests/run_streamer_backpressure.gd 2>&1 | tee streamer-game.log
           grep -E '^STREAM BACKPRESSURE TOTAL: [0-9]+ checks, 0 failures$' streamer-game.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' streamer-game.log; then exit 1; fi
+      - name: Game native simulation-tier regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_simulation_tiers.gd 2>&1 | tee simulation-tier.log
+          grep -E '^SIMULATION TIERS TOTAL: [0-9]+ checks, 0 failures$' simulation-tier.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' simulation-tier.log; then exit 1; fi
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -93,3 +107,4 @@ jobs:
             streamer-native.log
             streamer-import.log
             streamer-game.log
+            simulation-tier.log

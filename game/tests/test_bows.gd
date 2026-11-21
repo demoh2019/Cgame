@@ -63,6 +63,7 @@ func run(t) -> void:
 	t.current = "server crafting, weapon ownership and no-ammo gating"
 	var world := WorldGen.new(781)
 	var server := GameServer.new(world, 781)
+	server.craft_quality_enabled = false # This suite checks the item itself, not quality rolls.
 	var archer = server.add_player(781, "WoodlandArcher")
 	archer.inventory.add("plank_1", 2)
 	archer.inventory.add("fiber_1", 4)

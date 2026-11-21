@@ -3,6 +3,35 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
+const WorldGen = preload("res://scripts/shared/world_gen.gd")
+
+
+## Snapshot of the original ordered probability rules. The native sampler
+## must preserve actual loot AND consumption of the server's seeded RNG.
+static func _legacy_crate_loot(zone: int, rng: RandomNumberGenerator) -> Dictionary:
+	var loot: Dictionary = {}
+	var tier: int = WorldGen.tier_for_zone(zone)
+	var rolls: int = rng.randi_range(2, 4)
+	for i in rolls:
+		var roll: float = rng.randf()
+		if roll < 0.24:
+			loot["canned_food"] = int(loot.get("canned_food", 0)) + 1
+		elif roll < 0.44:
+			loot["water_bottle"] = int(loot.get("water_bottle", 0)) + 1
+		elif roll < 0.60:
+			loot["bandage"] = int(loot.get("bandage", 0)) + rng.randi_range(1, 2)
+		elif roll < 0.76:
+			loot["scrap"] = int(loot.get("scrap", 0)) + rng.randi_range(2, 6)
+		elif roll < 0.86:
+			loot["cloth_%d" % tier] = int(loot.get("cloth_%d" % tier, 0)) + rng.randi_range(1, 3)
+		elif roll < 0.95:
+			loot["ammo_9mm"] = int(loot.get("ammo_9mm", 0)) + rng.randi_range(6, 18)
+		else:
+			loot["pistol"] = 1
+	if rng.randf() < (0.14 if zone >= 2 else 0.025):
+		loot["antibiotics"] = 1
+	loot["silver"] = rng.randi_range(2, 10) * tier
+	return loot
 
 
 func run(t) -> void:
@@ -70,6 +99,44 @@ func run(t) -> void:
 	t.check(Combat.weapon_damage("club_3") > Combat.weapon_damage("club_1"), "higher tier hits harder")
 	t.near(Combat.weapon_damage("pistol"), 22.0, 0.0001, "pistol damage")
 	t.check(Combat.weapon_cooldown("") > 0.0, "fists have a cooldown")
+
+	t.current = "native weighted crate categories with seeded fallback parity"
+	var boundaries: Array[float] = [0.0, 0.23999, 0.24, 0.43999,
+		0.44, 0.59999, 0.60, 0.75999, 0.76, 0.85999, 0.86, 0.94999, 0.95, 0.99999]
+	var expected_buckets: Array[int] = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6]
+	for i in boundaries.size():
+		t.eq(Combat.crate_loot_bucket(boundaries[i]), expected_buckets[i],
+			"category boundary %d retains historical probability" % i)
+	if ClassDB.class_exists("WeightedChoiceTable"):
+		var table: Object = ClassDB.instantiate("WeightedChoiceTable")
+		t.check(table != null, "weighted selection is available as a native engine Resource")
+		if table != null:
+			var weights := PackedFloat64Array([24.0, 20.0, 16.0, 16.0, 10.0, 9.0, 5.0])
+			t.check(bool(table.call("configure", weights)), "native table accepts valid crate weights")
+			t.eq(int(table.call("get_option_count")), 7, "native table keeps seven loot categories")
+			t.near(float(table.call("get_probability", 6)), 0.05, 0.000001,
+				"pistol chance stays five percent")
+			var samples := PackedFloat64Array([0.0, 0.24, 0.44, 0.95])
+			t.eq(table.call("sample_many", samples), PackedInt32Array([0, 1, 2, 6]),
+				"native multi-sample preserves order")
+			t.check(not bool(table.call("configure", PackedFloat64Array([1.0, -3.0]))),
+				"invalid table replacement is rejected")
+			t.eq(int(table.call("sample_unit", 0.95)), 6,
+				"rejected replacement leaves prior native table intact")
+	else:
+		t.eq(Combat.crate_loot_bucket(0.95), 6, "stock Godot keeps historical rarity")
+	for zone in range(4):
+		for sample_seed in range(64):
+			var seed: int = sample_seed * 7919 + zone * 16127 + 17
+			var expected_rng := RandomNumberGenerator.new()
+			var actual_rng := RandomNumberGenerator.new()
+			expected_rng.seed = seed
+			actual_rng.seed = seed
+			var before: Dictionary = _legacy_crate_loot(zone, expected_rng)
+			var after: Dictionary = Combat.crate_loot(zone, actual_rng)
+			t.eq(after, before, "crate item parity zone %d seed %d" % [zone, seed])
+			t.eq(actual_rng.state, expected_rng.state,
+				"RNG draw order preserved zone %d seed %d" % [zone, seed])
 
 	t.current = "loot tables"
 	var rng := RandomNumberGenerator.new()

@@ -35,8 +35,8 @@ static func refusal(player, now: float) -> String:
 	if player.survival.hunger <= 5.0 or player.survival.thirst <= 5.0:
 		return "exhausted"
 	if (player.combat_tag_until > now or player.attack_timer > 0.0
-			or player.skill_timer > 0.0 or player.dodge_timer > 0.0
-			or player.noise_timer > 0.0):
+			or player.skill_timer > 0.0 or player.dodge_timer > 0.0):
+		# Noise is not combat: riding and sprinting make noise too, and shots already set the combat tag.
 		return "in_combat"
 	if not player.action.is_empty():
 		return "busy"

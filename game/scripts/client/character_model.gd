@@ -39,6 +39,8 @@ var _last_yaw := INF
 var _yaw_rate := 0.0
 var _lod_tier := 0
 var _lod_accum := 0.0
+var _status_pulse_tween: Tween
+var _hit_flash_tween: Tween
 
 # Pack mode state.
 var _zombie := false
@@ -945,9 +947,31 @@ func update_motion(delta: float) -> void:
 ## Diablo IV / Hades-style hit flash: every material of this character pops to
 ## a white emissive glow and fades out in ~0.14 s. Reuses the per-character
 ## material duplicates, so other characters are never affected.
+## Subtle emission cue for a periodic status effect. A real hit always wins.
+## The periodic scheduler coalesces pulses before calling this method.
+func status_pulse(color: Color) -> void:
+	if _materials.is_empty() or not is_inside_tree():
+		return
+	if _status_pulse_tween != null and _status_pulse_tween.is_running():
+		return
+	if _hit_flash_tween != null and _hit_flash_tween.is_running():
+		return # Never reduce or recolor a genuine damage flash.
+	for material in _materials:
+		if material == null:
+			continue
+		material.emission_enabled = true
+		material.emission = color
+		material.emission_energy_multiplier = 0.95
+	_status_pulse_tween = create_tween()
+	_status_pulse_tween.tween_method(_set_flash_energy, 0.95, 0.0, 0.22).set_ease(Tween.EASE_OUT)
+	_status_pulse_tween.tween_callback(_end_flash)
+
+
 func hit_flash(strength: float = 1.0) -> void:
 	if _materials.is_empty():
 		return
+	if _status_pulse_tween != null and _status_pulse_tween.is_running():
+		_status_pulse_tween.kill()
 	var energy: float = 2.4 * clampf(strength, 0.3, 1.5)
 	for material in _materials:
 		if material == null:
@@ -955,9 +979,11 @@ func hit_flash(strength: float = 1.0) -> void:
 		material.emission_enabled = true
 		material.emission = Color(1.0, 0.96, 0.9)
 		material.emission_energy_multiplier = energy
-	var tween := create_tween()
-	tween.tween_method(_set_flash_energy, energy, 0.0, 0.14).set_ease(Tween.EASE_OUT)
-	tween.tween_callback(_end_flash)
+	if _hit_flash_tween != null and _hit_flash_tween.is_running():
+		_hit_flash_tween.kill()
+	_hit_flash_tween = create_tween()
+	_hit_flash_tween.tween_method(_set_flash_energy, energy, 0.0, 0.14).set_ease(Tween.EASE_OUT)
+	_hit_flash_tween.tween_callback(_end_flash)
 
 
 func _set_flash_energy(value: float) -> void:

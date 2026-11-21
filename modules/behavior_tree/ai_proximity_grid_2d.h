@@ -40,6 +40,11 @@
 class AIProximityGrid2D : public RefCounted {
 	GDCLASS(AIProximityGrid2D, RefCounted);
 
+private:
+	Array _query_impl(const PackedVector2Array &p_positions,
+			const PackedInt32Array &p_source_indices, double p_radius,
+			double p_cell_size, int p_max_neighbors) const;
+
 protected:
 	static void _bind_methods();
 
@@ -50,4 +55,11 @@ public:
 	Array query_radius_batch(const PackedVector2Array &p_positions,
 			const PackedInt32Array &p_source_indices,
 			double p_radius, double p_cell_size) const;
+
+	// Limited nearest neighbors, ties by input index. Returns chosen indices
+	// ascending by input index (not distance) to retain game event order.
+	// p_max_neighbors must be 1..64. Invalid queries return [].
+	Array query_nearest_batch(const PackedVector2Array &p_positions,
+			const PackedInt32Array &p_source_indices,
+			double p_radius, double p_cell_size, int p_max_neighbors) const;
 };

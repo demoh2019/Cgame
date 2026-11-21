@@ -13,6 +13,45 @@ const KIND_COLORS := {
 }
 const MARKER_RANGE := 650.0
 const MARKER_COUNT := 3
+const ZOMBIE_BAR_BUDGET := 32 # Cosmetic HUD only; never cull 3D characters or combat.
+
+# One native significance planner shared across overlay refreshes, if supported.
+static var _significance_planner: Object = null
+static var _significance_checked: bool = false
+
+
+## Pure bounded choice used by the actual zombie HUD. The native engine handles
+## large crowds; stock Godot uses the same deterministic priority ordering.
+static func select_zombie_bar_indices(distances: PackedFloat64Array,
+		priorities: PackedByteArray, budget: int = ZOMBIE_BAR_BUDGET,
+		allow_native: bool = true) -> PackedInt32Array:
+	var empty := PackedInt32Array()
+	if distances.size() != priorities.size() or distances.size() > 16384 or budget < 0 or budget > 128:
+		return empty
+	for i in distances.size():
+		if not is_finite(distances[i]) or distances[i] < 0.0 or priorities[i] > 3:
+			return empty
+	if allow_native:
+		if not _significance_checked:
+			_significance_checked = true
+			if ClassDB.class_exists("SignificanceBudgetPlanner"):
+				_significance_planner = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if _significance_planner != null and _significance_planner.has_method("select_top"):
+			return _significance_planner.call("select_top", distances, priorities, budget)
+	var order: Array[int] = []
+	for i in distances.size():
+		order.append(i)
+	order.sort_custom(func(a: int, b: int) -> bool:
+		if priorities[a] != priorities[b]:
+			return priorities[a] > priorities[b]
+		if distances[a] != distances[b]:
+			return distances[a] < distances[b]
+		return a < b
+	)
+	var indices := PackedInt32Array()
+	for i in mini(order.size(), budget):
+		indices.append(order[i])
+	return indices
 
 var client
 var camera: Camera3D
@@ -104,15 +143,33 @@ func _text(position: Vector2, text: String, size: int, color: Color, width: floa
 
 func _draw_zombie_bars(view: Vector2) -> void:
 	var here: Vector3 = client.display_position()
+	var eligible: Array[Dictionary] = []
+	var screen_points := PackedVector2Array()
+	var distances := PackedFloat64Array()
+	var priorities := PackedByteArray()
+	# The existing proximity and projected-screen checks run before budgeting:
+	# offscreen infected never consume scarce HUD slots.
 	for zombie in client.zombies.values():
 		var top := Vector3(float(zombie["x"]), float(zombie["y"]) + 2.7, float(zombie["z"]))
 		if bool(zombie.get("raid_boss", false)):
 			top.y += 2.2
-		if top.distance_to(here) > 45.0 or camera.is_position_behind(top):
+		var distance: float = top.distance_to(here)
+		if not is_finite(distance) or distance > 45.0 or camera.is_position_behind(top):
 			continue
 		var spot: Vector2 = camera.unproject_position(top)
 		if spot.x < -40.0 or spot.y < -40.0 or spot.x > view.x + 40.0 or spot.y > view.y + 40.0:
 			continue
+		eligible.append(zombie)
+		screen_points.append(spot)
+		distances.append(distance)
+		# Boss > elite > actual attacker > ordinary enemy. Critical combat
+		# telegraphs still use their own independent animation budget.
+		priorities.append(3 if bool(zombie.get("raid_boss", false)) else
+			(2 if bool(zombie.get("elite", false)) else
+			(1 if int(zombie.get("state", 0)) >= 3 else 0)))
+	for selected in select_zombie_bar_indices(distances, priorities):
+		var zombie: Dictionary = eligible[selected]
+		var spot: Vector2 = screen_points[selected]
 		var maximum: float = maxf(float(zombie.get("max_hp", zombie.get("hp", 1.0))), 1.0)
 		var fraction: float = clampf(float(zombie.get("hp", 0.0)) / maximum, 0.0, 1.0)
 		var boss: bool = bool(zombie.get("raid_boss", false))

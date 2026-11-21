@@ -31,6 +31,7 @@
 #pragma once
 
 #include "ai_execution_profiler.h"
+#include "ai_behavior_trace.h"
 
 #include "core/io/resource.h"
 #include "core/object/gdvirtual.gen.h"
@@ -58,6 +59,9 @@ protected:
 
 public:
 	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta);
+	// Executes the virtual task normally, but records optional per-node trace.
+	// All built-in composites/decorators use this to preserve child paths.
+	Status execute_traced(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta);
 	virtual bool contains_task(const BehaviorTreeTask *p_target, int p_depth = 0) const;
 };
 
@@ -289,6 +293,8 @@ class BehaviorTreeRunner : public Node {
 	bool auto_tick = false;
 	bool finished = false;
 	Ref<AIExecutionProfiler> execution_profiler;
+	Ref<AIBehaviorTrace> execution_trace;
+	bool trace_enabled = false;
 
 protected:
 	static void _bind_methods();
@@ -311,6 +317,13 @@ public:
 	bool is_profiling_enabled() const;
 	Dictionary get_profile_snapshot() const;
 	void reset_profile();
+	void set_trace_enabled(bool p_enabled);
+	bool is_trace_enabled() const { return trace_enabled; }
+	Dictionary get_trace_snapshot() const;
+	// On-demand hierarchy: all Resource tasks plus latest per-path trace status.
+	// Unvisited nodes remain visible with status=-1 and executed=false.
+	Dictionary get_tree_snapshot() const;
+	void reset_trace();
 
 	BehaviorTreeRunner();
 };

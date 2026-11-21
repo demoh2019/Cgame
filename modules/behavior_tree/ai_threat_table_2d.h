@@ -55,6 +55,9 @@ public:
 	// Dictionary is a reference-counted container; methods mutate the
 	// supplied table in place, and do not copy or persist it.
 	bool record(Dictionary p_entries, int64_t p_peer_id, double p_damage) const;
+	// Modify a single existing target's threat without creating new aggro.
+	// Factor must be finite and in [0, 1], with zero forgetting the target.
+	bool scale(Dictionary p_entries, int64_t p_peer_id, double p_factor) const;
 	void decay(Dictionary p_entries, double p_delta) const;
 	int64_t pick(Dictionary p_entries, const Dictionary &p_players, const Vector2 &p_origin, double p_leash, int64_t p_current_target = -1) const;
 };

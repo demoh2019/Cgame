@@ -30,6 +30,7 @@
 
 
 #include "gameplay_tag_container.h"
+#include "gameplay_tag_stack_container.h"
 
 #include "core/object/class_db.h"
 
@@ -266,6 +267,48 @@ bool GameplayTagQuery::matches(const Ref<GameplayTagContainer> &p_container) con
 	return true;
 }
 
+void GameplayTagQuery::set_min_stack_count(int p_count) {
+	// A finite, positive threshold is always safe to serialize in a Resource.
+	const int next_count = CLAMP(p_count, 1, 65535);
+	if (min_stack_count == next_count) {
+		return;
+	}
+	min_stack_count = next_count;
+	emit_changed();
+}
+
+bool GameplayTagQuery::matches_stacks(const Ref<GameplayTagStackContainer> &p_container) const {
+	// No intermediate tag list or copied Dictionary: use the native indexed
+	// count lookup directly. The parent scope totals descendant stack counts.
+	const auto has_enough = [&](const String &p_tag) {
+		return p_container.is_valid() &&
+				p_container->get_stack_count(StringName(p_tag), exact) >= min_stack_count;
+	};
+	for (const String &tag : all_tags) {
+		if (!has_enough(tag)) {
+			return false;
+		}
+	}
+	if (!any_tags.is_empty()) {
+		bool found = false;
+		for (const String &tag : any_tags) {
+			if (has_enough(tag)) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			return false;
+		}
+	}
+	for (const String &tag : none_tags) {
+		if (has_enough(tag)) {
+			return false;
+		}
+	}
+	return true;
+}
+
 void GameplayTagQuery::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_all_tags", "tags"), &GameplayTagQuery::set_all_tags);
 	ClassDB::bind_method(D_METHOD("get_all_tags"), &GameplayTagQuery::get_all_tags);
@@ -277,11 +320,15 @@ void GameplayTagQuery::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_exact"), &GameplayTagQuery::is_exact);
 	ClassDB::bind_method(D_METHOD("set_min_any_matches", "count"), &GameplayTagQuery::set_min_any_matches);
 	ClassDB::bind_method(D_METHOD("get_min_any_matches"), &GameplayTagQuery::get_min_any_matches);
+	ClassDB::bind_method(D_METHOD("set_min_stack_count", "count"), &GameplayTagQuery::set_min_stack_count);
+	ClassDB::bind_method(D_METHOD("get_min_stack_count"), &GameplayTagQuery::get_min_stack_count);
 	ClassDB::bind_method(D_METHOD("matches", "container"), &GameplayTagQuery::matches);
+	ClassDB::bind_method(D_METHOD("matches_stacks", "container"), &GameplayTagQuery::matches_stacks);
 
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "all_tags"), "set_all_tags", "get_all_tags");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "any_tags"), "set_any_tags", "get_any_tags");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "none_tags"), "set_none_tags", "get_none_tags");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "exact"), "set_exact", "is_exact");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "min_any_matches", PROPERTY_HINT_RANGE, "1,64,1"), "set_min_any_matches", "get_min_any_matches");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "min_stack_count", PROPERTY_HINT_RANGE, "1,65535,1"), "set_min_stack_count", "get_min_stack_count");
 }

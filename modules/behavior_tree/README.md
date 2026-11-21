@@ -5,6 +5,36 @@ behavior tree system for gameplay AI. It is not a visual graph editor yet.
 When enabled, all resources are available in the scene inspector and in
 GDScript. The module has no third-party runtime dependencies.
 
+## Visual BehaviorTree Inspector: editor dock and runtime tree
+
+The native `BehaviorTreeRunner.get_tree_snapshot()` now returns the **full task hierarchy** even for branches that were not run on the last tick. It merges on-demand `AIBehaviorTrace` statuses into stable Resource paths, distinguishes `NOT RUN` from `SUCCESS`, `FAILURE` and `RUNNING`, and includes inclusive CPU time per visited node. Maximum 256 task nodes, with a graph-truncation flag; no per-frame tree walk when unused.
+
+Two editor-ready addon copies live at `game/addons/cgame_bt_debugger/` and `modules/behavior_tree/demo_reactive_ai/addons/cgame_bt_debugger/`, enabled in both Godot project files. The **Cgame AI** right-hand editor dock inspects a selected `BehaviorTreeRunner` in the edited scene (or the first runner under the scene root), with Refresh, colored statuses and resource paths. It safely reports a missing native class on stock Godot. This editor view **does not attach to the remote running game's process**; live per-tick behavior appears in the demo's runtime inspector panel.
+
+The playable sandbox now includes a live `Tree` UI with status colors, execution times and nested Resource tasks, shown only when **T** enables tracing. The canonical game uses a GDScript zombie state machine rather than a BehaviorTree, and exposes compatible **server-only** `Zombie.get_ai_state_visual_snapshot()` data showing its actual active state and last traced target-selection phase. These debug APIs are not network RPCs and must not be forwarded to multiplayer clients.
+
+## Opt-in per-node AI execution tracing
+
+`AIBehaviorTrace` brings a bounded per-task execution history to Cgame's native Resource behavior trees. This implements a practical part of the debugging workflows seen in Unreal's Behavior Tree debugger and LimboAI's runtime inspector: each executed task records its **path, class, returned status, tree depth and inclusive CPU time** in start order. It retains only the latest tick (128 steps by default, up to 256), with an explicit `truncated` count for oversized trees.
+
+```gdscript
+var brain: BehaviorTreeRunner = $BehaviorTreeRunner
+brain.trace_enabled = true                  # Opt-in; default is false.
+brain.tick(0.2)
+var trace: Dictionary = brain.get_trace_snapshot()
+for entry in trace.get("steps", []):
+    print(entry["path"], " | ", entry["task_class"],
+          " | result=", entry["status"], " | usec=", entry["duration_usec"])
+brain.reset_trace()
+brain.trace_enabled = false
+```
+
+Only the selected runner allocates trace storage and calls the CPU clock for individual tasks. Tracing is independent of `profiling_enabled`, which tracks aggregate execution time. Shared task Resources do not share trace data; each agent has its own memory. The runner's `get_debug_snapshot()` now includes a detached `trace` record alongside the Blackboard and execution memory. **Do not forward internal AI decision traces or Blackboard data to ordinary multiplayer clients.**
+
+The playable AI demo enables trace initially and uses **T** to toggle per-node recording. Albion After also integrates the underlying `AIBehaviorTrace` with its authoritative zombie state machine for optional timing of real target selection, through `Zombie.enable_ai_trace(true)` and server-side `get_ai_trace_snapshot()`. No gameplay logic or random-number generation is changed by enabling traces.
+
+This is a bounded inspection API, not yet a graphical dock in the Godot editor or an offline history of every past tick. Scripted task internals are opaque; each scripted task is shown as one node when executed through native composites.
+
 ## Native timed decorators and action cooldowns
 
 Cgame now provides `BehaviorTreeDecorator` as the cycle-safe single-child Resource foundation, plus two reusable task decorators familiar from Unreal Engine Behavior Trees and Godot LimboAI.
@@ -226,6 +256,7 @@ caller-owned `Dictionary`:
 var table := AIThreatTable2D.new()
 var hate := {} # each NPC owns its own table
 table.record(hate, attacker_id, actual_server_damage)
+table.scale(hate, medic_id, 0.35) # retain existing healer aggro after an authorized rescue
 table.decay(hate, delta)
 var best_peer_id := table.pick(hate, server_players, enemy_xz, max_leash, current_peer_id)
 ```
@@ -241,6 +272,12 @@ once and calls its methods from the authoritative infected state machine,
 with a GDScript reference fallback on stock Godot. Source identities,
 damage validation, safe-zone authority and network synchronization remain
 entirely game-owned. No native threat data is sent to ordinary clients.
+
+The new `scale(entries, peer_id, factor)` method offers an opt-in, server-only
+single-target hate reduction primitive. It rejects non-finite factors, factors
+outside [0, 1] and missing peer IDs without altering the table. Factor zero
+forgets one target; it never generates combat threat or amplifies existing hate.
+Albion After uses this engine feature for guardian-assisted medic rescue.
 
 See `game/docs/NATIVE_AI_THREAT_TABLE.md`.
 
@@ -277,3 +314,39 @@ CPU overhead justifies the reduction in script loops.
 
 References: spatial partitioning used in Unity-style entity proximity
 workflows and Unreal Engine Mass crowd processing; no code copied.
+
+## Bounded nearest-neighbor fanout for dense infected packs
+
+`AIProximityGrid2D.query_nearest_batch(positions, sources, radius, cell_size, max_neighbors)`
+selects a maximum of **1–64** closest points for each source (source itself
+excluded). Distance ties choose the smaller **original input index**. The
+returned indices are sorted by input index, preserving authoritative game
+event order irrespective of bucket iteration. Exact radius hits are included.
+
+Capped queries retain at most K candidates per source while scanning the
+same 3×3 spatial buckets. The original four-argument
+`query_radius_batch()` remains unchanged, with no neighbor limit.
+
+Albion After now alerts at most **12 nearest infected per active source**
+within the established **18-metre** awareness radius. This prevents sudden,
+unbounded mass wake-ups in dense crowds while retaining server-side
+`Zombie.receive_pack_alert()` checks for legitimate players, safe hubs,
+combat state, territory and pursuit limits. Sources are frozen before alerts
+so freshly recruited NPCs cannot relay alerts during the same pass.
+
+`game/scripts/shared/pack_neighbor_selection.gd` performs equivalent
+distance/radius/tie selection for stock Godot and older engine builds,
+using the existing 3×3 GDScript buckets. Server-only
+`last_pack_query_stats` reports the selected cap and number of successful
+notifications. The selection never permits a client to provide arbitrary
+target IDs, and does not modify networking or save formats.
+
+### Testing
+
+Native C++ tests verify equal-distance ties, stable ordering, inclusive
+radius, dense crowds, bounds and full backward compatibility of the
+uncapped API. Albion After server tests compare fallback/native behavior
+on an intentionally reverse-ordered 19-member group (12 wake, 6 remain
+unalerted). The scoped CI workflow builds the custom Godot engine and
+runs headless tests. Benchmark actual frame time on dense encounters before
+asserting performance gains.

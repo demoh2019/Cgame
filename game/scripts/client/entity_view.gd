@@ -23,6 +23,7 @@ const CampfireFx = preload("res://scripts/client/campfire_fx.gd")
 const LootBeam = preload("res://scripts/client/loot_beam.gd")
 const CorpseBurn = preload("res://scripts/client/corpse_burn.gd")
 const BlobShadow = preload("res://scripts/client/blob_shadow.gd")
+const FarmPlotVisual = preload("res://scripts/client/farm_plot_visual.gd")
 var _anim_lod: Node = null # Native AnimationLODController when the engine has it, else the GDScript AnimLod.
 var _priority_quality: int = -1
 var _world = null
@@ -147,6 +148,9 @@ func update_from(client) -> void:
 		_touch("bag:%d" % id, "bag", client.bags[id], seen)
 	for id in client.barricades:
 		_touch("barricade:%d" % id, "barricade", client.barricades[id], seen)
+	for id in client.farm_plots:
+		_touch("plot:%d" % id, "plot", client.farm_plots[id], seen)
+		FarmPlotVisual.update(_nodes["plot:%d" % id], client.farm_plots[id])
 	for id in client.campfires:
 		_touch("campfire:%d" % id, "campfire", client.campfires[id], seen)
 	for id in client.shelters:
@@ -193,7 +197,8 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			var hit_model := (_nodes[key] as Node3D).get_node_or_null("Model")
 			if hit_model != null and hit_model.has_method("hit_flash"):
 				# Bigger hits flash brighter (fraction of the pre-hit HP).
-				hit_model.hit_flash(0.5 + (before - hp) / maxf(before, 1.0) * 2.0)
+				var strength: float = 0.5 + (before - hp) / maxf(before, 1.0) * 2.0
+				hit_model.hit_flash(EngineFeatures.hit_feedback_strength(_nodes[key], strength))
 	if kind == "player" or kind == "zombie":
 		# Moving things keep a short history on the server clock; they are drawn a little in the past, between two
 		# real samples, so uneven packet arrival does not show as stutter.
@@ -229,7 +234,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 				label.text += " [EXPOSED]"
 		elif kind == "player":
 			label.text = ("%s%s" % [
-				"OUTLAW " if bool(entity.get("outlaw", false)) else "", str(entity["name"])]) if entity["alive"] else "%s (dead)" % entity["name"]
+				("OUTLAW " if bool(entity.get("outlaw", false)) else "") + (("[%s] " % str(entity.get("faction", "")).capitalize()) if bool(entity.get("faction_flagged", false)) else ""), str(entity["name"])]) if entity["alive"] else "%s (dead)" % entity["name"]
 		elif kind == "bag":
 			label.text = LootLabel.for_bag(entity)
 			label.visible = not label.text.is_empty()
@@ -289,14 +294,17 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		var blocked: bool = bool(entity.get("melee_blocked", false))
 		# The native tag store is now the source for this visual cue when available.
 		# The snapshot fallback keeps stock Godot clients fully compatible.
-		var staggered: bool = EngineFeatures.runtime_has(_nodes[key], "Runtime.Status.Staggered",
-			float(entity.get("stagger_seconds", 0.0)) > 0.0)
-		var pinned: bool = float(entity.get("snared_seconds", 0.0)) > 0.0
-		var exposed: bool = float(entity.get("sunder_seconds", 0.0)) > 0.0
+		var staggered: bool = EngineFeatures.runtime_effect_remaining(_nodes[key],
+			"Runtime.Status.Staggered", float(entity.get("stagger_seconds", 0.0))) > 0.0
+		var pinned: bool = EngineFeatures.runtime_effect_remaining(_nodes[key],
+			"Runtime.Status.Snared", float(entity.get("snared_seconds", 0.0))) > 0.0
+		var exposed: bool = EngineFeatures.runtime_effect_remaining(_nodes[key],
+			"Runtime.Status.Sundered", float(entity.get("sunder_seconds", 0.0))) > 0.0
 		var wound_phase: String = str(entity.get("wound_phase", ""))
 		var fallback_resolve: int = int(entity.get("resolve_stacks", 0)) if float(entity.get("resolve_seconds", 0.0)) > 0.0 else 0
 		var resolve: bool = EngineFeatures.runtime_stack_count(_nodes[key],
-			"Runtime.Status.Resolve", fallback_resolve) >= 2
+			"Runtime.Status.Resolve", fallback_resolve) >= 2 and EngineFeatures.runtime_effect_remaining(
+			_nodes[key], "Runtime.Status.Resolve", float(entity.get("resolve_seconds", 0.0))) > 0.0
 		var tint: Color = base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base
 		if wound_phase == "limping":
 			tint = base.lerp(Color(0.54, 0.52, 0.66), 0.65)
@@ -312,8 +320,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			tint = base.lerp(Color(1.0, 0.84, 0.25), 0.65)
 		if staggered:
 			tint = base.lerp(Color(0.38, 0.8, 1.0), 0.7)
-		# Two concurrent server-owned crowd control effects are visible even
-		# when a stronger per-effect tint already applies.
+		# Layered control cues preserve the existing status tint priorities.
 		if EngineFeatures.zombie_control_count(_nodes[key], entity) >= 2:
 			tint = tint.lerp(Color(0.97, 0.28, 0.88), 0.22)
 		model.set_tint(tint)
@@ -513,6 +520,9 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 				wood.albedo_color = Color(0.35, 0.24, 0.16)
 				pole.material_override = wood
 				root.add_child(pole)
+		return root
+	if kind == "plot":
+		root.add_child(FarmPlotVisual.make(str(entity.get("crop", "carrot"))))
 		return root
 	if kind == "campfire":
 		var wood := MeshInstance3D.new()
@@ -760,6 +770,9 @@ func _process(delta: float) -> void:
 	var anim_models: Array = []
 	for key in _nodes:
 		var node: Node3D = _nodes[key]
+		var periodic_pulses: Dictionary = {}
+		if key.begins_with("zombie:") or key.begins_with("player:"):
+			periodic_pulses = EngineFeatures.tick_runtime_effects(node, delta)
 		var target: Dictionary = _targets[key]
 		var sampled: Array = _sample(key)
 		if sampled.is_empty():
@@ -769,10 +782,18 @@ func _process(delta: float) -> void:
 			target["yaw"] = sampled[1]
 		if key.begins_with("bag"):
 			LootDropBounce.apply(node, delta, GraphicsQuality.level())
-		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("fish_trap") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("ember") or key.begins_with("spit")):
+		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("plot") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("fish_trap") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("ember") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			var model: Node3D = node.get_node("Model")
 			model.update_motion(delta)
+			# Periodic visual feedback is coalesced by the native effect timeline:
+			# no damage, attack, RPC or client-authoritative state transition.
+			if key.begins_with("zombie:") and not periodic_pulses.is_empty() and GraphicsQuality.level() >= 2:
+				if model.has_method("status_pulse"):
+					var pulse_color := Color(0.70, 0.38, 1.0)
+					if periodic_pulses.has(StringName("Runtime.Status.Sundered")):
+						pulse_color = Color(1.0, 0.43, 0.15)
+					model.call("status_pulse", pulse_color)
 			anim_models.append(model)
 			if key.begins_with("player:"):
 				var bike = node.get_node("TrailBike")

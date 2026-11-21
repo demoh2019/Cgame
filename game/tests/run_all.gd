@@ -10,6 +10,7 @@ const SUITES := [
 	"res://tests/test_noise_batch_sampling.gd",
 	"res://tests/test_gradient_batch.gd",
 	"res://tests/test_image_batch.gd",
+	"res://tests/test_mask_distance_field.gd",
 	"res://tests/test_world_sites.gd",
 	"res://tests/test_model_catalog.gd",
 	"res://tests/test_imported_mesh_lod.gd",
@@ -35,6 +36,8 @@ const SUITES := [
 	"res://tests/test_footprint_decals.gd",
 	"res://tests/test_engine_parity_fx.gd",
 	"res://tests/test_engine_runtime_tags.gd",
+	"res://tests/test_runtime_effect_timeline.gd",
+	"res://tests/test_gameplay_attributes.gd",
 	"res://tests/test_ambient_tick_budget.gd",
 	"res://tests/test_ragdoll.gd",
 	"res://tests/test_anim_lod.gd",
@@ -49,8 +52,10 @@ const SUITES := [
 	"res://tests/test_audio_occlusion_envelope.gd",
 	"res://tests/test_animation_parity.gd",
 	"res://tests/test_network_snapshot_smoothing.gd",
+	"res://tests/test_snapshot_interest_grid.gd",
 	"res://tests/test_network_jitter_buffer.gd",
 	"res://tests/test_ui_parity.gd",
+	"res://tests/test_world_overlay_significance.gd",
 	"res://tests/test_terrain_shader_lod.gd",
 	"res://tests/test_terrain_screen_lod.gd",
 	"res://tests/test_terrain_mesh_streaming.gd",
@@ -73,6 +78,7 @@ const SUITES := [
 	"res://tests/test_predictive_streaming.gd",
 	"res://tests/test_world_streamer_shared_budget.gd",
 	"res://tests/test_world_streamer_backpressure.gd",
+	"res://tests/test_world_streamer_simulation_tiers.gd",
 	"res://tests/test_waypoint_streaming_source.gd",
 	"res://tests/test_world_streamer_retry.gd",
 	"res://tests/test_postprocess_sharpen.gd",
@@ -167,6 +173,7 @@ const SUITES := [
 	"res://tests/test_procedural_moon.gd",
 	"res://tests/test_sky_cirrus_lut.gd",
 	"res://tests/test_grass_lod.gd",
+	"res://tests/test_point_spacing.gd",
 	"res://tests/test_grass_crush.gd",
 	"res://tests/test_native_multimesh_shuffle.gd",
 	"res://tests/test_camera_pixel_density.gd",
@@ -200,6 +207,18 @@ const SUITES := [
 	"res://tests/test_craft_from_stash.gd",
 	"res://tests/test_gear_salvage.gd",
 	"res://tests/test_ammunition_loop.gd",
+	"res://tests/test_gear_durability.gd",
+	"res://tests/test_enchanting.gd",
+	"res://tests/test_gear_skills.gd",
+	"res://tests/test_weapon_mastery.gd",
+	"res://tests/test_focus_crafting.gd",
+	"res://tests/test_market_bids.gd",
+	"res://tests/test_factions.gd",
+	"res://tests/test_black_zone.gd",
+	"res://tests/test_farming.gd",
+	"res://tests/test_guild_bank.gd",
+	"res://tests/test_guild_alliances.gd",
+	"res://tests/test_world_roundtrip.gd",
 	"res://tests/test_progression.gd",
 	"res://tests/test_skills.gd",
 	"res://tests/test_json_numbers.gd",
@@ -455,7 +474,8 @@ func _initialize() -> void:
 	var failures: Array[String] = []
 	for path in SUITES:
 		var script: GDScript = load(path)
-		if script == null:
+		# A suite with a parse error must not abort the whole run: record it and continue.
+		if script == null or not script.can_instantiate():
 			failures.append("%s: could not load" % path)
 			continue
 		var suite = script.new()

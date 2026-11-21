@@ -217,6 +217,19 @@
 				Returns the cell that contains [param position] on the streamed [member axes].
 			</description>
 		</method>
+		<method name="get_simulation_active_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Number of resident chunks currently assigned to the active simulation tier. The scene root must opt in to actually change its cosmetic processing.
+			</description>
+		</method>
+		<method name="is_cell_simulation_active" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Returns whether the loaded chunk has an active simulation tier. Unloaded cells always return false.
+			</description>
+		</method>
 	</methods>
 	<members>
 		<member name="adaptive_chunk_budget_enabled" type="bool" setter="set_adaptive_chunk_budget_enabled" getter="is_adaptive_chunk_budget_enabled" default="false">
@@ -261,8 +274,17 @@
 		<member name="max_instantiations_per_frame" type="int" setter="set_max_instantiations_per_frame" getter="get_max_instantiations_per_frame" default="1">
 			Maximum number of chunks activated during one native streaming update, counting both finished background scene loads and procedural generator calls against the same budget. Once the limit is reached, remaining cells stay queued for a later update. A generator that returns [code]null[/code] or fails still consumes a slot, since the callback may already have done expensive CPU work. Combine with [member max_chunk_work_usec] to load several cheap chunks without scheduling more work after a costly chunk.
 		</member>
+		<member name="max_simulation_transitions_per_update" type="int" setter="set_max_simulation_transitions_per_update" getter="get_max_simulation_transitions_per_update" default="4">
+			Caps state changes on already-loaded chunks to 1–64 per streaming update. Near-field reactivations are always considered before far-field deactivations. Newly instantiated chunks receive an initial tier within the existing chunk creation budget.
+		</member>
 		<member name="position_chunks" type="bool" setter="set_position_chunks" getter="get_position_chunks" default="true">
 			If [code]true[/code], the root of every chunk is moved to the corner of its cell. Turn it off if the chunk scenes are already authored at their world position.
+		</member>
+		<member name="simulation_hysteresis" type="float" setter="set_simulation_hysteresis" getter="get_simulation_hysteresis" default="16.0">
+			Extra distance in metres an already-active chunk retains simulation after leaving [member simulation_radius]. Inactive chunks only reactivate when entering the inner radius. Clamped to 0–1000 metres.
+		</member>
+		<member name="simulation_radius" type="float" setter="set_simulation_radius" getter="get_simulation_radius" default="-1.0">
+			Opt-in distance in metres for cosmetic/script simulation on resident chunks. Negative (default) preserves all legacy chunk processing and avoids per-chunk simulation scans. The streamer calls a chunk root's optional [code]set_streaming_simulation_active(active: bool)[/code] when its tier changes; it never alters scene descendants, terrain, physics or networking by itself. State changes do not load or unload cells. Clamped to -1 (disabled) or 0–100000 metres.
 		</member>
 		<member name="unload_radius" type="float" setter="set_unload_radius" getter="get_unload_radius" default="192.0">
 			Loaded cells farther than this distance from the focus are freed. Values below [member load_radius] are treated as equal to it.
@@ -281,6 +303,11 @@
 		</member>
 	</members>
 	<signals>
+		<signal name="chunk_simulation_changed">
+			<param index="0" name="cell" type="Vector3i" />
+			<param index="1" name="active" type="bool" />
+			<description>Emitted for a change of an already-loaded chunk's simulation tier. Initial tier selection is available through [method is_cell_simulation_active] after [signal chunk_loaded].</description>
+		</signal>
 		<signal name="chunk_load_failed">
 			<param index="0" name="cell" type="Vector3i" />
 			<param index="1" name="path" type="String" />
