@@ -492,6 +492,20 @@ func c_craft_from_stash(recipe: String, times: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_enchant(item_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "enchant", sim.cmd_enchant(peer, str(item_id)))
+
+
+@rpc("any_peer", "reliable")
+func c_repair_gear() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "repair_gear", sim.cmd_repair_gear(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_craft(recipe: String, times: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -1034,6 +1048,20 @@ func c_skill(dir_x: float, dir_z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "skill", sim.cmd_skill(peer, dir_x, dir_z))
+
+
+@rpc("any_peer", "reliable")
+func c_skill_ultimate(dir_x: float, dir_z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "skill", sim.cmd_skill(peer, dir_x, dir_z, true))
+
+
+@rpc("any_peer", "reliable")
+func c_gear_skill(slot: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "gear_skill", sim.cmd_gear_skill(peer, str(slot)))
 
 
 @rpc("any_peer", "reliable")

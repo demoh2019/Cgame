@@ -316,6 +316,24 @@ func _build() -> void:
 		else:
 			client.salvage_gear(item_id))
 	salvage_row.add_child(salvage_button)
+	var repair_button := Button.new()
+	repair_button.name = "RepairGear"
+	repair_button.text = "Repair gear (workbench, silver)"
+	repair_button.tooltip_text = "Restores every damaged carried item to 100% durability. Broken (0%) gear only works at half strength."
+	repair_button.pressed.connect(func() -> void: client.repair_gear())
+	salvage_row.add_child(repair_button)
+	for enchant_slot in ["weapon", "armor"]:
+		var enchant_button := Button.new()
+		enchant_button.name = "Enchant" + enchant_slot.capitalize()
+		enchant_button.text = "Enchant %s" % enchant_slot
+		enchant_button.tooltip_text = "Workbench only. Raises the equipped %s one level (.1 runes, .2 souls, .3 relics) plus silver: +10%% stats, +100 item power." % enchant_slot
+		enchant_button.pressed.connect(func() -> void:
+			var target: String = client.inventory.weapon if enchant_slot == "weapon" else client.inventory.armor
+			if target == "":
+				say("Enchant: equip a %s first." % enchant_slot)
+			else:
+				client.enchant(target))
+		salvage_row.add_child(enchant_button)
 	_action_sections.append([inventory_box.get_child_count(), "Field"])
 	var trauma_button := Button.new()
 	trauma_button.name = "UseExpeditionTraumaKit"
@@ -2607,6 +2625,47 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("%s: %s." % [label, str(data.get("reason", "rejected")).replace("_", " ")])
 		return
+	if kind == "gear_skill":
+		if bool(data.get("ok", false)):
+			say("%s!" % str(data.get("skill", "")).replace("_", " ").capitalize())
+		elif str(data.get("reason", "")) == "no_item":
+			say("Equip a %s to use that ability." % {"armor": "chest piece", "head": "helmet", "feet": "pair of boots"}.get(str(data.get("slot", "")), "piece"))
+		elif str(data.get("reason", "")) == "cooldown":
+			say("Ability ready in %.0fs." % float(data.get("remaining", 0.0)))
+		return
+	if kind == "enchant":
+		if bool(data.get("ok", false)):
+			var made: String = str(data.get("item", ""))
+			say("Enchanted: %s (item power %d)." % [str(Defs.item(made).get("name", made)), int(data.get("item_power", 0))])
+		else:
+			match str(data.get("reason", "")):
+				"no_station":
+					say("Enchant: stand at a workbench.")
+				"need_materials":
+					var parts: Array = []
+					var cost: Dictionary = data.get("cost", {})
+					for id in cost:
+						parts.append("%d %s" % [int(cost[id]), str(Defs.item(str(id)).get("name", id))])
+					say("Enchant needs: %s." % ", ".join(parts))
+				"cannot_enchant":
+					say("Enchant: already at .3 or not enchantable.")
+				_:
+					say("Enchant: %s" % str(data.get("reason", "rejected")))
+		return
+	if kind == "repair_gear":
+		if bool(data.get("ok", false)):
+			say("Repaired %d item(s) for %d silver." % [(data.get("items", []) as Array).size(), int(data.get("cost", 0))])
+		else:
+			match str(data.get("reason", "")):
+				"no_station":
+					say("Repair: stand at a workbench.")
+				"nothing_to_repair":
+					say("Repair: all your gear is at 100%.")
+				"need_silver":
+					say("Repair costs %d silver." % int(data.get("cost", 0)))
+				_:
+					say("Repair: %s" % str(data.get("reason", "rejected")))
+		return
 	if kind == "smart_provision":
 		if bool(data.get("ok", false)):
 			var item_id: String = str(data.get("item", ""))
@@ -4166,9 +4225,12 @@ func _refresh_inventory() -> void:
 		var equipped: bool = client.inventory.is_equipped(item_id)
 		var info: Dictionary = Defs.item(item_id)
 		var card := _item_card(item_id, int(slot["count"]), equipped, Vector2(64, 64))
-		card.tooltip_text = "%s\n%s  ·  Tier %d%s\n\nDouble click or drag to a lit slot: equip\nRight click: put one in the stash" % [
+		var durability: float = client.inventory.durability(item_id) if client.inventory.has_method("durability") else 100.0
+		var power: int = Defs.item_power(item_id)
+		card.tooltip_text = ("Item power %d\n" % power if power > 0 and str(info.get("kind", "")) in Defs.ENCHANT_KINDS else "") + "%s\n%s  ·  Tier %d%s%s\n\nDouble click or drag to a lit slot: equip\nRight click: put one in the stash" % [
 			str(info.get("name", item_id)), str(info.get("kind", "item")).capitalize().replace("_", " "), maxi(1, Defs.tier_of(item_id)),
-			"\nEQUIPPED" if equipped else ""]
+			"\nEQUIPPED" if equipped else "",
+			("\nDurability %d%%%s" % [int(round(durability)), "  BROKEN - repair at a workbench" if durability <= 0.0 else ""]) if durability < 100.0 else ""]
 		card.gui_input.connect(func(event: InputEvent) -> void:
 			if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
 				client.move_stash(item_id, 1, true)

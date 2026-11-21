@@ -73,6 +73,13 @@ static func parse_inventory(raw: Variant, expected_slots: int, allow_equipment: 
 		if not allow_equipment or inventory.count(worn) < 1 or str(Defs.item(worn).get("kind", "")) != slot_name:
 			return {}
 		inventory.gear[slot_name] = worn
+	# Durability (older saves have none). Unknown items are dropped; values are clamped, so a
+	# tampered save can at most claim pristine gear, which is the default anyway.
+	var raw_wear: Variant = raw.get("wear", {})
+	if raw_wear is Dictionary:
+		for wear_id in raw_wear:
+			if wear_id is String and Defs.is_item(wear_id) and finite_number(raw_wear[wear_id], 0.0, 100.0):
+				inventory.wear[wear_id] = float(raw_wear[wear_id])
 	return {"inventory": inventory}
 
 

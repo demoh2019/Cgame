@@ -101,6 +101,9 @@ const PlayerPresenceGrid = preload("res://scripts/server/player_presence_grid.gd
 const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const AntisepticEdge = preload("res://scripts/shared/antiseptic_edge.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
+const GearDurability = preload("res://scripts/shared/gear_durability.gd")
+const Enchanting = preload("res://scripts/shared/enchanting.gd")
+const GearSkills = preload("res://scripts/shared/gear_skills.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
 const WoundSealant = preload("res://scripts/shared/wound_sealant.gd")
@@ -276,6 +279,10 @@ class Player:
 	var last_input_seq: int = 0
 	var attack_timer: float = 0.0
 	var skill_timer: float = 0.0
+	var ultimate_timer: float = 0.0 # Weapon E (charged skill), separate from Q.
+	var gear_skill_timers: Dictionary = {} # "armor" / "head" / "feet" -> seconds left.
+	var sprint_buff_seconds: float = 0.0
+	var sprint_buff_speed: float = 0.0
 	var dodge_timer: float = 0.0
 	var dodge_immunity: float = 0.0
 	var parry_cooldown: float = 0.0 # Server-owned timed melee defense.
@@ -1077,7 +1084,7 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 		var sprint_allowed: bool = sprint and not player.mounted and not player.crouching and moving and factor >= 0.9999 and WadingTravel.can_sprint(world, player.position) and player.survival.try_sprint(allowed)
 		player.position = Movement.step(world, player.position, {
 			"x": move_x, "z": move_z, "sprint": sprint_allowed, "mounted": player.mounted,
-			"crouch": player.crouching, "cargo_factor": factor, "speed_bonus": player.skills.bonus("move_speed"),
+			"crouch": player.crouching, "cargo_factor": factor, "speed_bonus": player.skills.bonus("move_speed") + player.sprint_buff_speed,
 			"injury_factor": Survival.fracture_speed_factor(player.survival.fracture),
 			"tire_grip_seconds": player.tire_grip_seconds,
 			"bike_integrity": player.bike_integrity,
@@ -2661,6 +2668,39 @@ func _tick_trades() -> void:
 
 ## The hub's workbench or the one of a settlement (village, fort) out in the world. Crafting, the vendor and contracts work at
 ## either; the bank, the market and camp rest stay in the hub's safe zone.
+## Albion-style enchanting at a workbench: runes / souls / relics plus a silver fee raise one
+## carried piece of gear to its next enchantment level (.1, .2, .3).
+func cmd_enchant(peer_id: int, item_id: String) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if not player.position.is_finite() or not _at_workbench(Vector2(player.position.x, player.position.z)):
+		return {"ok": false, "reason": "no_station"}
+	var result: Dictionary = Enchanting.enchant(player.inventory, str(item_id))
+	if bool(result.get("ok", false)):
+		player.dirty_character = true
+	return result
+
+
+## Albion-style gear repair: at a workbench, pay silver to restore every damaged
+## carried item to 100% durability. Costs scale with item value and wear.
+func cmd_repair_gear(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if not player.position.is_finite() or not _at_workbench(Vector2(player.position.x, player.position.z)):
+		return {"ok": false, "reason": "no_station"}
+	var cost: int = player.inventory.repair_cost()
+	if cost <= 0:
+		return {"ok": false, "reason": "nothing_to_repair"}
+	if player.inventory.count("silver") < cost:
+		return {"ok": false, "reason": "need_silver", "cost": cost}
+	player.inventory.remove("silver", cost)
+	var repaired: Array = player.inventory.repair_all()
+	player.dirty_character = true
+	return {"ok": true, "cost": cost, "items": repaired}
+
+
 func _at_workbench(spot: Vector2) -> bool:
 	if not spot.is_finite():
 		return false
@@ -4726,6 +4766,9 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float, charge: float = 0.0) -
 	# Mastery is server-owned. Missing/ghost equipment grants no bonus.
 	if weapon != "" and player.inventory.count(weapon) > 0:
 		damage *= player.progression.combat_damage_multiplier(weapon)
+		# Broken (0%) weapons strike at half strength; every swing wears the weapon.
+		damage *= player.inventory.effectiveness(weapon)
+		player.inventory.damage_item(weapon, GearDurability.WEAPON_WEAR_PER_HIT)
 	var reach: float = Combat.weapon_reach(weapon)
 	if kind == "ranged":
 		var ammo: String = Defs.item(weapon).get("ammo", "")
@@ -4999,16 +5042,49 @@ func _try_guardian_intercept(ally: Player, infected, raw_damage: float) -> bool:
 
 
 ## Resolve active combat on the server; the client supplies only aim direction.
-func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
+## Albion-style armor abilities (R chest / D helmet / F boots), granted by the equipped piece.
+func cmd_gear_skill(peer_id: int, slot: String) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if not GearSkills.SLOTS.has(slot):
+		return {"ok": false, "reason": "unknown_slot"}
+	var item_id: String = GearSkills.equipped_in(player.inventory, slot)
+	var skill: Dictionary = GearSkills.skill_for(slot, item_id)
+	if skill.is_empty():
+		return {"ok": false, "reason": "no_item", "slot": slot}
+	if float(player.gear_skill_timers.get(slot, 0.0)) > 0.0:
+		return {"ok": false, "reason": "cooldown", "slot": slot, "remaining": float(player.gear_skill_timers[slot])}
+	player.gear_skill_timers[slot] = float(skill["cooldown"])
+	match str(skill["id"]):
+		"iron_skin":
+			player.survival.guard_seconds = float(skill["seconds"])
+			player.survival.guard_reduction = float(skill["guard"])
+		"second_wind":
+			player.survival.regen_seconds = float(skill["seconds"])
+			player.survival.regen_per_second = float(skill["heal_total"]) / float(skill["seconds"])
+		"sprint":
+			player.sprint_buff_seconds = float(skill["seconds"])
+			player.sprint_buff_speed = float(skill["speed"])
+	player.dirty_character = true
+	events.append({"type": "gear_skill", "peer": peer_id, "skill": skill["id"],
+		"x": player.position.x, "z": player.position.z})
+	return {"ok": true, "skill": skill["id"], "slot": slot, "cooldown": skill["cooldown"]}
+
+
+func cmd_skill(peer_id: int, dir_x: float, dir_z: float, ultimate: bool = false) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	if player.mounted:
 		return {"ok": false, "reason": "mounted"}
-	if player.attack_timer > 0.0 or player.skill_timer > 0.0:
+	# Q and the weapon ultimate (E) keep separate cooldowns, Albion-style.
+	if player.attack_timer > 0.0 or (player.ultimate_timer if ultimate else player.skill_timer) > 0.0:
 		return {"ok": false, "reason": "cooldown"}
 	var weapon: String = player.inventory.weapon
 	var skill: Dictionary = Combat.active_skill(weapon)
+	if ultimate:
+		skill = GearSkills.ultimate(skill)
 	if skill.is_empty() or player.inventory.count(weapon) < 1:
 		return {"ok": false, "reason": "no_skill"}
 	var direction := Vector2(dir_x, dir_z)
@@ -5058,7 +5134,10 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		player.dirty_inventory = true
 	direction = direction.normalized()
 	player.combat_energy -= cost
-	player.skill_timer = float(skill["cooldown"])
+	if ultimate:
+		player.ultimate_timer = float(skill["cooldown"])
+	else:
+		player.skill_timer = float(skill["cooldown"])
 	player.attack_timer = float(skill["attack_lock"])
 	player.action = {}
 	player.yaw = atan2(direction.x, direction.y)
@@ -6371,6 +6450,10 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 		loot = EliteInfected.enhanced_loot(loot, zone)
 	if loot.has("silver"):
 		loot["silver"] = int(round(float(loot["silver"]) * (1.0 + killer.skills.bonus("zombie_silver"))))
+	# Albion-style enchantment materials: runes (infected), souls (elites), relics (raid bosses).
+	var enchant_drop: Dictionary = Enchanting.material_drop(zone, zombie.elite, zombie.raid_boss, loot_rng)
+	for material in enchant_drop:
+		loot[material] = int(loot.get(material, 0)) + int(enchant_drop[material])
 	if zombie.raid_boss:
 		# A speed bonus uses only the authoritative encounter start, live boss
 		# identity and death timestamp; no client-supplied result or reward.
@@ -6457,6 +6540,8 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.ruin_survey = {} # Dead scouts cannot retain private map beacons.
 	victim.prospect_mark = {} # Death clears paid exploration marks.
 	victim.dodge_immunity = 0.0
+	victim.sprint_buff_seconds = 0.0
+	victim.sprint_buff_speed = 0.0
 	ParryRiposte.clear(victim)
 	victim.guardian_brace = 0.0
 	victim.guard_link_target = -1
@@ -6486,6 +6571,9 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	var drops_gear: bool = ZoneRisk.full_loot(zone)
 	victim.last_death_full_loot = drops_gear
 	victim.keep_inventory_on_respawn = not drops_gear
+	if not drops_gear:
+		# Albion-style: a death that keeps your gear still costs durability.
+		victim.inventory.wear_equipped(GearDurability.DEATH_WEAR)
 	if drops_gear:
 		var everything: Dictionary = victim.inventory.take_everything()
 		var death_bag_id: int = _make_bag(victim.position, everything)
@@ -6812,6 +6900,14 @@ func _tick_players(delta: float) -> void:
 		player.flash_cooldown = maxf(0.0, player.flash_cooldown - maxf(0.0, delta))
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
 		player.skill_timer = maxf(player.skill_timer - delta, 0.0)
+		player.ultimate_timer = maxf(player.ultimate_timer - delta, 0.0)
+		for gear_slot in player.gear_skill_timers.keys():
+			player.gear_skill_timers[gear_slot] = maxf(float(player.gear_skill_timers[gear_slot]) - delta, 0.0)
+		if player.sprint_buff_seconds > 0.0:
+			player.sprint_buff_seconds = maxf(player.sprint_buff_seconds - delta, 0.0)
+			if player.sprint_buff_seconds <= 0.0:
+				player.sprint_buff_speed = 0.0
+				player.dirty_character = true
 		player.dodge_timer = maxf(player.dodge_timer - delta, 0.0)
 		player.dodge_immunity = maxf(player.dodge_immunity - delta, 0.0)
 		player.parry_cooldown = maxf(0.0, player.parry_cooldown - maxf(0.0, delta))
@@ -8646,7 +8742,9 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				_alive(player), WorldCycle.is_night(time), player.bike_lamp_enabled),
 			"bike_lamp_enabled": player.bike_lamp_enabled,
 			"max_health": player.survival.max_health,
-			"speed_bonus": player.skills.bonus("move_speed"), "carry_bonus": player.skills.bonus("carry_capacity"),
+			"skill_cd": player.skill_timer, "ultimate_cd": player.ultimate_timer, "gear_cd": player.gear_skill_timers.duplicate(),
+			"guard_s": player.survival.guard_seconds, "regen_s": player.survival.regen_seconds, "sprint_s": player.sprint_buff_seconds,
+			"speed_bonus": player.skills.bonus("move_speed") + player.sprint_buff_speed, "carry_bonus": player.skills.bonus("carry_capacity"),
 		},
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
 		"spit_zones": spit_zones, "acid_pools": nearby_acid_pools,

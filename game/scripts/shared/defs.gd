@@ -832,6 +832,12 @@ static func _build_items() -> void:
 		{"bar_2": 4, "plank_2": 3, "scrap": 5, "fiber_2": 4},
 		"workbench", 12.0)
 	_add_item("silver", {"name": "Silver", "kind": "currency", "stack": 100000, "value": 1})
+	# Albion-style enchantment materials, dropped by infected (runes), elites (souls)
+	# and raid bosses (relics). Spent at a workbench to raise gear to .1 / .2 / .3.
+	_add_item("rune", {"name": "Rune", "kind": "enchant_material", "stack": 999, "value": 6, "weight": 0.02})
+	_add_item("soul", {"name": "Soul", "kind": "enchant_material", "stack": 999, "value": 24, "weight": 0.02})
+	_add_item("relic", {"name": "Relic", "kind": "enchant_material", "stack": 999, "value": 90, "weight": 0.02})
+	_build_enchantments()
 
 
 static func tool_tier_for_node(kind: String) -> String:
@@ -858,3 +864,68 @@ static func node_info(kind: String) -> Dictionary:
 		"berry":
 			return {"yield": "berries", "amount": 3, "seconds": 1.2, "respawn": 90.0, "radius": 0.4, "blocks": false}
 	return {}
+
+
+# --- Enchantment and item power (Albion Online style) ----------------------------------------------------------
+
+const MAX_ENCHANT := 3
+const ENCHANT_KINDS := ["weapon", "armor", "head", "cape", "hands", "feet", "tool"]
+const ENCHANT_STAT_BONUS := 0.10 # +10% damage / protection per enchant level.
+const ENCHANT_MATERIALS := ["", "rune", "soul", "relic"] # Material to reach .1 / .2 / .3.
+
+
+## Adds `<base>@1..@3` variants for every piece of gear. Same item, stronger stats.
+static func _build_enchantments() -> void:
+	var bases: Array = []
+	for id in _items.keys():
+		if ENCHANT_KINDS.has(str(_items[id].get("kind", ""))) and not str(id).contains("@"):
+			bases.append(str(id))
+	for base in bases:
+		var info: Dictionary = _items[base]
+		for level in range(1, MAX_ENCHANT + 1):
+			var variant: Dictionary = info.duplicate(true)
+			var mult: float = 1.0 + ENCHANT_STAT_BONUS * float(level)
+			for stat in ["damage", "armor"]:
+				if variant.has(stat):
+					variant[stat] = float(variant[stat]) * mult
+			variant["name"] = "%s .%d" % [str(info.get("name", base)), level]
+			variant["value"] = int(round(float(info.get("value", 1)) * (1.0 + float(level))))
+			variant["enchant"] = level
+			variant["base"] = base
+			variant.erase("id")
+			_add_item(enchanted_id(base, level), variant)
+
+
+## "club_2" + 1 -> "club_2@1"; level 0 is the base item.
+static func enchanted_id(base: String, level: int) -> String:
+	return base if level <= 0 else "%s@%d" % [base, level]
+
+
+## The unenchanted item an id belongs to ("club_2@3" -> "club_2").
+static func base_id(id: String) -> String:
+	return id.get_slice("@", 0)
+
+
+static func enchant_of(id: String) -> int:
+	return int(item(id).get("enchant", 0))
+
+
+## Albion item power: 300 + 100 per tier + 100 per enchantment level (T4.1 = 800).
+static func item_power(id: String) -> int:
+	var tier: int = tier_of(id)
+	if tier <= 0:
+		return 0
+	return 300 + 100 * tier + 100 * enchant_of(id)
+
+
+## What enchanting `id` one level further costs: {material: count, "silver": n}, or {} if it cannot be enchanted.
+static func enchant_cost(id: String) -> Dictionary:
+	var info := item(id)
+	if info.is_empty() or not ENCHANT_KINDS.has(str(info.get("kind", ""))):
+		return {}
+	var level: int = enchant_of(id)
+	if level >= MAX_ENCHANT:
+		return {}
+	var tier: int = maxi(1, tier_of(id))
+	var material: String = ENCHANT_MATERIALS[level + 1]
+	return {material: tier * 4, "silver": 25 * tier * (level + 1)}

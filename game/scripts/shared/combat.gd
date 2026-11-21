@@ -19,8 +19,14 @@ static func apply_armor(damage: float, armor_id: String) -> float:
 ## Damage after everything worn: body armor plus hood, cloak, gloves and boots, at most 80% blocked.
 static func apply_gear(damage: float, inventory) -> float:
 	var reduction := 0.0
+	var has_durability: bool = inventory.has_method("effectiveness")
 	for piece in inventory.worn():
-		reduction += float(Defs.item(str(piece)).get("armor", 0.0))
+		var protection: float = float(Defs.item(str(piece)).get("armor", 0.0))
+		# Broken armor protects at half strength until it is repaired.
+		reduction += protection * (inventory.effectiveness(str(piece)) if has_durability else 1.0)
+	# Every received hit wears the protection a little (Albion-style durability).
+	if has_durability and damage > 0.0:
+		inventory.wear_worn()
 	return damage * (1.0 - clampf(reduction, 0.0, 0.8))
 
 
@@ -97,7 +103,7 @@ static func active_skill(weapon_id: String) -> Dictionary:
 	var info: Dictionary = Defs.item(weapon_id)
 	if info.is_empty():
 		return {}
-	if weapon_id == "purifier_maul_3" and str(info.get("weapon", "")) == "melee":
+	if Defs.base_id(weapon_id) == "purifier_maul_3" and str(info.get("weapon", "")) == "melee":
 		return {"id": "purifying_slam", "energy_cost": 35.0, "cooldown": 8.0,
 			"attack_lock": 1.1, "range": Defs.MELEE_RANGE + 0.8,
 			"damage": weapon_damage(weapon_id) * 1.5,
@@ -154,12 +160,12 @@ static func active_skill(weapon_id: String) -> Dictionary:
 			"ranged": true, "ammo": str(info.get("ammo", ""))}
 	# The covert pistol trades raw DPS and firing range for less infected aggro.
 	# Its charged shot uses the same one-cartridge, line-of-fire server path.
-	if weapon_id == "suppressed_pistol" and str(info.get("weapon", "")) == "ranged":
+	if Defs.base_id(weapon_id) == "suppressed_pistol" and str(info.get("weapon", "")) == "ranged":
 		return {"id": "careful_shot", "energy_cost": 32.0, "cooldown": 6.5,
 			"attack_lock": 0.95, "range": ranged_range(weapon_id) + 2.0,
 			"damage": weapon_damage(weapon_id) * 1.55,
 			"ranged": true, "ammo": str(info.get("ammo", ""))}
-	if weapon_id == "pistol" and str(info.get("weapon", "")) == "ranged":
+	if Defs.base_id(weapon_id) == "pistol" and str(info.get("weapon", "")) == "ranged":
 		return {"id": "focused_shot", "energy_cost": 40.0, "cooldown": 8.0,
 			"attack_lock": 0.55, "range": Defs.PISTOL_RANGE + 4.0,
 			"damage": weapon_damage(weapon_id) * 1.75,

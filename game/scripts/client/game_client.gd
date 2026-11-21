@@ -296,6 +296,14 @@ func fish(baited: bool = false, storm_cast: bool = false) -> void:
 	net.c_fish.rpc_id(1, baited, storm_cast)
 
 
+func enchant(item_id: String) -> void:
+	net.c_enchant.rpc_id(1, item_id)
+
+
+func repair_gear() -> void:
+	net.c_repair_gear.rpc_id(1)
+
+
 func craft(recipe: String, times: int = 1) -> void:
 	net.c_craft.rpc_id(1, recipe, times)
 
@@ -572,6 +580,16 @@ func rage() -> void:
 
 func skill(direction: Vector2) -> void:
 	net.c_skill.rpc_id(1, direction.x, direction.y)
+
+
+## Weapon ultimate (E): a charged version of the weapon skill with its own cooldown.
+func skill_ultimate(direction: Vector2) -> void:
+	net.c_skill_ultimate.rpc_id(1, direction.x, direction.y)
+
+
+## Armor abilities: "armor" (Iron Skin), "head" (Second Wind), "feet" (Sprint).
+func gear_skill(slot: String) -> void:
+	net.c_gear_skill.rpc_id(1, slot)
 
 
 func stagger_finisher() -> void:
