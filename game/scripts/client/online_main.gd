@@ -1347,6 +1347,10 @@ func _on_welcomed() -> void:
 		streamer.simulation_radius = 110.0
 		streamer.simulation_hysteresis = 20.0
 		streamer.max_simulation_transitions_per_update = 4
+	# Unreal-style reduced cosmetic tick rate for distant but still active
+	# scene chunks. GraphicsQuality.apply supplies radius/interval per preset.
+	if "tick_throttle_radius" in streamer:
+		streamer.max_tick_throttle_transitions_per_update = 4
 	# Recover from transient generator/resource failures without an unbounded retry loop.
 	# A null chunk remains an intentionally empty world cell.
 	# Older engine builds lack the retry API; skip it instead of erroring.
