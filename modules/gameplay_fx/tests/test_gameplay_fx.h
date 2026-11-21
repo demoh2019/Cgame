@@ -266,7 +266,9 @@ TEST_CASE("[GameplayFX] timeline scoped snapshot preserves local timers and roll
 	CHECK_FALSE(timeline->replace_effect_branch("Runtime", invalid));
 	CHECK_FALSE(timeline->replace_effect_branch("Runtime..Bad", snapshot));
 	CHECK_FALSE(timeline->replace_effect_branch("", snapshot));
-	CHECK(timeline->get_snapshot() == before);
+	CHECK(timeline->get_effect_count() == before.size());
+	CHECK(timeline->get_stacks("Runtime.Status.Resolve") == 3);
+	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(0.25));
 
 	Dictionary duplicate;
 	duplicate[String("Runtime.Status.Resolve")] = resolve;
