@@ -1,0 +1,56 @@
+name: Days After equipment durability smoke
+
+on:
+  pull_request:
+    paths:
+      - 'demo/days_after/equipment_durability.gd'
+      - 'demo/days_after/player.gd'
+      - 'demo/days_after/save_state.gd'
+      - 'demo/days_after/smoke_test_durability.gd'
+      - '.github/workflows/days-after-durability.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'demo/days_after/equipment_durability.gd'
+      - 'demo/days_after/player.gd'
+      - 'demo/days_after/save_state.gd'
+      - 'demo/days_after/smoke_test_durability.gd'
+      - '.github/workflows/days-after-durability.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  durability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download verified Godot 4.7.2 compatibility editor
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum --check --status
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+      - name: Import and validate scripts
+        run: |
+          set -euo pipefail
+          ./godot --headless --path demo/days_after --editor --import --quit 2>&1 | tee import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' import.log; then exit 1; fi
+      - name: Run equipment durability regression
+        run: |
+          set -euo pipefail
+          timeout 120s ./godot --headless --path demo/days_after --script res://smoke_test_durability.gd 2>&1 | tee durability.log
+          grep -F 'PASS: equipment durability, tiered tool wear, armor breakage, repairs and compatible saves.' durability.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed' durability.log; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: days-after-durability-logs
+          if-no-files-found: ignore
+          path: |
+            import.log
+            durability.log
