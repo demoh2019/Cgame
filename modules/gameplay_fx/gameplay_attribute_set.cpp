@@ -178,7 +178,7 @@ Dictionary GameplayAttributeSet::get_snapshot() const {
 	return result;
 }
 
-bool GameplayAttributeSet::replace_snapshot(const Dictionary &p_snapshot) {
+bool GameplayAttributeSet::_parse_snapshot(const Dictionary &p_snapshot, Vector<Attribute> &r_attributes, Vector<Modifier> &r_modifiers) const {
 	if (!p_snapshot.has("attributes") || !p_snapshot.has("modifiers")) {
 		return false;
 	}
@@ -273,6 +273,66 @@ bool GameplayAttributeSet::replace_snapshot(const Dictionary &p_snapshot) {
 		}
 		parsed_mods.push_back(m);
 	}
+	r_attributes = parsed_attrs;
+	r_modifiers = parsed_mods;
+	return true;
+}
+
+// Branch matching is exact or dot-delimited, never string-prefix matching.
+bool GameplayAttributeSet::_source_in_branch(const StringName &p_source, const StringName &p_branch) {
+	const String source = p_source;
+	const String branch = p_branch;
+	return source == branch || (source.length() > branch.length() &&
+			source.begins_with(branch) && source[branch.length()] == '.');
+}
+
+bool GameplayAttributeSet::replace_snapshot(const Dictionary &p_snapshot) {
+	Vector<Attribute> parsed_attrs;
+	Vector<Modifier> parsed_mods;
+	if (!_parse_snapshot(p_snapshot, parsed_attrs, parsed_mods)) {
+		return false;
+	}
+	attributes = parsed_attrs;
+	modifiers = parsed_mods;
+	cached_results.clear();
+	return true;
+}
+
+bool GameplayAttributeSet::replace_snapshot_branch(const StringName &p_branch, const Dictionary &p_snapshot) {
+	if (!_valid_tag(p_branch)) {
+		return false;
+	}
+	Vector<Attribute> parsed_attrs;
+	Vector<Modifier> parsed_mods;
+	if (!_parse_snapshot(p_snapshot, parsed_attrs, parsed_mods)) {
+		return false;
+	}
+	// Do not permit a supposedly scoped authoritative snapshot to replace
+	// any source outside its namespace.
+	for (const Modifier &modifier : parsed_mods) {
+		if (!_source_in_branch(modifier.source, p_branch)) {
+			return false;
+		}
+	}
+
+	// Retain independently owned modifiers (e.g. Local.Visual) and reject a
+	// snapshot that removes an attribute still used by an outside source.
+	for (const Modifier &modifier : modifiers) {
+		if (_source_in_branch(modifier.source, p_branch)) {
+			continue;
+		}
+		bool found_attribute = false;
+		for (const Attribute &attr : parsed_attrs) {
+			if (attr.name == modifier.attribute) {
+				found_attribute = true;
+				break;
+			}
+		}
+		if (!found_attribute || parsed_mods.size() >= MAX_MODIFIERS) {
+			return false; // Entire transaction is unchanged on failure.
+		}
+		parsed_mods.push_back(modifier);
+	}
 	attributes = parsed_attrs;
 	modifiers = parsed_mods;
 	cached_results.clear();
@@ -293,4 +353,5 @@ void GameplayAttributeSet::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_modifier_count"), &GameplayAttributeSet::get_modifier_count);
 	ClassDB::bind_method(D_METHOD("get_snapshot"), &GameplayAttributeSet::get_snapshot);
 	ClassDB::bind_method(D_METHOD("replace_snapshot", "snapshot"), &GameplayAttributeSet::replace_snapshot);
+	ClassDB::bind_method(D_METHOD("replace_snapshot_branch", "branch", "snapshot"), &GameplayAttributeSet::replace_snapshot_branch);
 }

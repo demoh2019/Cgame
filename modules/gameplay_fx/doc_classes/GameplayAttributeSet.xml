@@ -66,6 +66,12 @@
 			<return type="Dictionary" />
 			<description>Returns an independent snapshot with attributes (tag keys mapped to base/min/max dictionaries) and modifiers (an array of source/attribute/additive/percent dictionaries).</description>
 		</method>
+		<method name="replace_snapshot_branch">
+			<return type="bool" />
+			<param index="0" name="branch" type="StringName" />
+			<param index="1" name="snapshot" type="Dictionary" />
+			<description>Atomically replaces all attribute base values/bounds and only modifier sources matching [param branch] exactly or a dot-separated descendant. Preserves modifiers owned by other namespaces, including local presentation effects. Incoming modifiers outside the named branch, missing attributes referenced by retained modifiers, overflow, and malformed values reject the entire update without clearing the cached state. Invalid branch names are rejected. Use this for authoritative runtime slices while other sources have independent lifetimes.</description>
+		</method>
 		<method name="replace_snapshot">
 			<return type="bool" />
 			<param index="0" name="snapshot" type="Dictionary" />

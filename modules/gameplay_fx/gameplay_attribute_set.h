@@ -46,6 +46,9 @@ private:
 	static bool _valid_tag(const StringName &p_tag);
 	static bool _valid_value(double p_value, double p_bound);
 	static bool _valid_modifier(double p_additive, double p_percent);
+	// Shared transactional validation for complete and scoped snapshots.
+	bool _parse_snapshot(const Dictionary &p_snapshot, Vector<Attribute> &r_attributes, Vector<Modifier> &r_modifiers) const;
+	static bool _source_in_branch(const StringName &p_source, const StringName &p_branch);
 
 protected:
 	static void _bind_methods();
@@ -66,5 +69,8 @@ public:
 	int get_modifier_count() const { return modifiers.size(); }
 	// Complete transaction: invalid attributes/modifiers never partially apply.
 	bool replace_snapshot(const Dictionary &p_snapshot);
+	// Atomically refresh authoritative attributes and one modifier-source namespace.
+	// Unrelated sources survive; invalid or orphaned state rolls back everything.
+	bool replace_snapshot_branch(const StringName &p_branch, const Dictionary &p_snapshot);
 	Dictionary get_snapshot() const;
 };
