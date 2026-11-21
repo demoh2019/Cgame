@@ -7,6 +7,8 @@ const CombatAnimationPriority = preload("res://scripts/client/combat_animation_p
 static var _native_tier_planner: Object = null
 const NEAR_CAMERA_VISIBILITY_RADIUS := 3.0 # Matches the animation LOD close-camera safeguard.
 const IK_RETENTION_HYSTERESIS_METRES := 1.5 # Keeps a prior on-screen IK owner during small camera moves.
+# The soft CPU cap applies only to the optional script full-pose modifier.
+const FULL_POSE_CPU_BUDGET_US := [0, 750, 1500, 2750]
 
 # --- Animation LOD / crowd budget (Unreal URO / Unity Animator Culling) --------------------------------------------------
 
@@ -187,6 +189,66 @@ static func _plan_crowd_tiers_fallback(distances: PackedFloat64Array,
 	return tiers
 
 
+## Cost-only second-stage admission. Call after the engine's distance,
+## visibility, sticky-IK and independently retained combat tiers are chosen.
+## This *never* promotes or demotes existing tier-1/2/3/4 poses.
+static func cap_full_pose_cost(tiers: PackedInt32Array, distances: PackedFloat64Array,
+		retained_full_flags: PackedByteArray, full_pose_cost_us: PackedInt32Array,
+		full_pose_budget_us: int, hysteresis: float = IK_RETENTION_HYSTERESIS_METRES,
+		prefer_native: bool = true) -> PackedInt32Array:
+	var count: int = tiers.size()
+	if count != distances.size() or count != retained_full_flags.size() or \
+			count != full_pose_cost_us.size() or count > 16384 or \
+			full_pose_budget_us < 0 or full_pose_budget_us > 1000000 or \
+			not is_finite(hysteresis) or hysteresis < 0.0 or hysteresis > 8.0:
+		return PackedInt32Array()
+	var full_count := 0
+	for i in count:
+		if tiers[i] < 0 or tiers[i] > 4 or \
+				not is_finite(distances[i]) or distances[i] < 0.0 or \
+				full_pose_cost_us[i] < 0 or full_pose_cost_us[i] > 100000:
+			return PackedInt32Array()
+		if tiers[i] == 0:
+			full_count += 1
+	if full_count > 256:
+		return PackedInt32Array()
+	if full_pose_budget_us == 0:
+		return tiers
+	if prefer_native and ClassDB.class_exists("CrowdAnimationTierPlanner"):
+		if _native_tier_planner == null:
+			_native_tier_planner = ClassDB.instantiate("CrowdAnimationTierPlanner")
+		if _native_tier_planner != null and _native_tier_planner.has_method("cap_full_pose_cost"):
+			var native_tiers: PackedInt32Array = _native_tier_planner.call(
+				"cap_full_pose_cost", tiers, distances, retained_full_flags,
+				full_pose_cost_us, full_pose_budget_us, hysteresis)
+			if native_tiers.size() == count:
+				return native_tiers
+	# The stock-Godot and old-Cgame path follows exactly the same
+	# admission order as the native bounded top-K selector.
+	var result: PackedInt32Array = tiers.duplicate()
+	var winners: Array[int] = []
+	for i in count:
+		if tiers[i] == 0:
+			winners.append(i)
+	winners.sort_custom(func(a: int, b: int) -> bool:
+		var da: float = maxf(0.0, distances[a] -
+			(hysteresis if retained_full_flags[a] != 0 else 0.0))
+		var db: float = maxf(0.0, distances[b] -
+			(hysteresis if retained_full_flags[b] != 0 else 0.0))
+		return da < db if da != db else a < b
+	)
+	var spent_us: int = 0
+	for idx in winners:
+		var estimated_us: int = full_pose_cost_us[idx]
+		if estimated_us == 0:
+			estimated_us = 100
+		if spent_us + estimated_us <= full_pose_budget_us:
+			spent_us += estimated_us
+		else:
+			result[idx] = 1
+	return result
+
+
 # --- Smoothing / springs --------------------------------------------------------------------------------------------------
 
 ## Exponential smoothing independent of frame rate.
@@ -338,6 +400,7 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 	var visible_mask := PackedByteArray()
 	var retained_full_mask := PackedByteArray()
 	var retained_combat_mask := PackedByteArray()
+	var full_pose_cost_us := PackedInt32Array()
 	for model in models:
 		var distance: float = model.global_position.distance_to(cam)
 		distances.append(distance)
@@ -348,6 +411,8 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 		visible_mask.append(1 if visible else 0)
 		retained_full_mask.append(1 if bool(model.get_meta("aa_full_ik_retained", false)) else 0)
 		retained_combat_mask.append(1 if bool(model.get_meta("aa_combat_pose_retained", false)) else 0)
+		var modifier: Object = model.get("_procedural")
+		full_pose_cost_us.append(int(modifier.get("estimated_full_pose_us")) if modifier != null else 0)
 		# Combat urgency is visual-only, and the native mixer controller
 		# already handles critical poses when external_anim_lod is enabled.
 		var critical: bool = not bool(model.get("external_anim_lod")) \
@@ -358,6 +423,13 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 		full_budget(quality), CombatAnimationPriority.slots(quality), true, visible_mask,
 		retained_full_mask, IK_RETENTION_HYSTERESIS_METRES,
 		retained_combat_mask, 1.5)
+	if tiers.size() != models.size():
+		return
+	# Secondary predicted CPU gate: no change to combat-priority decisions
+	# and never a pause of game-authoritative movement or attack animation.
+	tiers = cap_full_pose_cost(tiers, distances, retained_full_mask,
+		full_pose_cost_us, FULL_POSE_CPU_BUDGET_US[clampi(quality, 0, 3)],
+		IK_RETENTION_HYSTERESIS_METRES)
 	if tiers.size() != models.size():
 		return
 	for i in models.size():
