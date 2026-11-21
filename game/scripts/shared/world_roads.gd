@@ -64,7 +64,9 @@ static func compute_links(places: Array, max_link: float = MAX_LINK,
 			return {}
 		positions.append(point)
 	var native: Array = []
-	if not force_scalar and places.size() <= 4096 and maxi(regular_neighbors, hub_neighbors) <= 32 			and Geometry2D.has_method("get_nearest_neighbors"):
+	var use_native: bool = not force_scalar and places.size() <= 4096
+	use_native = use_native and maxi(regular_neighbors, hub_neighbors) <= 32
+	if use_native and Geometry2D.has_method("get_nearest_neighbors"):
 		native = Geometry2D.call(
 				"get_nearest_neighbors", positions, maxi(regular_neighbors, hub_neighbors), max_link)
 	for i in positions.size():

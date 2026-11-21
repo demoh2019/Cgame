@@ -8,6 +8,7 @@ const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 
 
 func run(t) -> void:
+	var world := WorldGen.new(1337)
 	t.current = "procedural road nearest-neighbor graph"
 	var sample_places: Array = [
 		{"x": 0.0, "z": 0.0},
@@ -45,7 +46,6 @@ func run(t) -> void:
 	t.check(region_places.size() >= 10, "road graph parity covers multiple inhabited regions")
 
 	t.current = "roads"
-	var world := WorldGen.new(1337)
 	var roads: Array = world.roads.all_roads()
 	t.check(roads.size() > 150, "many roads join the island (%d)" % roads.size())
 	var from_hub := 0
