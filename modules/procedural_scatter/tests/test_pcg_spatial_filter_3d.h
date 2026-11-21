@@ -220,4 +220,81 @@ TEST_CASE("[PCGSpatialFilter3D] exclusions validate complete batch atomically") 
 	CHECK(filter->filter_indices_excluding(candidates, {}, {}, 1.0, 0).is_empty());
 }
 
+
+TEST_CASE("[PCGSpatialFilter3D] mixed sphere and box exclusion preserves original candidate IDs") {
+	Ref<PCGSpatialFilter3D> filter;
+	filter.instantiate();
+	const PackedVector3Array points = {
+		Vector3(0, 0, 0), Vector3(2, 0, 0), Vector3(3, 0, 0),
+		Vector3(5, 0, 0), Vector3(6, 0, 0), Vector3(8, 0, 0),
+		Vector3(2, 3, 0), Vector3(-4, 0, 0)
+	};
+	const PackedVector3Array centers = { Vector3(0, 0, 0) };
+	const PackedFloat64Array radii = { 1.0 };
+	const PackedVector3Array box_mins = { Vector3(1.5, -1, -1), Vector3(8, 0, 0) };
+	const PackedVector3Array box_maxs = { Vector3(3, 1, 1), Vector3(8, 0, 0) };
+	const PackedInt32Array expected = { 3, 6, 7 };
+	CHECK(filter->filter_indices_excluding_volumes(points, centers, radii,
+			box_mins, box_maxs, 2.0) == expected);
+	CHECK(filter->filter_indices_excluding_volumes(points, centers, radii,
+			box_mins, box_maxs, 2.0) == expected);
+	const PackedInt32Array zero_spacing = { 3, 4, 6, 7 };
+	CHECK(filter->filter_indices_excluding_volumes(points, centers, radii,
+			box_mins, box_maxs, 0.0) == zero_spacing);
+	const PackedInt32Array capped = { 3, 6 };
+	CHECK(filter->filter_indices_excluding_volumes(points, centers, radii,
+			box_mins, box_maxs, 2.0, 2) == capped);
+	// Empty boxes preserve the existing sphere-only API bit-for-bit.
+	CHECK(filter->filter_indices_excluding_volumes(points, centers, radii,
+			{}, {}, 2.0) == filter->filter_indices_excluding(points, centers, radii, 2.0));
+	// Empty sphere and box inputs preserve the original spatial filter.
+	CHECK(filter->filter_indices_excluding_volumes(points, {}, {}, {}, {}, 2.0) ==
+			filter->filter_indices(points, 2.0));
+	// An excluded candidate never occupies a spatial-hash cell.
+	const PackedInt32Array surviving = { 1, 2 };
+	CHECK(filter->filter_indices_excluding_volumes(
+			{ Vector3(0, 0, 0), Vector3(0.9, 0, 0), Vector3(3, 0, 0) },
+			{}, {}, { Vector3(0, -1, -1) }, { Vector3(0, 1, 1) },
+			2.0) == surviving);
+	CHECK(points[0] == Vector3(0, 0, 0)); // No mutation.
+}
+
+TEST_CASE("[PCGSpatialFilter3D] mixed volumes reject invalid boxes and points atomically") {
+	Ref<PCGSpatialFilter3D> filter;
+	filter.instantiate();
+	const PackedVector3Array points = { Vector3(0, 0, 0), Vector3(4, 0, 0) };
+	const PackedVector3Array box_mins = { Vector3(-1, -1, -1) };
+	const PackedVector3Array box_maxs = { Vector3(1, 1, 1) };
+	CHECK(filter->filter_indices_excluding_volumes(points, {}, {},
+			box_mins, box_maxs, 1.0).size() == 1);
+	CHECK(filter->filter_indices_excluding_volumes(points, {}, {},
+			box_mins, {}, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding_volumes(points, {}, {},
+			box_maxs, box_mins, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding_volumes(points, {}, {},
+			{ Vector3(Math::NaN, 0, 0) }, box_maxs, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding_volumes(points, {}, {},
+			box_mins, { Vector3(Math::INF, 1, 1) }, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding_volumes(points, {}, {},
+			{ Vector3(10000001, 0, 0) }, box_maxs, 1.0).is_empty());
+	// Reject invalid candidates even when they fall inside an exclusion box.
+	CHECK(filter->filter_indices_excluding_volumes(
+			{ Vector3(0, 0, 0), Vector3(Math::NaN, 0, 0) }, {}, {},
+			box_mins, box_maxs, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding_volumes(points, { Vector3(0, 0, 0) },
+			{}, box_mins, box_maxs, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding_volumes(points, {}, {},
+			box_mins, box_maxs, Math::INF).is_empty());
+	CHECK(filter->filter_indices_excluding_volumes(points, {}, {},
+			box_mins, box_maxs, 1.0, 4097).is_empty());
+	PackedVector3Array many_mins;
+	PackedVector3Array many_maxs;
+	for (int i = 0; i < 129; ++i) {
+		many_mins.push_back(Vector3(i, -1, -1));
+		many_maxs.push_back(Vector3(i + 0.2, 1, 1));
+	}
+	CHECK(filter->filter_indices_excluding_volumes(points, {}, {},
+			many_mins, many_maxs, 1.0).is_empty());
+}
+
 } // namespace TestPCGSpatialFilter3D
