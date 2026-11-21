@@ -735,6 +735,7 @@ func build(p_world, p_cell: Vector2i) -> void:
 	_use_village = Assets.has_village()
 	_world = p_world
 	cell = p_cell
+	GrassField.rivers = _world.rivers
 	# Stagger 0.5-second shadow checks across neighboring chunks to avoid update spikes.
 	_shadow_timer = float(posmod(cell.x * 37 + cell.y * 19, 50)) * 0.01
 	var origin := WorldGen.cell_origin(cell)
@@ -743,6 +744,7 @@ func build(p_world, p_cell: Vector2i) -> void:
 		_build_objects(_world.chunk(cell)) # The chests.
 		return
 	_build_terrain(origin)
+	_build_rivers_and_bridges(origin)
 	var data: Dictionary = _world.chunk(cell)
 	_build_objects(data)
 	_add_outdoor_reflection_anchors(origin, data)
@@ -876,7 +878,7 @@ func _refresh_terrain_horizon() -> void:
 		return
 	var origin: Vector2 = WorldGen.cell_origin(cell)
 	var spacing: float = Defs.CHUNK_SIZE / float(SAMPLES - 1)
-	var height_sampler := Callable(_world, "height_at")
+	var height_sampler := Callable(_world, "ground_at")
 	if _base_curvature_colors.is_empty():
 		_base_curvature_colors = TerrainCurvature.build(
 			_raw_heights, origin, SAMPLES, spacing, height_sampler)
@@ -902,7 +904,7 @@ func _build_terrain(origin: Vector2) -> void:
 	var step := Defs.CHUNK_SIZE / float(SAMPLES - 1)
 	for j in SAMPLES:
 		for i in SAMPLES:
-			var h: float = _world.height_at(origin.x + i * step, origin.y + j * step)
+			var h: float = _world.ground_at(origin.x + i * step, origin.y + j * step)
 			heights[j * SAMPLES + i] = clampf((h - HEIGHT_MIN) / HEIGHT_RANGE, 0.0, 1.0)
 			_raw_heights.append(h)
 	_terrain = ChunkedTerrain3D.new()
@@ -935,7 +937,7 @@ func _build_terrain(origin: Vector2) -> void:
 	# the current chunk. Their shared world-space derivative removes bright
 	# vertical lighting seams without an extra shader pass or texture.
 	_terrain.set_normal_data(TerrainSeamNormals.build(_raw_heights, origin,
-		SAMPLES, step, HEIGHT_MIN, HEIGHT_RANGE, Callable(_world, "height_at")))
+		SAMPLES, step, HEIGHT_MIN, HEIGHT_RANGE, Callable(_world, "ground_at")))
 	_refresh_terrain_horizon()
 	add_child(_terrain)
 	_terrain.add_to_group(TERRAIN_LOD_GROUP)
@@ -2107,3 +2109,136 @@ func apply_state(hidden_ids: Dictionary) -> void:
 		changed = true
 	if changed and _terrain != null:
 		_refresh_ground_contact()
+
+
+# --- Rivers, lakes and bridges (world_rivers.gd / world_roads.gd) -----------------------------------------
+
+static var _river_material: ShaderMaterial
+static var _bridge_wood: StandardMaterial3D
+
+
+static func _river_material_get() -> ShaderMaterial:
+	if _river_material == null:
+		_river_material = ShaderMaterial.new()
+		_river_material.shader = load("res://assets/shaders/water.gdshader")
+	return _river_material
+
+
+## River surfaces as spline ribbons (clipped to this chunk by their segments), lakes as discs,
+## and timber bridges where roads cross. Water uses the same shader as the sea.
+func _build_rivers_and_bridges(origin: Vector2) -> void:
+	if _world.rivers == null:
+		return
+	var segments: Array = _world.rivers.segments_in_cell(cell)
+	if not segments.is_empty():
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		for seg in segments:
+			var a: Vector2 = seg["a"]
+			var b: Vector2 = seg["b"]
+			var dir: Vector2 = (b - a).normalized()
+			var side := Vector2(-dir.y, dir.x)
+			var wa: float = float(seg["w0"]) + 0.6
+			var wb: float = float(seg["w1"]) + 0.6
+			# Extend a little along the flow so consecutive pieces overlap without gaps.
+			var a2: Vector2 = a - dir * 0.8
+			var b2: Vector2 = b + dir * 0.8
+			var corners := [
+				Vector3(a2.x + side.x * wa - origin.x, float(seg["s0"]) - 0.05, a2.y + side.y * wa - origin.y),
+				Vector3(a2.x - side.x * wa - origin.x, float(seg["s0"]) - 0.05, a2.y - side.y * wa - origin.y),
+				Vector3(b2.x + side.x * wb - origin.x, float(seg["s1"]) - 0.05, b2.y + side.y * wb - origin.y),
+				Vector3(b2.x - side.x * wb - origin.x, float(seg["s1"]) - 0.05, b2.y - side.y * wb - origin.y),
+			]
+			for index in [0, 1, 2, 1, 3, 2]:
+				st.set_normal(Vector3.UP)
+				st.set_uv(Vector2(corners[index].x, corners[index].z) * 0.1)
+				st.add_vertex(corners[index])
+		var river := MeshInstance3D.new()
+		river.name = "River"
+		river.mesh = st.commit()
+		river.material_override = _river_material_get()
+		river.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(river)
+	for lake in _world.rivers.lakes_in_cell(cell):
+		# Each lake is drawn once, by the chunk holding its centre.
+		if WorldGen.cell_of(float(lake["x"]), float(lake["z"])) != cell:
+			continue
+		var disc := MeshInstance3D.new()
+		disc.name = "Lake"
+		var shape := CylinderMesh.new()
+		shape.top_radius = float(lake["radius"]) + 1.0
+		shape.bottom_radius = shape.top_radius
+		shape.height = 0.02
+		shape.radial_segments = 48
+		shape.rings = 1
+		disc.mesh = shape
+		disc.material_override = _river_material_get()
+		disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		disc.position = Vector3(float(lake["x"]) - origin.x, float(lake["surface"]) - 0.06, float(lake["z"]) - origin.y)
+		add_child(disc)
+	for bridge in _world.roads.bridges_in_cell(cell):
+		var a: Vector2 = bridge["a"]
+		if WorldGen.cell_of(a.x, a.y) != cell:
+			continue # Built once, by the chunk at its first end.
+		_build_bridge(bridge, origin)
+
+
+## A timber bridge: planks across an arched deck, side beams and posts down into the water.
+func _build_bridge(bridge: Dictionary, origin: Vector2) -> void:
+	if _bridge_wood == null:
+		_bridge_wood = StandardMaterial3D.new()
+		_bridge_wood.albedo_color = Color(0.42, 0.3, 0.19)
+		_bridge_wood.roughness = 0.9
+	var a: Vector2 = bridge["a"]
+	var b: Vector2 = bridge["b"]
+	var length: float = a.distance_to(b)
+	var dir: Vector2 = (b - a) / maxf(length, 0.01)
+	var side := Vector2(-dir.y, dir.x)
+	var yaw: float = atan2(dir.x, dir.y)
+	var root := Node3D.new()
+	root.name = "Bridge"
+	add_child(root)
+	var plank_mesh := BoxMesh.new()
+	plank_mesh.size = Vector3(WorldRoads.BRIDGE_HALF_WIDTH * 2.0, 0.12, 0.42)
+	var planks := MultiMeshInstance3D.new()
+	var multimesh := MultiMesh.new()
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.mesh = plank_mesh
+	var count: int = maxi(int(length / 0.46), 2)
+	multimesh.instance_count = count
+	for k in count:
+		var t: float = (float(k) + 0.5) / float(count)
+		var p: Vector2 = a.lerp(b, t)
+		var y: float = WorldRoads.deck_height(bridge, t) - 0.06
+		var slope: float = (WorldRoads.deck_height(bridge, minf(t + 0.01, 1.0)) - WorldRoads.deck_height(bridge, maxf(t - 0.01, 0.0))) / maxf(length * 0.02, 0.001)
+		var basis := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -atan(slope))
+		multimesh.set_instance_transform(k, Transform3D(basis.scaled(Vector3(1.0 + 0.04 * sin(k * 2.3), 1.0, 1.0)), Vector3(p.x - origin.x, y, p.y - origin.y)))
+	planks.multimesh = multimesh
+	planks.material_override = _bridge_wood
+	root.add_child(planks)
+	# Side beams (railing) and posts down to the riverbed.
+	var segments := 10
+	for s in [-1.0, 1.0]:
+		for k in segments:
+			var t0: float = float(k) / float(segments)
+			var t1: float = float(k + 1) / float(segments)
+			var p0: Vector2 = a.lerp(b, t0) + side * (WorldRoads.BRIDGE_HALF_WIDTH - 0.1) * s
+			var p1: Vector2 = a.lerp(b, t1) + side * (WorldRoads.BRIDGE_HALF_WIDTH - 0.1) * s
+			var q0 := Vector3(p0.x - origin.x, WorldRoads.deck_height(bridge, t0) + 0.85, p0.y - origin.y)
+			var q1 := Vector3(p1.x - origin.x, WorldRoads.deck_height(bridge, t1) + 0.85, p1.y - origin.y)
+			var rail := MeshInstance3D.new()
+			var beam := BoxMesh.new()
+			beam.size = Vector3(0.12, 0.12, q0.distance_to(q1) + 0.05)
+			rail.mesh = beam
+			rail.material_override = _bridge_wood
+			rail.transform = Transform3D(Basis.looking_at(q1 - q0, Vector3.UP), (q0 + q1) * 0.5)
+			root.add_child(rail)
+			if k % 2 == 0:
+				var post := MeshInstance3D.new()
+				var post_mesh := BoxMesh.new()
+				var bottom: float = _world.ground_at(p0.x, p0.y) - 0.3
+				post_mesh.size = Vector3(0.16, maxf(q0.y - bottom, 0.5), 0.16)
+				post.mesh = post_mesh
+				post.material_override = _bridge_wood
+				post.position = Vector3(q0.x, (q0.y + bottom) * 0.5, q0.z)
+				root.add_child(post)

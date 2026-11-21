@@ -2287,7 +2287,12 @@ func _update_underwater() -> void:
 		_breath_label.add_theme_color_override("font_outline_color", Color.BLACK)
 		_breath_label.add_theme_constant_override("outline_size", 6)
 		hud.add_child(_breath_label)
-	_underwater_tint.visible = camera.global_position.y < Defs.WATER_LEVEL - 0.05
+	var eye: Vector3 = camera.global_position
+	var surface: float = client.world.water_level_at(eye.x, eye.z) if client != null and client.world != null else Defs.WATER_LEVEL
+	var under: bool = eye.y < surface - 0.05
+	_underwater_tint.visible = under
+	_underwater_tint.color.a = 0.28 # Thin: the real murk is the fog below.
+	_apply_underwater_fog(under, surface - eye.y)
 	var breath: float = float(client.you.get("breath", 100.0))
 	var diving: bool = bool(client.you.get("diving", false))
 	_breath_label.visible = diving or breath < 99.5
@@ -3259,3 +3264,31 @@ func _melee_equipped() -> bool:
 func _look_direction() -> Vector2:
 	var aim: Vector2 = _aim_direction()
 	return aim if aim != Vector2.ZERO else Vector2(sin(client.yaw), cos(client.yaw))
+
+
+var _dry_fog: Dictionary = {}
+
+## Underwater, the environment fog turns dense and green-blue and thickens with depth;
+## back at the surface the weather's own fog settings return.
+func _apply_underwater_fog(under: bool, depth: float) -> void:
+	if atmosphere == null or not (atmosphere.world_environment is WorldEnvironment):
+		return
+	var env: Environment = (atmosphere.world_environment as WorldEnvironment).environment
+	if env == null:
+		return
+	if under:
+		if _dry_fog.is_empty():
+			_dry_fog = {"enabled": env.fog_enabled, "density": env.fog_density, "color": env.fog_light_color,
+				"sky": env.fog_sky_affect, "energy": env.fog_light_energy}
+		env.fog_enabled = true
+		env.fog_light_color = Color(0.05, 0.24, 0.28)
+		env.fog_light_energy = clampf(1.0 - depth * 0.08, 0.35, 1.0)
+		env.fog_density = clampf(0.09 + depth * 0.02, 0.09, 0.3)
+		env.fog_sky_affect = 1.0
+	elif not _dry_fog.is_empty():
+		env.fog_enabled = _dry_fog["enabled"]
+		env.fog_density = _dry_fog["density"]
+		env.fog_light_color = _dry_fog["color"]
+		env.fog_sky_affect = _dry_fog["sky"]
+		env.fog_light_energy = _dry_fog["energy"]
+		_dry_fog = {}

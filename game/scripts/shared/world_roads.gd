@@ -25,6 +25,10 @@ var _native_nearest_segments: bool = Geometry2D.has_method("get_closest_point_on
 var _signs_by_cell: Dictionary = {} # Vector2i -> Array of sign dictionaries
 var roads: Array = [] # Every road: {"from": name, "to": name, "points": PackedVector2Array}
 var _built := false
+var bridges: Array = [] # [{"points": PackedVector2Array, "deck": PackedFloat32Array}] where roads cross rivers
+var _bridges_by_cell: Dictionary = {}
+const BRIDGE_MAX_SPAN := 70.0
+const BRIDGE_HALF_WIDTH := 2.4
 
 
 func _init(p_world) -> void:
@@ -131,6 +135,7 @@ func _lay_road(a: Dictionary, b: Dictionary) -> void:
 		var bend: float = (sin(t * PI * 2.0 + phase) * 0.7 + sin(t * PI * 5.0 + phase * 1.7) * 0.3) * wiggle * sin(t * PI)
 		points.append(start.lerp(finish, t) + side * bend)
 	roads.append({"from": a["name"], "to": b["name"], "points": points})
+	_find_bridges(points)
 	for n in points.size() - 1:
 		var p: Vector2 = points[n]
 		var q: Vector2 = points[n + 1]
@@ -269,3 +274,68 @@ func _add_sign(points: PackedVector2Array, destination: Dictionary, length: floa
 	var target_name: String = str(destination["name"])
 	# The sign names the place at the far end of the road.
 	_signs_by_cell[cell].append({"x": beside.x, "z": beside.y, "yaw": atan2(toward.x, toward.y), "to": target_name, "metres": int(round(length))})
+
+
+# --- Bridges -------------------------------------------------------------------------------------------
+
+## Where a road runs through a river, a timber bridge spans it from bank to bank. The deck
+## arches gently and is part of the terrain height (height_at), so walking, carts and the
+## renderer all use the same surface.
+func _find_bridges(points: PackedVector2Array) -> void:
+	if world.rivers == null:
+		return
+	var n := 0
+	while n < points.size():
+		var p: Vector2 = points[n]
+		if world.rivers.surface_at(p.x, p.y) == -INF:
+			n += 1
+			continue
+		var first: int = maxi(n - 1, 0)
+		var last: int = n
+		while last < points.size() - 1 and world.rivers.surface_at(points[last].x, points[last].y) != -INF:
+			last += 1
+		var a: Vector2 = points[first]
+		var b: Vector2 = points[last]
+		# Reach a little onto dry land at both ends.
+		a = a + (a - b).normalized() * 3.0
+		b = b + (b - a).normalized() * 3.0
+		if a.distance_to(b) <= BRIDGE_MAX_SPAN:
+			var top: float = maxf(world.rivers.surface_at(points[n].x, points[n].y) + 1.1, 0.0)
+			var ya: float = maxf(world.height_at(a.x, a.y), top - 1.0) + 0.12
+			var yb: float = maxf(world.height_at(b.x, b.y), top - 1.0) + 0.12
+			var bridge := {"a": a, "b": b, "ya": ya, "yb": yb, "top": top}
+			bridges.append(bridge)
+			var reach: float = BRIDGE_HALF_WIDTH + 1.0
+			for cx in range(floori((minf(a.x, b.x) - reach) / Defs.CHUNK_SIZE), floori((maxf(a.x, b.x) + reach) / Defs.CHUNK_SIZE) + 1):
+				for cz in range(floori((minf(a.y, b.y) - reach) / Defs.CHUNK_SIZE), floori((maxf(a.y, b.y) + reach) / Defs.CHUNK_SIZE) + 1):
+					var key := Vector2i(cx, cz)
+					if not _bridges_by_cell.has(key):
+						_bridges_by_cell[key] = []
+					_bridges_by_cell[key].append(bridge)
+		n = last + 1
+
+
+## Height of a bridge deck at this point, or -INF off every bridge.
+func bridge_deck(x: float, z: float) -> float:
+	_build()
+	var key := Vector2i(floori(x / Defs.CHUNK_SIZE), floori(z / Defs.CHUNK_SIZE))
+	var best := -INF
+	for bridge in _bridges_by_cell.get(key, []):
+		var a: Vector2 = bridge["a"]
+		var ab: Vector2 = bridge["b"] - a
+		var t: float = clampf((Vector2(x, z) - a).dot(ab) / maxf(ab.length_squared(), 0.0001), 0.0, 1.0)
+		if Vector2(x, z).distance_to(a + ab * t) > BRIDGE_HALF_WIDTH:
+			continue
+		best = maxf(best, deck_height(bridge, t))
+	return best
+
+
+static func deck_height(bridge: Dictionary, t: float) -> float:
+	var straight: float = lerpf(bridge["ya"], bridge["yb"], t)
+	var arch: float = maxf(float(bridge["top"]) - straight, 0.0) + 0.5
+	return straight + arch * sin(t * PI)
+
+
+func bridges_in_cell(cell: Vector2i) -> Array:
+	_build()
+	return _bridges_by_cell.get(cell, [])
