@@ -688,6 +688,10 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 		_flank_query.set("direction_origin", Vector3(target.x, 0.0, target.y))
 		_flank_query.set("direction_axis", Vector3(target.x - here.x, 0.0, target.y - here.y))
 		_flank_query.set("min_direction_dot", -0.25)
+		# Angular EQS band: prefer side slots, not straight through the survivor.
+		# Older engine binaries retain the original one-sided cone.
+		if _flank_query.has_method("set_max_direction_dot"):
+			_flank_query.set("max_direction_dot", 0.75)
 		_flank_query.set("use_direction", true)
 	# Every agent targeting the same survivor now sees the SAME eight ring
 	# slots. The server leases distinct slots; old builds without a shared pool

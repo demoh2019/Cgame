@@ -68,7 +68,7 @@ static bool score_candidate(const Vector3 &p_point, int p_index,
 		const Vector3 &p_origin, const Vector3 &p_threat_position,
 		const PackedVector3Array &p_threat_positions,
 		const PackedVector3Array &p_exclusion_positions, double p_min_exclusion_distance,
-		bool p_use_direction, const Vector3 &p_direction_origin, const Vector3 &p_direction_axis, double p_min_direction_dot,
+		bool p_use_direction, const Vector3 &p_direction_origin, const Vector3 &p_direction_axis, double p_min_direction_dot, double p_max_direction_dot,
 		bool p_use_threat, bool p_horizontal_only, double p_min_distance,
 		double p_max_distance, double p_max_vertical_difference, double p_desired_distance,
 		double p_distance_weight, double p_safety_weight,
@@ -102,7 +102,7 @@ static bool score_candidate(const Vector3 &p_point, int p_index,
 			}
 			facing_dot = to_point.normalized().dot(p_direction_axis.normalized());
 		}
-		if (!Math::is_finite(facing_dot) || facing_dot < p_min_direction_dot) {
+		if (!Math::is_finite(facing_dot) || facing_dot < p_min_direction_dot || facing_dot > p_max_direction_dot) {
 			return false;
 		}
 	}
@@ -175,6 +175,8 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_direction_axis"), &EnvironmentQuery3D::get_direction_axis);
 	ClassDB::bind_method(D_METHOD("set_min_direction_dot", "dot"), &EnvironmentQuery3D::set_min_direction_dot);
 	ClassDB::bind_method(D_METHOD("get_min_direction_dot"), &EnvironmentQuery3D::get_min_direction_dot);
+	ClassDB::bind_method(D_METHOD("set_max_direction_dot", "dot"), &EnvironmentQuery3D::set_max_direction_dot);
+	ClassDB::bind_method(D_METHOD("get_max_direction_dot"), &EnvironmentQuery3D::get_max_direction_dot);
 	ClassDB::bind_method(D_METHOD("set_use_threat", "enabled"), &EnvironmentQuery3D::set_use_threat);
 	ClassDB::bind_method(D_METHOD("is_using_threat"), &EnvironmentQuery3D::is_using_threat);
 	ClassDB::bind_method(D_METHOD("set_horizontal_only", "enabled"), &EnvironmentQuery3D::set_horizontal_only);
@@ -215,6 +217,7 @@ void EnvironmentQuery3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "direction_origin"), "set_direction_origin", "get_direction_origin");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "direction_axis"), "set_direction_axis", "get_direction_axis");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "min_direction_dot", PROPERTY_HINT_RANGE, "-1,1,0.01"), "set_min_direction_dot", "get_min_direction_dot");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_direction_dot", PROPERTY_HINT_RANGE, "-1,1,0.01"), "set_max_direction_dot", "get_max_direction_dot");
 	ADD_GROUP("Threat Safety", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_threat"), "set_use_threat", "is_using_threat");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "threat_position"), "set_threat_position", "get_threat_position");
@@ -253,8 +256,14 @@ void EnvironmentQuery3D::set_direction_axis(const Vector3 &p_axis) {
 }
 
 void EnvironmentQuery3D::set_min_direction_dot(double p_dot) {
-	ERR_FAIL_COND_MSG(!Math::is_finite(p_dot) || p_dot < -1.0 || p_dot > 1.0, "min_direction_dot must be finite and within [-1, 1].");
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_dot) || p_dot < -1.0 || p_dot > 1.0 || p_dot > max_direction_dot, "min_direction_dot must be finite, within [-1, 1] and no greater than max_direction_dot.");
 	min_direction_dot = p_dot;
+	emit_changed();
+}
+
+void EnvironmentQuery3D::set_max_direction_dot(double p_dot) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_dot) || p_dot < -1.0 || p_dot > 1.0 || p_dot < min_direction_dot, "max_direction_dot must be finite, within [-1, 1] and no less than min_direction_dot.");
+	max_direction_dot = p_dot;
 	emit_changed();
 }
 
@@ -346,7 +355,7 @@ Array EnvironmentQuery3D::query() const {
 		QueryHit hit;
 		if (score_candidate(candidates[i], i, origin, threat_position, threat_positions,
 					exclusion_positions, min_exclusion_distance,
-					use_direction, direction_origin, direction_axis, min_direction_dot,
+					use_direction, direction_origin, direction_axis, min_direction_dot, max_direction_dot,
 					use_threat, horizontal_only, min_distance, max_distance,
 					max_vertical_difference, desired_distance, distance_weight, safety_weight,
 					min_threat_distance, hit)) {
@@ -397,7 +406,7 @@ PackedVector3Array EnvironmentQuery3D::query_top_positions(int p_count) const {
 		QueryHit hit;
 		if (!score_candidate(candidates[i], i, origin, threat_position, threat_positions,
 					exclusion_positions, min_exclusion_distance,
-					use_direction, direction_origin, direction_axis, min_direction_dot,
+					use_direction, direction_origin, direction_axis, min_direction_dot, max_direction_dot,
 					use_threat, horizontal_only, min_distance, max_distance,
 					max_vertical_difference, desired_distance, distance_weight, safety_weight,
 					min_threat_distance, hit)) {
@@ -441,7 +450,7 @@ PackedVector3Array EnvironmentQuery3D::query_spread_positions(int p_count, doubl
 		QueryHit hit;
 		if (score_candidate(candidates[i], i, origin, threat_position, threat_positions,
 					exclusion_positions, min_exclusion_distance,
-					use_direction, direction_origin, direction_axis, min_direction_dot,
+					use_direction, direction_origin, direction_axis, min_direction_dot, max_direction_dot,
 					use_threat, horizontal_only, min_distance, max_distance,
 					max_vertical_difference, desired_distance, distance_weight, safety_weight,
 					min_threat_distance, hit)) {
