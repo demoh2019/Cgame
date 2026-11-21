@@ -1,5 +1,5 @@
 extends MultiMeshInstance3D
-## Procedural, collision-free foliage in one instanced draw batch.
+## Collision-free PCG foliage grouped into up to three mesh-specific GPU batches.
 ## Exclusion spheres protect spawn, scavenging resources, and ruined structures.
 ## Native PCG and stock-Godot fallback agree on stable-ID density and exclusions.
 
