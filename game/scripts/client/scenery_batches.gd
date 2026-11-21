@@ -333,7 +333,7 @@ static func align_cosmetic_transforms_surface(transforms: Array[Transform3D],
 			if native_result.size() == transforms.size():
 				var typed: Array[Transform3D] = []
 				for item in native_result:
-					if not item is Transform3D:
+					if not (item is Transform3D):
 						return transforms
 					typed.append(item)
 				return typed
