@@ -1,5 +1,6 @@
 extends RefCounted
 ## Engine-side simulation LOD must not change chunk residency or load budgets.
+const WorldStreamingPolicy = preload("res://scripts/client/world_streaming_policy.gd")
 
 
 class ProbeChunk extends Node3D:
@@ -139,8 +140,11 @@ func run(t) -> void:
 	layered.max_simulation_transitions_per_update = 64
 	layered.set_chunk_generator(Callable(self, "_make_layered_chunk"))
 	if layered.has_method("set_simulation_layer_enabled"):
+		WorldStreamingPolicy.apply_simulation_layers(layered, true)
+		t.check(not layered.is_simulation_layer_enabled(&"SurfaceCosmetics"),
+			"actual Albion underground policy disables the surface layer")
 		t.check(layered.set_simulation_layer_enabled(&"SurfaceCosmetics", false),
-			"named surface layer can be disabled before the first chunk loads")
+			"repeated surface layer state is idempotent before loading")
 		layered.refresh()
 		var surface_cell := Vector3i(0, 0, 0)
 		var dungeon_cell := Vector3i(1, 0, 0)
@@ -158,8 +162,9 @@ func run(t) -> void:
 			t.check(layered.is_cell_simulation_active(dungeon_cell),
 				"another layer remains active despite underground surface suspension")
 			var count_before: int = layered.get_loaded_count()
-			t.check(layered.set_simulation_layer_enabled(&"SurfaceCosmetics", true),
-				"returning to surface reenables the data layer")
+			WorldStreamingPolicy.apply_simulation_layers(layered, false)
+			t.check(layered.is_simulation_layer_enabled(&"SurfaceCosmetics"),
+				"actual Albion outdoors policy reenables the data layer")
 			layered.refresh()
 			t.check(layered.is_cell_simulation_active(surface_cell),
 				"surface chunk resumes at existing node with no reload")
@@ -167,8 +172,9 @@ func run(t) -> void:
 				"resuming simulated visuals never replaces a resident chunk")
 			t.eq(layered.get_loaded_count(), count_before,
 				"data layers never alter world loading or collision residency")
-			t.check(layered.set_simulation_layer_enabled(&"SurfaceCosmetics", false),
-				"entering dungeon pauses the surface again")
+			WorldStreamingPolicy.apply_simulation_layers(layered, true)
+			t.check(not layered.is_simulation_layer_enabled(&"SurfaceCosmetics"),
+				"reentering dungeon pauses the surface again")
 			layered.refresh()
 			t.check(not layered.is_cell_simulation_active(surface_cell),
 				"subsequent cosmetic suspension remains reversible")

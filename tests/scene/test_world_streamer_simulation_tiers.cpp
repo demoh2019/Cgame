@@ -24,7 +24,7 @@ TEST_CASE("[WorldStreamer] Named cosmetic simulation layers are bounded and defa
 	CHECK(streamer->get_simulation_layer_count() == 1);
 	// The namespace limit prevents untrusted scripts from growing a global table.
 	for (int i = 0; i < 15; i++) {
-		const String name = "Layer_" + itos(i);
+		const String name = String("Layer_") + itos(i);
 		CHECK(streamer->set_simulation_layer_enabled(StringName(name), true));
 	}
 	CHECK(streamer->get_simulation_layer_count() == 16);
