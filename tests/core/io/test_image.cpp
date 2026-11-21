@@ -264,6 +264,46 @@ TEST_CASE("[Image] Resizing") {
 			"get_size() should return the correct size after resize_to_po2().");
 }
 
+TEST_CASE("[Image][Batch] Packed rectangular pixel update matches scalar writes") {
+	const Image::Format formats[] = {
+		Image::FORMAT_L8, Image::FORMAT_RGB8, Image::FORMAT_RGBA8, Image::FORMAT_RGBAF,
+	};
+	for (const Image::Format format : formats) {
+		Ref<Image> batch = memnew(Image(5, 4, false, format));
+		Ref<Image> scalar = memnew(Image(5, 4, false, format));
+		REQUIRE(batch.is_valid());
+		REQUIRE(scalar.is_valid());
+		batch->fill(Color(0.11f, 0.22f, 0.33f, 0.44f));
+		scalar->fill(Color(0.11f, 0.22f, 0.33f, 0.44f));
+
+		const Vector<Color> colors = {
+			Color(1.0f, 0.0f, 0.2f, 0.8f), Color(0.0f, 0.4f, 1.0f, 0.2f), Color(0.9f, 0.7f, 0.1f, 1.0f),
+			Color(0.2f, 0.6f, 0.8f, 0.5f), Color(0.3f, 0.4f, 0.1f, 0.0f), Color(0.8f, 0.3f, 0.6f, 1.0f),
+		};
+		batch->set_pixels_rect(Rect2i(1, 1, 3, 2), colors);
+		for (int y = 0; y < 2; y++) {
+			for (int x = 0; x < 3; x++) {
+				scalar->set_pixel(1 + x, 1 + y, colors[y * 3 + x]);
+			}
+		}
+		CHECK(batch->get_data() == scalar->get_data());
+
+		// The bottom-right edge is allowed, but overflowing rectangles
+		// and mismatched packed arrays must not partially modify pixels.
+		batch->set_pixels_rect(Rect2i(4, 3, 1, 1), { Color(0.3f, 0.8f, 0.1f) });
+		scalar->set_pixel(4, 3, Color(0.3f, 0.8f, 0.1f));
+		CHECK(batch->get_data() == scalar->get_data());
+		const Vector<uint8_t> unchanged = batch->get_data();
+		ERR_PRINT_OFF;
+		batch->set_pixels_rect(Rect2i(-1, 1, 3, 2), colors);
+		batch->set_pixels_rect(Rect2i(3, 3, 3, 2), colors);
+		batch->set_pixels_rect(Rect2i(1, 1, 4, 2), colors);
+		batch->set_pixels_rect(Rect2i(1, 1, 0, 2), {});
+		ERR_PRINT_ON;
+		CHECK(batch->get_data() == unchanged);
+	}
+}
+
 TEST_CASE("[Image] Modifying pixels of an image") {
 	Ref<Image> image = memnew(Image(3, 3, false, Image::FORMAT_RGBA8));
 	image->set_pixel(0, 0, Color(1, 1, 1, 1));
