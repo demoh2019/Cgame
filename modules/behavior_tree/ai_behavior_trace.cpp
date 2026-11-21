@@ -141,7 +141,12 @@ Array AIBehaviorTrace::get_history_frames(bool p_changes_only) const {
 	bool have_previous = false;
 	// Include up to capacity-1 retained ticks plus the latest in progress.
 	for (int i = 0; i < history_frames.size() + (tick_index > 0 ? 1 : 0); ++i) {
-		const Dictionary frame = i < history_frames.size() ? Dictionary(history_frames[i]) : get_snapshot();
+		Dictionary frame;
+		if (i < history_frames.size()) {
+			frame = history_frames[i];
+		} else {
+			frame = get_snapshot();
+		}
 		const bool changed = !have_previous || !_ai_trace_same_behavior(previous, frame);
 		if (!p_changes_only || changed) {
 			Dictionary copy = frame.duplicate(true);
@@ -162,20 +167,40 @@ Array AIBehaviorTrace::get_slowest_nodes(int p_limit) const {
 		if (int(candidate.get("status", -1)) < 0) {
 			continue;
 		}
-		const int64_t duration = candidate.get("duration_usec", int64_t(0));
+		const int64_t inclusive_usec = candidate.get("duration_usec", int64_t(0));
 		const String path = candidate.get("path", String());
+		const int depth = candidate.get("depth", 0);
+		// Inclusive timings are correct for the trace, but tend to show
+		// the root as the slowest node. Subtract immediate child spans to
+		// approximate the own work of a task and expose actual hot leaves.
+		int64_t children_usec = 0;
+		for (int j = 0; j < steps.size(); ++j) {
+			if (i == j) {
+				continue;
+			}
+			const Dictionary other = steps[j];
+			const String other_path = other.get("path", String());
+			if (int(other.get("status", -1)) >= 0 &&
+					int(other.get("depth", -1)) == depth + 1 &&
+					other_path.begins_with(path + "/")) {
+				children_usec += int64_t(other.get("duration_usec", int64_t(0)));
+			}
+		}
+		const int64_t self_usec = MAX(int64_t(0), inclusive_usec - children_usec);
+		Dictionary record = candidate.duplicate(true);
+		record["self_usec"] = self_usec;
 		int index = 0;
 		for (; index < top.size(); ++index) {
 			const Dictionary other = top[index];
-			const int64_t other_usec = other.get("duration_usec", int64_t(0));
-			if (duration > other_usec || (duration == other_usec && path < String(other.get("path", String())))) {
+			const int64_t other_usec = other.get("self_usec", int64_t(0));
+			if (self_usec > other_usec || (self_usec == other_usec && path < String(other.get("path", String())))) {
 				break;
 			}
 		}
 		if (index >= p_limit) {
 			continue;
 		}
-		top.insert(index, candidate.duplicate(true));
+		top.insert(index, record);
 		if (top.size() > p_limit) {
 			top.remove_at(top.size() - 1);
 		}
