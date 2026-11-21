@@ -657,3 +657,62 @@ GDScript parsing, physics/world rendering and macOS Metal runtime behavior are
 and the GitHub CI workflow remains pending/queued.
 
 References: [Godot scene-tree groups](https://docs.godotengine.org/en/stable/tutorials/scripting/groups.html), [Godot 3D ray-casting](https://docs.godotengine.org/en/stable/tutorials/physics/ray-casting.html), [Unreal Gameplay Framework](https://dev.epicgames.com/documentation/unreal-engine/gameplay-framework-in-unreal-engine).
+
+
+## Visual Quality Lab v15 — persistent inventory, item recipes and equippable light
+
+This release extends the demo's reusable **GDScript game/engine services**, not
+Godot's core C++ renderer. Its item definitions and recipes are maintained by
+`VisualItemCatalog` (`addons/visual_quality/item_catalog.gd`); item stacks,
+source-unique rewards, save/load and atomic recipe mutations are managed by
+`WorldInventory3D` (`addons/visual_quality/inventory_component.gd`). These are
+reusable nodes/classes that do not reference the demo's player or world cells.
+
+**Game integration:** collecting quest light shards now rewards `light_shard`;
+activating a streamed beacon rewards a `forest_essence`. Source keys such as
+`quest:<seed>:<index>` and `beacon:<x>:<z>` prevent a reward from being granted
+again after a level reload, a beacon-state reset or a quest replay. On first
+use of v15, the demo migrates already-collected shards and activated beacons
+from v6–v14 save files. Claims remain recorded even when resources are spent.
+
+**Controls:** press **I** to open/close the centered inventory panel. Press
+**C** (or click the recipe button) to create an `spark_core` from **2 light
+shards**. Press **J** to create a unique `forest_lantern` from **1 spark core +
+2 forest essences**. Press **T** to equip/unequip its warm, player-carried
+OmniLight3D, useful during night exploration. The light is intentionally
+shadow-free to keep rendering cost modest. Existing H contextual interactions,
+F pickup, G beacon activation, NPCs, world streaming and atmosphere controls
+continue to function. Players can collect light shards even before opening the
+inventory UI.
+
+**Persistence and protections:** inventory files are versioned and tied to a
+world ID, saved with Godot `ConfigFile` to `user://` through temporary-file
+replacement. Inventory changes roll back in memory if saving fails. Only
+registered item IDs and positive, bounded counts are accepted when loading.
+Crafting checks every ingredient and output capacity **before consuming
+anything**. Receipts (up to 8,192) are also saved and prohibit duplicate
+rewards; counts are capped at 99/99/20/1 for shards/essence/cores/lanterns.
+The inventory exposes signals, copies of its state, pure recipe simulation,
+and methods to add, remove, craft and claim one-time rewards.
+
+The world/beacon and quest save files are separate from the inventory file;
+**there is no distributed transaction across those files**. On startup, the
+demo reconciles committed world and quest progress using stable source IDs.
+This is a single-player prototype, not a network-authoritative inventory,
+large-scale item database, trading system, or equipment animation pipeline.
+Quest replay/reset does **not** allow farming the same rewards indefinitely.
+
+**Verification:** Python packaging/static regression suite **37/37 passed**;
+Godot runtime tests below were added to CI but have *not* been executed in
+this environment (the local Godot binary and authorized Mac are unavailable,
+while GitHub Actions still has no confirmed passing run):
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+godot --headless --path . --script res://tests/test_inventory_component.gd
+godot --headless --path . --script res://tests/test_inventory_crafting.gd
+godot --headless --path . --script res://tests/test_inventory_persistence.gd
+godot --headless --path . --script res://tests/test_inventory_gameplay.gd
+```
+
+References: [Godot save-game guidance](https://docs.godotengine.org/en/4.6/tutorials/io/saving_games.html), [ConfigFile](https://docs.godotengine.org/en/4.6/classes/class_configfile.html), [OmniLight3D](https://docs.godotengine.org/en/4.6/classes/class_omnilight3d.html).
