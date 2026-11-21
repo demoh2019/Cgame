@@ -1,0 +1,71 @@
+name: Cgame native SceneNodePool regression
+
+on:
+  pull_request:
+    paths:
+      - 'scene/main/scene_node_pool.*'
+      - 'scene/register_scene_types.cpp'
+      - 'tests/scene/test_scene_node_pool.cpp'
+      - 'game/addons/runtime_pool/**'
+      - 'game/scripts/client/effects.gd'
+      - 'game/scripts/client/pooled_burst.*'
+      - 'game/tests/test_runtime_node_pool.gd'
+      - '.github/workflows/native-scene-node-pool.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/main/scene_node_pool.*'
+      - 'scene/register_scene_types.cpp'
+      - 'tests/scene/test_scene_node_pool.cpp'
+      - 'game/scripts/client/effects.gd'
+      - 'game/tests/test_runtime_node_pool.gd'
+      - '.github/workflows/native-scene-node-pool.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-scene-pool:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout Cgame engine and Albion After
+        uses: actions/checkout@v4
+      - name: Install native build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame with native doctest cases
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_text_server_fb_enabled=yes -j2
+      - name: Execute native pool regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$BIN" --version
+          timeout 180s "$BIN" --headless --test --test-case="[SceneNodePool]*" --no-colors 2>&1 | tee native-pool-tests.log
+      - name: Import Albion After and run its real game tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          timeout 300s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee pool-import.log
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee pool-game-tests.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' pool-game-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pool-import.log pool-game-tests.log; then exit 1; fi
+      - name: Upload regression diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-scene-pool-logs
+          if-no-files-found: ignore
+          path: |
+            native-pool-tests.log
+            pool-import.log
+            pool-game-tests.log

@@ -106,6 +106,7 @@
 #include "scene/main/missing_node.h"
 #include "scene/main/multiplayer_api.h"
 #include "scene/main/resource_preloader.h"
+#include "scene/main/scene_node_pool.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/shader_globals_override.h"
 #include "scene/main/status_indicator.h"
@@ -486,6 +487,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(Timer);
 	GDREGISTER_CLASS(CanvasLayer);
 	GDREGISTER_CLASS(ResourcePreloader);
+	GDREGISTER_CLASS(SceneNodePool);
 	GDREGISTER_CLASS(Window);
 
 	GDREGISTER_CLASS(StatusIndicator);

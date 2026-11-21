@@ -44,7 +44,8 @@ func _ready() -> void:
 	add_child(_rain)
 	_snow = SnowVfx.new()
 	add_child(_snow)
-	_burst_pool = PoolScript.new()
+	# Use the native Cgame engine pool; stock Godot keeps the script fallback.
+	_burst_pool = ClassDB.instantiate("SceneNodePool") if ClassDB.class_exists("SceneNodePool") else PoolScript.new()
 	_burst_pool.name = "BurstPool"
 	_burst_pool.template = BurstScene
 	_burst_pool.prewarm_count = 12

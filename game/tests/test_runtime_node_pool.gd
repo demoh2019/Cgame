@@ -79,3 +79,25 @@ func run(t) -> void:
 	standalone.on_pool_created()
 	t.check(standalone.mesh is SphereMesh, "lazy resource initialization")
 	standalone.free()
+
+	# The stock Godot CI binary has no SceneNodePool native class; Cgame does.
+	if ClassDB.class_exists("SceneNodePool"):
+		t.current = "native Cgame SceneNodePool parity"
+		var native = ClassDB.instantiate("SceneNodePool")
+		t.check(native is Node, "native engine pool registered")
+		native.template = BurstScene
+		native.max_idle = 1
+		native.max_active = 1
+		t.eq(native.prewarm(8), 1, "native prewarm respects cache bound")
+		var native_host := Node3D.new()
+		var a: Node = native.acquire(native_host)
+		t.check(a is CPUParticles3D, "native pool creates game particle scene")
+		t.eq(native.acquire(native_host), null, "native max_active enforced")
+		t.check(native.release(a), "native return succeeds")
+		t.check(not native.release(a), "native double return rejected")
+		t.check(native.acquire(native_host) == a, "native node reused")
+		t.eq(native.get_stats()["created_total"], 1, "native cache hit avoids allocation")
+		t.check(native.release(a), "native repeated lifecycle")
+		native.clear_idle()
+		native_host.free()
+		native.free()
