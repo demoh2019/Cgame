@@ -526,6 +526,13 @@ func c_build(x: float, z: float, yaw: float = 0.0) -> void:
 		s_result.rpc_id(peer, "build", sim.cmd_build(peer, x, z, yaw))
 
 
+@rpc("any_peer", "reliable")
+func c_build_piece(piece: String, x: float, z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "build", sim.cmd_build_piece(peer, piece, x, z))
+
+
 
 @rpc("any_peer", "reliable")
 func c_place_infected_snare(x: float, z: float) -> void:

@@ -140,6 +140,7 @@ const SUITES := [
 	"res://tests/test_arcane_abilities.gd",
 	"res://tests/test_swimming.gd",
 	"res://tests/test_infected_temperaments.gd",
+	"res://tests/test_house_building.gd",
 	"res://tests/test_rain_wet_foliage.gd",
 	"res://tests/test_sky_lighting_budget.gd",
 	"res://tests/test_sky_ibl_fidelity.gd",

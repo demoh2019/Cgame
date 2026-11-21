@@ -3,6 +3,7 @@ extends RefCounted
 ## and a predicted position for the local player that is corrected whenever the server answers.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
@@ -160,7 +161,11 @@ func on_snapshot(snapshot: Dictionary) -> void:
 		for entity in snapshot["barricades"]:
 			var id: int = int(entity["id"])
 			barricades[id] = entity
-			world.add_dynamic_blocker(id, float(entity["x"]), float(entity["z"]), 0.85)
+			var piece: String = str(entity.get("piece", ""))
+			if HousePieces.valid(piece):
+				world.add_structure_blockers(id, HousePieces.blockers(piece, float(entity["x"]), float(entity["z"]), float(entity.get("yaw", 0.0))))
+			else:
+				world.add_dynamic_blocker(id, float(entity["x"]), float(entity["z"]), 0.85)
 	depleted.clear()
 	for id in snapshot["depleted"]:
 		depleted[id] = true
@@ -613,6 +618,11 @@ func loot_sweep() -> void:
 func build(point: Vector2, yaw: float = 0.0) -> void:
 	if point.is_finite():
 		net.c_build.rpc_id(1, point.x, point.y, yaw)
+
+
+func build_piece(piece: String, point: Vector2) -> void:
+	if point.is_finite():
+		net.c_build_piece.rpc_id(1, piece, point.x, point.y)
 
 
 func repair(id: int) -> void:

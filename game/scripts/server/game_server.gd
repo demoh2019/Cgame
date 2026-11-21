@@ -93,6 +93,7 @@ const StaggerFinisher = preload("res://scripts/shared/stagger_finisher.gd")
 const ArcaneAbilities = preload("res://scripts/shared/arcane_abilities.gd")
 const Swimming = preload("res://scripts/shared/swimming.gd")
 const WorldIncidents = preload("res://scripts/shared/world_incidents.gd")
+const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const AntisepticEdge = preload("res://scripts/shared/antiseptic_edge.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
@@ -3467,6 +3468,61 @@ func cmd_refuel_campfire(peer_id: int, id: int) -> Dictionary:
 	player.dirty_character = true
 	events.append({"type": "campfire_refueled", "id": id, "peer": peer_id})
 	return {"ok": true, "id": id, "remaining": float(camp["expires"]) - time}
+
+
+## House pieces snap to the 3 m grid; each slot (cell edge, floor, roof, corner) holds one piece.
+const MAX_PIECES_PER_OWNER := 80
+const MAX_PIECES_GLOBAL := 2500
+
+
+func cmd_build_piece(peer_id: int, piece: String, x: float, z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if not HousePieces.valid(piece):
+		return {"ok": false, "reason": "invalid_piece"}
+	var snapped: Vector3 = HousePieces.snap(piece, Vector2(x, z))
+	var reason: String = HousePieces.placement_reason(world, piece, snapped, Vector2(player.position.x, player.position.z))
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	if barricades.size() >= MAX_PIECES_GLOBAL:
+		return {"ok": false, "reason": "world_limit"}
+	var owned := 0
+	for item in barricades.values():
+		if Structures.can_manage(item, peer_id, player.user_id):
+			owned += 1
+		var other_piece: String = str(item.get("piece", ""))
+		if other_piece != "" and HousePieces.slot(other_piece) == HousePieces.slot(piece) \
+				and Vector2(float(item["x"]) - snapped.x, float(item["z"]) - snapped.y).length() < 0.2:
+			return {"ok": false, "reason": "occupied"}
+	if owned >= MAX_PIECES_PER_OWNER:
+		return {"ok": false, "reason": "owner_limit"}
+	if HousePieces.blocks(piece):
+		for circle in HousePieces.blockers(piece, snapped.x, snapped.y, snapped.z):
+			var at := Vector2(float(circle[0]), float(circle[1]))
+			for other in players.values():
+				if _alive(other) and Structures.within_range(at, Vector2(other.position.x, other.position.z), float(circle[2]) + Defs.PLAYER_RADIUS + 0.1):
+					return {"ok": false, "reason": "blocked"}
+			for infected in zombies.values():
+				if infected.is_alive() and Structures.within_range(at, Vector2(infected.position.x, infected.position.z), float(circle[2]) + 0.6):
+					return {"ok": false, "reason": "blocked"}
+	var cost: Dictionary = HousePieces.COST[piece]
+	if not player.inventory.has_all(cost):
+		return {"ok": false, "reason": "missing_materials"}
+	for item_id in cost:
+		player.inventory.remove(item_id, int(cost[item_id]))
+	var id := new_id()
+	var item := {"id": id, "x": snapped.x, "y": world.height_at(snapped.x, snapped.y) + HousePieces.elevation(piece), "z": snapped.y,
+		"hp": Structures.MAX_HEALTH, "tier": 1, "owner": peer_id,
+		"owner_account": player.user_id, "owner_guild": player.guild_id,
+		"yaw": snapped.z, "piece": piece, "upkeep_until": time + Structures.UPKEEP_SECONDS}
+	barricades[id] = item
+	world_structure_revision += 1
+	world.add_structure_blockers(id, HousePieces.blockers(piece, snapped.x, snapped.y, snapped.z))
+	player.dirty_inventory = true
+	player.dirty_character = true
+	events.append({"type": "barricade_built", "id": id, "peer": peer_id})
+	return {"ok": true, "id": id, "piece": piece}
 
 
 func cmd_build(peer_id: int, x: float, z: float, yaw: float = 0.0) -> Dictionary:
@@ -7125,6 +7181,8 @@ func _tick_zombies(delta: float) -> void:
 				if toward.length_squared() > 0.01:
 					for wall_id in barricades.keys():
 						var wall: Dictionary = barricades[wall_id]
+						if str(wall.get("piece", "")) != "" and not HousePieces.blocks(str(wall["piece"])):
+							continue # Floors and roofs are not in the way.
 						var offset := Vector2(float(wall["x"]), float(wall["z"])) - here
 						if offset.length() <= Structures.ZOMBIE_REACH and offset.dot(toward) > 0.0:
 							damage_barricade(wall_id, float(zombie.data["damage"]) * delta * 2.0)

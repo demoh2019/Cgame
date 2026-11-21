@@ -708,8 +708,29 @@ func add_dynamic_blocker(id: int, x: float, z: float, radius: float) -> void:
 		dynamic_blockers[id] = {"id": id, "x": x, "z": z, "radius": radius, "blocks": true}
 
 
+## A structure made of several circles (house walls, doorways). Tagged so house placement can
+## tell pieces apart from scenery; removed together by remove_dynamic_blocker(id).
+var _structure_parts: Dictionary = {}
+
+
+func add_structure_blockers(id: int, circles: Array) -> void:
+	remove_dynamic_blocker(id)
+	var keys: Array = []
+	for k in circles.size():
+		var c: Array = circles[k]
+		if not (is_finite(float(c[0])) and is_finite(float(c[1])) and float(c[2]) > 0.0):
+			continue
+		var key := "%d:%d" % [id, k]
+		dynamic_blockers[key] = {"id": id, "x": float(c[0]), "z": float(c[1]), "radius": float(c[2]), "blocks": true, "piece_owner": str(id)}
+		keys.append(key)
+	_structure_parts[id] = keys
+
+
 func remove_dynamic_blocker(id: int) -> void:
 	dynamic_blockers.erase(id)
+	for key in _structure_parts.get(id, []):
+		dynamic_blockers.erase(key)
+	_structure_parts.erase(id)
 
 
 func blockers_near(x: float, z: float, radius: float) -> Array:

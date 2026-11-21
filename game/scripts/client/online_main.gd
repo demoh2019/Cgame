@@ -24,6 +24,7 @@ const UiAccess = preload("res://scripts/client/ui_access.gd")
 const UiSettings = preload("res://scripts/client/ui_settings.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
+const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const FirstPersonView = preload("res://scripts/client/first_person_view.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
 const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
@@ -186,6 +187,9 @@ var _build_mode := false # U: a ghost wall follows the aim until it is placed or
 var _build_yaw := 0.0
 var _build_ghost: MeshInstance3D
 var _build_reason := ""
+# "" builds the old free-standing barricade; otherwise a house piece snapped to the 3 m grid.
+var _build_piece := "wall"
+const BUILD_PIECES := ["wall", "door", "window", "floor", "roof", "pillar", ""]
 var _move_input := Vector2.ZERO # This frame's movement keys, for facing the way you walk.
 var _last_attack_msec := -100000
 var _fishing_line: MeshInstance3D # Line from the rod tip to the bobber while fishing.
@@ -822,12 +826,67 @@ func _build_target() -> Vector2:
 	return Vector2(client.predicted.x, client.predicted.z) + direction.normalized() * 2.8
 
 
+## Where a house piece would go: aimed 3.5 m ahead, snapped to the grid (x, z, yaw).
+func _piece_target() -> Vector3:
+	var direction: Vector2 = _aim_direction()
+	if direction.length_squared() < 0.001:
+		direction = Vector2(sin(avatar.rotation.y), cos(avatar.rotation.y))
+	var aim := Vector2(client.predicted.x, client.predicted.z) + direction.normalized() * 3.5
+	return HousePieces.snap(_build_piece, aim)
+
+
+func _piece_reason(snapped: Vector3) -> String:
+	var reason: String = HousePieces.placement_reason(client.world, _build_piece, snapped, Vector2(client.predicted.x, client.predicted.z))
+	if reason != "":
+		return reason
+	for item in client.barricades.values():
+		var other: String = str(item.get("piece", ""))
+		if other != "" and HousePieces.slot(other) == HousePieces.slot(_build_piece) \
+				and Vector2(float(item["x"]) - snapped.x, float(item["z"]) - snapped.y).length() < 0.2:
+			return "occupied"
+	if not client.inventory.has_all(HousePieces.COST[_build_piece]):
+		return "missing_materials"
+	return ""
+
+
+func _select_build_piece(index: int) -> void:
+	_build_piece = BUILD_PIECES[posmod(index, BUILD_PIECES.size())]
+	if _build_ghost != null:
+		_build_ghost.mesh = EntityView.piece_mesh(_build_piece, 1) if _build_piece != "" else EntityView.wall_mesh(1)
+
+
 ## The ghost wall of build mode: the real tier-1 model, see-through, green where it may stand and red where not.
 func _update_build_ghost() -> void:
 	if not _build_mode or not bool(client.you.get("alive", false)):
 		if _build_ghost != null:
 			_build_ghost.visible = false
 		return
+	if _build_piece != "":
+		if _build_ghost == null:
+			_update_build_ghost_legacy_setup()
+		var snapped: Vector3 = _piece_target()
+		_build_reason = _piece_reason(snapped)
+		_build_ghost.visible = true
+		_build_ghost.global_position = Vector3(snapped.x, client.world.height_at(snapped.x, snapped.y) + HousePieces.elevation(_build_piece), snapped.y)
+		_build_ghost.rotation.y = snapped.z
+		(_build_ghost.material_override as StandardMaterial3D).albedo_color = \
+			Color(0.35, 1.0, 0.45, 0.45) if _build_reason == "" else Color(1.0, 0.3, 0.25, 0.45)
+		return
+	_update_build_ghost_legacy()
+
+
+func _update_build_ghost_legacy_setup() -> void:
+	_build_ghost = MeshInstance3D.new()
+	_build_ghost.mesh = EntityView.piece_mesh(_build_piece, 1) if _build_piece != "" else EntityView.wall_mesh(1)
+	var glass := StandardMaterial3D.new()
+	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_build_ghost.material_override = glass
+	_build_ghost.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_build_ghost)
+
+
+func _update_build_ghost_legacy() -> void:
 	if _build_ghost == null:
 		_build_ghost = MeshInstance3D.new()
 		_build_ghost.mesh = EntityView.wall_mesh(1)
@@ -853,6 +912,10 @@ func _place_wall() -> void:
 	if _build_reason != "":
 		hud.say("Cannot build here: %s." % _build_reason.replace("_", " "))
 		return
+	if _build_piece != "":
+		var snapped: Vector3 = _piece_target()
+		client.build_piece(_build_piece, Vector2(snapped.x, snapped.y))
+		return # Stay in build mode: houses take many pieces.
 	client.build(_build_target(), _build_yaw)
 	_end_build_mode()
 
@@ -1672,7 +1735,18 @@ func _update_prompt() -> void:
 		var protection: float = float(client.campfires[nearby_fire_id].get("stormproof_seconds", 0.0))
 		if protection > 0.0:
 			text += " | STORMPROOF FIRE: %.0fs" % protection
-	if _build_mode:
+	if _build_mode and _build_piece != "":
+		var cost: Dictionary = HousePieces.COST[_build_piece]
+		var parts: Array = []
+		for item_id in cost:
+			parts.append("%d %s" % [int(cost[item_id]), str(item_id).replace("_1", "")])
+		text = "BUILD %s  (%s)   1 wall 2 door 3 window 4 floor 5 roof 6 pillar 7 barricade | wheel: next piece   click: place   right click: done" % [
+			str(HousePieces.NAMES[_build_piece]).to_upper(), ", ".join(parts)]
+		if _build_reason != "":
+			text += "   -   " + {"out_of_range": "too far", "safe_zone": "not in the settlement",
+				"bad_terrain": "ground too steep or wet", "blocked": "something is in the way", "occupied": "already built there",
+				"missing_materials": "not enough materials"}.get(_build_reason, _build_reason)
+	elif _build_mode:
 		text = "BUILD WALL  (4 wood, 2 stone)   wheel: turn   click or U: place   right click: cancel"
 		if _build_reason != "":
 			text += "   -   " + {"out_of_range": "too near or too far", "safe_zone": "not in the settlement",
@@ -2100,13 +2174,25 @@ func _unhandled_input(event: InputEvent) -> void:
 				var id: int = client.nearest_barricade(client.predicted)
 				if id != -1:
 					client.dismantle(id)
+	if _build_mode and event is InputEventKey and event.pressed and not event.echo \
+			and event.keycode >= KEY_1 and event.keycode <= KEY_7:
+		# Build mode: 1 wall, 2 doorway, 3 window, 4 floor, 5 roof, 6 pillar, 7 old barricade.
+		_select_build_piece(int(event.keycode - KEY_1))
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventMouseButton and event.pressed and _build_mode:
 		# Build mode: the wheel turns the wall, a left click places it, a right click puts the plan away.
 		match event.button_index:
 			MOUSE_BUTTON_WHEEL_UP:
-				_build_yaw = fposmod(_build_yaw + Structures.ROTATION_STEP, TAU)
+				if _build_piece == "":
+					_build_yaw = fposmod(_build_yaw + Structures.ROTATION_STEP, TAU)
+				else:
+					_select_build_piece(BUILD_PIECES.find(_build_piece) + 1)
 			MOUSE_BUTTON_WHEEL_DOWN:
-				_build_yaw = fposmod(_build_yaw - Structures.ROTATION_STEP, TAU)
+				if _build_piece == "":
+					_build_yaw = fposmod(_build_yaw - Structures.ROTATION_STEP, TAU)
+				else:
+					_select_build_piece(BUILD_PIECES.find(_build_piece) - 1)
 			MOUSE_BUTTON_LEFT:
 				_place_wall()
 			MOUSE_BUTTON_RIGHT:

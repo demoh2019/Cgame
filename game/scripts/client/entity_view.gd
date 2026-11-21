@@ -54,6 +54,27 @@ const INTERPOLATION_DELAY := 0.12 # A little more than one snapshot interval (10
 const TELEPORT_DISTANCE := 8.0
 
 
+## House piece models (Kenney Fantasy Town Kit, CC0), sized to the 3 m building grid. Upgraded
+## walls (tier 2+) turn from timber to stone.
+const PIECE_DIR := "res://assets/models/kenney_building/town/"
+const PIECE_MODELS := {
+	"wall": [["wall-wood", "length", 3.0], ["wall", "length", 3.0]],
+	"door": [["wall-wood-door", "length", 3.0], ["wall-doorway-square", "length", 3.0]],
+	"window": [["wall-wood-window-shutters", "length", 3.0], ["wall-window-shutters", "length", 3.0]],
+	"floor": [["planks", "length", 3.0], ["planks", "length", 3.0]],
+	"roof": [["roof", "length", 3.2], ["roof", "length", 3.2]],
+	"pillar": [["pillar-wood", "height", 3.0], ["pillar-wood", "height", 3.0]],
+}
+
+
+static func piece_mesh(piece: String, tier: int) -> Mesh:
+	if not PIECE_MODELS.has(piece):
+		return wall_mesh(tier)
+	var choice: Array = PIECE_MODELS[piece][0 if tier <= 1 else 1]
+	var mesh: Mesh = ModelCatalog.entry_mesh({"path": PIECE_DIR + str(choice[0]) + ".glb", "kind": str(choice[1]), "size": float(choice[2])})
+	return mesh if mesh != null else wall_mesh(tier)
+
+
 ## The wall model of a tier, or a timber box when the packs are missing.
 static func wall_mesh(tier: int) -> Mesh:
 	var mesh: Mesh = ModelCatalog.barricade_mesh(tier)
@@ -203,9 +224,11 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		# The tier's wall model, turned to its facing, darkening as it is damaged.
 		var barricade_mesh: MeshInstance3D = _nodes[key].get_node("Wall")
 		var tier: int = Structures.tier_of(entity)
-		if int(barricade_mesh.get_meta("tier", 0)) != tier:
+		var piece: String = str(entity.get("piece", ""))
+		if int(barricade_mesh.get_meta("tier", 0)) != tier or str(barricade_mesh.get_meta("piece", "")) != piece:
 			barricade_mesh.set_meta("tier", tier)
-			barricade_mesh.mesh = wall_mesh(tier)
+			barricade_mesh.set_meta("piece", piece)
+			barricade_mesh.mesh = piece_mesh(piece, tier) if piece != "" else wall_mesh(tier)
 			if barricade_mesh.material_overlay == null:
 				var wear := StandardMaterial3D.new()
 				wear.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA

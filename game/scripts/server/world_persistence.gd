@@ -1,4 +1,5 @@
 extends RefCounted
+const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 ## Dedicated-server world checkpoints for account-owned barricades only.
 ## Authenticated account IDs stay on the server and are NEVER sent to clients.
 ## Session-only offline/guest structures cannot be reclaimed safely after restart.
@@ -38,7 +39,7 @@ static func capture(sim) -> Dictionary:
 			"x": float(item["x"]), "z": float(item["z"]),
 			"hp": float(item["hp"]), "tier": Structures.tier_of(item), "owner_account": account,
 			"owner_guild": str(item.get("owner_guild", "")),
-			"yaw": float(item.get("yaw", 0.0)),
+			"yaw": float(item.get("yaw", 0.0)), "piece": str(item.get("piece", "")),
 			"upkeep": clampf(float(item.get("upkeep_until", sim.time)) - sim.time, 0.0, Structures.UPKEEP_SECONDS),
 		})
 	walls.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
@@ -154,7 +155,8 @@ static func validate(data: Variant, sim) -> Dictionary:
 		owner_counts[uid] = next_count
 		walls.append({"id": id, "x": x, "z": z, "hp": float(value["hp"]),
 			"tier": tier, "owner_account": uid, "owner_guild": guild,
-			"yaw": float(value.get("yaw", 0.0)), "upkeep": float(value.get("upkeep", Structures.UPKEEP_SECONDS))})
+			"yaw": float(value.get("yaw", 0.0)), "upkeep": float(value.get("upkeep", Structures.UPKEEP_SECONDS)),
+			"piece": str(value.get("piece", "")) if HousePieces.valid(str(value.get("piece", ""))) else ""})
 	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls, "outposts": holds}
 
 
@@ -175,7 +177,13 @@ static func restore(sim, data: Variant) -> bool:
 			"owner_account": wall["owner_account"], "owner_guild": str(wall.get("owner_guild", "")),
 			"yaw": float(wall.get("yaw", 0.0)), "upkeep_until": sim.time + float(wall.get("upkeep", Structures.UPKEEP_SECONDS)),
 		}
-		sim.world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
+		var piece: String = str(wall.get("piece", ""))
+		if HousePieces.valid(piece):
+			sim.barricades[id]["piece"] = piece
+			sim.barricades[id]["y"] = sim.world.height_at(x, z) + HousePieces.elevation(piece)
+			sim.world.add_structure_blockers(id, HousePieces.blockers(piece, x, z, float(wall.get("yaw", 0.0))))
+		else:
+			sim.world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
 		sim._next_id = maxi(sim._next_id, id)
 	sim.territory.restore_holds(valid["outposts"], sim.time)
 	return true

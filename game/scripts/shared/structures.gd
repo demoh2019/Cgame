@@ -113,6 +113,7 @@ static func public_state(data: Dictionary) -> Dictionary:
 		"tier": tier_of(data), "max_hp": max_health(tier_of(data)),
 		"owner": int(data["owner"]),
 		"yaw": float(data.get("yaw", 0.0)),
+		"piece": str(data.get("piece", "")),
 	}
 
 
