@@ -81,6 +81,14 @@ public:
 	Array query_cross_radius_batch(const PackedVector2Array &p_sources,
 			const PackedVector2Array &p_targets, double p_radius, double p_cell_size) const;
 
+	// Mass-style variable-radius cross-cohort broadphase for independent AI
+	// sensing/leash radii. Result: one packed array of original target indices
+	// per source, in ascending index order (including duplicate positions).
+	// Zero-radius matches are exact. Invalid/oversized requests fail atomically.
+	// Bounds: <=4096 sources, <=8192 targets, <=32768 matching pairs.
+	Array query_cross_variable_radius_batch(const PackedVector2Array &p_sources,
+			const PackedFloat32Array &p_radii, const PackedVector2Array &p_targets) const;
+
 	// EQS-style nearest candidate across two independent spatial cohorts.
 	// One original target index per source, -1 when none lies within radius.
 	// Equal-distance ties prefer smaller persistent target ID and then index.
