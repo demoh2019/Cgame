@@ -6,6 +6,7 @@
 #include "register_types.h"
 
 #include "pcg_instance_cluster_3d.h"
+#include "pcg_density_selector.h"
 #include "pcg_spatial_filter_2d.h"
 #include "pcg_spatial_filter_3d.h"
 #include "core/object/class_db.h"
@@ -14,6 +15,7 @@
 #include "tests/test_pcg_instance_cluster_3d.h"
 #include "tests/test_pcg_spatial_filter_2d.h"
 #include "tests/test_pcg_spatial_filter_3d.h"
+#include "tests/test_pcg_density_selector.h"
 #endif
 
 void initialize_procedural_scatter_module(ModuleInitializationLevel p_level) {
@@ -23,6 +25,7 @@ void initialize_procedural_scatter_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PCGInstanceCluster3D);
 	GDREGISTER_CLASS(PCGSpatialFilter2D);
 	GDREGISTER_CLASS(PCGSpatialFilter3D);
+	GDREGISTER_CLASS(PCGDensitySelector);
 }
 
 void uninitialize_procedural_scatter_module(ModuleInitializationLevel p_level) {
