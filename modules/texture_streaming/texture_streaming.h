@@ -525,6 +525,15 @@ private:
 
 	uint64_t next_io_op_ticks = 0;
 	std::atomic<uint64_t> texture_streaming_total_memory = 0;
+	// Published once per feedback fit pass. Each field is a separate cheap
+	// atomic gauge: readers never enumerate RID owners, touch the renderer or
+	// block the feedback/I/O workers. Values can differ by one pass.
+	std::atomic<uint32_t> streaming_texture_count{ 0 };
+	std::atomic<uint32_t> streaming_pending_count{ 0 };
+	std::atomic<uint32_t> streaming_budget_reduction_steps{ 0 };
+	std::atomic<uint64_t> streaming_requested_bytes{ 0 };
+	std::atomic<uint64_t> streaming_fitted_bytes{ 0 };
+	std::atomic<uint64_t> streaming_budget_bytes{ 0 };
 
 	void _feedback_handle_data(const PackedByteArray &p_array, RID p_buffer);
 
@@ -646,6 +655,14 @@ public:
 
 	// Status API
 	uint64_t get_memory_budget_bytes_used();
+	// Unreal STAT STREAMING-style, last completed feedback-pass diagnostics.
+	// Nonblocking atomic loads; a zero budget means memory fitting is disabled.
+	int get_streaming_texture_count() const { return int(streaming_texture_count.load(std::memory_order_relaxed)); }
+	int get_streaming_pending_count() const { return int(streaming_pending_count.load(std::memory_order_relaxed)); }
+	int get_streaming_budget_reduction_steps() const { return int(streaming_budget_reduction_steps.load(std::memory_order_relaxed)); }
+	uint64_t get_streaming_requested_bytes() const { return streaming_requested_bytes.load(std::memory_order_relaxed); }
+	uint64_t get_streaming_fitted_bytes() const { return streaming_fitted_bytes.load(std::memory_order_relaxed); }
+	uint64_t get_streaming_budget_bytes() const { return streaming_budget_bytes.load(std::memory_order_relaxed); }
 
 	// Properties
 	void set_detail_prefetch_mips(int p_mips) {
