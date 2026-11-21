@@ -160,3 +160,25 @@ godot --headless --path games/days_after --script res://smoke_test.gd
 The focused `native-pcg-spatial-filter.yml` workflow additionally
 executes C++ `[PCGWeightedVariantSelector]` doctests. This is a
 functional rendering-variation feature, not evidence of FPS gains.
+
+## Instanced trail stones with native PCG route sampling
+
+`TrailMarkers` now visualizes the existing curved survivor trail with
+small, path-aligned stones. Its route comes directly from
+`FoliageScatter.get_trail_points()`, so the visible markers and
+no-foliage path falloff cannot drift to separate authored routes.
+
+The new native `PCGPolylineSampler3D` samples the 3D polyline at an
+approximately 1.35 m fitted arc-length interval; both endpoints are
+included. A small GDScript fallback follows the same arc-length
+calculation on standard Godot. Markers inside ruin/barricade/prop
+exclusion AABBs are omitted. Remaining geometry is drawn in **one
+MultiMesh**, with no collisions and no effect on harvesting, enemy AI,
+navmeshes, world saves or network state.
+
+The smoke verifies that sample distances stay bounded, both route
+endpoints are preserved, all visible markers avoid structure zones,
+the instance count matches the filtered positions, native/fallback
+sampling agrees within floating-point tolerance and regeneration is
+deterministic. Performance needs compiled-build profiling before
+making FPS claims.

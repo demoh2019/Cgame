@@ -64,6 +64,11 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 240s "$BIN" --headless --test --test-case="*PCGWeightedVariantSelector*" --no-colors 2>&1 | tee pcg-weighted-native.log
+      - name: Native PCG polyline arc-length sampler tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*PCGPolylineSampler3D*" --no-colors 2>&1 | tee pcg-polyline-native.log
       - name: Import Albion After game
         run: |
           set -euo pipefail
@@ -106,6 +111,7 @@ jobs:
           path: |
             pcg-native.log
             pcg-weighted-native.log
+            pcg-polyline-native.log
             pcg-weighted-game.log
             pcg-path-falloff-native.log
             pcg-surface-native.log

@@ -260,3 +260,45 @@ This is variation of *instance attributes* rather than allocation of three
 separate mesh resources.
 
 Reference: [Unreal PCG weighted mesh selectors](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).
+
+## Native 3D polyline arc-length sampler
+
+`PCGPolylineSampler3D.sample_positions(path_points, spacing,
+max_samples=4096, fit_to_path=true)` is a data-only primitive inspired
+by Unreal's **PCG Spline Sampler**. It supports prop placement on an
+open straight-segment polyline with even **3D arc-length spacing**:
+
+```gdscript
+var sampler := PCGPolylineSampler3D.new()
+var posts := sampler.sample_positions(route_waypoints, 1.35, 192, true)
+# Use those positions to fill a MultiMesh, or instance scene objects.
+```
+
+- **Fit to path (default):** uses ceil(total_length / spacing) intervals
+  and divides the full length equally, preserving *both endpoints*
+  without a shortened final gap.
+- **Fixed increment:** set fit_to_path to false for exact increments;
+  the route ends only when it coincides with a spacing step.
+- Degenerate/repeated vertices are safe. A single-point or zero-length
+  path outputs one point, not a divide-by-zero. Corner spacing is
+  measured *along* the route; fully 3D, including vertical segments.
+- Accepts at most 256 finite waypoints within +/-10,000,000 per
+  coordinate; spacing finite in [0.05,10,000], max_samples 1–4,096.
+  Rejects invalid/oversized work atomically, including calculating the
+  output count in double **before** integer conversion. No silent
+  truncation or partial scene population.
+- A single O(waypoints) segment-length pass followed by a monotonic
+  O(samples + waypoints) walk; no physics, global RNG, scene traversals,
+  or mesh/renderer allocations in native code.
+- Returns a `PackedVector3Array` in route order. This polyline-only
+  sampler does not calculate cubic Bézier tangents, pathfinding,
+  terrain projection, or camera visibility; those are distinct tasks.
+
+In `games/days_after/trail_markers.gd`, the live scene places
+path-aligned ground stones at native sampled positions using **one
+MultiMesh**, skips stones within building AABBs, and supplies the same
+sampling algorithm in GDScript for stock Godot. Native unit tests and
+game smoke assert both endpoints, spacing, limits, parity, and
+regeneration.
+
+Reference: [Unreal Engine PCG Spline Sampler settings](https://dev.epicgames.com/documentation/en-us/unreal-engine/BlueprintAPI/Utilities/Struct/BreakPCGSplineSamplerParams).
