@@ -28,6 +28,14 @@ static func _run_passive_interest_fixture(force_fallback: bool) -> Dictionary:
         infected.state = Zombie.State.IDLE
         infected.think_timer = 0.0
         infected._ai_has_selected_once = true
+        if index == 5:
+            # One survivor is two metres beyond far LOD, but still
+            # inside the 4m hysteresis band of a previous medium scan.
+            var hysteretic_x: float = 1150.0 + float(infected.data["lose"]) + 26.0
+            infected.position = Vector3(hysteretic_x,
+                world.height_at(hysteretic_x, zz), zz)
+            infected._ai_lod_previous_interval = 0.5
+            infected._ai_lod_staggered = true
         if index == 3:
             # Already pursuing targets must continue to see ALL player data.
             infected.state = Zombie.State.CHASE
