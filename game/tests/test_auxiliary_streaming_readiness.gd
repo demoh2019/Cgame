@@ -90,6 +90,9 @@ func run(t) -> void:
 		"deliberately empty chunk remains uninstantiated")
 
 	t.current = "cosmetic detail readiness is distinct from core scene loading"
+	t.eq(WorldMap.waypoint_streaming_caption(streamer, waypoint, Vector2(8, 8)),
+		"Terrain ready; details finish on approach",
+		"map clearly distinguishes base streaming from deferred cosmetics")
 	t.check(not streamer.is_auxiliary_source_ready(true),
 		"staged scenery can still be pending after base chunks are loaded")
 	t.check(streamer.get_auxiliary_source_progress(true) < 1.0,
