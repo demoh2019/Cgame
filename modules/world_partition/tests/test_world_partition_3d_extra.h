@@ -46,6 +46,97 @@
 
 namespace TestWorldPartition3DExtra {
 
+TEST_CASE("[WorldPartition3D] Stateful child objects are opt-in and expose snapshot operations") {
+	WorldPartition3D world;
+	CHECK_FALSE(world.is_persisting_streaming_objects());
+	CHECK(world.snapshot_cell_object_states().is_empty());
+	CHECK(world.capture_cell_object_states(Vector2i(0, 0)).is_empty());
+	CHECK(world.get_cell_object_state_count() == 0);
+	CHECK(world.has_signal(SNAME("cell_object_state_changed")));
+	world.set_persist_streaming_objects(true);
+	CHECK(world.is_persisting_streaming_objects());
+	world.set_persist_streaming_objects(false);
+	CHECK_FALSE(world.is_persisting_streaming_objects());
+}
+
+TEST_CASE("[WorldPartition3D] Object import validates scene paths and serializable value types") {
+	WorldPartition3D world;
+	Dictionary valid_record;
+	valid_record["active"] = true;
+	valid_record["uses"] = 3;
+	valid_record["caption"] = "opened";
+	valid_record["offset"] = Vector3(1, 2, 3);
+	Dictionary nested = valid_record.duplicate(true);
+	nested["nested"] = Dictionary();
+	Dictionary nonfinite = valid_record.duplicate(true);
+	nonfinite["bad_float"] = std::numeric_limits<double>::infinity();
+	Dictionary invalid_key = valid_record.duplicate(true);
+	invalid_key[42] = true;
+	Dictionary candidates;
+	candidates["TreasureChest"] = valid_record;
+	candidates["../External"] = valid_record;
+	candidates["/root/External"] = valid_record;
+	candidates["TreasureChest:active"] = valid_record;
+	candidates["Nested"] = nested;
+	candidates["Nonfinite"] = nonfinite;
+	candidates["InvalidKey"] = invalid_key;
+	candidates[123] = valid_record;
+	Dictionary imported;
+	imported[Vector2i(0, 0)] = candidates;
+	imported["not a cell"] = candidates;
+	world.load_cell_object_states(imported);
+	CHECK(world.get_cell_object_state_count() == 1);
+	const Dictionary result = world.get_cell_object_states(Vector2i(0, 0));
+	REQUIRE(result.size() == 1);
+	REQUIRE(result.has("TreasureChest"));
+	const Dictionary record = result["TreasureChest"];
+	CHECK(record["active"] == true);
+	CHECK(record["uses"] == 3);
+	world.clear_cell_object_states();
+	CHECK(world.get_cell_object_state_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Stateful object snapshots are deep copies of imports") {
+	WorldPartition3D world;
+	Dictionary record;
+	record["active"] = false;
+	record["uses"] = 1;
+	Dictionary nodes;
+	nodes["ArenaSwitch"] = record;
+	Dictionary cells;
+	cells[Vector2i(4, 2)] = nodes;
+	world.load_cell_object_states(cells);
+	record["uses"] = 99;
+	nodes["ArenaSwitch"] = Dictionary();
+	cells.clear();
+	Dictionary stored = world.get_cell_object_states(Vector2i(4, 2));
+	const Dictionary again = stored["ArenaSwitch"];
+	CHECK(again["uses"] == 1);
+	stored.clear();
+	const Dictionary after = world.snapshot_cell_object_states();
+	REQUIRE(after.has(Vector2i(4, 2)));
+	Dictionary cloned = after[Vector2i(4, 2)];
+	Dictionary saved = cloned["ArenaSwitch"];
+	saved["active"] = true;
+	const Dictionary refreshed = world.get_cell_object_states(Vector2i(4, 2));
+	const Dictionary original = refreshed["ArenaSwitch"];
+	CHECK(original["active"] == false);
+}
+
+TEST_CASE("[WorldPartition3D] Stateful object import limits records per cell") {
+	WorldPartition3D world;
+	Dictionary valid;
+	valid["active"] = true;
+	Dictionary records;
+	for (int i = 0; i < 150; i++) {
+		records["Item_" + itos(i)] = valid;
+	}
+	Dictionary cells;
+	cells[Vector2i(1, -1)] = records;
+	world.load_cell_object_states(cells);
+	CHECK(world.get_cell_object_states(Vector2i(1, -1)).size() == 128);
+}
+
 TEST_CASE("[WorldPartition3D] Rigid body snapshots are disabled unless explicitly opted in") {
 	WorldPartition3D world;
 	CHECK_FALSE(world.is_persisting_rigid_bodies());
