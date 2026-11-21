@@ -110,6 +110,7 @@
 #include "scene/main/resource_preloader.h"
 #include "scene/main/scene_node_pool.h"
 #include "scene/main/spatial_point_grid_2d.h"
+#include "scene/main/spatial_point_grid_3d.h"
 #include "scene/main/spatial_relevancy_grid_2d.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/shader_globals_override.h"
@@ -495,6 +496,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(AdaptiveNetworkJitterBuffer);
 	GDREGISTER_CLASS(SceneNodePool);
 	GDREGISTER_CLASS(SpatialPointGrid2D);
+	GDREGISTER_CLASS(SpatialPointGrid3D);
 	GDREGISTER_CLASS(SpatialRelevancyGrid2D);
 	GDREGISTER_CLASS(Window);
 
