@@ -36,10 +36,18 @@ func _run_checks() -> void:
         _fail("Sensor did not acquire a target in front of the enemy")
         return
 
-    _set_flag(demo.brain, "low_health", false)
+    _set_flag(demo.brain, "health", 100)
+    _set_flag(demo.brain, "retreat_at_or_below", 30)
     _set_flag(demo.brain, "target_visible", true)
     _set_flag(demo.brain, "target_remembered", true)
     demo.brain.tick(0.2)
+    var debug_state: Dictionary = demo.brain.get_debug_snapshot()
+    if debug_state.get("root_task_class") != "BehaviorTreeReactiveSelector":
+        _fail("Native debug snapshot must identify the active tree")
+        return
+    if debug_state.get("blackboard", {}).get("health") != 100:
+        _fail("Native debug snapshot must include current health")
+        return
     if demo.brain.get_blackboard().get("action") != "chase":
         _fail("Visible player must cause chase behavior")
         return
@@ -61,7 +69,7 @@ func _run_checks() -> void:
         _fail("Last-seen position should trigger investigation")
         return
 
-    _set_flag(demo.brain, "low_health", true)
+    _set_flag(demo.brain, "health", 20)
     demo.brain.tick(0.2)
     if demo.brain.get_blackboard().get("action") != "retreat":
         _fail("Low health must preempt other tasks")
