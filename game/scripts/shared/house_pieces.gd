@@ -11,9 +11,10 @@ extends RefCounted
 const GRID := 3.0
 const WALL_HEIGHT := 3.0
 const BUILD_RANGE := 7.0
-const PIECES := ["wall", "door", "window", "floor", "roof", "pillar", "bed", "lamp"]
+const PIECES := ["wall", "door", "window", "floor", "roof", "pillar", "bed", "lamp", "chest", "workbench"]
 const NAMES := {"wall": "Wall", "door": "Door", "window": "Window wall", "floor": "Floor", "roof": "Roof", "pillar": "Pillar",
-	"bed": "Bed", "lamp": "Lamp"}
+	"bed": "Bed", "lamp": "Lamp", "chest": "Chest (your stash)", "workbench": "Workbench"}
+const STATION_RANGE := 3.0 # How close a chest or workbench must be to use it.
 const DOOR_REACH := 3.0
 const BED_RESPAWN_RANGE := 2.5
 const COST := {
@@ -25,6 +26,8 @@ const COST := {
 	"pillar": {"wood_1": 2},
 	"bed": {"wood_1": 4, "cloth_1": 3},
 	"lamp": {"wood_1": 2, "stone_1": 2},
+	"chest": {"wood_1": 6},
+	"workbench": {"wood_1": 6, "stone_1": 2},
 }
 
 
@@ -36,7 +39,7 @@ static func valid(piece: String) -> bool:
 static func slot(piece: String) -> String:
 	if piece in ["wall", "door", "window"]:
 		return "edge"
-	return "furniture" if piece in ["bed", "lamp"] else piece
+	return "furniture" if piece in ["bed", "lamp", "chest", "workbench"] else piece
 
 
 static func elevation(piece: String) -> float:
@@ -44,16 +47,21 @@ static func elevation(piece: String) -> float:
 
 
 static func blocks(piece: String) -> bool:
-	return piece in ["wall", "door", "window", "pillar", "bed", "lamp"]
+	return piece in ["wall", "door", "window", "pillar", "bed", "lamp", "chest", "workbench"]
 
 
 ## The snapped position and facing for a piece aimed at `point` (x, z, yaw).
-static func snap(piece: String, point: Vector2) -> Vector3:
+## `facing` (the builder's facing yaw) turns roofs and furniture in quarter turns, so two roofs
+## placed facing each other form a gable.
+static func snap(piece: String, point: Vector2, facing: float = 0.0) -> Vector3:
 	var cell := Vector2(floorf(point.x / GRID), floorf(point.y / GRID))
 	var center := (cell + Vector2(0.5, 0.5)) * GRID
+	var quarter: float = fposmod(roundf(facing / (PI * 0.5)) * (PI * 0.5), TAU) if is_finite(facing) else 0.0
 	match piece:
-		"floor", "roof", "bed", "lamp":
+		"floor":
 			return Vector3(center.x, center.y, 0.0)
+		"roof", "bed", "lamp", "chest", "workbench":
+			return Vector3(center.x, center.y, quarter)
 		"pillar":
 			var corner := Vector2(roundf(point.x / GRID), roundf(point.y / GRID)) * GRID
 			return Vector3(corner.x, corner.y, 0.0)
@@ -86,6 +94,10 @@ static func blockers(piece: String, x: float, z: float, yaw: float, closed: bool
 			result.append([x, z, 0.6])
 		"lamp":
 			result.append([x, z, 0.25])
+		"chest":
+			result.append([x, z, 0.45])
+		"workbench":
+			result.append([x, z, 0.6])
 	return result
 
 

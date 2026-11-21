@@ -89,6 +89,26 @@ func run(t) -> void:
 		var spot: Vector2 = server._bed_spawn(builder)
 		t.check(spot.is_finite() and spot.distance_to(Vector2(cell_center.x, cell_center.y)) < HousePieces.BED_RESPAWN_RANGE + 0.5, "the bed gives a respawn spot beside it")
 
+	t.current = "a chest opens your stash at home; a workbench is a crafting station"
+	builder.inventory.add("wood_1", 20)
+	builder.inventory.add("stone_1", 4)
+	var chest_cell := Vector2(cell_center.x + HousePieces.GRID, cell_center.y)
+	builder.position = Vector3(chest_cell.x - 1.5, world.height_at(chest_cell.x - 1.5, chest_cell.y), chest_cell.y)
+	builder.inventory.add("fiber_1", 2)
+	t.eq(server.cmd_stash(101, "fiber_1", 1, true).get("reason", ""), "no_station", "no stash access out in the wild")
+	var chest_result: Dictionary = server.cmd_build_piece(101, "chest", chest_cell.x, chest_cell.y)
+	t.check(bool(chest_result.get("ok", false)), "chest placed (%s)" % str(chest_result.get("reason", "")))
+	if bool(chest_result.get("ok", false)):
+		t.check(bool(server.cmd_stash(101, "fiber_1", 1, true).get("ok", false)), "deposit into the stash at your own chest")
+		var other = server.add_player(103, "Visitor")
+		other.position = builder.position
+		other.inventory.add("fiber_1", 1)
+		t.eq(server.cmd_stash(103, "fiber_1", 1, true).get("reason", ""), "no_station", "someone else's chest is not your stash")
+	t.check(not server._near_piece(builder.position, "workbench"), "no workbench yet")
+	var bench_result: Dictionary = server.cmd_build_piece(101, "workbench", chest_cell.x, chest_cell.y + HousePieces.GRID)
+	t.check(bool(bench_result.get("ok", false)), "workbench placed (%s)" % str(bench_result.get("reason", "")))
+	t.near(HousePieces.snap("roof", Vector2(1, 1), PI * 0.5 + 0.2).z, PI * 0.5, 0.001, "roofs turn in quarter turns toward the builder's facing")
+
 	t.current = "dismantling removes the collision"
 	if bool(wall_result.get("ok", false)):
 		var id: int = int(wall_result["id"])

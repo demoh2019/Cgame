@@ -1373,7 +1373,8 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1,
 		return {"ok": false, "reason": "need_skill", "skill": "crafting", "tier": recipe_tier}
 	var at_bench: bool = player.position.is_finite() and (
 		_at_workbench(Vector2(player.position.x, player.position.z))
-		or territory.has_field_workbench(peer_id, players, parties, time))
+		or territory.has_field_workbench(peer_id, players, parties, time)
+		or _near_piece(player.position, "workbench"))
 	var at_fire: bool = String(recipe["station"]) == "campfire" and FieldCampfire.has_warmth(
 			campfires, player.position, time)
 	var status: int = CraftFromStash.craft(
@@ -3036,7 +3037,7 @@ func cmd_stash(peer_id: int, item_id: String, count: int, deposit: bool) -> Dict
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	var distance: float = Vector2(player.position.x, player.position.z).distance_to(WORKBENCH_POSITION)
-	if not is_finite(distance) or distance > WORKBENCH_RANGE:
+	if (not is_finite(distance) or distance > WORKBENCH_RANGE) and not _near_piece(player.position, "chest", player):
 		return {"ok": false, "reason": "no_station"}
 	if not Defs.is_item(item_id) or count < 1 or count > Defs.stack_size(item_id):
 		return {"ok": false, "reason": "invalid_stack"}
@@ -3135,7 +3136,7 @@ func cmd_stash_bulk(peer_id: int) -> Dictionary:
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	var at := Vector2(player.position.x, player.position.z)
-	if not at.is_finite() or at.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE:
+	if (not at.is_finite() or at.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE) and not _near_piece(player.position, "chest", player):
 		return {"ok": false, "reason": "no_station"}
 	var result: Dictionary = StashBulk.deposit(player.inventory, player.stash)
 	if not bool(result.get("ok", false)):
@@ -3481,13 +3482,13 @@ const MAX_PIECES_PER_OWNER := 80
 const MAX_PIECES_GLOBAL := 2500
 
 
-func cmd_build_piece(peer_id: int, piece: String, x: float, z: float) -> Dictionary:
+func cmd_build_piece(peer_id: int, piece: String, x: float, z: float, facing: float = 0.0) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	if not HousePieces.valid(piece):
 		return {"ok": false, "reason": "invalid_piece"}
-	var snapped: Vector3 = HousePieces.snap(piece, Vector2(x, z))
+	var snapped: Vector3 = HousePieces.snap(piece, Vector2(x, z), facing)
 	var reason: String = HousePieces.placement_reason(world, piece, snapped, Vector2(player.position.x, player.position.z))
 	if reason != "":
 		return {"ok": false, "reason": reason}
@@ -3529,6 +3530,21 @@ func cmd_build_piece(peer_id: int, piece: String, x: float, z: float) -> Diction
 	player.dirty_character = true
 	events.append({"type": "barricade_built", "id": id, "peer": peer_id})
 	return {"ok": true, "id": id, "piece": piece}
+
+
+## A house piece of this kind within range of the spot; `owner` limits it to pieces that player may manage.
+func _near_piece(spot: Vector3, piece: String, owner: Player = null) -> bool:
+	if not spot.is_finite():
+		return false
+	var at := Vector2(spot.x, spot.z)
+	for item in barricades.values():
+		if str(item.get("piece", "")) != piece:
+			continue
+		if owner != null and not Structures.can_manage(item, owner.id, owner.user_id):
+			continue
+		if at.distance_to(Vector2(float(item["x"]), float(item["z"]))) <= HousePieces.STATION_RANGE:
+			return true
+	return false
 
 
 ## Open or shut a door. Its owner, their party and their guild may; everyone else has to break it.

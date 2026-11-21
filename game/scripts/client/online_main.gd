@@ -191,7 +191,7 @@ var _build_ghost: MeshInstance3D
 var _build_reason := ""
 # "" builds the old free-standing barricade; otherwise a house piece snapped to the 3 m grid.
 var _build_piece := "wall"
-const BUILD_PIECES := ["wall", "door", "window", "floor", "roof", "pillar", "bed", "lamp", ""]
+const BUILD_PIECES := ["wall", "door", "window", "floor", "roof", "pillar", "bed", "lamp", "chest", "workbench", ""]
 var _move_input := Vector2.ZERO # This frame's movement keys, for facing the way you walk.
 var _last_attack_msec := -100000
 var _fishing_line: MeshInstance3D # Line from the rod tip to the bobber while fishing.
@@ -834,7 +834,7 @@ func _piece_target() -> Vector3:
 	if direction.length_squared() < 0.001:
 		direction = Vector2(sin(avatar.rotation.y), cos(avatar.rotation.y))
 	var aim := Vector2(client.predicted.x, client.predicted.z) + direction.normalized() * 3.5
-	return HousePieces.snap(_build_piece, aim)
+	return HousePieces.snap(_build_piece, aim, atan2(direction.x, direction.y))
 
 
 func _piece_reason(snapped: Vector3) -> String:
@@ -916,7 +916,7 @@ func _place_wall() -> void:
 		return
 	if _build_piece != "":
 		var snapped: Vector3 = _piece_target()
-		client.build_piece(_build_piece, Vector2(snapped.x, snapped.y))
+		client.build_piece(_build_piece, Vector2(snapped.x, snapped.y), snapped.z)
 		return # Stay in build mode: houses take many pieces.
 	client.build(_build_target(), _build_yaw)
 	_end_build_mode()
@@ -1745,7 +1745,7 @@ func _update_prompt() -> void:
 		var parts: Array = []
 		for item_id in cost:
 			parts.append("%d %s" % [int(cost[item_id]), str(item_id).replace("_1", "")])
-		text = "BUILD %s  (%s)   1 wall 2 door 3 window 4 floor 5 roof 6 pillar 7 bed 8 lamp 9 barricade | wheel: next piece   click: place   right click: done" % [
+		text = "BUILD %s  (%s)   1 wall 2 door 3 window 4 floor 5 roof 6 pillar 7 bed 8 lamp 9 chest 0 bench | roofs face where you look | wheel: next piece   click: place   right click: done" % [
 			str(HousePieces.NAMES[_build_piece]).to_upper(), ", ".join(parts)]
 		if _build_reason != "":
 			text += "   -   " + {"out_of_range": "too far", "safe_zone": "not in the settlement",
@@ -2180,9 +2180,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				if id != -1:
 					client.dismantle(id)
 	if _build_mode and event is InputEventKey and event.pressed and not event.echo \
-			and event.keycode >= KEY_1 and event.keycode <= KEY_9:
-		# Build mode: 1 wall, 2 door, 3 window, 4 floor, 5 roof, 6 pillar, 7 bed, 8 lamp, 9 old barricade.
-		_select_build_piece(int(event.keycode - KEY_1))
+			and event.keycode >= KEY_0 and event.keycode <= KEY_9:
+		# Build mode: 1 wall, 2 door, 3 window, 4 floor, 5 roof, 6 pillar, 7 bed, 8 lamp, 9 chest, 0 workbench;
+		# the wheel also reaches the old free-standing barricade.
+		_select_build_piece(9 if event.keycode == KEY_0 else int(event.keycode - KEY_1))
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventMouseButton and event.pressed and _build_mode:
@@ -2467,14 +2468,16 @@ func _run_demo() -> void:
 					_demo_house_plan.append(["door" if k < 0 else "wall", corner + Vector2(k * g, -g * 0.95)])
 					_demo_house_plan.append(["wall", corner + Vector2(k * g, g * 0.95)])
 				for cell in [Vector2(-0.5, -0.5), Vector2(0.5, -0.5), Vector2(-0.5, 0.5), Vector2(0.5, 0.5)]:
-					_demo_house_plan.append(["roof", corner + cell * g])
+					_demo_house_plan.append(["roof", corner + cell * g, -PI * 0.5 if cell.x < 0.0 else PI * 0.5])
 				for c in [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 1), Vector2(1, 1)]:
 					_demo_house_plan.append(["pillar", corner + c * g])
+				_demo_house_plan.append(["chest", corner + Vector2(0.5, -0.5) * g])
+				_demo_house_plan.append(["workbench", corner + Vector2(-0.5, -0.5) * g])
 				_demo_house_plan.append(["bed", corner + Vector2(0.5, 0.5) * g])
 				_demo_house_plan.append(["lamp", corner + Vector2(-0.5, 0.5) * g])
 			if _demo_frames > 80 and _demo_frames % 8 == 0 and not _demo_house_plan.is_empty():
 				var step: Array = _demo_house_plan.pop_front()
-				client.build_piece(str(step[0]), step[1])
+				client.build_piece(str(step[0]), step[1], float(step[2]) if step.size() > 2 else 0.0)
 				if _demo_house_plan.is_empty():
 					_demo_house_done_at = _demo_frames
 			if _demo_house_done_at > 0 and _demo_frames == _demo_house_done_at + 30:

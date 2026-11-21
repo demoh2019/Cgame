@@ -638,9 +638,9 @@ func nearest_door(point: Vector3) -> int:
 	return best
 
 
-func build_piece(piece: String, point: Vector2) -> void:
+func build_piece(piece: String, point: Vector2, facing: float = 0.0) -> void:
 	if point.is_finite():
-		net.c_build_piece.rpc_id(1, piece, point.x, point.y)
+		net.c_build_piece.rpc_id(1, piece, point.x, point.y, facing)
 
 
 func repair(id: int) -> void:

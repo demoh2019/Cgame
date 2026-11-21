@@ -66,6 +66,8 @@ const PIECE_MODELS := {
 	"pillar": [["pillar-wood", "height", 3.0], ["pillar-wood", "height", 3.0]],
 	"bed": [["../../kenney_ruins/survival/bedroll-frame", "length", 2.2], ["../../kenney_ruins/survival/bedroll-frame", "length", 2.2]],
 	"lamp": [["../../kenney_ruins/graveyard/fire-basket", "height", 1.3], ["../../kenney_ruins/graveyard/fire-basket", "height", 1.3]],
+	"chest": [["../survival/chest", "length", 1.2], ["../survival/chest", "length", 1.2]],
+	"workbench": [["../survival/workbench", "length", 1.8], ["../survival/workbench", "length", 1.8]],
 	"door_open": [["wall-wood-doorway-base", "length", 3.0], ["wall-doorway-square", "length", 3.0]],
 }
 
