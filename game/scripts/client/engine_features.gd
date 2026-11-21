@@ -129,8 +129,14 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 				stack_container.call("replace_stacks", counts)
 	# Render-only native timers are independent from counted tag branches.
 	var timeline: Object = node.get_meta("effect_timeline", null) as Object
-	if timeline != null and timeline.has_method("replace_snapshot"):
-		timeline.call("replace_snapshot", runtime_effect_snapshot(kind, snapshot))
+	if timeline != null:
+		var timed_effects := runtime_effect_snapshot(kind, snapshot)
+		# Server snapshots own only Runtime.*, never locally spawned visual timers.
+		if timeline.has_method("replace_effect_branch"):
+			timeline.call("replace_effect_branch", StringName("Runtime"), timed_effects)
+		elif timeline.has_method("replace_snapshot"):
+			# Legacy fork binaries still get the original authoritative snapshot.
+			timeline.call("replace_snapshot", timed_effects)
 
 
 ## Presentation-only stack counts. The server remains authoritative for combat.
