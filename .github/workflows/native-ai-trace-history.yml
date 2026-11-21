@@ -1,0 +1,95 @@
+name: Native AI trace history and Albion After replay
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_behavior_trace.*'
+      - 'modules/behavior_tree/behavior_tree.*'
+      - 'modules/behavior_tree/tests/test_ai_trace_history.h'
+      - 'modules/behavior_tree/register_types.cpp'
+      - 'modules/behavior_tree/demo_reactive_ai/**'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_native_infected_senses.gd'
+      - '.github/workflows/native-ai-trace-history.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_behavior_trace.*'
+      - 'modules/behavior_tree/behavior_tree.*'
+      - 'modules/behavior_tree/tests/test_ai_trace_history.h'
+      - 'modules/behavior_tree/register_types.cpp'
+      - 'modules/behavior_tree/demo_reactive_ai/**'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_native_infected_senses.gd'
+      - '.github/workflows/native-ai-trace-history.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-replay-game-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-ai-trace-history
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-ai-trace-history
+        continue-on-error: true
+      - name: Run native bounded history and exclusive hotspot tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[AITraceHistory]*" 2>&1 | tee ai-trace-history-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' ai-trace-history-native.log; then exit 1; fi
+      - name: Import reactive demo with replay UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path modules/behavior_tree/demo_reactive_ai --editor --import --quit 2>&1 | tee ai-trace-demo-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' ai-trace-demo-import.log; then exit 1; fi
+      - name: Run interactive timeline smoke regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path modules/behavior_tree/demo_reactive_ai --script res://tests/smoke_demo.gd 2>&1 | tee ai-trace-demo-smoke.log
+          grep -F 'PASS: AI perception, wall LOS, memory, reactive priorities and reset' ai-trace-demo-smoke.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' ai-trace-demo-smoke.log; then exit 1; fi
+      - name: Import Albion After with replay-enabled server tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee ai-trace-game-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' ai-trace-game-import.log; then exit 1; fi
+      - name: Run authoritative infected AI regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 600s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee ai-trace-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' ai-trace-game.log; then exit 1; fi
+      - name: Upload native and game logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-ai-trace-history-results
+          if-no-files-found: ignore
+          path: ai-trace-*.log
