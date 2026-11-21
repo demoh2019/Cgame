@@ -152,7 +152,7 @@ PackedFloat32Array PCGPolygonMask3D::sample_factors(
 			const double bx = double(b.x), bz = double(b.z);
 			const double dx = bx - ax, dz = bz - az;
 			const double len_squared = dx * dx + dz * dz;
-			const double t = Math::clamp(((x - ax) * dx + (z - az) * dz) /
+			const double t = CLAMP(((x - ax) * dx + (z - az) * dz) /
 					len_squared, 0.0, 1.0);
 			const double ex = x - (ax + dx * t);
 			const double ez = z - (az + dz * t);

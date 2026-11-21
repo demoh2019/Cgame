@@ -70,7 +70,7 @@ TEST_CASE("[PCGPolygonMask3D] concave polygon retains true interior without conv
 	REQUIRE(factors.size() == points.size());
 	CHECK(factors[0] == 0.0f);
 	CHECK(factors[1] == 0.0f);
-	CHECK(factors[2] > 0.7f && factors[2] < 0.9f);
+	CHECK((factors[2] > 0.7f && factors[2] < 0.9f));
 	CHECK(factors[3] == 1.0f);
 	CHECK(factors[4] == 1.0f);
 	CHECK(sampler->sample_factors(points, reversed, 2.0) == factors);
