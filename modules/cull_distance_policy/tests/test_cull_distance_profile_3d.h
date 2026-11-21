@@ -81,4 +81,80 @@ TEST_CASE("[CullDistanceProfile3D] invalid input is distinguishable from no cull
 	CHECK(policy->get_cull_distance(box, sizes, ranges) == -1.0);
 }
 
+
+TEST_CASE("[CullDistanceProfile3D] configured profiles match one-off queries across bounds") {
+	Ref<CullDistanceProfile3D> policy;
+	policy.instantiate();
+	CHECK(policy->get_pair_count() == 0);
+	CHECK(policy->get_cached_cull_distance(AABB(Vector3(), Vector3(1, 1, 1)), 120.0) == -1.0);
+
+	PackedFloat32Array sizes;
+	PackedFloat32Array ranges;
+	for (const float size : { 64.0f, 1.0f, 24.0f, 4.0f, 10.0f }) {
+		sizes.push_back(size);
+	}
+	for (const float range : { 0.0f, 45.0f, 160.0f, 75.0f, 105.0f }) {
+		ranges.push_back(range);
+	}
+	CHECK(policy->configure(sizes, ranges));
+	CHECK(policy->get_pair_count() == 5);
+	CHECK(policy->configure(sizes, ranges)); // Idempotent, no mutation.
+	for (int i = 1; i <= 128; i++) {
+		const AABB box(Vector3(-100.0, 0, 20.0), Vector3(double(i) * 0.6, 2, 1));
+		const double authored = double(i) * 1.3;
+		CHECK(policy->get_cached_cull_distance(box, authored) ==
+				policy->get_cull_distance(box, sizes, ranges, authored));
+		CHECK(policy->get_cached_cull_distance(box) ==
+				policy->get_cull_distance(box, sizes, ranges));
+	}
+	// Packed array copy-on-write means caller mutation cannot silently retune
+	// a profile whose inputs were validated at configure() time.
+	ranges.set(0, 999.0f);
+	CHECK(policy->get_cached_cull_distance(AABB(Vector3(), Vector3(64, 1, 1))) == 0.0);
+	CHECK(policy->get_cull_distance(AABB(Vector3(), Vector3(64, 1, 1)), sizes, ranges) == 999.0);
+
+	PackedFloat32Array invalid_ranges;
+	invalid_ranges.push_back(Math::NaN);
+	CHECK_FALSE(policy->configure(sizes, invalid_ranges)); // Wrong count.
+	CHECK(policy->get_pair_count() == 5);
+	CHECK(policy->get_cached_cull_distance(AABB(Vector3(), Vector3(64, 1, 1))) == 0.0);
+	for (int i = 1; i < 5; ++i) {
+		invalid_ranges.push_back(20.0f);
+	}
+	CHECK_FALSE(policy->configure(sizes, invalid_ranges)); // Non-finite entry.
+	CHECK(policy->get_pair_count() == 5);
+	CHECK_FALSE(policy->configure(PackedFloat32Array(), PackedFloat32Array()));
+	CHECK(policy->get_pair_count() == 5);
+	CHECK(policy->get_cached_cull_distance(AABB(Vector3(Math::INF, 0, 0), Vector3(1, 1, 1))) == -1.0);
+	CHECK(policy->get_cached_cull_distance(AABB(Vector3(), Vector3(1, 1, 1)), -10.0) == -1.0);
+	CHECK(policy->get_cached_cull_distance(AABB(Vector3(), Vector3(1, 1, 1)), 1000001.0) == -1.0);
+	policy->clear_profile();
+	CHECK(policy->get_pair_count() == 0);
+	CHECK(policy->get_cached_cull_distance(AABB(Vector3(), Vector3(1, 1, 1))) == -1.0);
+	CHECK(policy->configure(sizes, ranges));
+	CHECK(policy->get_pair_count() == 5);
+}
+
+TEST_CASE("[CullDistanceProfile3D] independent configured quality presets") {
+	Ref<CullDistanceProfile3D> low;
+	Ref<CullDistanceProfile3D> high;
+	low.instantiate();
+	high.instantiate();
+	PackedFloat32Array sizes;
+	PackedFloat32Array low_ranges;
+	PackedFloat32Array high_ranges;
+	sizes.push_back(1.0f);
+	low_ranges.push_back(24.75f);
+	high_ranges.push_back(54.0f);
+	CHECK(low->configure(sizes, low_ranges));
+	CHECK(high->configure(sizes, high_ranges));
+	const AABB small(Vector3(), Vector3(1, 1, 1));
+	CHECK(low->get_cached_cull_distance(small, 100.0) == 24.75);
+	CHECK(high->get_cached_cull_distance(small, 100.0) == 54.0);
+	CHECK(low->get_cached_cull_distance(small, 10.0) == 10.0);
+	low->clear_profile();
+	CHECK(high->get_cached_cull_distance(small, 100.0) == 54.0);
+}
+
+
 } // namespace TestCullDistanceProfile3D

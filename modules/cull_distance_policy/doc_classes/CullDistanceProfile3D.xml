@@ -7,6 +7,26 @@
 		Resolves the visibility end distance from an object's axis-aligned bounding box and size/range pairs, inspired by Cull Distance Volumes in Unreal Engine. The object's size is the longest dimension of [param bounds], not its area or diagonal. Pairs are matched by nearest size with no interpolation. Pair order does not matter, and equally near pairs use the smallest positive cull range (0 means no extra culling). A positive [param authored_distance] is always an upper limit, so the result never increases it. Zero means unlimited. The method is pure and never changes visibility, render state or game objects; callers choose whether to apply it. Inputs must be finite and non-negative, with 1–128 pairs, size and distance up to 1,000,000, and bounds positions within +/-10,000,000. Invalid inputs return -1, distinguishable from the valid unlimited distance 0.
 	</description>
 	<methods>
+		<method name="configure">
+			<return type="bool" />
+			<param index="0" name="sizes" type="PackedFloat32Array" />
+			<param index="1" name="ranges" type="PackedFloat32Array" />
+			<description>Atomically stores 1–128 validated size/range pairs for repeated cull-distance queries. Rejects invalid, mismatched, negative, nonfinite or out-of-bounds input without changing an existing configured profile. Repeated identical configuration is harmless. Pairs are read-only snapshots; caller edits do not modify the configured values.</description>
+		</method>
+		<method name="get_pair_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns the number of configured pairs, or zero when no profile has been configured or after [method clear_profile].</description>
+		</method>
+		<method name="clear_profile">
+			<return type="void" />
+			<description>Clears previously configured size/range pairs. Subsequent cached queries return -1 until configuration succeeds.</description>
+		</method>
+		<method name="get_cached_cull_distance" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="bounds" type="AABB" />
+			<param index="1" name="authored_distance" type="float" default="0.0" />
+			<description>Uses stored pairs to resolve each object's longest AABB dimension, without passing or revalidating the same profile arrays for each instance. Bounds and author cap are validated on every call. Returns -1 for invalid bounds, cap or unconfigured profile. Selection and no-interpolation semantics are identical to [method get_cull_distance]. Pure data API: callers set visibility themselves.</description>
+		</method>
 		<method name="get_cull_distance" qualifiers="const">
 			<return type="float" />
 			<param index="0" name="bounds" type="AABB" />
