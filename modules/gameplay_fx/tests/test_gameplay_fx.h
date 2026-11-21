@@ -195,6 +195,72 @@ TEST_CASE("[GameplayFX] timeline reapply, explicit tick and expiry") {
 	CHECK(timeline->tick(1.5).size() == 1);
 	CHECK(timeline->is_empty());
 }
+TEST_CASE("[GameplayFX] fused periodic tick and drain is equivalent to legacy two calls") {
+	Ref<GameplayEffectTimeline> legacy;
+	Ref<GameplayEffectTimeline> fused;
+	legacy.instantiate();
+	fused.instantiate();
+	for (int variant = 0; variant < 2; ++variant) {
+		Ref<GameplayEffectTimeline> timeline = variant == 0 ? legacy : fused;
+		REQUIRE(timeline->set_effect("Runtime.Status.Sundered", 3.0));
+		REQUIRE(timeline->set_effect("Runtime.Status.Resolve", 2.1, 3));
+		REQUIRE(timeline->set_effect("Local.Visual.Hit", 0.3));
+		REQUIRE(timeline->set_periodic("Runtime.Status.Sundered", 0.75, false));
+		REQUIRE(timeline->set_periodic("Runtime.Status.Resolve", 1.1, false));
+		REQUIRE(timeline->set_periodic("Local.Visual.Hit", 0.1, true));
+	}
+	const double steps[] = { 0.04, 0.26, 0.1, 0.5, 0.75, 0.71, 2.1, 5.0 };
+	for (int i = 0; i < 8; ++i) {
+		const PackedStringArray expired = legacy->tick(steps[i]);
+		const Dictionary old_pulses = legacy->take_periodic_pulses();
+		const Dictionary new_pulses = fused->tick_and_take_periodic_pulses(steps[i]);
+		CHECK(new_pulses == old_pulses);
+		CHECK(fused->get_snapshot() == legacy->get_snapshot());
+		CHECK(fused->get_effect_count() == legacy->get_effect_count());
+		CHECK(fused->get_stacks("Runtime.Status.Resolve") == legacy->get_stacks("Runtime.Status.Resolve"));
+		if (i == 1) {
+			CHECK(expired.size() == 1);
+			CHECK(expired[0] == "Local.Visual.Hit");
+			CHECK(new_pulses.get(StringName("Local.Visual.Hit"), 0) == 3);
+		}
+	}
+	CHECK(fused->is_empty());
+	CHECK(fused->tick_and_take_periodic_pulses(1.0).is_empty());
+}
+
+TEST_CASE("[GameplayFX] fused periodic tick preserves pending aggregation and rejects invalid time") {
+	Ref<GameplayEffectTimeline> legacy;
+	Ref<GameplayEffectTimeline> fused;
+	legacy.instantiate();
+	fused.instantiate();
+	for (int variant = 0; variant < 2; ++variant) {
+		Ref<GameplayEffectTimeline> timeline = variant == 0 ? legacy : fused;
+		REQUIRE(timeline->set_effect("Runtime.Status.Resolve", 6.0, 3));
+		REQUIRE(timeline->set_periodic("Runtime.Status.Resolve", 0.05, false));
+	}
+	CHECK(legacy->tick(0.1).is_empty());
+	CHECK(fused->tick(0.1).is_empty()); // Pending pulses accumulate before drain.
+	CHECK(legacy->tick(Math::NaN).is_empty());
+	const Dictionary nan_legacy = legacy->take_periodic_pulses();
+	const Dictionary nan_fused = fused->tick_and_take_periodic_pulses(Math::NaN);
+	CHECK(nan_fused == nan_legacy);
+	CHECK(nan_fused.get(StringName("Runtime.Status.Resolve"), 0) == 2);
+	CHECK(fused->get_snapshot() == legacy->get_snapshot());
+	CHECK(legacy->tick(4.0).is_empty());
+	const Dictionary old_pulses = legacy->take_periodic_pulses();
+	const Dictionary new_pulses = fused->tick_and_take_periodic_pulses(4.0);
+	CHECK(new_pulses == old_pulses);
+	CHECK(new_pulses.get(StringName("Runtime.Status.Resolve"), 0) == GameplayEffectTimeline::MAX_PENDING_PULSES);
+	CHECK(fused->get_snapshot() == legacy->get_snapshot());
+	CHECK(legacy->tick(-5.0).is_empty());
+	CHECK(fused->tick_and_take_periodic_pulses(-5.0).is_empty());
+	CHECK(fused->get_snapshot() == legacy->get_snapshot());
+	CHECK(legacy->tick(50.0).size() == 1);
+	CHECK(fused->tick_and_take_periodic_pulses(50.0) == legacy->take_periodic_pulses());
+	CHECK(fused->is_empty());
+	CHECK(fused->take_periodic_pulses().is_empty()); // Fused step already drained.
+}
+
 TEST_CASE("[GameplayFX] timeline target-tag requirements and immunity are atomic") {
 	Ref<GameplayEffectTimeline> timeline;
 	timeline.instantiate();

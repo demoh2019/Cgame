@@ -108,4 +108,53 @@ func run(t) -> void:
 	else:
 		t.eq(Features.tick_runtime_effects(actor, 0.4), {},
 			"older engine binaries and stock Godot do not invent periodic triggers")
+	t.current = "native fused periodic step matches the legacy two-call status loop"
+	if ClassDB.class_exists("GameplayEffectTimeline"):
+		var updated: Object = ClassDB.instantiate("GameplayEffectTimeline")
+		var baseline: Object = ClassDB.instantiate("GameplayEffectTimeline")
+		if updated != null and baseline != null and updated.has_method(
+				"tick_and_take_periodic_pulses"):
+			var render_actor := Node3D.new()
+			render_actor.set_meta("effect_timeline", updated)
+			for timeline in [updated, baseline]:
+				t.check(bool(timeline.call("set_effect", &"Runtime.Status.Sundered", 3.0)),
+					"native timelines accept the same incoming replicated status")
+				t.check(bool(timeline.call("set_effect", &"Runtime.Status.Resolve", 3.7, 3)),
+					"both native timelines accept stacked Resolve")
+				t.check(bool(timeline.call("set_periodic", &"Runtime.Status.Sundered", 0.75, false)),
+					"native Sundered pulse phase is configured")
+				t.check(bool(timeline.call("set_periodic", &"Runtime.Status.Resolve", 1.1, false)),
+					"native Resolve pulse phase is configured")
+			for step in [0.4, 0.36, 0.8, 0.9, 2.0, 4.0]:
+				var expired: PackedStringArray = baseline.call("tick", step)
+				var old_pulses: Dictionary = baseline.call("take_periodic_pulses")
+				var new_pulses: Dictionary = Features.tick_runtime_effects(render_actor, step)
+				t.eq(new_pulses, old_pulses,
+					"live game fused actor tick emits exactly the legacy native pulse counts")
+				t.eq(updated.call("get_snapshot"), baseline.call("get_snapshot"),
+					"periodic phase, remaining timers and stack counts are unchanged")
+				t.eq(updated.call("take_periodic_pulses"), {},
+					"fused call drains pending status pulses exactly once")
+				if step == 2.0:
+					t.check(expired.has("Runtime.Status.Sundered"),
+						"legacy path exposes expired statuses; fused game path still expires them")
+			t.eq(int(updated.call("get_effect_count")), 0, "all visual effects expire as before")
+			t.eq(Features.tick_runtime_effects(render_actor, 0.2), {},
+				"empty native timeline does not fabricate pulses")
+			render_actor.free()
+		else:
+			t.check(true, "older Cgame retains the two-call periodic effect fallback")
+	else:
+		t.eq(Features.tick_runtime_effects(actor, 0.2), {},
+			"stock Godot keeps an inert status effect ticking fallback")
+
+	t.current = "live Albion After actor loop uses fused native periodic update"
+	var bridge_source: String = (Features as Script).source_code
+	t.check(bridge_source.contains('timeline.has_method("tick_and_take_periodic_pulses")') and
+		bridge_source.contains('timeline.call("tick_and_take_periodic_pulses", delta)'),
+		"actual entity view's EngineFeatures bridge calls new native fused step")
+	t.check(bridge_source.contains('timeline.call("tick", delta)') and
+		bridge_source.contains('timeline.call("take_periodic_pulses")'),
+		"older fork builds retain the two-call native compatibility path")
+
 	actor.free()

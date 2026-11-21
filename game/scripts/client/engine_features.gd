@@ -192,10 +192,17 @@ static func tick_runtime_effects(node: Node, delta: float) -> Dictionary:
 	if node == null or not is_finite(delta) or delta <= 0.0:
 		return {}
 	var timeline: Object = node.get_meta("effect_timeline", null) as Object
-	if timeline != null and timeline.has_method("tick"):
-		timeline.call("tick", delta)
-		if timeline.has_method("take_periodic_pulses"):
-			return timeline.call("take_periodic_pulses") as Dictionary
+	if timeline != null:
+		# One engine boundary crossing per actor/frame instead of a tick()
+		# followed by take_periodic_pulses(). Cosmetic callers do not use the
+		# expired tag array, so native code can omit that temporary entirely.
+		if timeline.has_method("tick_and_take_periodic_pulses"):
+			return timeline.call("tick_and_take_periodic_pulses", delta) as Dictionary
+		# Preserve the existing behavior for older Cgame engine binaries.
+		if timeline.has_method("tick"):
+			timeline.call("tick", delta)
+			if timeline.has_method("take_periodic_pulses"):
+				return timeline.call("take_periodic_pulses") as Dictionary
 	return {}
 
 
