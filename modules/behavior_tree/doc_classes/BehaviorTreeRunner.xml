@@ -8,6 +8,10 @@
 		<method name="is_finished" qualifiers="const"><return type="bool" /><description>Returns true after the root returns success or failure.</description></method>
 		<method name="get_last_status" qualifiers="const"><return type="int" enum="BehaviorTreeTask.Status" /><description>Returns the latest status or [constant BehaviorTreeTask.RUNNING] before the first tick.</description></method>
 		<method name="get_debug_snapshot" qualifiers="const"><return type="Dictionary" /><description>Returns a deep-copied Dictionary with keys [code]status[/code], [code]finished[/code], [code]auto_tick[/code], [code]root_task_class[/code], [code]blackboard[/code], and [code]execution_memory[/code]. The snapshot is made only when requested; editing the copied Dictionaries and Arrays does not change the runner, but Object values inside them remain shared references; do not modify such Objects through the snapshot. Execution memory uses internal node-path keys and should be treated as read-only diagnostic data, not persistent save data or a stable serialized format. Do not send sensitive Blackboard values to untrusted clients.</description></method>
+		<method name="set_profiling_enabled"><return type="void" /><param index="0" name="enabled" type="bool" /><description>Enable or disable per-runner timing. A private [AIExecutionProfiler] is created lazily when first enabled.</description></method>
+		<method name="is_profiling_enabled" qualifiers="const"><return type="bool" /><description>Whether this runner is collecting CPU timing samples.</description></method>
+		<method name="get_profile_snapshot" qualifiers="const"><return type="Dictionary" /><description>Return a detached dictionary of timing statistics. When enabled, category [code]behavior_tree[/code] measures the root task execution and all its child evaluations. Finished runner ticks do not record samples. See [method AIExecutionProfiler.get_snapshot].</description></method>
+		<method name="reset_profile"><return type="void" /><description>Reset collected timings without resetting tree execution or Blackboard.</description></method>
 		<method name="set_root_task"><return type="void" /><param index="0" name="task" type="BehaviorTreeTask" /><description>Replaces the root task and resets the execution state.</description></method>
 		<method name="get_root_task" qualifiers="const"><return type="BehaviorTreeTask" /><description>Returns the root resource.</description></method>
 		<method name="set_blackboard"><return type="void" /><param index="0" name="blackboard" type="Dictionary" /><description>Sets the shared blackboard dictionary for this agent.</description></method>
@@ -19,6 +23,7 @@
 		<member name="root_task" type="BehaviorTreeTask">Root task resource to execute.</member>
 		<member name="blackboard" type="Dictionary" default="{}">Agent-specific shared state available to task scripts.</member>
 		<member name="auto_tick" type="bool" default="false">Process the root task every frame while it is running.</member>
+		<member name="profiling_enabled" type="bool" default="false">Record root decision time using an opt-in private profiler.</member>
 	</members>
 	<signals>
 		<signal name="tree_finished">
