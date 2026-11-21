@@ -23,6 +23,7 @@ def get_doc_classes():
         "AIVisualSensor2D",
         "AIHearingSensor2D",
         "AIExecutionProfiler",
+        "AISimulationLOD2D",
     ]
 
 

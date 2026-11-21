@@ -1,0 +1,80 @@
+name: Native AI Simulation LOD and Albion After infected scans
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_simulation_lod_2d.*'
+      - 'modules/behavior_tree/tests/test_ai_simulation_lod_2d.h'
+      - 'modules/behavior_tree/register_types.cpp'
+      - 'modules/behavior_tree/config.py'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_zombie_ai.gd'
+      - '.github/workflows/native-ai-simulation-lod.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_simulation_lod_2d.*'
+      - 'modules/behavior_tree/tests/test_ai_simulation_lod_2d.h'
+      - 'modules/behavior_tree/register_types.cpp'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_zombie_ai.gd'
+      - '.github/workflows/native-ai-simulation-lod.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  simulation-lod-engine-game:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-ai-simulation-lod
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-ai-simulation-lod
+        continue-on-error: true
+      - name: Native policy and safety regression cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[AISimulationLOD2D]*"
+      - name: Import Albion After and compile GDScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee ai-lod-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' ai-lod-import.log; then exit 1; fi
+      - name: Authoritative infected and game regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee ai-lod-game.log
+          grep -Fq 'test_zombie_ai.gd' ai-lod-game.log
+          grep -Fq '0 failures' ai-lod-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' ai-lod-game.log; then exit 1; fi
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-ai-simulation-lod-logs
+          if-no-files-found: ignore
+          path: |
+            ai-lod-import.log
+            ai-lod-game.log
