@@ -254,7 +254,9 @@ func _ready() -> void:
 		var native_budget: Object = EngineFeatures.make("FrameUpdateBudget")
 		if native_budget != null and native_budget.has_method("record_cost") \
 				and native_budget.has_method("set_frame_time_budget_us") \
-				and native_budget.has_method("last_frame_cost_us"):
+				and native_budget.has_method("last_frame_cost_us") \
+				and native_budget.has_method("set_lane_importance") \
+				and native_budget.has_method("get_reserved_estimated_cost_us"):
 			var registered_all := true
 			for lane in AmbientTickBudget.LANES:
 				if not bool(native_budget.call("register_lane", StringName(lane))):
@@ -269,6 +271,7 @@ func _ready() -> void:
 		[&"Albion/AmbientPressurePct", Callable(_ambient_budget, "pressure_percent")],
 		[&"Albion/AmbientCPUus", Callable(_ambient_budget, "last_frame_cost_us")],
 		[&"Albion/AmbientCPUBudgetus", Callable(_ambient_budget, "get_frame_time_budget_us")],
+		[&"Albion/AmbientPlannedCPUus", Callable(_ambient_budget, "get_reserved_estimated_cost_us")],
 	]:
 		var monitor_name: StringName = monitor[0]
 		if not Performance.has_custom_monitor(monitor_name):
@@ -1674,6 +1677,12 @@ func _update_time_of_day(delta: float) -> void:
 	# still update every frame. Force an immediate refresh across dungeon edges.
 	var ambient_quality: int = GraphicsQuality.level()
 	_ambient_budget.set_frame_time_budget_us(AMBIENT_CPU_BUDGET_US[ambient_quality])
+	# Scene significance controls optional effects; encounter/physics/AI never
+	# enter this scheduler. Importance is updated before lane reservations.
+	var cosmetic_importance: Dictionary = AmbientTickBudget.suggested_importance(
+		WorldCycle.daylight(clock), storming, underground)
+	for lane in cosmetic_importance:
+		_ambient_budget.set_lane_importance(lane, float(cosmetic_importance[lane]))
 	_ambient_budget.begin_frame(delta, ambient_quality)
 	var ambient_force: bool = underground != _ambient_was_underground
 	_ambient_was_underground = underground

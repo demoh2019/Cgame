@@ -9,6 +9,10 @@ const HZ_BY_QUALITY := [12.0, 18.0, 30.0, 60.0]
 const MAX_STEP := 0.16
 
 var _elapsed: Dictionary = {}
+var _importance: Dictionary = {}
+var _estimates: Dictionary = {}
+var _overdue: Dictionary = {}
+var _reserved_estimate_us: int = 0
 var _reserved: Array[String] = []
 var _tie_start: int = 0
 var _quality: int = -1
@@ -34,6 +38,7 @@ func begin_frame(delta: float, quality: int) -> void:
 	_spent = 0
 	_last_updated = 0
 	_last_skipped = 0
+	_reserved_estimate_us = 0
 	if is_finite(delta) and delta > 0.0:
 		if delta > 0.030:
 			_pressure = minf(1.0, _pressure + 0.16)
@@ -54,18 +59,41 @@ func begin_frame(delta: float, quality: int) -> void:
 	var interval: float = 1.0 / HZ_BY_QUALITY[_quality]
 	for _slot in range(_budget):
 		var pick: String = ""
-		var best_elapsed: float = -1.0
-		for offset in range(LANES.size()):
-			var lane: String = LANES[(_tie_start + offset) % LANES.size()]
-			if _reserved.has(lane):
-				continue
-			var due: float = minf(float(_elapsed.get(lane, 0.0)) + delta, MAX_STEP)
-			if due + 0.000001 >= interval and due > best_elapsed + 0.000000000001:
-				pick = lane
-				best_elapsed = due
+		var best_priority: float = -1.0
+		# Fit already measured costs first; allow one over-budget channel
+		# when none fit, so expensive ambience can still make progress.
+		for cost_pass in range(2):
+			if cost_pass == 1 and not _reserved.is_empty():
+				break
+			for offset in range(LANES.size()):
+				var lane: String = LANES[(_tie_start + offset) % LANES.size()]
+				if _reserved.has(lane):
+					continue
+				var due: float = minf(float(_elapsed.get(lane, 0.0)) + delta, MAX_STEP)
+				if due + 0.000001 < interval:
+					continue
+				var estimated: int = int(_estimates.get(lane, 0))
+				var age: int = int(_overdue.get(lane, 0))
+				var exceeds: bool = _time_budget_us > 0 and estimated > 0 \
+					and _reserved_estimate_us + estimated > _time_budget_us
+				if cost_pass == 0 and exceeds and age < 48:
+					continue
+				var priority: float = due * float(_importance.get(lane, 1.0)) \
+					+ float(mini(age, 120)) * 0.012
+				if priority > best_priority + 0.000000000001:
+					pick = lane
+					best_priority = priority
+			if not pick.is_empty():
+				break
 		if pick.is_empty():
 			break
 		_reserved.append(pick)
+		_reserved_estimate_us = mini(1000000000,
+			_reserved_estimate_us + int(_estimates.get(pick, 0)))
+	for lane in LANES:
+		var due: float = minf(float(_elapsed.get(lane, 0.0)) + delta, MAX_STEP)
+		if due + 0.000001 >= interval and not _reserved.has(lane):
+			_overdue[lane] = mini(120, int(_overdue.get(lane, 0)) + 1)
 
 
 ## Returns 0 when the lane should not be updated this frame, or the
@@ -77,6 +105,7 @@ func consume(lane: String, delta: float, force: bool = false) -> float:
 	var elapsed: float = minf(float(_elapsed.get(lane, 0.0)) + delta, MAX_STEP)
 	if force or _quality_changed:
 		_elapsed[lane] = 0.0
+		_overdue[lane] = 0
 		_record_update()
 		return elapsed
 	_elapsed[lane] = elapsed
@@ -89,12 +118,15 @@ func consume(lane: String, delta: float, force: bool = false) -> float:
 	_spent += 1
 	_reserved.erase(lane)
 	_elapsed[lane] = 0.0
+	_overdue[lane] = 0
 	_record_update()
 	return elapsed
 
 
 func reset() -> void:
 	_elapsed.clear()
+	_overdue.clear()
+	_reserved_estimate_us = 0
 	_reserved.clear()
 	_tie_start = 0
 	_quality = -1
@@ -147,8 +179,48 @@ func get_frame_time_budget_us() -> int:
 func record_cost(lane: String, elapsed_us: int) -> bool:
 	if not LANES.has(lane) or elapsed_us < 0 or elapsed_us > 10000000:
 		return false
+	if elapsed_us > 0:
+		var previous: int = int(_estimates.get(lane, 0))
+		_estimates[lane] = elapsed_us if previous == 0 else \
+			int((3 * previous + elapsed_us + 2) / 4)
 	_frame_cost_us = mini(1000000000, _frame_cost_us + elapsed_us)
 	return true
+
+
+func set_lane_importance(lane: String, importance: float) -> bool:
+	if not LANES.has(lane) or not is_finite(importance) \
+			or importance < 0.25 or importance > 4.0:
+		return false
+	_importance[lane] = importance
+	return true
+
+
+func get_lane_importance(lane: String) -> float:
+	return float(_importance.get(lane, 1.0)) if LANES.has(lane) else -1.0
+
+
+func get_lane_estimated_cost_us(lane: String) -> int:
+	return int(_estimates.get(lane, 0)) if LANES.has(lane) else -1
+
+
+func get_reserved_estimated_cost_us() -> int:
+	return _reserved_estimate_us
+
+
+## Scene relevance weights are independent of the server simulation.
+static func suggested_importance(daylight: float, storming: bool, underground: bool) -> Dictionary:
+	var light: float = clampf(daylight, 0.0, 1.0) if is_finite(daylight) else 0.5
+	if underground:
+		return {
+			"dust_devils": 0.25, "dragonflies": 0.25,
+			"tumbleweeds": 0.25, "dusk_bats": 0.25
+		}
+	return {
+		"dust_devils": 2.0 if storming else 1.0,
+		"dragonflies": 3.0 if light > 0.55 and not storming else 0.5,
+		"tumbleweeds": 0.5 if storming else 1.2,
+		"dusk_bats": 3.0 if light < 0.4 else 0.4
+	}
 
 
 func current_frame_cost_us() -> int:

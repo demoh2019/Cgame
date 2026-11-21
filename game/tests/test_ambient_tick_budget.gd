@@ -166,3 +166,87 @@ func run(t) -> void:
 				"native CPU budget prevents extra work")
 			t.check(float(native_cpu.call("consume", &"dragonflies", 0.1, true)) > 0.0,
 				"native forced work bypasses soft limit")
+
+	t.current = "scene-aware importance with learned CPU costs"
+	var daylight_weights: Dictionary = AmbientTickBudget.suggested_importance(0.8, false, false)
+	var night_weights: Dictionary = AmbientTickBudget.suggested_importance(0.1, false, false)
+	var storm_weights: Dictionary = AmbientTickBudget.suggested_importance(0.8, true, false)
+	var cave_weights: Dictionary = AmbientTickBudget.suggested_importance(0.8, false, true)
+	t.check(float(daylight_weights["dragonflies"]) > float(daylight_weights["dusk_bats"]),
+		"dragonflies take daytime significance")
+	t.check(float(night_weights["dusk_bats"]) > float(night_weights["dragonflies"]),
+		"dusk bats take nighttime significance")
+	t.check(float(storm_weights["dust_devils"]) > float(storm_weights["dragonflies"]),
+		"storm-weighted landscape changes priority")
+	for lane in AmbientTickBudget.LANES:
+		t.eq(float(cave_weights[lane]), 0.25, "underground %s is low significance" % lane)
+
+	var weighted := AmbientTickBudget.new()
+	t.check(weighted.set_frame_time_budget_us(500), "significance scheduler sets CPU budget")
+	t.check(not weighted.set_lane_importance("dust_devils", 0.0), "invalid importance rejected")
+	t.check(not weighted.set_lane_importance("dust_devils", NAN), "NaN importance rejected")
+	t.check(not weighted.set_lane_importance("missing", 1.0), "unknown lane rejected")
+	t.check(weighted.set_lane_importance("dust_devils", 0.25), "heavy effects deprioritized")
+	t.check(weighted.set_lane_importance("dragonflies", 4.0), "visible effects prioritized")
+	t.eq(weighted.get_lane_importance("dragonflies"), 4.0, "importance can be inspected")
+	weighted.begin_frame(0.01, 0)
+	for lane in AmbientTickBudget.LANES:
+		weighted.consume(lane, 0.01)
+	t.check(weighted.record_cost("dust_devils", 1500), "heavy effect's cost measured")
+	t.check(weighted.record_cost("dragonflies", 100), "cheap effect's cost measured")
+	t.eq(weighted.get_lane_estimated_cost_us("dust_devils"), 1500, "EMA starts with first sample")
+	t.check(weighted.record_cost("dust_devils", 500), "next heavy sample is accepted")
+	t.eq(weighted.get_lane_estimated_cost_us("dust_devils"), 1250, "estimated cost uses EMA")
+	t.check(weighted.set_lane_importance("tumbleweeds", 0.25), "third lane low priority")
+	t.check(weighted.set_lane_importance("dusk_bats", 0.25), "fourth lane low priority")
+
+	var native_weighted: Object = null
+	if ClassDB.class_exists("FrameUpdateBudget"):
+		var candidate: Object = ClassDB.instantiate("FrameUpdateBudget")
+		if candidate != null and candidate.has_method("set_lane_importance") \
+				and candidate.has_method("get_reserved_estimated_cost_us"):
+			native_weighted = candidate
+			for lane in AmbientTickBudget.LANES:
+				t.check(bool(native_weighted.call("register_lane", StringName(lane))),
+					"native importance lane %s registered" % lane)
+				t.check(bool(native_weighted.call("set_lane_importance",
+					StringName(lane), weighted.get_lane_importance(lane))),
+					"native importance weight for %s accepted" % lane)
+			native_weighted.call("set_frame_time_budget_us", 500)
+			native_weighted.call("begin_frame", 0.01, 0)
+			for lane in AmbientTickBudget.LANES:
+				native_weighted.call("consume", StringName(lane), 0.01)
+			native_weighted.call("record_cost", &"dust_devils", 1500)
+			native_weighted.call("record_cost", &"dragonflies", 100)
+			native_weighted.call("record_cost", &"dust_devils", 500)
+			t.eq(int(native_weighted.call("get_lane_estimated_cost_us", &"dust_devils")),
+				1250, "native learned cost matches GDScript")
+
+	weighted.begin_frame(0.1, 0)
+	t.eq(weighted.get_reserved_estimated_cost_us(), 100,
+		"forecaster reserves affordable channel instead of expensive one")
+	if native_weighted != null:
+		native_weighted.call("begin_frame", 0.1, 0)
+		t.eq(int(native_weighted.call("get_reserved_estimated_cost_us")), 100,
+			"native predicted reservation matches GDScript")
+	var heavy_count: int = 0
+	for frame in range(100):
+		if frame > 0:
+			weighted.begin_frame(0.1, 0)
+			if native_weighted != null:
+				native_weighted.call("begin_frame", 0.1, 0)
+		for lane in AmbientTickBudget.LANES:
+			var result: float = weighted.consume(lane, 0.1)
+			if native_weighted != null:
+				var native_result: float = float(native_weighted.call(
+					"consume", StringName(lane), 0.1))
+				t.near(native_result, result, 0.0000001,
+					"native/script priority parity on frame %d for %s" % [frame, lane])
+			if result > 0.0:
+				var elapsed_us: int = 1500 if lane == "dust_devils" else 100
+				weighted.record_cost(lane, elapsed_us)
+				if native_weighted != null:
+					native_weighted.call("record_cost", StringName(lane), elapsed_us)
+				if lane == "dust_devils":
+					heavy_count += 1
+	t.check(heavy_count >= 1, "old expensive lane is eventually scheduled")
