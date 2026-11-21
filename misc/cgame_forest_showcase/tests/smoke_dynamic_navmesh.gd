@@ -132,6 +132,16 @@ func _run() -> void:
     if barricade == null or barricade.collision_layer != 1:
         _fail("buildable obstacle is not a physical collision body")
         return
+    var barricade_id: int = barricade.get_instance_id()
+    var surface: Vector3 = barricade.global_position
+    var ray := PhysicsRayQueryParameters3D.create(
+        surface + Vector3.UP * 3.0, surface - Vector3.UP * 3.0)
+    ray.collision_mask = 1
+    await physics_frame
+    var contact: Dictionary = root.get_world_3d().direct_space_state.intersect_ray(ray)
+    if int(contact.get("collider_id", -1)) != barricade_id:
+        _fail("PhysicsServer raycast did not hit the new barricade")
+        return
 
     # Removing the obstacle restores polygons without reloading scene roots.
     if not local_root.call("toggle_dynamic_barricade", barricade_point):
@@ -145,6 +155,11 @@ func _run() -> void:
         return
     if _region(local_root).navigation_mesh.get_polygon_count() != previous_polygons:
         _fail("removing the barrier did not restore the original navigation surface")
+        return
+    await physics_frame
+    contact = root.get_world_3d().direct_space_state.intersect_ray(ray)
+    if int(contact.get("collider_id", -1)) == barricade_id:
+        _fail("removed barricade still participates in physics queries")
         return
 
     # A real stalker path should be invalidated when any active tile changes.
