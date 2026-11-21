@@ -259,3 +259,33 @@ and older engine binaries use a corresponding GDScript fallback.
 
 Inspired by Unreal EQS Points: Grid and context-relative generators:
 https://dev.epicgames.com/documentation/en-us/unreal-engine/eqs-node-reference-generators-in-unreal-engine
+
+## Area-uniform golden-angle annulus sampling (procedural radial scatter)
+
+`sample_fibonacci_annulus(center, inner_radius, outer_radius, count, phase=0.0)`
+adds an O(N) native **area-uniform annulus** generator to the existing
+EQS generators. Rather than choosing radial coordinates linearly or placing
+every ring's points along the same spokes, it uses
+
+`radius = sqrt(inner_radius² + ((i + 0.5) / count) * (outer_radius² - inner_radius²))`
+
+and the fixed golden angle `2.39996322972865332` radians per sample.
+The center Y is unchanged, the pattern is deterministic with optional
+phase rotation, and all output is kept in original source order. Input
+radii must be nonnegative and ordered; the algorithm rejects nonfinite
+parameters, squared-radius overflow, point output overflow and counts
+outside 1..65536. It touches no PhysicsServer, navmesh, scene nodes,
+GPU resources or gameplay RNG.
+
+Albion After uses a 32-sample 18..26m scatter as **backup only** for
+server-authoritative night horde spawns when the original 3x16
+concentric-ring sites cannot fill the requested wave. All original
+zone, terrain slope, water, collision, survivor proximity, infected
+occupancy, maximum radial distance and inter-enemy spacing checks
+apply identically. A GDScript reference fallback preserves older
+Cgame / stock Godot. No extra rewards, capacity or client trust.
+
+This is a lightweight Cgame sampling primitive, **not** an implementation
+of Unreal's particular node. It is inspired by radial point scatter in
+Unreal Dataflow/PCG:
+https://dev.epicgames.com/documentation/unreal-engine/node-reference/Dataflow/RadialScatterPoints
