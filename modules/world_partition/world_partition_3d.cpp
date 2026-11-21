@@ -825,7 +825,10 @@ bool WorldPartition3D::_valid_body_state(const Dictionary &p_state) {
 	if (transform.get_type() != Variant::TRANSFORM3D || linear.get_type() != Variant::VECTOR3 || angular.get_type() != Variant::VECTOR3 || sleeping.get_type() != Variant::BOOL || frozen.get_type() != Variant::BOOL) {
 		return false;
 	}
-	return Transform3D(transform).is_finite() && Vector3(linear).is_finite() && Vector3(angular).is_finite();
+	const Transform3D body_transform = transform;
+	const Vector3 linear_velocity = linear;
+	const Vector3 angular_velocity = angular;
+	return body_transform.is_finite() && linear_velocity.is_finite() && angular_velocity.is_finite();
 }
 
 void WorldPartition3D::_capture_cell_physics_state(const Vector2i &p_cell, Node *p_instance) {
@@ -880,9 +883,18 @@ void WorldPartition3D::_restore_cell_physics_state(const Vector2i &p_cell, Node 
 		if (key.get_type() != Variant::STRING || String(key).is_empty()) {
 			continue;
 		}
-		const NodePath path = NodePath(String(key));
+		const String path_text = key;
+		// A checkpoint must not traverse outside the cell root or address
+		// node properties through subnames.
+		if (path_text.contains("..")) {
+			continue;
+		}
+		const NodePath path = NodePath(path_text);
+		if (path.is_absolute() || path.get_subname_count() > 0) {
+			continue;
+		}
 		RigidBody3D *body = Object::cast_to<RigidBody3D>(p_instance->get_node_or_null(path));
-		if (body == nullptr || !bool(body->get_meta(SNAME("streaming_persistent"), false))) {
+		if (body == nullptr || (body != p_instance && !p_instance->is_ancestor_of(body)) || !bool(body->get_meta(SNAME("streaming_persistent"), false))) {
 			continue;
 		}
 		const Dictionary record = (*states)[key];
