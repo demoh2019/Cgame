@@ -47,7 +47,7 @@ func run(t) -> void:
 		candidates, threats, Vector2.ZERO, 2, 4.0, false)
 	t.eq(scripted.size(), 2, "two locations are selected")
 	t.eq(scripted[0], Vector2(25, 0), "safest candidate is first")
-	t.eq(scripted[1], Vector2(16, 0), "spread finds next distinct candidate")
+	t.eq(scripted[1], Vector2(16, 1), "spread chooses the safer of two neighboring candidates")
 	t.check(scripted[0].distance_to(scripted[1]) >= 4.0, "raid sites keep minimum spacing")
 	var actual: Array[Vector2] = RaidReinforcements.spread_sites(
 		candidates, threats, Vector2.ZERO, 2, 4.0, true)
