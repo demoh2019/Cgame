@@ -864,19 +864,51 @@ void WorldStreamer::_generate_cell(const Vector3i &cell) {
 	}
 }
 
-void WorldStreamer::_record_chunk_work(uint64_t p_started_usec) {
+int64_t WorldStreamer::update_chunk_work_estimate(int64_t p_previous, int64_t p_sample_usec) {
+	// Bounded 1/4 EMA: no allocations, callbacks, or cross-stage bias.
+	const int64_t sample = CLAMP(p_sample_usec, int64_t(0), int64_t(1000000));
+	const int64_t previous = CLAMP(p_previous, int64_t(0), int64_t(1000000));
+	if (sample == 0) {
+		return previous; // A sub-microsecond call is not a reliable cost sample.
+	}
+	return previous == 0 ? sample : (3 * previous + sample + 2) / 4;
+}
+
+bool WorldStreamer::should_defer_predicted_chunk_work(int p_budget_usec, int p_previous_attempts,
+		int64_t p_work_spent_usec, int64_t p_estimated_next_usec) {
+	// Always allow the first necessary task, even when it is indivisible
+	// and more expensive than the configured soft frame budget.
+	if (p_budget_usec <= 0 || p_previous_attempts <= 0 || p_estimated_next_usec <= 0) {
+		return false;
+	}
+	const int64_t remaining = int64_t(p_budget_usec) - MAX(p_work_spent_usec, int64_t(0));
+	return remaining < p_estimated_next_usec;
+}
+
+bool WorldStreamer::_should_defer_predicted_work(bool p_generator) const {
+	if (!predictive_chunk_work_budget_enabled) {
+		return false;
+	}
+	return should_defer_predicted_chunk_work(active_chunk_work_budget_usec, frame_chunk_attempt_count,
+			frame_chunk_work_usec, p_generator ? estimated_generator_work_usec : estimated_finalization_work_usec);
+}
+
+void WorldStreamer::_record_chunk_work(uint64_t p_started_usec, bool p_generator) {
 	const uint64_t now = OS::get_singleton()->get_ticks_usec();
-	const uint64_t elapsed = now >= p_started_usec ? now - p_started_usec : 0;
-	frame_chunk_work_usec = MIN(int64_t(1000000000),
-			frame_chunk_work_usec + int64_t(MIN(elapsed, uint64_t(1000000000))));
+	const int64_t elapsed = int64_t(MIN(now >= p_started_usec ? now - p_started_usec : 0, uint64_t(1000000000)));
+	frame_chunk_work_usec = MIN(int64_t(1000000000), frame_chunk_work_usec + elapsed);
+	int64_t &estimate = p_generator ? estimated_generator_work_usec : estimated_finalization_work_usec;
+	estimate = update_chunk_work_estimate(estimate, elapsed);
 	frame_chunk_attempt_count++;
 }
 
 void WorldStreamer::_finish_chunk_work_frame() {
 	last_frame_chunk_work_usec = frame_chunk_work_usec;
 	last_frame_chunk_attempt_count = frame_chunk_attempt_count;
+	last_predicted_deferred_count = frame_predicted_deferred_count;
 	frame_chunk_work_usec = 0;
 	frame_chunk_attempt_count = 0;
+	frame_predicted_deferred_count = 0;
 }
 
 void WorldStreamer::set_adaptive_chunk_budget_enabled(bool p_enabled) {
@@ -975,19 +1007,24 @@ void WorldStreamer::_run_generator_queue(int &r_instantiation_budget, uint64_t p
 				OS::get_singleton()->get_ticks_usec() - p_frame_started_usec >= uint64_t(active_chunk_work_budget_usec)) {
 			break;
 		}
-		const Vector3i cell = generate_queue[consumed++];
-		if (loaded.has(cell)) {
+		const Vector3i cell = generate_queue[consumed];
+		if (loaded.has(cell) || !have_focus || !_cell_requested(position, cell)) {
+			consumed++; // Irrelevant cells are discarded without spending CPU slots.
 			continue;
 		}
-		// The focus may have moved on while the cell waited in the queue.
-		if (!have_focus || !_cell_requested(position, cell)) {
-			continue;
+		// Forecast a second or later procedural call before starting it.
+		// Both the generator and threaded finalization share the same
+		// measured work and instantiation counters for this frame.
+		if (_should_defer_predicted_work(true)) {
+			frame_predicted_deferred_count++;
+			break; // Keep the next still-wanted cell queued for a later frame.
 		}
+		consumed++;
 		// Generator calls can be expensive even when a chunk is missing or fails.
 		r_instantiation_budget--;
 		const uint64_t generation_started_usec = OS::get_singleton()->get_ticks_usec();
 		_generate_cell(cell);
-		_record_chunk_work(generation_started_usec);
+		_record_chunk_work(generation_started_usec, true);
 	}
 	if (consumed > 0) {
 		LocalVector<Vector3i> rest;
@@ -1062,11 +1099,17 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 				OS::get_singleton()->get_ticks_usec() - p_frame_started_usec >= uint64_t(active_chunk_work_budget_usec))) {
 			continue; // Keep loaded resources ready for the next frame.
 		}
+		if (_should_defer_predicted_work(false)) {
+			// The finished resource stays in the bounded ready queue until
+			// the next frame; no synchronous scene activation this frame.
+			frame_predicted_deferred_count++;
+			continue;
+		}
 		r_instantiation_budget--;
 		loading.erase(cell);
 		const uint64_t finalization_started_usec = OS::get_singleton()->get_ticks_usec();
 		const bool finalized = _finalize_chunk(cell, path);
-		_record_chunk_work(finalization_started_usec);
+		_record_chunk_work(finalization_started_usec, false);
 		if (!finalized) {
 			_record_failure(cell, path);
 		}
@@ -1334,6 +1377,10 @@ void WorldStreamer::_reset_state() {
 	last_frame_chunk_work_usec = 0;
 	frame_chunk_attempt_count = 0;
 	last_frame_chunk_attempt_count = 0;
+	estimated_generator_work_usec = 0;
+	estimated_finalization_work_usec = 0;
+	frame_predicted_deferred_count = 0;
+	last_predicted_deferred_count = 0;
 	time_since_update = 1e9;
 }
 
@@ -1676,6 +1723,7 @@ void WorldStreamer::set_chunk_path_template(const String &p_template) {
 	}
 	clear_cached_chunks();
 	chunk_path_template = p_template;
+	estimated_finalization_work_usec = 0;
 	missing.clear();
 	failed.clear();
 	retry_states.clear();
@@ -1684,6 +1732,7 @@ void WorldStreamer::set_chunk_path_template(const String &p_template) {
 void WorldStreamer::set_chunk_provider(const Callable &p_provider) {
 	clear_cached_chunks();
 	chunk_provider = p_provider;
+	estimated_finalization_work_usec = 0;
 	missing.clear();
 	failed.clear();
 	retry_states.clear();
@@ -1698,6 +1747,7 @@ void WorldStreamer::set_chunk_generator(const Callable &p_generator) {
 		cache_ineligible_nodes.insert(entry.value);
 	}
 	chunk_generator = p_generator;
+	estimated_generator_work_usec = 0;
 	generate_queue.clear();
 	missing.clear();
 	failed.clear();
@@ -1923,6 +1973,13 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_streaming_frame_pressure_percent"), &WorldStreamer::get_streaming_frame_pressure_percent);
 	ClassDB::bind_method(D_METHOD("get_last_frame_chunk_work_usec"), &WorldStreamer::get_last_frame_chunk_work_usec);
 	ClassDB::bind_method(D_METHOD("get_last_frame_chunk_attempt_count"), &WorldStreamer::get_last_frame_chunk_attempt_count);
+	ClassDB::bind_method(D_METHOD("set_predictive_chunk_work_budget_enabled", "enabled"), &WorldStreamer::set_predictive_chunk_work_budget_enabled);
+	ClassDB::bind_method(D_METHOD("is_predictive_chunk_work_budget_enabled"), &WorldStreamer::is_predictive_chunk_work_budget_enabled);
+	ClassDB::bind_method(D_METHOD("get_estimated_generator_work_usec"), &WorldStreamer::get_estimated_generator_work_usec);
+	ClassDB::bind_method(D_METHOD("get_estimated_finalization_work_usec"), &WorldStreamer::get_estimated_finalization_work_usec);
+	ClassDB::bind_method(D_METHOD("get_last_predicted_deferred_chunk_count"), &WorldStreamer::get_last_predicted_deferred_chunk_count);
+	ClassDB::bind_static_method("WorldStreamer", D_METHOD("update_chunk_work_estimate", "previous_usec", "sample_usec"), &WorldStreamer::update_chunk_work_estimate);
+	ClassDB::bind_static_method("WorldStreamer", D_METHOD("should_defer_predicted_chunk_work", "budget_usec", "previous_attempts", "spent_usec", "predicted_next_usec"), &WorldStreamer::should_defer_predicted_chunk_work);
 	ClassDB::bind_method(D_METHOD("set_max_auto_retries", "count"), &WorldStreamer::set_max_auto_retries);
 	ClassDB::bind_method(D_METHOD("get_max_auto_retries"), &WorldStreamer::get_max_auto_retries);
 	ClassDB::bind_method(D_METHOD("set_retry_initial_delay", "seconds"), &WorldStreamer::set_retry_initial_delay);
@@ -2015,6 +2072,7 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_unloads_per_update", PROPERTY_HINT_RANGE, "0,64,1"), "set_max_unloads_per_update", "get_max_unloads_per_update");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_unload_work_usec", PROPERTY_HINT_RANGE, "0,1000000,100,suffix:us"), "set_max_unload_work_usec", "get_max_unload_work_usec");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_chunk_work_usec", PROPERTY_HINT_RANGE, "0,1000000,100,suffix:us"), "set_max_chunk_work_usec", "get_max_chunk_work_usec");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "predictive_chunk_work_budget_enabled"), "set_predictive_chunk_work_budget_enabled", "is_predictive_chunk_work_budget_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "update_interval", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater,suffix:s"), "set_update_interval", "get_update_interval");
 	ADD_GROUP("Recovery", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_auto_retries", PROPERTY_HINT_RANGE, "0,8,1"), "set_max_auto_retries", "get_max_auto_retries");

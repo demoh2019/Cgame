@@ -92,6 +92,32 @@
 			<return type="float" />
 			<description>Returns 0 to 100 for the measured render-frame backpressure. Only updated on the streamer's internal process when adaptivity is enabled.</description>
 		</method>
+		<method name="should_defer_predicted_chunk_work" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="budget_usec" type="int" />
+			<param index="1" name="previous_attempts" type="int" />
+			<param index="2" name="spent_usec" type="int" />
+			<param index="3" name="predicted_next_usec" type="int" />
+			<description>Pure admission helper: returns true only when a second or later scene work unit would exceed a positive shared CPU budget based on prior measured time plus the forecast. Unknown estimates, disabled budgets and first attempts always return false.</description>
+		</method>
+		<method name="update_chunk_work_estimate" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="previous_usec" type="int" />
+			<param index="1" name="sample_usec" type="int" />
+			<description>Pure bounded quarter-rate exponential moving average for measured per-chunk main-thread CPU microseconds. Returns the previous estimate for a zero/negative sample and clamps positive estimates to 1000000. The engine records separate procedural and threaded-finalization forecasts.</description>
+		</method>
+		<method name="get_estimated_generator_work_usec" qualifiers="const">
+			<return type="int" />
+			<description>Observed moving-average main-thread microseconds for procedural generation and node adoption, clamped to 1000000. No prediction until at least one positive sample. Resets when the generator or streaming grid changes.</description>
+		</method>
+		<method name="get_estimated_finalization_work_usec" qualifiers="const">
+			<return type="int" />
+			<description>Observed moving-average microseconds for ready-threaded-scene finalization, excluding background resource decoding. Reset on provider/template/grid changes.</description>
+		</method>
+		<method name="get_last_predicted_deferred_chunk_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of already-wanted procedural or ready-threaded cells deferred in the last frame by the optional cost forecast (not by the regular count or wall-clock limit). Recomputed on every internal update or explicit refresh.</description>
+		</method>
 		<method name="get_last_frame_chunk_work_usec" qualifiers="const">
 			<return type="int" />
 			<description>Returns the elapsed main-thread microseconds of the last stream integration frame, covering both procedural generator+adoption and threaded scene finalization. Resource decoding on worker threads is not included.</description>
@@ -407,6 +433,9 @@
 		</member>
 		<member name="max_cached_chunks" type="int" setter="set_max_cached_chunks" getter="get_max_cached_chunks" default="0">
 			Opt-in bounded cache for unloaded, procedural Node roots that implement [code]can_cache_streaming_chunk() -&gt; bool[/code] and explicitly return [code]true[/code]. Zero preserves normal unload-and-free behavior; values are clamped to 0–16 complete scene roots. Cached roots are detached and do not render or simulate, but still retain memory. Least-recent entries are evicted first, but cells requested again by the current focus/source take precedence over nonrequested cached cells. Returning to the exact cell reattaches through the ordinary budgeted load path and optionally invokes [code]on_streaming_cache_restored()[/code] after adoption. Cached roots are cleared on grid/parent/generator changes, manual unload and destruction; only immutable client visuals should opt in. Not for authoritative entities, physics, quest state, or network-owned objects.
+		</member>
+		<member name="predictive_chunk_work_budget_enabled" type="bool" setter="set_predictive_chunk_work_budget_enabled" getter="is_predictive_chunk_work_budget_enabled" default="false">
+			Optional cost-forecast admission for procedural and threaded-ready cell activation, using independent 1/4 exponential moving averages of observed main-thread microseconds. Enabled only when [member max_chunk_work_usec] is positive. After at least one completed cell work unit in this frame, a candidate is postponed when its predicted cost plus already-measured work exceeds the shared frame budget. The first cell is never blocked, unknown costs do not block, and a single noninterruptible scene activation can exceed the soft limit. All normal loading priorities and cell count budgets still apply. Zero CPU time budget or default disabled mode retain legacy behavior. The budget uses real measurements, not GPU time or background texture decoding; estimates reset when the corresponding generator/provider/grid changes.
 		</member>
 		<member name="max_chunk_work_usec" type="int" setter="set_max_chunk_work_usec" getter="get_max_chunk_work_usec" default="0">
 			Soft CPU-time budget, in microseconds, shared across finished-scene activation and procedural chunk generation during one streaming update. Both paths use the same frame start timestamp. Once at least one chunk has been processed, no more chunks are integrated after the budget expires. A single chunk cannot be interrupted and may take longer than the budget. Enable [member adaptive_chunk_budget_enabled] to temporarily reduce effective limits during sustained slow frames; call [method get_effective_chunk_work_usec] for the resulting cap. The value is clamped to [code]0[/code] through [code]1000000[/code]; [code]0[/code] disables time slicing while keeping [member max_instantiations_per_frame] active. Also works with [method refresh].
