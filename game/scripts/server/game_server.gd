@@ -8356,8 +8356,8 @@ func _prepare_passive_target_candidates(cohort: Array, info: Dictionary,
 	for zombie in cohort:
 		# For these agents, Zombie._select_target() only needs currently
 		# eligible survivors inside their lose-leash plus the passive AI LOD
-		# far threshold (24m). All further targets are behaviorally equivalent
-		# to an infinite nearest-viewer distance for passive LOD purposes.
+		# far threshold (24m) plus its 4m hysteresis band. Further
+		# targets are behaviorally equivalent to infinite nearest distance.
 		if not zombie.is_alive() or zombie.raid_boss or zombie.target_id != -1 \
 				or zombie.forced_target_seconds > 0.0 or not zombie.threat.is_empty() \
 				or (zombie.state != Zombie.State.IDLE \
@@ -8366,7 +8366,7 @@ func _prepare_passive_target_candidates(cohort: Array, info: Dictionary,
 				or zombie.think_timer > delta or not zombie.position.is_finite():
 			continue
 		var lose: float = float(zombie.data.get("lose", NAN))
-		var radius: float = lose + 24.125 # 12.5cm outward float32 safety margin.
+		var radius: float = lose + 28.125 # 24m far + 4m hysteresis + float safety.
 		if not is_finite(radius) or radius <= 0.0 or radius > 256.0:
 			return {} # Avoid silently clipping any agent's detection or LOD.
 		agent_ids.append(zombie.id)
