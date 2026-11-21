@@ -136,6 +136,8 @@ var _visual_biome := "plains"
 var atmosphere
 var _ambient_motes
 var _ambient_budget: Variant = AmbientTickBudget.new()
+var _ambient_rates_supported: bool = false
+var _ambient_rate_cache: Dictionary = {}
 var _ambient_was_underground := false
 var _ambient_monitors: Array[StringName] = []
 var _ambient_birds
@@ -263,6 +265,8 @@ func _ready() -> void:
 					registered_all = false
 			if registered_all:
 				_ambient_budget = native_budget
+	# Older custom binaries keep their existing importance/cost scheduler.
+	_ambient_rates_supported = _ambient_budget.has_method("set_lane_rate_scale")
 	# Client-side cosmetic update budget, exposed to Godot's built-in profiler.
 	for monitor in [
 		[&"Albion/AmbientUpdates", Callable(_ambient_budget, "updated_total")],
@@ -1682,7 +1686,15 @@ func _update_time_of_day(delta: float) -> void:
 	var cosmetic_importance: Dictionary = AmbientTickBudget.suggested_importance(
 		WorldCycle.daylight(clock), storming, underground)
 	for lane in cosmetic_importance:
-		_ambient_budget.set_lane_importance(lane, float(cosmetic_importance[lane]))
+		var significance: float = float(cosmetic_importance[lane])
+		_ambient_budget.set_lane_importance(lane, significance)
+		# Adapt desired frequency only when relevance changes. Cost forecasts,
+		# finite frame slots, and starvation aging stay managed in the engine.
+		if _ambient_rates_supported:
+			var rate_scale: float = AmbientTickBudget.rate_scale_for_importance(significance)
+			if float(_ambient_rate_cache.get(lane, -1.0)) != rate_scale:
+				if bool(_ambient_budget.call("set_lane_rate_scale", lane, rate_scale)):
+					_ambient_rate_cache[lane] = rate_scale
 	_ambient_budget.begin_frame(delta, ambient_quality)
 	var ambient_force: bool = underground != _ambient_was_underground
 	_ambient_was_underground = underground
