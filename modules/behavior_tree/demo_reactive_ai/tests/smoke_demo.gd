@@ -89,6 +89,40 @@ func _run_checks() -> void:
         _fail("Small demo tree should fit inside its bounded node trace")
         return
 
+    # The full Resource graph includes branches skipped on the current tick.
+    var graph: Dictionary = demo.brain.get_tree_snapshot()
+    var graph_nodes: Array = graph.get("nodes", [])
+    if graph_nodes.size() < visited_nodes.size():
+        _fail("Full graph inspector must include all executed and skipped tasks")
+        return
+    var skipped_patrol := false
+    for raw_node in graph_nodes:
+        var task: Dictionary = raw_node
+        if task.get("path") == "root/4" and not bool(task.get("executed", true)):
+            skipped_patrol = true
+    if not skipped_patrol:
+        _fail("The unvisited patrol alternative must remain visible in the graph")
+        return
+    demo.call("_refresh_trace_tree_panel")
+    if demo.trace_tree == null or demo.trace_panel == null or not demo.trace_panel.visible:
+        _fail("Live AI hierarchy panel must be visible while tracing is enabled")
+        return
+    var visual_root: TreeItem = demo.trace_tree.get_root()
+    var first_task: TreeItem = visual_root.get_first_child() if visual_root != null else null
+    if first_task == null or first_task.get_text(0) != "ReactiveSelector":
+        _fail("The live hierarchical Tree must show the actual native root task")
+        return
+    if first_task.get_text(1) != "RUNNING":
+        _fail("The active root task must be highlighted as running")
+        return
+    demo.brain.trace_enabled = false
+    demo.call("_refresh_trace_tree_panel")
+    if demo.trace_panel.visible:
+        _fail("Disabling tracing must hide the live debug panel")
+        return
+    demo.brain.trace_enabled = true
+    demo.call("_refresh_trace_tree_panel")
+
     if demo.brain.get_blackboard().get("action") != "chase":
         _fail("Visible player must cause chase behavior")
         return
