@@ -84,6 +84,15 @@ private:
 	// Soft main-thread time slice for procedural generation or scene
 	// activation (0 = count-only). Each individual chunk is indivisible.
 	int max_chunk_work_usec = 0;
+	// Opt-in adaptive backpressure. Defaults off to preserve existing games.
+	bool adaptive_chunk_budget_enabled = false;
+	double streaming_frame_pressure = 0.0;
+	int active_chunk_work_budget_usec = 0;
+	int active_instantiation_budget = 1;
+	int64_t frame_chunk_work_usec = 0;
+	int64_t last_frame_chunk_work_usec = 0;
+	int frame_chunk_attempt_count = 0;
+	int last_frame_chunk_attempt_count = 0;
 	double update_interval = 0.1;
 	String chunk_path_template;
 	Callable chunk_provider;
@@ -128,6 +137,9 @@ private:
 	bool _finalize_chunk(const Vector3i &p_cell, const String &p_path);
 	bool _adopt_chunk(const Vector3i &p_cell, Node *p_chunk);
 	void _run_generator_queue(int &r_instantiation_budget, uint64_t p_frame_started_usec);
+	void _generate_cell(const Vector3i &p_cell);
+	void _record_chunk_work(uint64_t p_started_usec);
+	void _finish_chunk_work_frame();
 	void _unload_cell(const Vector3i &p_cell);
 	void _reset_state();
 	void _record_failure(const Vector3i &p_cell, const String &p_reason);
@@ -180,6 +192,18 @@ public:
 	int get_max_instantiations_per_frame() const { return max_instantiations_per_frame; }
 	void set_max_chunk_work_usec(int p_usec);
 	int get_max_chunk_work_usec() const { return max_chunk_work_usec; }
+	void set_adaptive_chunk_budget_enabled(bool p_enabled);
+	bool is_adaptive_chunk_budget_enabled() const { return adaptive_chunk_budget_enabled; }
+	// Pure, bounded pressure step shared with performance tests. Large delta
+	// raises pressure; stable fast frames recover it gradually.
+	static double advance_chunk_pressure(double p_pressure, double p_frame_delta);
+	static int calculate_adaptive_instantiation_slots(int p_configured, double p_pressure);
+	static int calculate_adaptive_chunk_work_usec(int p_configured, double p_pressure);
+	int get_effective_chunk_work_usec() const;
+	int get_effective_instantiations_per_frame() const;
+	double get_streaming_frame_pressure_percent() const { return streaming_frame_pressure * 100.0; }
+	int64_t get_last_frame_chunk_work_usec() const { return last_frame_chunk_work_usec; }
+	int get_last_frame_chunk_attempt_count() const { return last_frame_chunk_attempt_count; }
 	void set_max_auto_retries(int p_count);
 	int get_max_auto_retries() const { return max_auto_retries; }
 	void set_retry_initial_delay(real_t p_seconds);

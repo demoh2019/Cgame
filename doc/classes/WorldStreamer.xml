@@ -23,6 +23,45 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="advance_chunk_pressure" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="pressure" type="float" />
+			<param index="1" name="frame_delta" type="float" />
+			<description>Pure bounded slow-frame pressure step. A frame longer than 30 ms adds 0.16, a frame shorter than 20 ms subtracts 0.05, and intermediate frames hold pressure. Invalid elapsed time is ignored, and pressure stays within 0 to 1.</description>
+		</method>
+		<method name="calculate_adaptive_instantiation_slots" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="configured" type="int" />
+			<param index="1" name="pressure" type="float" />
+			<description>Returns the adaptive number of chunk integration slots for a configured limit, reducing by one for pressure at least 0.4 and by two for pressure at least 0.8, with a minimum of one.</description>
+		</method>
+		<method name="calculate_adaptive_chunk_work_usec" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="configured" type="int" />
+			<param index="1" name="pressure" type="float" />
+			<description>Returns the adaptive soft CPU-time limit in microseconds; high pressure scales the configured value to 75% or 50%, but never raises the configured cap. Zero disables the time cap.</description>
+		</method>
+		<method name="get_effective_instantiations_per_frame" qualifiers="const">
+			<return type="int" />
+			<description>Returns the current adaptive or legacy limit for procedural generation and threaded scene activation.</description>
+		</method>
+		<method name="get_effective_chunk_work_usec" qualifiers="const">
+			<return type="int" />
+			<description>Returns the current soft deadline in microseconds. Individual chunks are indivisible.</description>
+		</method>
+		<method name="get_streaming_frame_pressure_percent" qualifiers="const">
+			<return type="float" />
+			<description>Returns 0 to 100 for the measured render-frame backpressure. Only updated on the streamer's internal process when adaptivity is enabled.</description>
+		</method>
+		<method name="get_last_frame_chunk_work_usec" qualifiers="const">
+			<return type="int" />
+			<description>Returns the elapsed main-thread microseconds of the last stream integration frame, covering both procedural generator+adoption and threaded scene finalization. Resource decoding on worker threads is not included.</description>
+		</method>
+		<method name="get_last_frame_chunk_attempt_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns the number of generator calls and loaded-scene finalization attempts in the last stream integration frame, including empty and failed chunks.</description>
+		</method>
+
 		<method name="cell_to_world" qualifiers="const">
 			<return type="Vector3" />
 			<param index="0" name="cell" type="Vector3i" />
@@ -180,6 +219,9 @@
 		</method>
 	</methods>
 	<members>
+		<member name="adaptive_chunk_budget_enabled" type="bool" setter="set_adaptive_chunk_budget_enabled" getter="is_adaptive_chunk_budget_enabled" default="false">
+			Opt-in slow-frame streaming backpressure. When enabled, high render-frame latency temporarily reduces per-frame chunk count and the microsecond budget, while never dropping below one integration slot. Normal frame times gradually recover configured limits. No change is made to load radius, unload radius, queued cells, authoritative world simulation, or asynchronous resource loading. Disabled by default for compatibility.
+		</member>
 		<member name="axes" type="int" setter="set_axes" getter="get_axes" enum="WorldStreamer.Axes" default="0">
 			Which axes make up the grid. [constant AXES_XZ] streams on the ground plane of a 3D world, [constant AXES_XY] is for 2D worlds, and [constant AXES_XYZ] also streams along the vertical axis. Changing it unloads every chunk.
 		</member>
@@ -214,7 +256,7 @@
 			Maximum number of chunks loading in the background at the same time.
 		</member>
 		<member name="max_chunk_work_usec" type="int" setter="set_max_chunk_work_usec" getter="get_max_chunk_work_usec" default="0">
-			Soft CPU-time budget, in microseconds, shared across finished-scene activation and procedural chunk generation during one streaming update. Both paths use the same frame start timestamp. Once at least one chunk has been processed, no more chunks are integrated after the budget expires. A single chunk cannot be interrupted and may take longer than the budget. The value is clamped to [code]0[/code] through [code]1000000[/code]; [code]0[/code] disables time slicing while keeping [member max_instantiations_per_frame] active. Also works with [method refresh].
+			Soft CPU-time budget, in microseconds, shared across finished-scene activation and procedural chunk generation during one streaming update. Both paths use the same frame start timestamp. Once at least one chunk has been processed, no more chunks are integrated after the budget expires. A single chunk cannot be interrupted and may take longer than the budget. Enable [member adaptive_chunk_budget_enabled] to temporarily reduce effective limits during sustained slow frames; call [method get_effective_chunk_work_usec] for the resulting cap. The value is clamped to [code]0[/code] through [code]1000000[/code]; [code]0[/code] disables time slicing while keeping [member max_instantiations_per_frame] active. Also works with [method refresh].
 		</member>
 		<member name="max_instantiations_per_frame" type="int" setter="set_max_instantiations_per_frame" getter="get_max_instantiations_per_frame" default="1">
 			Maximum number of chunks activated during one native streaming update, counting both finished background scene loads and procedural generator calls against the same budget. Once the limit is reached, remaining cells stay queued for a later update. A generator that returns [code]null[/code] or fails still consumes a slot, since the callback may already have done expensive CPU work. Combine with [member max_chunk_work_usec] to load several cheap chunks without scheduling more work after a costly chunk.
