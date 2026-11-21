@@ -54,7 +54,7 @@ uniform float albedo_texels = 1024.0; // Per-layer texture width, for the magnif
 uniform float normal_texels = 1024.0;
 // Poly Haven displacement per layer (0.5 = flat for layers without one), for close-range parallax.
 uniform sampler2DArray height_layers : filter_linear_mipmap, repeat_enable;
-uniform float normal_strength = 1.3;
+uniform float normal_strength = 1.7;
 // Per-layer multiplier that moves the photo's average colour to the game's palette (computed on load).
 uniform vec3 layer_tint[13];
 // Average color of each material: cheap residual retains all biome transitions when texture taps are limited.
@@ -125,7 +125,39 @@ void vertex() {
 // Wherever the near tile is magnified (under ~1 texel per pixel) the same layer is also sampled at a
 // 4.5x finer, rotated scale and applied as luminance detail: crisp grit underfoot, no extra textures.
 const float AA_MICRO_SCALE = 0.22;
-const float AA_PARALLAX_DEPTH = 0.06; // Metres of apparent relief at full displacement contrast.
+const float AA_PARALLAX_DEPTH = 0.09; // Metres of apparent relief at full displacement contrast.
+const float AA_CAVITY_STRENGTH = 0.5; // How dark the deepest cracks and gaps between stones get.
+
+// Parallax occlusion mapping: march the view ray through the layer's height field (4-14 steps,
+// fewer when the view is steep or far) so raised stones occlude what lies behind them.
+// Returns the corrected terrain position in metres and the height found there (in .z).
+vec3 aa_parallax(float layer, vec2 p, vec3 view_world, vec2 lod_dx, vec2 lod_dy, float fade) {
+	float grazing = 1.0 - clamp(view_world.y, 0.0, 1.0);
+	int steps = int(mix(4.0, 14.0, fade * grazing));
+	vec2 shift = -view_world.xz / max(view_world.y, 0.25) * AA_PARALLAX_DEPTH * fade;
+	float step_depth = 1.0 / float(steps);
+	float ray_depth = 0.0;
+	vec2 offset = vec2(0.0);
+	vec2 delta = shift * step_depth;
+	float surface = 1.0 - textureGrad(height_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy).r;
+	float previous_surface = surface;
+	for (int i = 0; i < 14; i++) {
+		if (i >= steps || ray_depth >= surface) {
+			break;
+		}
+		previous_surface = surface;
+		offset += delta;
+		ray_depth += step_depth;
+		surface = 1.0 - textureGrad(height_layers, vec3((p + offset) / tile_meters, layer), lod_dx, lod_dy).r;
+	}
+	// Refine between the last two steps.
+	float after = surface - ray_depth;
+	float before = previous_surface - (ray_depth - step_depth);
+	float t = clamp(after / min(after - before, -0.0001), 0.0, 1.0);
+	vec2 final_offset = offset - delta * t;
+	float height = 1.0 - mix(surface, previous_surface, t);
+	return vec3(p + final_offset, height);
+}
 const mat2 AA_MICRO_ROT = mat2(vec2(0.8776, 0.4794), vec2(-0.4794, 0.8776));
 
 float aa_micro_weight(vec2 lod_dx, vec2 lod_dy) {
@@ -218,7 +250,7 @@ void fragment() {
 	}
 	// Direction from the surface toward the camera, in world space, for parallax.
 	vec3 view_world = normalize(CAMERA_POSITION_WORLD - world_position);
-	float parallax_fade = 1.0 - smoothstep(6.0, 16.0, camera_distance);
+	float parallax_fade = 1.0 - smoothstep(8.0, 18.0, camera_distance);
 	vec2 cliff_dx_zy = dFdx(world_position.zy / tile_meters);
 	vec2 cliff_dy_zy = dFdy(world_position.zy / tile_meters);
 	vec2 cliff_dx_xy = dFdx(world_position.xy / tile_meters);
@@ -439,11 +471,17 @@ void fragment() {
 		} else {
 			// Parallax offset: pebbles and clods appear raised at grazing angles near the camera.
 			vec2 layer_p = material_p;
+			float layer_height = 0.5;
 			if (parallax_fade > 0.01) {
-				float height = textureGrad(height_layers, vec3(material_p / tile_meters, layer), lod_dx, lod_dy).r;
-				layer_p -= view_world.xz / max(view_world.y, 0.3) * (height - 0.5) * AA_PARALLAX_DEPTH * parallax_fade;
+				vec3 marched = aa_parallax(layer, material_p, view_world, lod_dx, lod_dy, parallax_fade);
+				layer_p = marched.xy;
+				layer_height = marched.z;
+			} else if (detail_fade > 0.01) {
+				layer_height = textureGrad(height_layers, vec3(material_p / tile_meters, layer), lod_dx, lod_dy).r;
 			}
 			c = top_albedo(layer, layer_p, mixer, detail_fade, lod_dx, lod_dy);
+			// Cavities: cracks, gaps between pebbles and hollows under leaves fall into shadow.
+			c *= mix(1.0, mix(1.0 - AA_CAVITY_STRENGTH, 1.0, smoothstep(0.05, 0.65, layer_height)), detail_fade);
 			normal_sample = top_normal(layer, layer_p, detail_fade, lod_dx, lod_dy);
 		}
 		// Replace the approximate layer color with the actual PBR texture; the
