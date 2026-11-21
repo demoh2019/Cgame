@@ -6,6 +6,7 @@ const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 
 const Structures = preload("res://scripts/shared/structures.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
+const MarketBids = preload("res://scripts/shared/market_bids.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
 const VERSION: int = 1
 const MAX_BYTES: int = 262144 # Barricades plus escrowed market listings.
@@ -68,7 +69,15 @@ static func _capture_market(sim) -> Dictionary:
 	for a in sim.market_returns.keys():
 		if not str(a).begins_with("peer:"):
 			returns[str(a)] = sim.market_returns[a].duplicate()
-	return {"orders": orders, "payouts": payouts, "returns": returns}
+	var bids: Array = []
+	for bid_id in sim.market_bids.keys():
+		var b: Dictionary = sim.market_bids[bid_id]
+		if str(b["account"]).begins_with("peer:"):
+			continue
+		bids.append({"account": str(b["account"]), "buyer_name": str(b.get("buyer_name", "")),
+			"item": str(b["item"]), "remaining": int(b["remaining"]), "price": int(b["price"]),
+			"left": maxf(0.0, float(b["expires"]) - sim.time)})
+	return {"orders": orders, "payouts": payouts, "returns": returns, "bids": bids}
 
 
 static func _valid_account(a: Variant) -> bool:
@@ -103,7 +112,20 @@ static func _validate_market(source: Variant) -> Variant:
 		for item in returns[a].keys():
 			if typeof(item) != TYPE_STRING or not Defs.is_item(item) or not _bounded_int(returns[a][item], 1, 1000000):
 				return null
-	return {"orders": orders, "payouts": payouts, "returns": returns}
+	# Buy orders (older checkpoints have none): same bounds as listings, escrow is the remaining * price.
+	var bids: Variant = source.get("bids", [])
+	if typeof(bids) != TYPE_ARRAY or bids.size() > MarketBids.MAX_BIDS:
+		return null
+	for b in bids:
+		if typeof(b) != TYPE_DICTIONARY or not _valid_account(b.get("account")):
+			return null
+		if typeof(b.get("item")) != TYPE_STRING or not Defs.is_item(b["item"]) or b["item"] == "silver":
+			return null
+		if not _bounded_int(b.get("remaining"), 1, MarketBoard.MAX_QUANTITY) or not _bounded_int(b.get("price"), 1, MarketBoard.MAX_UNIT_PRICE):
+			return null
+		if not _bounded_float(b.get("left"), 0.0, MarketBids.BID_LIFETIME) or typeof(b.get("buyer_name", "")) != TYPE_STRING:
+			return null
+	return {"orders": orders, "payouts": payouts, "returns": returns, "bids": bids}
 
 
 ## Guild holds of outposts: [{id, guild, name, remaining}]. Older checkpoints have none.
@@ -262,6 +284,10 @@ static func restore(sim, data: Variant) -> bool:
 		for item in market["returns"][a].keys():
 			goods[str(item)] = int(market["returns"][a][item])
 		sim.market_returns[str(a)] = goods
+	for b in market.get("bids", []):
+		sim.market_bids[sim.new_id()] = {"account": str(b["account"]), "buyer_name": str(b.get("buyer_name", "")),
+			"item": str(b["item"]), "remaining": int(b["remaining"]), "price": int(b["price"]),
+			"expires": sim.time + float(b["left"])}
 	return true
 
 

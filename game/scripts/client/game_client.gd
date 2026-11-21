@@ -846,3 +846,16 @@ func nearest_loot(point: Vector3, radius: float) -> Dictionary:
 					best = {"id": crate["id"], "kind": "crate", "x": crate["x"], "z": crate["z"]}
 					best_distance = distance
 	return best
+
+
+## Albion-style buy orders (escrowed silver; sellers fill them at the hub).
+func market_bid(item_id: String, quantity: int, price: int) -> void:
+	net.c_market_bid.rpc_id(1, item_id, quantity, price)
+
+
+func market_fill(bid_id: int, quantity: int) -> void:
+	net.c_market_fill.rpc_id(1, bid_id, quantity)
+
+
+func market_cancel_bid(bid_id: int) -> void:
+	net.c_market_cancel_bid.rpc_id(1, bid_id)

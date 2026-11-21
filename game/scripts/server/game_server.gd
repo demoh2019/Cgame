@@ -106,6 +106,7 @@ const GearDurability = preload("res://scripts/shared/gear_durability.gd")
 const Enchanting = preload("res://scripts/shared/enchanting.gd")
 const GearSkills = preload("res://scripts/shared/gear_skills.gd")
 const ReturnRate = preload("res://scripts/shared/return_rate.gd")
+const MarketBids = preload("res://scripts/shared/market_bids.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
 const WoundSealant = preload("res://scripts/shared/wound_sealant.gd")
@@ -414,6 +415,7 @@ var pounces: Dictionary = {} # zombie id -> {kind, phase, t, target, from, to}
 var pounce_ready_at: Dictionary = {} # zombie id -> server time its next leap/charge is allowed
 var downed_until: Dictionary = {} # zombie id -> server time it gets back up (knocked down).
 var market_payouts: Dictionary = {} # account -> silver owed from sales, collected at the hub.
+var market_bids: Dictionary = {} # id -> Albion-style buy order with escrowed silver.
 var market_returns: Dictionary = {} # account -> {item: count} unsold or cancelled goods.
 var market_sales: Array = [] # Bounded session-only receipts, NOT durable settlement.
 # Atomic two-account settlement. When the network layer has a persistent backend it sets pair_persistence; every
@@ -2754,6 +2756,10 @@ func _cancel_market_seller(_peer_id: int) -> void:
 
 ## Expired listings send their unsold goods back to the seller's market returns.
 func _tick_market() -> void:
+	for bid_id in market_bids.keys():
+		if time >= float(market_bids[bid_id]["expires"]) or int(market_bids[bid_id]["remaining"]) < 1:
+			_refund_bid(market_bids[bid_id])
+			market_bids.erase(bid_id)
 	for listing_id in market_orders.keys():
 		var listing: Dictionary = market_orders[listing_id]
 		if time >= float(listing["expires"]) or int(listing["remaining"]) < 1:
@@ -2819,9 +2825,95 @@ func cmd_market_list(peer_id: int) -> Dictionary:
 		})
 	public_orders.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return MarketBoard.cheaper_first(a, b))
-	return {"ok": true, "action": "list", "orders": public_orders,
+	var public_bids: Array = []
+	for bid_id in market_bids.keys():
+		var bid: Dictionary = market_bids[bid_id]
+		public_bids.append({"id": bid_id, "item": bid["item"], "quantity": bid["remaining"], "price": bid["price"],
+			"buyer_name": bid.get("buyer_name", "?"), "own": str(bid["account"]) == account})
+	public_bids.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return MarketBids.best_first(a, b))
+	return {"ok": true, "action": "list", "orders": public_orders, "bids": public_bids,
 		"collected_silver": int(collected.get("silver", 0)), "collected_items": int(collected.get("items", 0)),
 		"pending_silver": int(market_payouts.get(account, 0))}
+
+
+## Albion-style buy order: escrows quantity * price silver from the buyer (hub only).
+func cmd_market_bid(peer_id: int, item_id: String, quantity: int, unit_price: int) -> Dictionary:
+	var buyer: Player = players.get(peer_id)
+	if not _market_at_hub(buyer):
+		return {"ok": false, "reason": "no_station"}
+	_tick_market()
+	var reason: String = MarketBids.validate_bid(buyer.inventory.count("silver"), str(item_id), quantity, unit_price)
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	if market_bids.size() >= MarketBids.MAX_BIDS:
+		return {"ok": false, "reason": "market_full"}
+	var account: String = _market_account(buyer)
+	var mine := 0
+	for bid in market_bids.values():
+		if str(bid["account"]) == account:
+			mine += 1
+	if mine >= MarketBids.MAX_PER_BUYER:
+		return {"ok": false, "reason": "too_many_bids"}
+	buyer.inventory.remove("silver", quantity * unit_price)
+	var bid_id: int = new_id()
+	market_bids[bid_id] = {"account": account, "buyer_name": buyer.name, "item": str(item_id),
+		"remaining": quantity, "price": unit_price, "expires": time + MarketBids.BID_LIFETIME}
+	buyer.dirty_inventory = true
+	buyer.dirty_character = true
+	return {"ok": true, "action": "bid_created", "id": bid_id, "escrowed": quantity * unit_price}
+
+
+## Sell straight into a buy order: the seller is paid now (minus tax); the buyer's goods wait at the hub.
+func cmd_market_fill(peer_id: int, bid_id: int, quantity: int) -> Dictionary:
+	var seller: Player = players.get(peer_id)
+	if not _market_at_hub(seller):
+		return {"ok": false, "reason": "no_station"}
+	_tick_market()
+	var bid: Dictionary = market_bids.get(bid_id, {})
+	if bid.is_empty():
+		return {"ok": false, "reason": "unknown_bid"}
+	if str(bid["account"]) == _market_account(seller):
+		return {"ok": false, "reason": "self_trade"}
+	if quantity < 1 or quantity > int(bid["remaining"]):
+		return {"ok": false, "reason": "invalid_quantity"}
+	var item_id: String = str(bid["item"])
+	if MarketBids.sellable(seller.inventory, item_id) < quantity:
+		return {"ok": false, "reason": "missing_items"}
+	var total: int = int(bid["price"]) * quantity
+	var tax: int = MarketBoard.sale_tax(total)
+	seller.inventory.remove(item_id, quantity)
+	seller.inventory.unequip_missing()
+	var unpaid: int = seller.inventory.add("silver", total - tax)
+	if unpaid > 0:
+		var seller_account: String = _market_account(seller)
+		market_payouts[seller_account] = int(market_payouts.get(seller_account, 0)) + unpaid
+	_market_return(str(bid["account"]), item_id, quantity)
+	bid["remaining"] = int(bid["remaining"]) - quantity
+	if int(bid["remaining"]) <= 0:
+		market_bids.erase(bid_id)
+	seller.dirty_inventory = true
+	seller.dirty_character = true
+	return {"ok": true, "action": "filled", "id": bid_id, "item": item_id, "quantity": quantity, "total": total, "tax": tax}
+
+
+func cmd_market_cancel_bid(peer_id: int, bid_id: int) -> Dictionary:
+	var buyer: Player = players.get(peer_id)
+	var bid: Dictionary = market_bids.get(bid_id, {})
+	if buyer == null or bid.is_empty():
+		return {"ok": false, "reason": "unknown_bid"}
+	if str(bid["account"]) != _market_account(buyer):
+		return {"ok": false, "reason": "not_owner"}
+	_refund_bid(bid)
+	market_bids.erase(bid_id)
+	return {"ok": true, "action": "bid_cancelled", "id": bid_id}
+
+
+## Unspent escrow goes to the buyer's market payouts (collected at the hub).
+func _refund_bid(bid: Dictionary) -> void:
+	var refund: int = int(bid["remaining"]) * int(bid["price"])
+	if refund > 0:
+		var account: String = str(bid["account"])
+		market_payouts[account] = int(market_payouts.get(account, 0)) + refund
 
 
 func cmd_market_create(peer_id: int, item_id: String, quantity: int, unit_price: int) -> Dictionary:

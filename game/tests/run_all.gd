@@ -206,6 +206,7 @@ const SUITES := [
 	"res://tests/test_gear_skills.gd",
 	"res://tests/test_weapon_mastery.gd",
 	"res://tests/test_focus_crafting.gd",
+	"res://tests/test_market_bids.gd",
 	"res://tests/test_progression.gd",
 	"res://tests/test_skills.gd",
 	"res://tests/test_json_numbers.gd",

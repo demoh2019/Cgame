@@ -116,6 +116,8 @@ var _trade_status: Label
 var _trade_peer_signature: String = ""
 var _trade_item_signature: String = ""
 var _market_select: OptionButton
+var _bid_select: OptionButton # Albion-style buy orders (highest price first).
+var _market_bids: Array = []
 var _market_quantity: SpinBox
 var _market_price: SpinBox
 var _market_status: Label
@@ -1249,6 +1251,43 @@ func _build() -> void:
 			var listing_id: int = int(_market_select.get_item_metadata(_market_select.selected))
 			client.market_cancel(listing_id))
 	market_row.add_child(cancel_market)
+	# Albion-style buy orders: escrow silver now, sellers fill it at the hub, goods wait for you there.
+	_bid_select = OptionButton.new()
+	_bid_select.custom_minimum_size.x = 320.0
+	_bid_select.tooltip_text = "Buy orders (highest price first). Sell to one to get paid instantly."
+	inventory_box.add_child(_bid_select)
+	var bid_row := HBoxContainer.new()
+	inventory_box.add_child(bid_row)
+	var place_bid := Button.new()
+	place_bid.text = "Place buy order"
+	place_bid.tooltip_text = "Escrows quantity x price silver for the selected listing's item (or your barter item)."
+	place_bid.pressed.connect(func() -> void:
+		var bid_item := ""
+		if _market_select.selected >= 0 and _market_select.selected < _market_listings.size():
+			for order in _market_listings:
+				if int(order["id"]) == int(_market_select.get_item_metadata(_market_select.selected)):
+					bid_item = str(order["item"])
+		if bid_item == "" and _trade_item.selected >= 0:
+			bid_item = str(_trade_item.get_item_metadata(_trade_item.selected))
+		if bid_item == "":
+			say("Buy order: select a listing or an item first.")
+		else:
+			client.market_bid(bid_item, int(_market_quantity.value), int(_market_price.value)))
+	bid_row.add_child(place_bid)
+	var fill_bid := Button.new()
+	fill_bid.text = "Sell to order"
+	fill_bid.pressed.connect(func() -> void:
+		if _bid_select.selected < 0:
+			say("Buy order: select an order to sell into.")
+		else:
+			client.market_fill(int(_bid_select.get_item_metadata(_bid_select.selected)), int(_market_quantity.value)))
+	bid_row.add_child(fill_bid)
+	var cancel_bid := Button.new()
+	cancel_bid.text = "Cancel my order"
+	cancel_bid.pressed.connect(func() -> void:
+		if _bid_select.selected >= 0:
+			client.market_cancel_bid(int(_bid_select.get_item_metadata(_bid_select.selected))))
+	bid_row.add_child(cancel_bid)
 
 	_craft_panel = PanelContainer.new()
 	_craft_panel.set_anchors_preset(Control.PRESET_CENTER_LEFT)
@@ -3266,11 +3305,18 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				say("Market: " + str(data.get("reason", "rejected")))
 		elif str(data.get("action", "")) == "list":
 			_market_listings = data.get("orders", [])
+			_market_bids = data.get("bids", [])
 			if int(data.get("collected_silver", 0)) > 0 or int(data.get("collected_items", 0)) > 0:
 				say("Market: collected %d silver and %d returned items." % [int(data.get("collected_silver", 0)), int(data.get("collected_items", 0))])
 			if int(data.get("pending_silver", 0)) > 0:
 				say("Market: %d silver waits for backpack space." % int(data.get("pending_silver", 0)))
 			_refresh_market_options()
+		elif str(data.get("action", "")) == "filled":
+			say("Market: sold %dx %s into a buy order for %d silver (tax %d)." % [int(data.get("quantity", 0)), str(data.get("item", "")), int(data.get("total", 0)), int(data.get("tax", 0))])
+			client.market_list()
+		elif str(data.get("action", "")) == "bid_created":
+			say("Market: buy order placed, %d silver held in escrow." % int(data.get("escrowed", 0)))
+			client.market_list()
 		elif str(data.get("action", "")) == "bought":
 			say("Market: bought %dx %s for %d silver (tax %d; seller receives %d)." % [
 				int(data.get("quantity", 0)), str(data.get("item", "")), int(data.get("total", 0)),
@@ -3882,6 +3928,13 @@ func _refresh_market_options() -> void:
 			_market_select.select(index)
 	_market_status.text = "%d listings | item then lowest price | %d%% seller tax" % [
 		_market_listings.size(), MarketBoard.SALE_TAX_PERCENT]
+	if _bid_select != null:
+		_bid_select.clear()
+		for bid in _market_bids:
+			var bid_item: String = str(bid["item"])
+			_bid_select.add_item("WANTED %s x%d | %d silver/item | %s%s" % [str(Defs.item(bid_item).get("name", bid_item)),
+				int(bid["quantity"]), int(bid["price"]), str(bid.get("buyer_name", "?")), " (yours)" if bool(bid.get("own", false)) else ""])
+			_bid_select.set_item_metadata(_bid_select.item_count - 1, int(bid["id"]))
 
 
 func _refresh_party_controls() -> void:

@@ -506,6 +506,27 @@ func c_repair_gear() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_market_bid(item_id: String, quantity: int, unit_price: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "market", sim.cmd_market_bid(peer, str(item_id), quantity, unit_price))
+
+
+@rpc("any_peer", "reliable")
+func c_market_fill(bid_id: int, quantity: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "market", sim.cmd_market_fill(peer, bid_id, quantity))
+
+
+@rpc("any_peer", "reliable")
+func c_market_cancel_bid(bid_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "market", sim.cmd_market_cancel_bid(peer, bid_id))
+
+
+@rpc("any_peer", "reliable")
 func c_craft_focus(recipe: String, times: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
