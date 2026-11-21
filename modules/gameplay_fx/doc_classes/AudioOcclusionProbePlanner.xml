@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AudioOcclusionProbePlanner" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Deterministic, age-fair admission of bounded spatial-audio obstruction probes.</brief_description>
+	<description>
+		Selects which 3D voices are due for a geometry/terrain occlusion ray in the current physics frame. Pure data scheduler: the caller performs all raycasts and sound filtering. At most 128 inputs and 16 output indices. Increasing overdue age prevents starvation; this class never modifies audio, physics, scenes or server-side AI.
+	</description>
+	<methods>
+		<method name="select_due" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="next_due_seconds" type="PackedFloat64Array" />
+			<param index="1" name="priorities" type="PackedByteArray" />
+			<param index="2" name="audibilities" type="PackedFloat64Array" />
+			<param index="3" name="ids" type="PackedInt64Array" />
+			<param index="4" name="now_seconds" type="float" />
+			<param index="5" name="budget" type="int" />
+			<description>Returns due indices in decreasing urgency: time overdue + 0.15 seconds per priority tier 0..3. Ties prefer higher audibility, then smaller stable ID. Up to 128 equal-length entries with finite nonnegative due times, finite audibility and unique positive IDs. Clock must be finite, nonnegative and at most 1e9 seconds; budget 0..16. Future-due voices are not selected. Invalid input returns an empty array.</description>
+		</method>
+	</methods>
+</class>

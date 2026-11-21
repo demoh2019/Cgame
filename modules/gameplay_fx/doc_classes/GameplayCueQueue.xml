@@ -32,6 +32,12 @@
 			<param index="1" name="priority" type="int" default="0" />
 			<description>Transactionally applies a snapshot of tag to integer stack count, emitting only changes. Malformed input or insufficient pending capacity leaves both active and pending state unchanged.</description>
 		</method>
+		<method name="replace_active_resilient">
+			<return type="bool" />
+			<param index="0" name="snapshot" type="Dictionary" />
+			<param index="1" name="priority" type="int" default="0" />
+			<description>Atomically applies an authoritative presentation snapshot, reserving pending slots for changed started, updated and stopped events. When full, the oldest lowest-priority executed cue may be displaced only when its priority is strictly less than [param priority]. Lifecycle cues and equal/higher-priority transients are never evicted. If there are not enough expendable events for all changes, active tags, pending events and eviction counters remain exactly unchanged. Identical status snapshots do not enqueue again. The legacy [method replace_active] method retains its original strict no-eviction behavior. Does not authorize gameplay abilities, damage, status, or networking.</description>
+		</method>
 		<method name="replace_active_branch">
 			<return type="bool" />
 			<param index="0" name="branch" type="StringName" />
@@ -68,7 +74,7 @@
 		</method>
 		<method name="get_evicted_transient_count" qualifiers="const">
 			<return type="int" />
-			<description>Number of low-priority transient events displaced by higher-priority transient events since the last [method reset]. Saturates at the maximum signed 32-bit integer; lifecycle events do not contribute.</description>
+			<description>Number of low-priority transient events displaced by higher-priority transients or transactional resilient lifecycle snapshots since the last [method reset]. Saturates at the maximum signed 32-bit integer; lifecycle events do not contribute.</description>
 		</method>
 		<method name="get_rejected_transient_count" qualifiers="const">
 			<return type="int" />

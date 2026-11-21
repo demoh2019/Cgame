@@ -8,17 +8,29 @@ const AudioMix = preload("res://scripts/client/audio_mix.gd")
 const AudioSurfaces = preload("res://scripts/client/audio_surfaces.gd")
 const AudioVoices = preload("res://scripts/client/audio_voices.gd")
 const AudioVariants = preload("res://scripts/client/audio_variants.gd")
+const AudioOcclusionProbes = preload("res://scripts/client/audio_occlusion_probes.gd")
 const AudioVirtualVoices = preload("res://scripts/client/audio_virtual_voices.gd")
 const AudioSpatial = preload("res://scripts/client/audio_spatial.gd")
+const AudioEmission = preload("res://scripts/client/audio_spatial_emission.gd")
 const AudioDucking = preload("res://scripts/client/audio_ducking.gd")
 const AudioMixSnapshots = preload("res://scripts/client/audio_mix_snapshots.gd")
 const AudioAmbient = preload("res://scripts/client/audio_ambient.gd")
 const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 ## Optional engine SoundConcurrencyManager (null on a binary without the gameplay_fx module).
 const CONCURRENCY_GROUPS := {"enemy_hurt": 4, "coin": 3, "blaster": 4, "blaster_repeater": 4, "break": 3}
+# Coalesce only low-priority repeated local foley; never suppress shots,
+# kill confirmation, elite warning, dialogue or music.
+const SPATIAL_RETRIGGER := {"enemy_hurt": 0.075, "break": 0.095, "coin": 0.09}
+const SPATIAL_MERGE_RADIUS := 3.5
+const SPATIAL_MAX_DISTANCE := 90.0
 var _concurrency: Node = null
 var _concurrency_tried := false
 var _native_voice_admission: Object = null
+var _native_spatial_emission: Object = null
+var _last_spatial_emissions: Dictionary = {} # Only the three fixed sound names.
+var _listener_ready: bool = false
+var _spatial_emission_rejections: int = 0
+var _native_occlusion_probes: Object = null # Pure native ray budget selector.
 var _voice_hold_rejections: int = 0
 var _sfx_bus := -1
 var _sfx_lowpass := -1
@@ -74,6 +86,8 @@ func _ready() -> void:
 	_native_duck = EngineFeatures.make("AudioDuckMix")
 	_native_mix_snapshots = EngineFeatures.make("AudioMixSnapshotController")
 	_native_voice_admission = EngineFeatures.make("AudioVoiceAdmissionPlanner")
+	_native_spatial_emission = EngineFeatures.make("SpatialSoundEventPolicy")
+	_native_occlusion_probes = EngineFeatures.make("AudioOcclusionProbePlanner")
 	_ambience = AudioStreamPlayer.new()
 	_ambience.bus = "Ambience"
 	_ambience.stream = Assets.sound("ambience")
@@ -248,8 +262,42 @@ func get_voice_hold_rejections() -> int:
 	return _voice_hold_rejections
 
 
+func get_spatial_emission_rejections() -> int:
+	return _spatial_emission_rejections
+
+
+## Early, data-only admission before sound resource resolution, allocation,
+## sound-voice policy, physics queries or audio-server work.
+func _should_emit_spatial(name: String, at: Vector3, now: float) -> bool:
+	var last_position := Vector3.INF
+	var last_time := -1.0
+	var window: float = float(SPATIAL_RETRIGGER.get(name, 0.0))
+	if window > 0.0:
+		var recent: Dictionary = _last_spatial_emissions.get(name, {})
+		last_position = recent.get("at", Vector3.INF)
+		last_time = float(recent.get("time", -1.0))
+	if _native_spatial_emission != null and _native_spatial_emission.has_method("should_emit"):
+		return bool(_native_spatial_emission.call("should_emit", _listener, at,
+			last_position, now, last_time, window, SPATIAL_MERGE_RADIUS,
+			SPATIAL_MAX_DISTANCE, _listener_ready))
+	return AudioEmission.should_emit(_listener, at, last_position, now,
+		last_time, window, SPATIAL_MERGE_RADIUS, SPATIAL_MAX_DISTANCE,
+		_listener_ready)
+
+
+func _record_spatial_emission(name: String, at: Vector3, now: float) -> void:
+	if _listener_ready and SPATIAL_RETRIGGER.has(name):
+		# Only a successfully started voice may block a following event.
+		_last_spatial_emissions[name] = {"at": at, "time": now}
+
+
 func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0, from_position: float = 0.0) -> void:
 	if not enabled:
+		return
+	var now: float = Time.get_ticks_msec() / 1000.0
+	# A virtual-voice promotion resumes an already admitted sound.
+	if from_position <= 0.0 and not _should_emit_spatial(sound_name, position, now):
+		_spatial_emission_rejections += 1
 		return
 	var stream := Assets.sound(sound_name)
 	if stream == null:
@@ -258,7 +306,6 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0, from
 	var distance := position.distance_to(_listener)
 	var loudness := AudioVoices.audibility(volume_db, distance, 14.0)
 	var priority: int = AudioVoices.priority_for(sound_name)
-	var now := Time.get_ticks_msec() / 1000.0
 	var snapshot: Array = []
 	for v in _voices:
 		snapshot.append({"name": v["name"], "audibility": v["audibility"],
@@ -327,6 +374,8 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0, from
 		player.queue_free()
 		_promote_virtual_voice.call_deferred())
 	player.play(maxf(0.0, from_position))
+	if from_position <= 0.0:
+		_record_spatial_emission(sound_name, position, now)
 
 
 ## A real voice just freed: bring back the loudest virtual voice at its current offset.
@@ -336,6 +385,17 @@ func _promote_virtual_voice() -> void:
 	var entry: Dictionary = _virtual_voices.promote(Time.get_ticks_msec() / 1000.0, _listener)
 	if not entry.is_empty():
 		play_at(str(entry["name"]), entry["position"], float(entry["volume_db"]), float(entry["offset"]))
+
+
+## Native C++ admission of at most three due obstruction rays; stock Godot
+## uses an identical GDScript policy. Physics queries never run here.
+func _select_occlusion_probes(next_due: PackedFloat64Array, priorities: PackedByteArray,
+		audibility: PackedFloat64Array, ids: PackedInt64Array, now: float,
+		limit: int) -> PackedInt32Array:
+	if _native_occlusion_probes != null and _native_occlusion_probes.has_method("select_due"):
+		return _native_occlusion_probes.call("select_due",
+			next_due, priorities, audibility, ids, now, limit)
+	return AudioOcclusionProbes.select_due(next_due, priorities, audibility, ids, now, limit)
 
 
 ## Scene physics is read only during physics ticks. This detects wooden
@@ -360,15 +420,41 @@ func _physics_process(delta: float) -> void:
 	var probe_listeners: Array[Vector3] = []
 	var rays: int = 0
 	if state != null:
-		for index in _voices.size():
+		# Ray admission is based on overdue age, voice priority and audibility,
+		# rather than source insertion order. Non-selected voices still smooth.
+		var due_times := PackedFloat64Array()
+		var priorities := PackedByteArray()
+		var audibilities := PackedFloat64Array()
+		var stable_ids := PackedInt64Array()
+		var original_indices := PackedInt32Array()
+		for voice_index in _voices.size():
+			var candidate: Dictionary = _voices[voice_index]
+			var source: AudioStreamPlayer3D = candidate.get("player") as AudioStreamPlayer3D
+			if not is_instance_valid(source) or not source.is_playing():
+				continue
+			var next_due: float = float(candidate.get("next_obstruction_check", 0.0))
+			if not is_finite(next_due):
+				next_due = 0.0
+			next_due = maxf(0.0, next_due)
+			if next_due > _obstruction_clock:
+				continue
+			var loudness: float = float(candidate.get("audibility", -120.0))
+			if not is_finite(loudness):
+				loudness = -120.0
+			due_times.append(next_due)
+			priorities.append(clampi(int(candidate.get("priority", 0)), 0, 3))
+			audibilities.append(loudness)
+			stable_ids.append(source.get_instance_id())
+			original_indices.append(voice_index)
+		var chosen: PackedInt32Array = _select_occlusion_probes(
+			due_times, priorities, audibilities, stable_ids, _obstruction_clock,
+			OBSTRUCTION_RAYS_PER_TICK)
+		for chosen_index in chosen:
 			if rays >= OBSTRUCTION_RAYS_PER_TICK:
 				break
+			var index: int = int(original_indices[chosen_index])
 			var record: Dictionary = _voices[index]
 			var player: AudioStreamPlayer3D = record.get("player") as AudioStreamPlayer3D
-			if not is_instance_valid(player) or not player.is_playing():
-				continue
-			if _obstruction_clock < float(record.get("next_obstruction_check", 0.0)):
-				continue
 			var listener_eye: Vector3 = _listener + Vector3(0.0, 1.6, 0.0)
 			var source_eye: Vector3 = player.global_position + Vector3(0.0, 0.5, 0.0)
 			var ray: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
@@ -548,6 +634,7 @@ static func _apply_bus_gain(bus: String, gain_db: float) -> void:
 func update_environment(listener: Vector3, ground_height: Callable, underground: bool, biome: String,
 		daylight: float, storm: float, wind: float, covered: bool, speed: float, delta: float) -> void:
 	_listener = listener
+	_listener_ready = listener.is_finite()
 	_ground = ground_height
 	_humidity = clampf(storm, 0.0, 1.0)
 	# Listener low-pass on the SFX bus (underground / storm).

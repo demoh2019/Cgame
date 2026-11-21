@@ -7,6 +7,7 @@ const SUITES := [
 	"res://tests/test_audio_parity.gd",
 	"res://tests/test_audio_geometry_occlusion.gd",
 	"res://tests/test_audio_occlusion_envelope.gd",
+	"res://tests/test_audio_occlusion_probe_planner.gd",
 ]
 
 
