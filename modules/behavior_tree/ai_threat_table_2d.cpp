@@ -84,6 +84,26 @@ bool AIThreatTable2D::record(Dictionary p_entries, int64_t p_peer_id, double p_d
 	return true;
 }
 
+bool AIThreatTable2D::scale(Dictionary p_entries, int64_t p_peer_id, double p_factor) const {
+	// Invalid requests never change the caller-owned combat state.
+	if (p_peer_id <= 0 || !Math::is_finite(p_factor) || p_factor < 0.0 || p_factor > 1.0 || !p_entries.has(p_peer_id)) {
+		return false;
+	}
+	double amount = 0.0;
+	if (!_valid_threat(p_entries[p_peer_id], amount)) {
+		// Repair a malformed entry without touching other combatants.
+		p_entries.erase(p_peer_id);
+		return false;
+	}
+	const double remaining = MIN(MAX_VALUE, amount * p_factor);
+	if (remaining <= 0.0) {
+		p_entries.erase(p_peer_id);
+	} else {
+		p_entries[p_peer_id] = remaining;
+	}
+	return true;
+}
+
 void AIThreatTable2D::decay(Dictionary p_entries, double p_delta) const {
 	if (!Math::is_finite(p_delta) || p_delta <= 0.0) {
 		return;
@@ -163,6 +183,7 @@ int64_t AIThreatTable2D::pick(Dictionary p_entries, const Dictionary &p_players,
 
 void AIThreatTable2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("record", "entries", "peer_id", "damage"), &AIThreatTable2D::record);
+	ClassDB::bind_method(D_METHOD("scale", "entries", "peer_id", "factor"), &AIThreatTable2D::scale);
 	ClassDB::bind_method(D_METHOD("decay", "entries", "delta"), &AIThreatTable2D::decay);
 	ClassDB::bind_method(D_METHOD("pick", "entries", "players", "origin", "leash", "current_target"), &AIThreatTable2D::pick, DEFVAL(-1));
 }
