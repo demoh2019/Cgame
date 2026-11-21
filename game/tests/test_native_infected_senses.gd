@@ -24,6 +24,9 @@ func run(t) -> void:
         senses.record_confirmed_sight(Vector2.ZERO, Vector2(18, 0), 20.0, false, 0.1)
         t.eq(senses.last_seen_position(), Vector2(8, 0),
             "hidden target motion never leaks into sight memory")
+        senses.advance_time(7.0)
+        t.check(not senses.remembers_sight(),
+            "native sight memory expires after tracking stops")
         senses.reset()
         t.check(not senses.remembers_sight(), "reset clears native visual memory")
     else:
