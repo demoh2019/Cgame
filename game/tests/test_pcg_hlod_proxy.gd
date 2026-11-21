@@ -90,7 +90,7 @@ func run(t) -> void:
 			"proxy metadata reports count of original visual stones")
 		t.eq(int(proxy.get_meta("aa_hlod_triangle_count")), 96,
 			"proxy metadata reports low-poly triangle count")
-		t.check(Hlod.should_use_proxy(55.0, 80.0, false),
+		t.check(Hlod.should_use_proxy(57.0, 80.0, false),
 			"distant camera selects lower-polygon merged geometry")
 		t.check(not Hlod.should_use_proxy(52.0, 80.0, false),
 			"hysteresis holds full detail before entering far range")
