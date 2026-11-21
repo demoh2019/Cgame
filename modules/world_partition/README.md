@@ -17,6 +17,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Cap new requests, simultaneous outstanding requests, instantiation work and out-of-range scene unloads per frame. `max_unloads_per_frame` (default 32) smooths out mass cleanup after teleports; manual clear/remove or disabling streaming always unloads immediately.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Dispatch optional streamed-scene lifecycle hooks `streaming_activated(cell)` and `streaming_deactivating(cell)` before the existing load/unload signals. These run after gameplay state restoration and before `queue_free()` respectively. New native signals `cell_activated` and `cell_deactivating` let AI, physics and navigation systems prepare or detach. On-demand `get_cell_simulation_stats(cell)` reports PhysicsServer3D collision objects/shapes and NavigationServer3D regions in the instantiated scene hierarchy.
+- **Persist selected RigidBody3D motion across cell streaming:** set `persist_rigid_bodies=true` and mark individual physics objects using `set_meta("streaming_persistent", true)`. The native runtime captures/restores local transforms, linear/angular velocities, sleep and freeze state separately from quest/gameplay dictionaries. Export `snapshot_cell_physics_states` and import `load_cell_physics_states` for checkpoints; only marked bodies participate, and HLOD proxies need no physics.
 - Preserve per-cell gameplay progress with optional scene-root callbacks `capture_streaming_state() -> Dictionary` and `restore_streaming_state(state: Dictionary)`. The native streamer captures state when a cell unloads and restores it when the scene re-enters, after `_ready()`.
 - Export and import **deep-copied** runtime state with `snapshot_cell_states()` / `load_cell_states(Dictionary)`; read or edit single cells with `get_cell_state`, `set_cell_state`, `has_cell_state`, `erase_cell_state`, `clear_cell_states` and `get_cell_state_count`. State remains cached when scene registrations are removed, until explicitly erased, and is not automatically written to disk.
 - Query currently instantiated cell scene roots with `get_cell_instance(cell)` for safe per-cell visual proxy control. The method returns `null` after unload instead of a stale pointer.
@@ -69,6 +70,55 @@ re-enabling streaming restores them. If you remove a cell mapping, pinning does
 not re-register the scene.
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Opt-in RigidBody3D streaming persistence
+
+The engine can retain dynamic physics objects in streamed scenes without
+requiring each game to write custom callbacks for every body. This is
+independent of `capture_streaming_state()` for quest or gameplay data.
+
+```gdscript
+# Streamer's inspector flag, or from game setup:
+world.persist_rigid_bodies = true
+
+# In the authored cell root, during _ready() or scene construction:
+$StreamingCrate.set_meta("streaming_persistent", true)
+
+# Before saving a checkpoint, capture even still-resident bodies:
+var states: Dictionary = world.snapshot_cell_physics_states()
+var file := FileAccess.open("user://physics.save", FileAccess.WRITE)
+file.store_var(states, false)
+file.close()
+
+# After reading it with get_var(false) and validating the save header:
+world.load_cell_physics_states(states)
+```
+
+For each marked `RigidBody3D`, the engine stores its stable **scene-relative
+NodePath**, local `Transform3D`, linear/angular velocities, sleeping and
+freeze flags. Capture occurs *before* a scene's
+`streaming_deactivating(cell)` callback, which may stop or freeze simulated
+objects, and restoration occurs *after* the scene's `_ready()` and
+`restore_streaming_state()`, before `streaming_activated()`. If a node is
+renamed or removed in a later game version, its old record is ignored.
+
+`get_cell_physics_state(cell)` inspects one cell,
+`get_cell_physics_state_count()` reports cached cells, and
+`clear_cell_physics_states()` clears the cache. Getters and snapshots return
+deep copies. Import rejects unsupported types, nonfinite transforms and
+velocities, unsafe relative paths and body states with missing fields.
+Only marked nodes are ever restored, with a maximum of 128 records per
+cell. Missing imports leave currently loaded rigid bodies untouched.
+
+This is **opt-in, in-memory physics persistence**, not a full physics
+snapshot/rollback system: it does not preserve collision contacts, forces,
+constraints/joints, arbitrary scripts, server RIDs or determinism across
+different physics engines. Moving a live RigidBody3D transform or velocity
+repeatedly can produce unstable physical behavior; the engine applies stored
+state only during scene re-instantiation or explicit save loading. Saved
+values can be affected by physics steps between the last snapshot and unload,
+so a final save should capture at a well-defined point in the game loop.
+Real productions should use versioned, bounded, atomic checkpoint files.
 
 ## Navigation corridor leases for streamed AI
 
@@ -324,7 +374,7 @@ performance on the intended hardware still require validation.
 
 ## Tests
 
-The module includes 97 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (76), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 101 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (80), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"

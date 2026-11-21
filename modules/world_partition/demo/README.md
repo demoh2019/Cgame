@@ -24,6 +24,7 @@ detailed cells and lightweight distant proxies with no additional engine rendere
 - The full detail layer uses 160 trees per cell; the proxy layer uses 20 and a
   simpler canopy mesh. This reduces scene and geometry complexity away from the camera.
 - Both layers remain independently budgeted, to limit new instances per frame.
+- **Persistent physics crates:** an orange dynamic `RigidBody3D` with a `BoxShape3D` collision object is generated at Quest Hub (0,0) and Combat Arena (4,2). Press **I** to kick the loaded hub/arena crate. Native `persist_rigid_bodies=true` saves marked `streaming_persistent` bodies on unload, including local transform, linear/angular velocity and sleep/freeze state. The HUD displays current hub crate speed and number of cached physics-cell snapshots. K/J checkpoints serialize the separate `physics_states` dictionary with the rest of the world state; older v2 checkpoints without this optional field still load.
 - **Streamed physics and navigation:** detailed cells instantiate one coarse `StaticBody3D`/`BoxShape3D` ground collider and one shared-geometry `NavigationRegion3D` with a pre-authored walkable polygon. Distant HLOD proxies remain visual-only, including generated prebaked scenes. The native streamer calls `streaming_activated` after state restoration and `streaming_deactivating` before deferred deletion to disable collision and navigation registrations safely. The new `get_cell_simulation_stats` API reports loaded physics and navigation node counts in HUD.
 - **Streamed AI NPC:** a blue `CharacterBody3D` with `NavigationAgent3D` patrols across the boundary between cells (0,0) and (1,0). The native `acquire_cell_route()` API preloads both detailed cells and grants an independent lease to the NPC; `release_cell_route()` frees that corridor when the NPC pauses/despawns. The patrol moves through connected navigation regions only after physics synchronization. Press **O** to pause/resume; the HUD reports route leases, crossings, current cell and path status. Its checkpoint snapshot stores position, waypoint, crossing count and enabled state, **never the lease token IDs**. Checkpoint v2 stays readable (the patrol field is optional).
 - Press **N** to query a local walking path on a loaded Quest Hub or Combat Arena region. It waits two physics frames for Godot's NavigationServer3D map synchronization before calling `map_get_path`. The path point count is displayed in the HUD.
@@ -100,7 +101,7 @@ WASD to fly, Space/Ctrl for up/down, Shift for speed, P to toggle forward prefet
 L to toggle distant proxy scenes, F to toggle near/far crossfade,
 H to keep/release the Quest Hub, G to keep/release the Combat Arena pin,
 M to acquire/release the arena's manual lease, N to test a local navigation path,
-O to pause or resume the NavigationAgent3D patrol,
+O to pause or resume the NavigationAgent3D patrol, I to kick a persistent physics crate,
 T to toggle the three-cell Combat Event Data Layer, C claim the hub reward,
 B complete an arena round, V claim the Champion Shrine prize, K save and J load a
 checkpoint, R to retry failed resource loads when the telemetry/retry API from PR #916 is present.
@@ -122,6 +123,7 @@ Quality controller assertions (after importing the project):
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path modules/world_partition/demo --script res://tests/cell_state_contract_test.gd
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path modules/world_partition/demo --script res://tests/physics_navigation_lifecycle_test.gd
 godot --headless --path modules/world_partition/demo --script res://tests/route_patrol_test.gd
+godot --headless --path modules/world_partition/demo --script res://tests/physics_persistence_scene_test.gd
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path modules/world_partition/demo --script res://tests/world_event_rules_test.gd
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path modules/world_partition/demo --script res://tools/bake_hlod_proxies.gd -- --radius=1 --stride=8
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path modules/world_partition/demo --script res://tests/hlod_bake_test.gd
@@ -151,6 +153,7 @@ godot --headless --path modules/world_partition/demo --script res://tests/route_
   scene shape. It preserves source mesh materials and transforms but does
   not yet combine disparate materials, bake textures, or generate atlas
   impostors. Art direction and in-game profiling remain necessary.
+- Rigid-body persistence stores motion/transform and sleep/freeze flags for explicitly marked bodies only; it does not preserve collision contacts, joints, active forces, server RIDs or deterministic physics replay. The standalone scene test verifies real movement, while native persistence must be tested in a compiled Cgame build.
 - The patrol is a proof-of-concept: it has simple two-way waypoints and a single NavigationAgent3D, not an obstacle-aware mission planner, crowd avoidance, network-replicated NPC or full persistent rigid-body physics simulation.
 - Forest art now includes **coarse streamed ground physics** and a pre-authored
   flat navigation polygon on detailed cells, but not detailed tree collisions,
