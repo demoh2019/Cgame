@@ -224,7 +224,8 @@ static func candidate_ring_points(center: Vector2, phase: int,
 	var donut := PackedVector3Array()
 	if prefer_native and ClassDB.class_exists("EnvironmentQuery3D") \
 			and ClassDB.class_has_method("EnvironmentQuery3D", "sample_donut"):
-		donut = EnvironmentQuery3D.sample_donut(
+		# Reflection avoids a parse-time dependency on the optional native class.
+		donut = ClassDB.class_call_static("EnvironmentQuery3D", "sample_donut",
 			Vector3(center.x, 0.0, center.y), float(RADII[0]),
 			float(RADII[RADII.size() - 1]), RADII.size(), ANGLES)
 	var has_native: bool = donut.size() == RADII.size() * ANGLES
