@@ -753,6 +753,46 @@ TEST_CASE("[EnvironmentQuery3D] Reject invalid grid parameters") {
 	ERR_PRINT_ON
 }
 
+TEST_CASE("[EnvironmentQuery3D] Oriented grid preserves axis-aligned legacy order") {
+	const Vector3 center(5, 7, 9);
+	const PackedVector3Array baseline = EnvironmentQuery3D::sample_grid(center, Vector2(1, 1), 1);
+	const PackedVector3Array oriented = EnvironmentQuery3D::sample_oriented_grid(center, Vector3(0, 0, 9), Vector2(1, 1), 1);
+	REQUIRE(oriented.size() == 9);
+	CHECK(oriented == baseline);
+	CHECK(oriented[0] == Vector3(4, 7, 8));
+	CHECK(oriented[4] == center);
+	CHECK(oriented[8] == Vector3(6, 7, 10));
+}
+
+TEST_CASE("[EnvironmentQuery3D] Oriented grid rotates 90 degrees and stays deterministic") {
+	const Vector3 center(5, 7, 9);
+	const PackedVector3Array points = EnvironmentQuery3D::sample_oriented_grid(center, Vector3(4, 1, 0), Vector2(1, 1), 1);
+	REQUIRE(points.size() == 9);
+	CHECK(points[0].is_equal_approx(Vector3(4, 7, 10)));
+	CHECK(points[4] == center);
+	CHECK(points[8].is_equal_approx(Vector3(6, 7, 8)));
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(center, Vector3(4, 1, 0), Vector2(1, 1), 1) == points);
+	const PackedVector3Array collapsed = EnvironmentQuery3D::sample_oriented_grid(center, Vector3(0, 0, 1), Vector2(), 2);
+	REQUIRE(collapsed.size() == 1);
+	CHECK(collapsed[0] == center);
+}
+
+TEST_CASE("[EnvironmentQuery3D] Oriented grid validates input and enforces memory budget") {
+	ERR_PRINT_OFF
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(), Vector2(1, 1), 1).is_empty());
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 1, 0), Vector2(1, 1), 1).is_empty());
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(INF, 0, 0), Vector3(0, 0, 1), Vector2(1, 1), 1).is_empty());
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(NaN, 0, 1), Vector2(1, 1), 1).is_empty());
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 0, 1), Vector2(-1, 1), 1).is_empty());
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 0, 1), Vector2(1, INF), 1).is_empty());
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 0, 1), Vector2(1, 1), 0).is_empty());
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 0, 1), Vector2(1, 1), 1, 0).is_empty());
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 0, 1), Vector2(1, 1), 1, 65537).is_empty());
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 0, 1), Vector2(20, 20), 0.1, 100).is_empty());
+	ERR_PRINT_ON
+	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 0, 1), Vector2(127.5, 127.5), 1, 65536).size() == 65536);
+}
+
 TEST_CASE("[EnvironmentQuery3D] Evaluation does not mutate input candidates") {
 	PackedVector3Array points = { Vector3(7, 0, 0), Vector3(1, 0, 0) };
 	Ref<EnvironmentQuery3D> q = make_query(points);
