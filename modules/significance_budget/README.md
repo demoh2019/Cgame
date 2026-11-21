@@ -68,3 +68,19 @@ for each pending cosmetic burst and uses the native selector when available.
 Godot or older Cgame binaries. Gameplay, audio, server state and networking
 are not affected. The user-visible impact requires profiling in a running
 scene; no FPS improvement is claimed.
+
+## Multi-viewer, priority-stable world significance
+
+`select_world_priority_stable(positions, viewers, priorities, ids, retained_ids,
+budget, max_distance, hysteresis=0.0)` combines nearest-viewer distance
+calculation and bounded priority-stable top-K ranking in native code. It adds
+optional temporal retention among peers without bypassing the hard world radius
+or prioritizing a lower urgency class above a higher one. At most 16 viewer
+positions, 16,384 candidates and 128 ranked slots; invalid values fail closed.
+No scene, renderer, or gameplay-authority side effects occur.
+
+The Albion After infected health-bar overlay now passes visible infected world
+positions and the local observer to this selector. Its prefilter uses squared
+distance and the existing screen bounds; stock Godot uses the same stable-ID
+selection fallback. This removes per-infected square roots from the prefilter
+and offers a reusable split-screen/multi-camera budget primitive.
