@@ -71,6 +71,10 @@ private:
 	bool auxiliary_source_active = false;
 	Vector3 auxiliary_source_position;
 	real_t auxiliary_source_radius = 0.0;
+	// Optional route plan from AStarGrid2D or another game planner.
+	// Only reorders already-eligible player-radius chunks: it never adds
+	// residency, skips streaming budgets or loads a distant island.
+	LocalVector<Vector3i> route_hint_cells;
 	// 0 = legacy update cadence. A large camera turn may rebuild the
 	// scheduling queue sooner, subject to a 50 ms minimum CPU interval.
 	real_t fast_view_refresh_degrees = 0.0;
@@ -150,6 +154,12 @@ public:
 	// until it approaches the main focus. Clear to restore legacy behavior.
 	void set_auxiliary_source(const Vector3 &p_position, real_t p_radius);
 	void clear_auxiliary_source();
+	// Accepts at most 64 edge-adjacent cells in the active streaming plane.
+	// Reorders eligible work without changing membership, CPU budgets or
+	// the priority of the chunk beneath the player.
+	bool set_route_cells(const TypedArray<Vector3i> &p_cells);
+	TypedArray<Vector3i> get_route_cells() const;
+	void clear_route_cells();
 	bool has_auxiliary_source() const { return auxiliary_source_active; }
 	Vector3 get_auxiliary_source_position() const { return auxiliary_source_position; }
 	real_t get_auxiliary_source_radius() const { return auxiliary_source_active ? _auxiliary_effective_radius() : real_t(0.0); }
