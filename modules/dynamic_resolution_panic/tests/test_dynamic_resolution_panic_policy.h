@@ -42,8 +42,10 @@ TEST_CASE("[DynamicResolutionPanicPolicy] invalid and hostile timing never resiz
 TEST_CASE("[DynamicResolutionPanicPolicy] strictly monotone, bounded and deterministic") {
 	Ref<DynamicResolutionPanicPolicy> policy;
 	policy.instantiate();
-	for (double floor = 0.52; floor < 0.92; floor += 0.07) {
-		for (double current = floor; current <= 1.00001; current += 0.03) {
+	for (int floor_pct = 52; floor_pct <= 90; floor_pct += 7) {
+		const double floor = floor_pct / 100.0;
+		for (int current_pct = floor_pct; current_pct <= 100; current_pct += 3) {
+			const double current = current_pct / 100.0;
 			for (double gpu = 38.0; gpu <= 78.0; gpu += 4.0) {
 				const double next = policy->calculate_scale(current, floor, gpu, 20.0, 3);
 				CHECK(next <= current + 0.000001);
