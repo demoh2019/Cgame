@@ -258,7 +258,7 @@ func run(t) -> void:
 
 	t.current = "bulk quality updates partition large streamed worlds safely"
 	var many_nodes: Array = []
-	for i in SceneryLod.MAX_CULL_BATCH + 3:
+	for i in range(SceneryLod.MAX_CULL_BATCH + 3):
 		var decoration := MultiMeshInstance3D.new()
 		decoration.custom_aabb = AABB(Vector3.ZERO, Vector3.ONE)
 		decoration.set_meta("aa_scenery_kind", "decor:fern")
