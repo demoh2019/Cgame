@@ -3,6 +3,11 @@ extends RefCounted
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 
 var generated: Array[Vector3i] = []
+var _unload_events: Array[Vector3i] = []
+
+
+func _record_unload(cell: Vector3i) -> void:
+	_unload_events.append(cell)
 
 
 func _make_chunk(cell: Vector3i) -> Node:
