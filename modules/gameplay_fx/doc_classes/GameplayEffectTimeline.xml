@@ -35,6 +35,12 @@
 			<param index="2" name="stacks" type="int" default="1" />
 			<description>Sets an exact effect or removes it if the duration is zero.</description>
 		</method>
+		<method name="reconcile_effect_branch">
+			<return type="bool" />
+			<param index="0" name="branch" type="StringName" />
+			<param index="1" name="effects" type="Dictionary" />
+			<description>Reconciles an authoritative replicated effect branch while preserving already accumulated periodic pulses for continuing effects whose period and next-period phase have not changed. Uses exactly the same validation, branch isolation, stack/duration update, periodic phase preservation and all-or-nothing limits as [method replace_effect_branch]. Missing or zero-duration effects, newly created effects, disabled or rephased intervals discard old pulses only within the updated branch; all pending pulses from other branches survive. Invalid snapshots do not change timers, phases, stacks or pending pulses. An empty dictionary clears only that branch. Unlike [method replace_effect_branch], an unchanged or duration-only network snapshot cannot erase queued periodic cosmetic feedback before it is drained. The caller controls server authority and timing; this method does not execute damage or any gameplay callback.</description>
+		</method>
 		<method name="replace_effect_branch">
 			<return type="bool" />
 			<param index="0" name="branch" type="StringName" />

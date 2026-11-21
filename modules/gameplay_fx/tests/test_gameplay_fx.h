@@ -473,6 +473,88 @@ TEST_CASE("[GameplayFX] scoped effect snapshots keep independent periodic pulses
 	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(0.95));
 }
 
+
+TEST_CASE("[GameplayFX] replicated effect reconciliation retains earned pulses and independent branches") {
+	Ref<GameplayEffectTimeline> timeline;
+	timeline.instantiate();
+	REQUIRE(timeline->set_effect("Runtime.Status.Sundered", 5.0));
+	REQUIRE(timeline->set_effect("Runtime.Status.Resolve", 5.0, 3));
+	REQUIRE(timeline->set_effect("Local.Visual.Hit", 5.0));
+	REQUIRE(timeline->set_periodic("Runtime.Status.Sundered", 0.5, false));
+	REQUIRE(timeline->set_periodic("Runtime.Status.Resolve", 0.25, false));
+	REQUIRE(timeline->set_periodic("Local.Visual.Hit", 0.25, false));
+	CHECK(timeline->tick(0.6).is_empty()); // 1 sunder, 2 resolve, 2 local.
+	Dictionary state;
+	state["remaining"] = 4.5;
+	state["stacks"] = 1;
+	Dictionary incoming;
+	incoming[StringName("Runtime.Status.Sundered")] = state;
+	state = Dictionary();
+	state["remaining"] = 4.2;
+	state["stacks"] = 4;
+	incoming[StringName("Runtime.Status.Resolve")] = state;
+	CHECK(timeline->reconcile_effect_branch("Runtime", incoming));
+	CHECK(timeline->get_stacks("Runtime.Status.Resolve") == 4);
+	CHECK(timeline->get_remaining("Runtime.Status.Sundered") == doctest::Approx(4.5));
+	CHECK(timeline->reconcile_effect_branch("Runtime", incoming)); // A duplicate network snapshot.
+	Dictionary pulses = timeline->take_periodic_pulses();
+	CHECK(int(pulses.get(StringName("Runtime.Status.Sundered"), 0)) == 1);
+	CHECK(int(pulses.get(StringName("Runtime.Status.Resolve"), 0)) == 2);
+	CHECK(int(pulses.get(StringName("Local.Visual.Hit"), 0)) == 2);
+	CHECK(timeline->tick(0.6).is_empty());
+	CHECK(timeline->reconcile_effect_branch("Runtime", Dictionary()));
+	CHECK(timeline->get_remaining("Runtime.Status.Sundered") == 0.0);
+	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(3.8));
+	pulses = timeline->take_periodic_pulses();
+	CHECK(pulses.get(StringName("Runtime.Status.Sundered"), 0) == 0);
+	CHECK(pulses.get(StringName("Runtime.Status.Resolve"), 0) == 0);
+	CHECK(int(pulses.get(StringName("Local.Visual.Hit"), 0)) == 2);
+	// The old API must retain its original drop-all-in-branch contract.
+	CHECK(timeline->set_effect("Runtime.Status.Sundered", 2.0));
+	CHECK(timeline->set_periodic("Runtime.Status.Sundered", 0.5, false));
+	CHECK(timeline->tick(0.5).is_empty());
+	CHECK(timeline->replace_effect_branch("Runtime", incoming));
+	pulses = timeline->take_periodic_pulses();
+	CHECK(pulses.get(StringName("Runtime.Status.Sundered"), 0) == 0);
+}
+
+TEST_CASE("[GameplayFX] replicated effect pulse preservation validates phase and rolls back") {
+	Ref<GameplayEffectTimeline> timeline;
+	timeline.instantiate();
+	REQUIRE(timeline->set_effect("Runtime.Status.Sundered", 2.0));
+	REQUIRE(timeline->set_periodic("Runtime.Status.Sundered", 0.5, false));
+	CHECK(timeline->tick(0.6).is_empty()); // 1 queued pulse, next in 0.4.
+	Dictionary state;
+	state["remaining"] = 1.4;
+	state["stacks"] = 1;
+	Dictionary snapshot;
+	snapshot[StringName("Runtime.Status.Sundered")] = state;
+	Dictionary invalid = snapshot.duplicate(true);
+	invalid[StringName("RuntimeExtra.Bad")] = state;
+	CHECK_FALSE(timeline->reconcile_effect_branch("Runtime", invalid));
+	invalid.erase(StringName("RuntimeExtra.Bad"));
+	Dictionary bad_state = state.duplicate();
+	bad_state["remaining"] = Math::NaN;
+	invalid[StringName("Runtime.Status.Sundered")] = bad_state;
+	CHECK_FALSE(timeline->reconcile_effect_branch("Runtime", invalid));
+	CHECK(timeline->get_remaining("Runtime.Status.Sundered") == doctest::Approx(1.4));
+	CHECK(timeline->get_periodic("Runtime.Status.Sundered") == doctest::Approx(0.5));
+	// Accepted interval changes explicitly invalidate stale queued pulses.
+	state["period"] = 1.0;
+	state["next_period"] = 1.0;
+	CHECK(timeline->reconcile_effect_branch("Runtime", snapshot));
+	CHECK(timeline->take_periodic_pulses().is_empty());
+	CHECK(timeline->tick(0.5).is_empty());
+	// Same interval but a rephased deadline also cancels the old pulse.
+	state["next_period"] = 0.25;
+	CHECK(timeline->reconcile_effect_branch("Runtime", snapshot));
+	CHECK(timeline->take_periodic_pulses().is_empty());
+	CHECK(timeline->tick(0.25).is_empty());
+	CHECK(int(timeline->take_periodic_pulses().get(StringName("Runtime.Status.Sundered"), 0)) == 1);
+	CHECK(timeline->tick(2.0).size() == 1);
+	CHECK(timeline->reconcile_effect_branch("Runtime", snapshot));
+	CHECK(timeline->take_periodic_pulses().is_empty()); // New tag never inherits old expired pulses.
+}
 TEST_CASE("[GameplayFX] GameplayAttributeSet additive and percentage modifiers") {
 	Ref<GameplayAttributeSet> a;
 	a.instantiate();
