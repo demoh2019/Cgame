@@ -540,6 +540,11 @@ TEST_CASE("[SceneTree][WorldPartition3D] Prediction loads a future cell before o
 	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
 	CHECK(partition->is_cell_loaded(Vector2i(1, 0)));
 	CHECK(partition->get_loaded_cell_count() == 2);
+	CHECK(partition->get_cell_navigation_revision(Vector2i(0, 0)) == 0);
+	CHECK(partition->get_cell_navigation_revision(Vector2i(1, 0)) == 0);
+	CHECK_FALSE(partition->mark_cell_navigation_dirty(Vector2i(0, 0))); // Plain scene root has no rebuild callback.
+	CHECK(partition->get_navigation_dirty_cell_count() == 0);
+	CHECK(partition->get_navigation_mesh_generation() >= 2);
 	CHECK(partition->is_cell_physics_active(Vector2i(0, 0)));
 	CHECK(partition->is_cell_physics_active(Vector2i(1, 0)));
 	CHECK(partition->get_physics_active_cell_count() == 2);
