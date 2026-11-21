@@ -37,6 +37,19 @@
 			<param index="6" name="max_distance" type="float" />
 			<description>Selects up to [param budget] cosmetic effect indices, ordering by priority (3 to 0), then visibility (1 before 0), distance, and original index. Input visibility values must be 0 or 1 and have the same length as the other arrays. Four category caps and an inclusive hard distance limit apply. Invalid inputs reject atomically; off-screen critical effects still compete within their priority tier. This does not perform occlusion queries or affect gameplay authority.</description>
 		</method>
+		<method name="select_effects_visible_costed" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priorities" type="PackedByteArray" />
+			<param index="2" name="categories" type="PackedByteArray" />
+			<param index="3" name="visible" type="PackedByteArray" />
+			<param index="4" name="particle_costs" type="PackedInt32Array" />
+			<param index="5" name="category_caps" type="PackedInt32Array" />
+			<param index="6" name="budget" type="int" />
+			<param index="7" name="max_distance" type="float" />
+			<param index="8" name="particle_budget" type="int" />
+			<description>Returns deterministic effect indices sorted by priority, then on-screen visibility, distance and original index, up to [param budget] slots, four category caps and a total cost of [param particle_budget]. Candidates whose particle cost cannot fit are skipped so cheaper effects can still be selected. [param particle_costs] must contain positive integers up to 4,096; the frame cost budget must be between 0 and 65,536. Candidate arrays must have equal length at most 16,384, distance must be finite, nonnegative and within the inclusive [param max_distance] range, priorities and categories 0 through 3, visibility 0 or 1. Invalid arguments reject atomically. The method plans cosmetic work only; it does not spawn effects or estimate CPU/GPU milliseconds.</description>
+		</method>
 		<method name="select_top_priority_stable" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="distances" type="PackedFloat64Array" />

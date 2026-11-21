@@ -116,6 +116,56 @@ func run(t) -> void:
 	fx.flush_bursts()
 	t.eq(fx.pending_burst_count(), 0, "queue emptied once per frame")
 	t.eq(fx.last_fx_budget_stats["requested"], 256, "diagnostics record workload")
+	t.check(int(fx.last_fx_budget_stats["planned_particles"]) <=
+		int(fx.last_fx_budget_stats["particle_budget"]),
+		"actual game VFX queue enforces the particle budget")
 	t.check(int(fx.last_fx_budget_stats["rendered"]) <= FxPolicy.budget_for(3),
 		"no more than Ultra burst budget can instantiate")
 	fx.free()
+
+	t.current = "dual-budget VFX retains priority and fills gaps with cheaper recipes"
+	var cost_distances := PackedFloat64Array([2.0, 2.0, 4.0, 1.0, 6.0])
+	var cost_priorities := PackedByteArray([3, 2, 2, 1, 1])
+	var cost_categories := PackedByteArray([3, 1, 1, 0, 0])
+	var cost_visibility := PackedByteArray([0, 1, 1, 1, 1])
+	var costs := PackedInt32Array([36, 80, 30, 10, 10])
+	var expected_costed := PackedInt32Array([0, 2, 3])
+	t.eq(FxPolicy.select_visible_costed_indices(cost_distances, cost_priorities,
+		cost_categories, cost_visibility, costs, 0), expected_costed,
+		"performance tier admits critical offscreen FX then uses remaining work budget")
+	t.eq(FxPolicy.particle_budget_for(0), 96, "performance has a finite particle cap")
+	t.eq(FxPolicy.particle_budget_for(3), 384, "ultra has a larger particle cap")
+	t.check(FxPolicy.select_visible_costed_indices(cost_distances, cost_priorities,
+		cost_categories, cost_visibility, PackedInt32Array([36]), 0).is_empty(),
+		"cost array length mismatch cannot partially admit effects")
+	t.check(FxPolicy.select_visible_costed_indices(cost_distances, cost_priorities,
+		cost_categories, cost_visibility, PackedInt32Array([36, 0, 30, 10, 10]), 0).is_empty(),
+		"zero particle cost cannot bypass the frame limit")
+	t.check(FxPolicy.select_visible_costed_indices(cost_distances, cost_priorities,
+		cost_categories, cost_visibility, PackedInt32Array([36, 4097, 30, 10, 10]), 0).is_empty(),
+		"oversized per-effect work is rejected atomically")
+	if ClassDB.class_exists("SignificanceBudgetPlanner"):
+		var cost_native: Object = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if cost_native != null and cost_native.has_method("select_effects_visible_costed"):
+			t.eq(FxPolicy.select_visible_costed_indices(cost_distances, cost_priorities,
+				cost_categories, cost_visibility, costs, 0, cost_native), expected_costed,
+				"native cost-aware ranking exactly matches stock Godot")
+			var rng_cost := RandomNumberGenerator.new()
+			rng_cost.seed = 140922
+			for quality in 4:
+				for sample in 12:
+					var cd := PackedFloat64Array()
+					var cp := PackedByteArray()
+					var cg := PackedByteArray()
+					var cv := PackedByteArray()
+					var cc := PackedInt32Array()
+					for i in 64:
+						cd.append(rng_cost.randf_range(0.0, 170.0))
+						cp.append(rng_cost.randi_range(0, 3))
+						cg.append(rng_cost.randi_range(0, 3))
+						cv.append(rng_cost.randi_range(0, 1))
+						cc.append(rng_cost.randi_range(1, 75))
+					t.eq(FxPolicy.select_visible_costed_indices(cd, cp, cg, cv,
+						cc, quality, cost_native), FxPolicy.select_visible_costed_indices(
+						cd, cp, cg, cv, cc, quality),
+						"native costed VFX parity tier %d sample %d" % [quality, sample])

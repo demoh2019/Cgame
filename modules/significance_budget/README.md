@@ -84,3 +84,33 @@ markers; an 8m retention bonus reduces flickering as sites exchange order.
 All marker urgency values are zero to preserve nearest-site semantics.
 The game keeps the original entered-site and 650m exclusions and includes
 stock Godot fallback parity tests. No measured performance claim is made.
+
+## Dual-budget Niagara-style admission (particle work)
+
+`select_effects_visible_costed(distances, priorities, categories, visible,
+particle_costs, category_caps, budget, max_distance, particle_budget)` applies
+the existing global effect-slot and per-type caps **plus a hard sum of the
+requested particles**. The method retains priority > on-screen > distance >
+input index ordering. When the next effect is too expensive, it skips that
+candidate and may fill spare capacity with cheaper effects. A hard radius is
+always enforced; all inputs are checked before any selection is returned.
+
+- At most 16,384 candidates, 128 effect slots, four effect categories and
+  65,536 particle work units. Each effect must cost 1 to 4,096 units.
+- Native C++ keeps work bounded to O(N × selected slots) and O(N) bytes of
+  temporary selection flags. No global RNG, GPU query or scene-tree mutation.
+- Albion After uses it in the **real** pooled `Effects.flush_bursts()` path.
+  Quality-tier particle budgets are 96 / 160 / 256 / 384 (Performance to Ultra)
+  in addition to existing scene-slot caps. The script fallback works in
+  official Godot and older Cgame engines.
+- `last_fx_budget_stats` reports `planned_particles` and `particle_budget`.
+  These numbers measure admitted recipe particle counts, **not measured CPU
+  time, actual pool allocation, GPU overdraw or frame rate**.
+
+A particle budget prevents an overload of many individually affordable bursts
+from producing an unbounded amount of cosmetic particle work in one frame.
+It never modifies health, loot, damage, audio or multiplayer authority.
+Validated by C++ doctests and `game/tests/test_fx_scalability_budget.gd`;
+runtime FPS benefits should be benchmarked on representative hardware.
+
+Unreal reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/performance-budgeting-using-effect-types-in-niagara-for-unreal-engine
