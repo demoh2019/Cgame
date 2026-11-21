@@ -386,18 +386,49 @@ void WorldStreamer::_trim_cached_chunks() {
 	}
 }
 
-void WorldStreamer::_expire_cached_chunks() {
-	if (cached_chunk_retention_seconds <= real_t(0.0) || cached_chunks.size() == 0) {
+void WorldStreamer::_expire_cached_chunks(bool p_ignore_budget) {
+	last_cached_expiration_count = 0;
+	last_deferred_cached_expiration_count = 0;
+	last_cached_expiration_work_usec = 0;
+	if (cached_chunk_retention_seconds <= real_t(0.0) || cached_chunks.is_empty()) {
 		return;
 	}
-	// The cache is already capped at 16 roots. Gather keys before erasing.
+	// No more than 16 entries. Collect cells before changing the hash map.
+	const uint64_t started_usec = OS::get_singleton()->get_ticks_usec();
 	LocalVector<Vector3i> expired;
 	for (const KeyValue<Vector3i, CachedChunk> &entry : cached_chunks) {
 		if (cached_chunk_elapsed_seconds - entry.value.retained_at_seconds >= double(cached_chunk_retention_seconds)) {
 			expired.push_back(entry.key);
 		}
 	}
-	for (const Vector3i &cell : expired) {
+	while (!expired.is_empty()) {
+		// Destroy at least one expired root. Destructors are indivisible,
+		// so the microsecond budget is deliberately a soft deadline.
+		if (!p_ignore_budget && last_cached_expiration_count > 0 &&
+				((max_cached_expirations_per_frame > 0 && last_cached_expiration_count >= max_cached_expirations_per_frame) ||
+						(max_cached_expiration_work_usec > 0 &&
+								OS::get_singleton()->get_ticks_usec() - started_usec >= uint64_t(max_cached_expiration_work_usec)))) {
+			break;
+		}
+		// Always release the oldest expired root first, with stable cell
+		// coordinates as a tie-break instead of hash iteration order.
+		uint32_t oldest_index = 0;
+		for (uint32_t i = 1; i < expired.size(); i++) {
+			const CachedChunk *candidate = cached_chunks.getptr(expired[i]);
+			const CachedChunk *oldest = cached_chunks.getptr(expired[oldest_index]);
+			if (candidate == nullptr || oldest == nullptr) {
+				continue;
+			}
+			const Vector3i &a = expired[i];
+			const Vector3i &b = expired[oldest_index];
+			if (candidate->retained_at_seconds < oldest->retained_at_seconds ||
+					(candidate->retained_at_seconds == oldest->retained_at_seconds &&
+							(a.x < b.x || (a.x == b.x && (a.y < b.y || (a.y == b.y && a.z < b.z)))))) {
+				oldest_index = i;
+			}
+		}
+		const Vector3i cell = expired[oldest_index];
+		expired.remove_at(oldest_index);
 		const CachedChunk *entry = cached_chunks.getptr(cell);
 		if (entry == nullptr) {
 			continue;
@@ -407,10 +438,8 @@ void WorldStreamer::_expire_cached_chunks() {
 		cached_chunks.erase(cell);
 		Node *chunk = Object::cast_to<Node>(ObjectDB::get_instance(id));
 		if (chunk && !chunk->is_queued_for_deletion()) {
-			// Cached nodes are detached: actually free their ownership, even
-			// if this streamer is running a headless/manual refresh.
 			if (chunk->get_parent() == nullptr) {
-				memdelete(chunk);
+				memdelete(chunk); // Detached scene: release even outside SceneTree.
 			} else {
 				chunk->queue_free();
 			}
@@ -418,7 +447,10 @@ void WorldStreamer::_expire_cached_chunks() {
 		if (cache_expirations < INT32_MAX) {
 			++cache_expirations;
 		}
+		++last_cached_expiration_count;
 	}
+	last_deferred_cached_expiration_count = int(expired.size());
+	last_cached_expiration_work_usec = int64_t(OS::get_singleton()->get_ticks_usec() - started_usec);
 }
 
 void WorldStreamer::_discard_cached_chunks() {
@@ -440,6 +472,9 @@ void WorldStreamer::clear_cached_chunks() {
 	cache_hits = 0;
 	cache_evictions = 0;
 	cache_expirations = 0;
+	last_cached_expiration_count = 0;
+	last_deferred_cached_expiration_count = 0;
+	last_cached_expiration_work_usec = 0;
 }
 
 void WorldStreamer::set_max_cached_chunks(int p_count) {
@@ -451,6 +486,14 @@ void WorldStreamer::set_max_cached_chunks(int p_count) {
 	_trim_cached_chunks();
 }
 
+void WorldStreamer::set_max_cached_expirations_per_frame(int p_count) {
+	max_cached_expirations_per_frame = CLAMP(p_count, 0, 16);
+}
+
+void WorldStreamer::set_max_cached_expiration_work_usec(int p_usec) {
+	max_cached_expiration_work_usec = CLAMP(p_usec, 0, 1000000);
+}
+
 void WorldStreamer::set_cached_chunk_retention_seconds(real_t p_seconds) {
 	if (!Math::is_finite(p_seconds)) {
 		return;
@@ -460,12 +503,15 @@ void WorldStreamer::set_cached_chunk_retention_seconds(real_t p_seconds) {
 		return;
 	}
 	cached_chunk_retention_seconds = bounded;
-	_expire_cached_chunks(); // Shrinking the TTL must release old roots now.
+	_expire_cached_chunks(true); // Preserve immediate cleanup on explicit TTL changes.
 }
 
 void WorldStreamer::advance_cached_chunk_retention(real_t p_delta_seconds) {
-	if (cached_chunk_retention_seconds <= real_t(0.0) || cached_chunks.size() == 0 ||
+	if (cached_chunk_retention_seconds <= real_t(0.0) || cached_chunks.is_empty() ||
 			!Math::is_finite(p_delta_seconds) || p_delta_seconds <= real_t(0.0)) {
+		last_cached_expiration_count = 0;
+		last_deferred_cached_expiration_count = 0;
+		last_cached_expiration_work_usec = 0;
 		return;
 	}
 	// Huge/corrupt frame deltas cannot poison the floating point clock.
@@ -1898,6 +1944,13 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cached_chunk_retention_seconds"), &WorldStreamer::get_cached_chunk_retention_seconds);
 	ClassDB::bind_method(D_METHOD("advance_cached_chunk_retention", "delta_seconds"), &WorldStreamer::advance_cached_chunk_retention);
 	ClassDB::bind_method(D_METHOD("get_chunk_cache_expiration_count"), &WorldStreamer::get_chunk_cache_expiration_count);
+	ClassDB::bind_method(D_METHOD("set_max_cached_expirations_per_frame", "count"), &WorldStreamer::set_max_cached_expirations_per_frame);
+	ClassDB::bind_method(D_METHOD("get_max_cached_expirations_per_frame"), &WorldStreamer::get_max_cached_expirations_per_frame);
+	ClassDB::bind_method(D_METHOD("set_max_cached_expiration_work_usec", "usec"), &WorldStreamer::set_max_cached_expiration_work_usec);
+	ClassDB::bind_method(D_METHOD("get_max_cached_expiration_work_usec"), &WorldStreamer::get_max_cached_expiration_work_usec);
+	ClassDB::bind_method(D_METHOD("get_last_cached_expiration_count"), &WorldStreamer::get_last_cached_expiration_count);
+	ClassDB::bind_method(D_METHOD("get_last_deferred_cached_expiration_count"), &WorldStreamer::get_last_deferred_cached_expiration_count);
+	ClassDB::bind_method(D_METHOD("get_last_cached_expiration_work_usec"), &WorldStreamer::get_last_cached_expiration_work_usec);
 	ClassDB::bind_method(D_METHOD("get_cached_chunk_count"), &WorldStreamer::get_cached_chunk_count);
 	ClassDB::bind_method(D_METHOD("get_chunk_cache_hit_count"), &WorldStreamer::get_chunk_cache_hit_count);
 	ClassDB::bind_method(D_METHOD("get_chunk_cache_eviction_count"), &WorldStreamer::get_chunk_cache_eviction_count);
@@ -1956,6 +2009,8 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cached_chunks", PROPERTY_HINT_RANGE, "0,16,1"), "set_max_cached_chunks", "get_max_cached_chunks");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cached_chunk_bytes", PROPERTY_HINT_RANGE, "0,268435456,1048576,suffix:B"), "set_max_cached_chunk_bytes", "get_max_cached_chunk_bytes");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cached_chunk_retention_seconds", PROPERTY_HINT_RANGE, "0,120,0.1,suffix:s"), "set_cached_chunk_retention_seconds", "get_cached_chunk_retention_seconds");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cached_expirations_per_frame", PROPERTY_HINT_RANGE, "0,16,1"), "set_max_cached_expirations_per_frame", "get_max_cached_expirations_per_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cached_expiration_work_usec", PROPERTY_HINT_RANGE, "0,1000000,100,suffix:us"), "set_max_cached_expiration_work_usec", "get_max_cached_expiration_work_usec");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_instantiations_per_frame", PROPERTY_HINT_RANGE, "1,16,1,or_greater"), "set_max_instantiations_per_frame", "get_max_instantiations_per_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_unloads_per_update", PROPERTY_HINT_RANGE, "0,64,1"), "set_max_unloads_per_update", "get_max_unloads_per_update");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_unload_work_usec", PROPERTY_HINT_RANGE, "0,1000000,100,suffix:us"), "set_max_unload_work_usec", "get_max_unload_work_usec");
