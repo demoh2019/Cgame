@@ -35,6 +35,7 @@
 
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
+#include "core/string/string_name.h"
 #include "core/variant/dictionary.h"
 
 // Streams the parts ("chunks") of a big world in and out around a focus point, so an open world
@@ -122,6 +123,13 @@ private:
 	HashMap<Vector3i, ObjectID> loaded;
 	HashMap<Vector3i, bool> simulation_active_cells;
 	int simulation_inactive_count = 0;
+	// Opt-in, bounded runtime simulation layers. Loading, collision, visual
+	// residency, networking, and authoritative gameplay never depend on them.
+	HashMap<Vector3i, StringName> cell_simulation_layers;
+	HashMap<StringName, bool> simulation_layer_states;
+	int disabled_simulation_layer_count = 0;
+	static constexpr int MAX_SIMULATION_LAYERS = 16;
+	bool _simulation_layer_allows(const Vector3i &p_cell) const;
 	// Optional cosmetic work is tracked separately from playable chunk residency.
 	HashSet<Vector3i> pending_visual_details;
 	HashMap<Vector3i, String> loading;
@@ -227,6 +235,12 @@ public:
 	int get_max_simulation_transitions_per_update() const { return max_simulation_transitions_per_update; }
 	bool is_cell_simulation_active(const Vector3i &p_cell) const;
 	int get_simulation_active_count() const;
+	// Chunk roots may implement get_streaming_simulation_layer() -> StringName.
+	// Unknown/unconfigured layers are enabled by default; no load/unload.
+	bool set_simulation_layer_enabled(const StringName &p_layer, bool p_enabled);
+	bool is_simulation_layer_enabled(const StringName &p_layer) const;
+	StringName get_cell_simulation_layer(const Vector3i &p_cell) const;
+	int get_simulation_layer_count() const { return simulation_layer_states.size(); }
 	int get_max_chunk_work_usec() const { return max_chunk_work_usec; }
 	void set_adaptive_chunk_budget_enabled(bool p_enabled);
 	bool is_adaptive_chunk_budget_enabled() const { return adaptive_chunk_budget_enabled; }

@@ -1302,6 +1302,13 @@ func _build_windmills(windmills: Array, origin: Vector2) -> void:
 var _streaming_simulation_active := true
 
 
+## Surface-only decorative processing; the engine may suspend this named
+## layer when the observer enters a dungeon. Meshes, terrain collisions and
+## real server entities remain resident and unaffected.
+func get_streaming_simulation_layer() -> StringName:
+	return &"SurfaceCosmetics"
+
+
 func set_streaming_simulation_active(active: bool) -> void:
 	if _streaming_simulation_active == active:
 		return

@@ -180,6 +180,19 @@ static func apply_waypoint(streamer: WorldStreamer, waypoint: Vector2,
 			not is_equal_approx(float(streamer.call("get_auxiliary_source_radius")), radius):
 		streamer.call("set_auxiliary_source", destination, radius)
 
+
+## Unreal-inspired named simulation Data Layer. Surface chunk scene roots opt
+## into this client-cosmetic layer; disabling it suspends expensive grass,
+## decor, windmill and shadow callbacks, not terrain/collision/network play.
+## Idempotent setter; old Cgame builds simply retain their normal LOD tier.
+static func apply_simulation_layers(streamer: WorldStreamer, underground: bool) -> void:
+	if streamer == null or not streamer.has_method("set_simulation_layer_enabled") or \
+			not streamer.has_method("is_simulation_layer_enabled"):
+		return
+	var enabled: bool = not underground
+	if bool(streamer.call("is_simulation_layer_enabled", &"SurfaceCosmetics")) != enabled:
+		streamer.call("set_simulation_layer_enabled", &"SurfaceCosmetics", enabled)
+
 ## Read-only main streaming readiness for a compact client HUD indicator.
 ## Older fork engines lack this native API; do not invent a percentage.
 ## Game systems never use this cosmetic estimate as combat authority.
