@@ -87,7 +87,7 @@ TEST_CASE("[CrowdAnimationTierPlanner] Bounded hysteresis prevents tier thrash")
 	CHECK(crowd[0] == 0);
 	CHECK(crowd[1] == 1);
 	CHECK(crowd[2] == 1);
-	const PackedInt32Array urgent = planner->plan_tiers_stable({ 90.5, 88.0 },
+	const PackedInt32Array urgent = planner->plan_tiers_stable({ 90.5, 89.2 },
 			{ 1, 1 }, { 1, 3 }, 0, 1, 1.5);
 	REQUIRE(urgent.size() == 2);
 	CHECK(urgent[0] == 1);

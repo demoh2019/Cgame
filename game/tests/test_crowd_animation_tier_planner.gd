@@ -60,7 +60,7 @@ func run(t) -> void:
 	t.eq(full_crowd, PackedInt32Array([0, 1, 1]),
 		"prior full pose has stability but never exceeds hard slots")
 	var urgent := CharacterAnim.plan_crowd_tiers_stable(
-		PackedFloat64Array([90.5, 88.0]), PackedByteArray([1, 1]),
+		PackedFloat64Array([90.5, 89.2]), PackedByteArray([1, 1]),
 		PackedInt32Array([1, 3]), 0, 1, 1.5, false)
 	t.eq(urgent, PackedInt32Array([1, 3]),
 		"combat priority avoids flicker near the far threshold")
