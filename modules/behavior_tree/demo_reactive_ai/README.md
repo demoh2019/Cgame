@@ -2,6 +2,12 @@
 
 A self-contained 2D sandbox for this fork's **resource-backed** behavior-tree runtime plus its native sight and hearing sensors. This project is separate from the canonical *Albion After* game in `game/`; the engine functionality is also wired into that game's server infected AI through `native_infected_senses.gd`.
 
+## Editor dock and playable visual inspector
+
+Open this project in the custom Cgame Godot editor. The enabled `Cgame BehaviorTree Inspector` addon opens a right-hand **Cgame AI** dock that shows all child Resource tasks of an edited scene's `BehaviorTreeRunner`, even branches not executed. Select the runner node and press **Refresh**; this editor-side inspector observes the edited scene, not the remote running game.
+
+Run the sandbox and press **T** to show or hide a separate live hierarchical panel, updated on every 0.2-second AI tick. It shows `SUCCESS` (green), `FAILURE` (red), `RUNNING` (amber) and `NOT RUN` (gray) with nested paths and elapsed CPU microseconds. The native `get_tree_snapshot()` returns at most 256 Resource occurrences and works independently of the separate performance profiler toggled with **P**.
+
 ## Run
 
 ```sh
