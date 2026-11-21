@@ -74,6 +74,15 @@
 			<param index="4" name="max_points" type="int" default="4096" />
 			<description>Generates a deterministic rectangular grid on the XZ plane rotated so local +Z points along the XZ projection of [param forward] and local +X is perpendicular to the right. As in [method sample_grid], [param half_extents] controls the local X/Z size and points are emitted in row-major order. Positive finite spacing, finite center/direction/extents, a nonzero horizontal forward vector, nonnegative extents, and a maximum allocation of 65536 points are required. Invalid inputs return an empty array. Does not test pathfinding, physics, terrain or actor occupancy.</description>
 		</method>
+		<method name="sample_fibonacci_annulus" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="inner_radius" type="float" />
+			<param index="2" name="outer_radius" type="float" />
+			<param index="3" name="count" type="int" />
+			<param index="4" name="phase" type="float" default="0.0" />
+			<description>Generates deterministic XZ candidates distributed approximately uniformly in [b]area[/b] between the inclusive [param inner_radius] and [param outer_radius], with a golden-angle angular sequence and an optional starting [param phase] in radians. Unlike evenly spaced concentric rings, the samples do not align in spokes, and a single call covers the entire annulus. Candidates keep the center's Y coordinate. Counts must be 1–65536, radii must be finite, nonnegative, ordered and small enough to square without overflow, and phase/center must be finite; invalid inputs return an empty array. This is geometric sampling only: it does not validate navigation, collision, terrain or actor occupancy.</description>
+		</method>
 		<method name="sample_grid" qualifiers="static">
 			<return type="PackedVector3Array" />
 			<param index="0" name="center" type="Vector3" />
