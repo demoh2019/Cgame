@@ -30,6 +30,8 @@
 
 #pragma once
 
+#include "core/math/vector2.h"
+#include "core/math/vector2i.h"
 #include "core/object/ref_counted.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/vector.h"
