@@ -224,6 +224,145 @@ bool GameplayEffectTimeline::replace_snapshot(const Dictionary &p_effects) {
 	return true;
 }
 
+// Exact tags and descendants match, never lookalike prefixes.
+static bool _timeline_effect_in_branch(const StringName &p_tag, const StringName &p_branch) {
+	const String tag = p_tag;
+	const String branch = p_branch;
+	return tag == branch || (tag.length() > branch.length() && tag.begins_with(branch) && tag[branch.length()] == '.');
+}
+
+bool GameplayEffectTimeline::replace_effect_branch(const StringName &p_branch, const Dictionary &p_effects) {
+	if (!_valid_tag(p_branch) || p_effects.size() > MAX_EFFECTS) {
+		return false;
+	}
+
+	// Validate the entire incoming authoritative slice first, including
+	// optional periodic phase and normalization collisions, before any commit.
+	Vector<Effect> validated;
+	Vector<StringName> seen;
+	for (const Variant &key : p_effects) {
+		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
+			return false;
+		}
+		const StringName tag = key;
+		if (!_valid_tag(tag) || !_timeline_effect_in_branch(tag, p_branch) || seen.has(tag)) {
+			return false;
+		}
+		seen.push_back(tag);
+		const Variant value = p_effects[key];
+		if (value.get_type() != Variant::DICTIONARY) {
+			return false;
+		}
+		const Dictionary state = value;
+		if (!state.has("remaining") || !state.has("stacks")) {
+			return false;
+		}
+		const Variant raw_remaining = state["remaining"];
+		const Variant raw_stacks = state["stacks"];
+		if ((raw_remaining.get_type() != Variant::FLOAT && raw_remaining.get_type() != Variant::INT) ||
+				raw_stacks.get_type() != Variant::INT) {
+			return false;
+		}
+		const double remaining = double(raw_remaining);
+		const int64_t stacks = int64_t(raw_stacks);
+		if (!_valid_duration(remaining) || stacks < 1 || stacks > MAX_STACKS) {
+			return false;
+		}
+		if (remaining > 0.0) {
+			Effect effect;
+			effect.tag = tag;
+			effect.remaining = remaining;
+			effect.stacks = int(stacks);
+			// Preserve periodic phase for existing tags unless explicitly overridden.
+			const int prior = _find(tag);
+			if (prior >= 0) {
+				effect.period = effects[prior].period;
+				effect.next_period = effects[prior].next_period;
+				effect.reset_on_reapply = effects[prior].reset_on_reapply;
+			}
+			if (state.has("period")) {
+				const Variant raw_period = state["period"];
+				if (raw_period.get_type() != Variant::INT && raw_period.get_type() != Variant::FLOAT) {
+					return false;
+				}
+				const double period = double(raw_period);
+				if (!Math::is_finite(period) || period < 0.0 ||
+						(period != 0.0 && period < MIN_PERIOD) || period > MAX_DURATION) {
+					return false;
+				}
+				if (period != effect.period) {
+					effect.next_period = period;
+				}
+				effect.period = period;
+				if (state.has("reset_on_reapply")) {
+					const Variant raw_reset = state["reset_on_reapply"];
+					if (raw_reset.get_type() != Variant::BOOL) {
+						return false;
+					}
+					effect.reset_on_reapply = bool(raw_reset);
+				}
+				if (state.has("next_period")) {
+					const Variant raw_phase = state["next_period"];
+					if ((raw_phase.get_type() != Variant::INT && raw_phase.get_type() != Variant::FLOAT) ||
+							period <= 0.0 || !Math::is_finite(double(raw_phase)) ||
+							double(raw_phase) <= 0.0 || double(raw_phase) > period) {
+						return false;
+					}
+					effect.next_period = double(raw_phase);
+				}
+			} else if (state.has("next_period") || state.has("reset_on_reapply")) {
+				return false;
+			}
+			validated.push_back(effect);
+		} else if (state.has("period") || state.has("next_period") || state.has("reset_on_reapply")) {
+			return false;
+		}
+	}
+
+	Vector<Effect> next;
+	for (const Effect &effect : effects) {
+		if (!_timeline_effect_in_branch(effect.tag, p_branch)) {
+			next.push_back(effect);
+		}
+	}
+	if (next.size() + validated.size() > MAX_EFFECTS) {
+		return false;
+	}
+	for (const Effect &effect : validated) {
+		next.push_back(effect);
+	}
+
+	bool unchanged = effects.size() == next.size();
+	if (unchanged) {
+		for (int i = 0; i < next.size(); ++i) {
+			const Effect &a = effects[i];
+			const Effect &b = next[i];
+			if (a.tag != b.tag || a.remaining != b.remaining || a.stacks != b.stacks ||
+					a.period != b.period || a.next_period != b.next_period ||
+					a.reset_on_reapply != b.reset_on_reapply) {
+				unchanged = false;
+				break;
+			}
+		}
+	}
+	if (!unchanged) {
+		effects = next;
+	}
+	// A Runtime update may supersede its pending pulses, but must never erase
+	// unrelated local cosmetic pulse events queued for the game's next frame.
+	Vector<StringName> expired_pulses;
+	for (const Variant &key : pending_pulses) {
+		const StringName tag = key;
+		if (_timeline_effect_in_branch(tag, p_branch)) {
+			expired_pulses.push_back(tag);
+		}
+	}
+	for (const StringName &tag : expired_pulses) {
+		pending_pulses.erase(tag);
+	}
+	return true;
+}
+
 Dictionary GameplayEffectTimeline::get_snapshot() const {
 	Dictionary result;
 	for (const Effect &effect : effects) {
@@ -295,6 +434,7 @@ void GameplayEffectTimeline::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remove_effect", "tag"), &GameplayEffectTimeline::remove_effect);
 	ClassDB::bind_method(D_METHOD("clear"), &GameplayEffectTimeline::clear);
 	ClassDB::bind_method(D_METHOD("replace_snapshot", "effects"), &GameplayEffectTimeline::replace_snapshot);
+	ClassDB::bind_method(D_METHOD("replace_effect_branch", "branch", "effects"), &GameplayEffectTimeline::replace_effect_branch);
 	ClassDB::bind_method(D_METHOD("get_snapshot"), &GameplayEffectTimeline::get_snapshot);
 	ClassDB::bind_method(D_METHOD("tick", "delta"), &GameplayEffectTimeline::tick);
 	ClassDB::bind_method(D_METHOD("get_remaining", "tag"), &GameplayEffectTimeline::get_remaining);
