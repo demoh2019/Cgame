@@ -1,5 +1,5 @@
-class_name CgameLocomotionFacade
 extends RefCounted
+const CgameAnimNative = preload("res://scripts/native/animation_native.gd")
 ## Distance matching, stride/orientation warp and attack motion warp. Native `CgameLocomotionTools`
 ## when available, `distance_matching.gd` and `motion_warp.gd` otherwise.
 

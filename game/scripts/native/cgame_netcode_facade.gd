@@ -1,4 +1,3 @@
-class_name CgameNetcodeFacade
 extends RefCounted
 ## Facade over the native netcode classes (CgameBitWriter, CgameNetSchema,
 ## CgameReplicationGraph, CgameSnapshotDelta). When the engine was built with the

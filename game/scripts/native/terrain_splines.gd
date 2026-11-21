@@ -3,7 +3,7 @@ extends RefCounted
 ## Facade for CgameTerrainSplines (native) with GDScript fallback.
 ## Same API as res://scripts/shared/terrain_splines.gd.
 
-const Native = preload("res://game_facade/cgame_native.gd")
+const Native = preload("res://scripts/native/cgame_native.gd")
 const Fallback = preload("res://scripts/shared/terrain_splines.gd")
 const NATIVE_CLASS := &"CgameTerrainSplines"
 

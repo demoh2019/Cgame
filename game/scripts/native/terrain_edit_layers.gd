@@ -11,7 +11,7 @@ extends RefCounted
 ## public native per-texel API and only fall back to the private fields for the
 ## GDScript implementation.
 
-const Native = preload("res://game_facade/cgame_native.gd")
+const Native = preload("res://scripts/native/cgame_native.gd")
 const Fallback = preload("res://scripts/shared/terrain_edit_layers.gd")
 const NATIVE_CLASS := &"CgameTerrainEditLayers"
 

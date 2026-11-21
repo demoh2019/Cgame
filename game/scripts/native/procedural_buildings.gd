@@ -2,7 +2,7 @@ extends RefCounted
 ## Facade for CgameProceduralBuildings (native) with GDScript fallback.
 ## Same API as res://scripts/shared/procedural_buildings.gd.
 
-const Native = preload("res://game_facade/cgame_native.gd")
+const Native = preload("res://scripts/native/cgame_native.gd")
 const Fallback = preload("res://scripts/shared/procedural_buildings.gd")
 const NATIVE_CLASS := &"CgameProceduralBuildings"
 

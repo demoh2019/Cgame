@@ -1,4 +1,3 @@
-class_name CgameAnimNative
 extends RefCounted
 ## Bridge to the native `cgame_animation` engine module with GDScript fallbacks.
 ##

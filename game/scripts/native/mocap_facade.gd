@@ -1,5 +1,5 @@
-class_name CgameMocapFacade
 extends RefCounted
+const CgameAnimNative = preload("res://scripts/native/animation_native.gd")
 ## Mocap cleanup: native `CgameMocapCleanup` when available, `mocap_cleanup.gd` otherwise. Every
 ## function of the native class exists under the same name in the script, so `call_cleanup()` can
 ## forward any of them (including the rotation variants not wrapped below).

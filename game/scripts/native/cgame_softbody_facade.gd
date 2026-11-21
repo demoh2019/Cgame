@@ -1,4 +1,3 @@
-class_name CgameSoftbodyFacade
 extends RefCounted
 ## Single entry point for cloth, rope and hair simulation. Uses the native `cgame_softbody`
 ## engine module (CgameXPBDCloth, CgameXPBDRope, CgameHairStrands, ClothInstance3D) when the

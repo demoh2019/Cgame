@@ -6,18 +6,18 @@ extends RefCounted
 ## ruins_debris()    inputs: pois (points)                          outputs: debris, ground
 ## cave_rocks()      inputs: entrances (points)                     outputs: rocks
 
-const PCGGraph = preload("res://scripts/shared/pcg_graph.gd")
+const PcgGraphScript = preload("res://scripts/shared/pcg_graph.gd")
 
 
-static func _link(g: PCGGraph, a: String, ap: String, b: String, bp: String) -> void:
+static func _link(g: PcgGraphScript, a: String, ap: String, b: String, bp: String) -> void:
 	var err: String = g.link(a, ap, b, bp)
 	if err != "":
 		push_error("pcg_presets: " + err)
 
 
 ## Dense forest with a cleared corridor around the road; steep ground gets rocks instead of trees.
-static func forest_scatter(graph_seed: int = 1337) -> PCGGraph:
-	var g := PCGGraph.new()
+static func forest_scatter(graph_seed: int = 1337) -> PcgGraphScript:
+	var g := PcgGraphScript.new()
 	g.graph_seed = graph_seed
 	g.add_graph_input("in_volume", "volume", "volume")
 	g.add_graph_input("in_land", "landscape", "landscape")
@@ -57,8 +57,8 @@ static func forest_scatter(graph_seed: int = 1337) -> PCGGraph:
 
 
 ## Rubble clusters stamped onto each point of interest.
-static func ruins_debris(graph_seed: int = 4242) -> PCGGraph:
-	var g := PCGGraph.new()
+static func ruins_debris(graph_seed: int = 4242) -> PcgGraphScript:
+	var g := PcgGraphScript.new()
 	g.graph_seed = graph_seed
 	g.add_graph_input("in_pois", "pois", "points")
 	g.add_node("cluster_vol", "constant_volume", {"center": Vector3(0, 1, 0), "size": Vector3(14, 2, 14)})
@@ -88,8 +88,8 @@ static func ruins_debris(graph_seed: int = 4242) -> PCGGraph:
 
 
 ## Boulders ringing each cave mouth, with the opening itself kept clear.
-static func cave_rocks(graph_seed: int = 9001) -> PCGGraph:
-	var g := PCGGraph.new()
+static func cave_rocks(graph_seed: int = 9001) -> PcgGraphScript:
+	var g := PcgGraphScript.new()
 	g.graph_seed = graph_seed
 	g.add_graph_input("in_entrances", "entrances", "points")
 	g.add_node("ring_vol", "constant_volume", {"center": Vector3(0, 1, 0), "size": Vector3(16, 2, 16)})

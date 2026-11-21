@@ -1,5 +1,5 @@
-class_name CgameMotionMatchingFacade
 extends RefCounted
+const CgameAnimNative = preload("res://scripts/native/animation_native.gd")
 ## Motion matching database and AnimationTree node. Native `CgameMotionMatchingDatabase` and
 ## `AnimationNodeMotionMatching` when available, `motion_matching.gd` otherwise. Both databases
 ## share the same API: add_clip(), build(), search(), brute_force_search(), query_from().

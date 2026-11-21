@@ -2,12 +2,12 @@ extends RefCounted
 ## PCG graph runtime: typed pins, determinism, pruning/difference, spline sampling, subgraphs,
 ## custom nodes, incremental cache, debugger capture, partition cells and presets.
 
-const PCGGraph = preload("res://scripts/shared/pcg_graph.gd")
+const PcgGraphScript = preload("res://scripts/shared/pcg_graph.gd")
 const PCGPresets = preload("res://scripts/shared/pcg_presets.gd")
 
 
 func _pts_with_density(positions: PackedVector3Array, dens: Array) -> Dictionary:
-	var d: Dictionary = PCGGraph.make_points(positions)
+	var d: Dictionary = PcgGraphScript.make_points(positions)
 	var attrs: Dictionary = d["attrs"]
 	var arr: PackedFloat32Array = attrs["density"]
 	for i in dens.size():
@@ -27,11 +27,11 @@ func _origins(mesh_data: Dictionary) -> PackedVector3Array:
 
 
 func _landscape() -> Dictionary:
-	return PCGGraph.make_landscape(func(x: float, z: float) -> float: return sin(x * 0.05) * 3.0 + cos(z * 0.07) * 2.0)
+	return PcgGraphScript.make_landscape(func(x: float, z: float) -> float: return sin(x * 0.05) * 3.0 + cos(z * 0.07) * 2.0)
 
 
-func _sampling_graph(prune: bool) -> PCGGraph:
-	var g := PCGGraph.new()
+func _sampling_graph(prune: bool) -> PcgGraphScript:
+	var g := PcgGraphScript.new()
 	g.graph_seed = 77
 	g.add_graph_input("in_v", "volume", "volume")
 	g.add_node("sample", "surface_sampler", {"spacing": 3.0, "jitter": 0.8})
@@ -60,7 +60,7 @@ func _keyset(p: Dictionary) -> Dictionary:
 
 func run(t) -> void:
 	t.current = "typed pins"
-	var g := PCGGraph.new()
+	var g := PcgGraphScript.new()
 	g.add_graph_input("in_v", "volume", "volume")
 	g.add_node("sample", "surface_sampler")
 	g.add_node("filter", "density_filter")
@@ -75,28 +75,28 @@ func run(t) -> void:
 	t.check(g.validate().size() > 0, "validate reports an injected incompatible edge")
 	t.eq(g.execute({}).size(), 0, "invalid graphs do not execute")
 	t.check(g.last_errors.size() > 0, "errors are kept in last_errors")
-	var cyc := PCGGraph.new()
+	var cyc := PcgGraphScript.new()
 	cyc.add_node("a", "density_filter")
 	cyc.add_node("b", "density_filter")
 	cyc.link("a", "out", "b", "in")
 	cyc.link("b", "out", "a", "in")
 	t.check(cyc.validate().size() > 0, "cycles are validation errors")
-	t.check(PCGGraph.pins_compatible("any", "points") and not PCGGraph.pins_compatible("spline", "points"), "any is a wildcard")
+	t.check(PcgGraphScript.pins_compatible("any", "points") and not PcgGraphScript.pins_compatible("spline", "points"), "any is a wildcard")
 
 	t.current = "determinism"
-	var vol: Dictionary = PCGGraph.make_volume(AABB(Vector3(0, 0, 0), Vector3(60, 10, 60)))
+	var vol: Dictionary = PcgGraphScript.make_volume(AABB(Vector3(0, 0, 0), Vector3(60, 10, 60)))
 	var ga := _sampling_graph(true)
 	var gb := _sampling_graph(true)
 	var oa: Dictionary = ga.execute({"volume": vol})
 	var ob: Dictionary = gb.execute({"volume": vol})
-	t.check(PCGGraph.point_count(oa["pts"]) > 50, "sampler produces points")
+	t.check(PcgGraphScript.point_count(oa["pts"]) > 50, "sampler produces points")
 	t.eq(hash(oa), hash(ob), "same seed and inputs give identical output")
 	gb.graph_seed = 78
 	var oc: Dictionary = gb.execute({"volume": vol})
 	t.check(hash(oa) != hash(oc), "a different seed changes the output")
 
 	t.current = "self pruning"
-	var gp := PCGGraph.new()
+	var gp := PcgGraphScript.new()
 	gp.graph_seed = 5
 	gp.add_graph_input("v", "volume", "volume")
 	gp.add_node("s", "surface_sampler", {"spacing": 1.0, "jitter": 1.0})
@@ -107,7 +107,7 @@ func run(t) -> void:
 	gp.link("s", "out", "p", "in")
 	gp.link("p", "out", "o", "in")
 	gp.link("s", "out", "o0", "in")
-	var po: Dictionary = gp.execute({"volume": PCGGraph.make_volume(AABB(Vector3.ZERO, Vector3(30, 5, 30)))})
+	var po: Dictionary = gp.execute({"volume": PcgGraphScript.make_volume(AABB(Vector3.ZERO, Vector3(30, 5, 30)))})
 	var pruned: Dictionary = po["pruned"]
 	var pp: PackedVector3Array = pruned["positions"]
 	var min_d: float = 1.0e9
@@ -115,10 +115,10 @@ func run(t) -> void:
 		for j in range(i + 1, pp.size()):
 			min_d = minf(min_d, pp[i].distance_to(pp[j]))
 	t.check(min_d >= 2.0 - 0.0001, "survivors are at least min_distance apart (%f)" % min_d)
-	t.check(PCGGraph.point_count(pruned) < PCGGraph.point_count(po["raw"]) and pp.size() > 10, "pruning removes some but not all points")
+	t.check(PcgGraphScript.point_count(pruned) < PcgGraphScript.point_count(po["raw"]) and pp.size() > 10, "pruning removes some but not all points")
 
 	t.current = "difference"
-	var gd := PCGGraph.new()
+	var gd := PcgGraphScript.new()
 	gd.add_graph_input("a", "a", "points")
 	gd.add_graph_input("b", "b", "points")
 	gd.add_node("d", "difference", {"distance": 2.0, "planar": true})
@@ -131,7 +131,7 @@ func run(t) -> void:
 		for z in range(0, 11):
 			grid.append(Vector3(x, 0, z))
 	var cut := PackedVector3Array([Vector3(5, 3, 5), Vector3(0, 0, 0)])
-	var dr: Dictionary = gd.execute({"a": PCGGraph.make_points(grid), "b": PCGGraph.make_points(cut)})
+	var dr: Dictionary = gd.execute({"a": PcgGraphScript.make_points(grid), "b": PcgGraphScript.make_points(cut)})
 	var res_pts: PackedVector3Array = (dr["res"] as Dictionary)["positions"]
 	var ok_far: bool = true
 	for p in res_pts:
@@ -143,7 +143,7 @@ func run(t) -> void:
 	t.check(not res_pts.has(Vector3(5, 0, 5)) and res_pts.has(Vector3(10, 0, 10)), "centre removed, far corner kept")
 
 	t.current = "spline sampler"
-	var gs := PCGGraph.new()
+	var gs := PcgGraphScript.new()
 	gs.add_graph_input("sp", "spline", "spline")
 	gs.add_node("along", "spline_sampler", {"mode": "along", "spacing": 5.0})
 	gs.add_node("off", "spline_sampler", {"mode": "along", "spacing": 5.0, "lateral_offset": 3.0})
@@ -156,7 +156,7 @@ func run(t) -> void:
 	gs.link("along", "out", "o1", "in")
 	gs.link("off", "out", "o2", "in")
 	gs.link("around", "out", "o3", "in")
-	var so: Dictionary = gs.execute({"spline": PCGGraph.make_spline(PackedVector3Array([Vector3(0, 0, 0), Vector3(100, 0, 0)]))})
+	var so: Dictionary = gs.execute({"spline": PcgGraphScript.make_spline(PackedVector3Array([Vector3(0, 0, 0), Vector3(100, 0, 0)]))})
 	var along: PackedVector3Array = (so["along"] as Dictionary)["positions"]
 	t.eq(along.size(), 21, "100 m at 5 m spacing gives 21 points")
 	var spacing_ok: bool = true
@@ -172,11 +172,11 @@ func run(t) -> void:
 		if absf(p.z) < 2.0 - 0.001 or absf(p.z) > 6.0 + 0.001:
 			band_ok = false
 	t.check(band_ok, "around mode keeps points inside the band on both sides (%d)" % around.size())
-	var bent: Dictionary = gs.execute({"spline": PCGGraph.make_spline(PackedVector3Array([Vector3(0, 0, 0), Vector3(10, 0, 0), Vector3(10, 0, 10)]))})
+	var bent: Dictionary = gs.execute({"spline": PcgGraphScript.make_spline(PackedVector3Array([Vector3(0, 0, 0), Vector3(10, 0, 0), Vector3(10, 0, 10)]))})
 	t.eq(((bent["along"] as Dictionary)["positions"] as PackedVector3Array).size(), 5, "a bent 20 m path at 5 m gives 5 points")
 
 	t.current = "subgraph"
-	var sub := PCGGraph.new()
+	var sub := PcgGraphScript.new()
 	sub.add_graph_input("i", "in", "points")
 	sub.add_node("f", "density_filter", {"min": 0.5})
 	sub.add_node("x", "transform_points", {"scale_min": 2.0, "scale_max": 2.0, "rot_min_deg": 0.0, "rot_max_deg": 0.0})
@@ -184,7 +184,7 @@ func run(t) -> void:
 	sub.link("i", "out", "f", "in")
 	sub.link("f", "out", "x", "in")
 	sub.link("x", "out", "o", "in")
-	var par := PCGGraph.new()
+	var par := PcgGraphScript.new()
 	par.add_graph_input("ia", "a", "points")
 	par.add_graph_input("ib", "b", "points")
 	par.add_node("s1", "subgraph", {"graph": sub})
@@ -199,8 +199,8 @@ func run(t) -> void:
 	var pa: Dictionary = _pts_with_density(PackedVector3Array([Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(2, 0, 0), Vector3(3, 0, 0)]), [0.2, 0.6, 0.9, 0.4])
 	var pb: Dictionary = _pts_with_density(PackedVector3Array([Vector3(0, 0, 5), Vector3(1, 0, 5)]), [0.7, 0.1])
 	var sr: Dictionary = par.execute({"a": pa, "b": pb})
-	t.eq(PCGGraph.point_count(sr["ra"]), 2, "first instance filtered with its own inputs")
-	t.eq(PCGGraph.point_count(sr["rb"]), 1, "second instance filtered independently")
+	t.eq(PcgGraphScript.point_count(sr["ra"]), 2, "first instance filtered with its own inputs")
+	t.eq(PcgGraphScript.point_count(sr["rb"]), 1, "second instance filtered independently")
 	var sscale: PackedFloat32Array = ((sr["ra"] as Dictionary)["attrs"] as Dictionary)["scale"]
 	t.near(sscale[0], 2.0, 0.0001, "subgraph nodes apply their params")
 	t.check(par.executed_nodes.has("s1/f") and par.executed_nodes.has("s2/x"), "inner nodes are reported with a prefix")
@@ -208,7 +208,7 @@ func run(t) -> void:
 	t.eq(par.executed_nodes.size(), 0, "unchanged subgraph run is fully cached")
 	var pb2: Dictionary = _pts_with_density(PackedVector3Array([Vector3(0, 0, 5), Vector3(1, 0, 5)]), [0.9, 0.9])
 	var sr2: Dictionary = par.execute({"a": pa, "b": pb2})
-	t.eq(PCGGraph.point_count(sr2["rb"]), 2, "changed input flows through the subgraph")
+	t.eq(PcgGraphScript.point_count(sr2["rb"]), 2, "changed input flows through the subgraph")
 	var s1_ran: bool = false
 	for n in par.executed_nodes:
 		if n.begins_with("s1"):
@@ -216,7 +216,7 @@ func run(t) -> void:
 	t.check(not s1_ran, "the untouched subgraph instance stayed cached")
 
 	t.current = "custom nodes"
-	var gc := PCGGraph.new()
+	var gc := PcgGraphScript.new()
 	gc.register_node("boost_density", {"in": "points"}, {"out": "points", "count_only": "points"}, func(inputs: Dictionary, params: Dictionary) -> Dictionary:
 		var src: Dictionary = inputs["in"]
 		var attrs: Dictionary = (src["attrs"] as Dictionary).duplicate()
@@ -233,8 +233,8 @@ func run(t) -> void:
 	t.check(gc.link("b", "count_only", "o", "in") == "", "second custom output is linkable")
 	t.check(gc.link("i", "out", "b", "other") != "", "custom node rejects unknown pins")
 	var cr: Dictionary = gc.execute({"p": _pts_with_density(PackedVector3Array([Vector3.ZERO, Vector3.ONE]), [0.25, 0.5])})
-	t.eq(PCGGraph.point_count(cr["res"]), 2, "custom output wired through")
-	var gc2 := PCGGraph.new()
+	t.eq(PcgGraphScript.point_count(cr["res"]), 2, "custom output wired through")
+	var gc2 := PcgGraphScript.new()
 	gc2.register_node("boost_density", {"in": "points"}, {"out": "points"}, func(inputs: Dictionary) -> Dictionary:
 		var src: Dictionary = inputs["in"]
 		var attrs: Dictionary = (src["attrs"] as Dictionary).duplicate()
@@ -247,10 +247,10 @@ func run(t) -> void:
 	gc2.add_graph_output("o", "res", "points")
 	gc2.link("i", "out", "b", "in")
 	gc2.link("b", "out", "o", "in")
-	var cr2: Dictionary = gc2.execute({"p": PCGGraph.make_points(PackedVector3Array([Vector3.ZERO]))})
+	var cr2: Dictionary = gc2.execute({"p": PcgGraphScript.make_points(PackedVector3Array([Vector3.ZERO]))})
 	var cd: PackedFloat32Array = ((cr2["res"] as Dictionary)["attrs"] as Dictionary)["density"]
 	t.near(cd[0], 0.9, 0.0001, "one-argument execute callables work")
-	var unk := PCGGraph.new()
+	var unk := PcgGraphScript.new()
 	unk.add_node("x", "no_such_node")
 	t.check(unk.validate().size() > 0, "unknown node types are validation errors")
 
@@ -280,7 +280,7 @@ func run(t) -> void:
 	gi.set_param("sample", "spacing", 4.0)
 	gi.execute({"volume": vol})
 	t.check(gi.executed_nodes.has("sample") and gi.executed_nodes.has("spawn") and not gi.executed_nodes.has("in_v"), "upstream param change re-runs the chain but not the input")
-	gi.execute({"volume": PCGGraph.make_volume(AABB(Vector3.ZERO, Vector3(40, 10, 40)))})
+	gi.execute({"volume": PcgGraphScript.make_volume(AABB(Vector3.ZERO, Vector3(40, 10, 40)))})
 	t.check(gi.executed_nodes.has("sample"), "changed graph input invalidates dependants")
 
 	t.current = "debug capture"
@@ -339,9 +339,9 @@ func run(t) -> void:
 
 	t.current = "presets"
 	var land: Dictionary = _landscape()
-	var big: Dictionary = PCGGraph.make_volume(AABB(Vector3(-60, -10, -60), Vector3(120, 40, 120)))
-	var road: Dictionary = PCGGraph.make_spline(PackedVector3Array([Vector3(-60, 0, 0), Vector3(0, 0, 0), Vector3(60, 0, 0)]))
-	var forest: PCGGraph = PCGPresets.forest_scatter()
+	var big: Dictionary = PcgGraphScript.make_volume(AABB(Vector3(-60, -10, -60), Vector3(120, 40, 120)))
+	var road: Dictionary = PcgGraphScript.make_spline(PackedVector3Array([Vector3(-60, 0, 0), Vector3(0, 0, 0), Vector3(60, 0, 0)]))
+	var forest: PcgGraphScript = PCGPresets.forest_scatter()
 	t.eq(forest.validate().size(), 0, "forest preset validates")
 	var fo: Dictionary = forest.execute({"volume": big, "landscape": land, "road": road})
 	var tree_pts: PackedVector3Array = _origins(fo["trees"])
@@ -353,16 +353,16 @@ func run(t) -> void:
 			if Vector2(p.x - r.x, p.z - r.z).length() < 7.0 - 0.001:
 				clear_ok = false
 	t.check(clear_ok, "no tree stands within the road clearing")
-	t.eq(PCGGraph.point_count(fo["floor"]), tree_pts.size(), "forest floor layer weights match tree count")
-	var ruins: PCGGraph = PCGPresets.ruins_debris()
+	t.eq(PcgGraphScript.point_count(fo["floor"]), tree_pts.size(), "forest floor layer weights match tree count")
+	var ruins: PcgGraphScript = PCGPresets.ruins_debris()
 	t.eq(ruins.validate().size(), 0, "ruins preset validates")
-	var pois := PCGGraph.make_points(PackedVector3Array([Vector3(0, 0, 0), Vector3(40, 2, 10), Vector3(-30, 1, 25)]))
+	var pois := PcgGraphScript.make_points(PackedVector3Array([Vector3(0, 0, 0), Vector3(40, 2, 10), Vector3(-30, 1, 25)]))
 	var ro: Dictionary = ruins.execute({"pois": pois})
-	t.check(PCGGraph.point_count(ro["debris"]) > 6, "ruins scatter debris around points of interest")
-	t.check(PCGGraph.point_count(ro["ground"]) == PCGGraph.point_count(ro["debris"]), "rubble ground layer follows debris")
-	var cave: PCGGraph = PCGPresets.cave_rocks()
+	t.check(PcgGraphScript.point_count(ro["debris"]) > 6, "ruins scatter debris around points of interest")
+	t.check(PcgGraphScript.point_count(ro["ground"]) == PcgGraphScript.point_count(ro["debris"]), "rubble ground layer follows debris")
+	var cave: PcgGraphScript = PCGPresets.cave_rocks()
 	t.eq(cave.validate().size(), 0, "cave preset validates")
-	var ents := PCGGraph.make_points(PackedVector3Array([Vector3(10, 0, 10), Vector3(-20, 3, 5)]))
+	var ents := PcgGraphScript.make_points(PackedVector3Array([Vector3(10, 0, 10), Vector3(-20, 3, 5)]))
 	var co: Dictionary = cave.execute({"entrances": ents})
 	var rocks: PackedVector3Array = _origins(co["rocks"])
 	t.check(rocks.size() > 4, "cave entrances get rocks")

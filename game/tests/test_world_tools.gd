@@ -4,7 +4,7 @@ extends RefCounted
 const SplineTool = preload("res://addons/cgame_world_tools/spline_tool.gd")
 const FoliagePainter = preload("res://addons/cgame_world_tools/foliage_painter.gd")
 const TerrainEditLayers = preload("res://scripts/shared/terrain_edit_layers.gd")
-const PCGGraph = preload("res://scripts/shared/pcg_graph.gd")
+const PcgGraphScript = preload("res://scripts/shared/pcg_graph.gd")
 
 const N: int = 64
 
@@ -36,8 +36,8 @@ func _min_dist(p: PackedVector3Array) -> float:
 	return best
 
 
-func _pcg() -> PCGGraph:
-	var g := PCGGraph.new()
+func _pcg() -> PcgGraphScript:
+	var g := PcgGraphScript.new()
 	g.graph_seed = 5
 	g.add_graph_input("in_v", "volume", "volume")
 	g.add_node("sample", "surface_sampler", {"spacing": 3.0, "jitter": 0.6})
@@ -294,14 +294,14 @@ func _foliage_paint(t) -> void:
 
 func _foliage_pcg(t) -> void:
 	t.current = "pcg merge, mask and overrides"
-	var g: PCGGraph = _pcg()
-	var inputs: Dictionary = {"volume": PCGGraph.make_volume(AABB(Vector3(-20, 0, -20), Vector3(40, 10, 40)))}
+	var g: PcgGraphScript = _pcg()
+	var inputs: Dictionary = {"volume": PcgGraphScript.make_volume(AABB(Vector3(-20, 0, -20), Vector3(40, 10, 40)))}
 	var fp := FoliagePainter.new()
 	var n: int = fp.regenerate_from_pcg(g, inputs, "tree")
 	t.check(n > 50, "graph produced procedural instances (%d)" % n)
 	t.eq(fp.count("tree"), n, "all instances in the layer")
 	t.eq(fp.procedural_count("tree"), n, "all flagged procedural")
-	t.eq(fp.regenerate_from_pcg(PCGGraph.new(), {}, "tree"), -1, "non-point output rejected")
+	t.eq(fp.regenerate_from_pcg(PcgGraphScript.new(), {}, "tree"), -1, "non-point output rejected")
 
 	var id: int = fp.instance_id("tree", 3)
 	var far := Vector3(100, 0, 100)

@@ -2,7 +2,7 @@ extends RefCounted
 ## Facade for CgameHydraulicErosion (native) with GDScript fallback.
 ## Same API as res://scripts/shared/hydraulic_erosion.gd.
 
-const Native = preload("res://game_facade/cgame_native.gd")
+const Native = preload("res://scripts/native/cgame_native.gd")
 const Fallback = preload("res://scripts/shared/hydraulic_erosion.gd")
 const NATIVE_CLASS := &"CgameHydraulicErosion"
 

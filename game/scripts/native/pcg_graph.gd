@@ -6,7 +6,7 @@ extends RefCounted
 ## GDScript res://scripts/shared/pcg_graph.gd. Both use the same method names and data
 ## model, so graphs are built and executed by duck typing:
 ##
-##     var g = PCGGraph.create()
+##     var g = PcgGraphScript.create()
 ##     g.graph_seed = 42
 ##     g.add_graph_input("in_v", "volume", "volume")
 ##
@@ -14,7 +14,7 @@ extends RefCounted
 ## helpers below (`executed_nodes(g)`, `cache_hits(g)`, ...) when code must run on both.
 ## Custom nodes registered with `register_node()` work in both implementations.
 
-const Native = preload("res://game_facade/cgame_native.gd")
+const Native = preload("res://scripts/native/cgame_native.gd")
 const Fallback = preload("res://scripts/shared/pcg_graph.gd")
 const Presets = preload("res://scripts/shared/pcg_presets.gd")
 const NATIVE_CLASS := &"CgamePCGGraph"

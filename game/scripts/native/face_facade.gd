@@ -1,5 +1,5 @@
-class_name CgameFaceFacade
 extends RefCounted
+const CgameAnimNative = preload("res://scripts/native/animation_native.gd")
 ## Lip sync and facial animation: native `CgameLipSync` / `CgameFacialAnimation` when available,
 ## `lip_sync.gd` / `facial_animation.gd` otherwise.
 

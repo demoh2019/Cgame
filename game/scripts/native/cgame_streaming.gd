@@ -1,4 +1,3 @@
-class_name CgameStreaming
 extends RefCounted
 ## Facade over the open-world streaming / rendering-data libraries.
 ##

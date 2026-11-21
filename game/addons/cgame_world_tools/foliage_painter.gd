@@ -5,7 +5,7 @@ extends RefCounted
 ## Original GDScript implementation. Concepts follow the publicly documented
 ## workflows of Unreal Engine's Foliage Mode / PCG "edit a generated instance" and
 ## Terrain3D's instancer; Poisson-disk spacing uses plain dart throwing (Cook 1986 /
-## Bridson 2007 are algorithms, no code copied). The 64-bit hash is PCGGraph.mix64
+## Bridson 2007 are algorithms, no code copied). The 64-bit hash is PcgGraphScript.mix64
 ## (SplitMix64 finaliser, CC0 / public domain).
 ##
 ## Instances live per foliage type in `layers[type]`:
@@ -15,7 +15,7 @@ extends RefCounted
 ## instances keep a stable id (the PCG point seed); edit_instance() and erase() store an
 ## override keyed by that id, so the edit survives every regeneration.
 
-const PCGGraph = preload("res://scripts/shared/pcg_graph.gd")
+const PcgGraphScript = preload("res://scripts/shared/pcg_graph.gd")
 
 const ID_MANUAL_BASE: int = 1 << 40
 const MAX_UNDO: int = 100
@@ -432,7 +432,7 @@ func revert_instance(type: String, id: int) -> bool:
 ## density mask, then re-applies overrides by stable id (PCG point seed). Manually
 ## painted instances are untouched. Returns the number of procedural instances, or -1
 ## when the graph did not yield point data.
-func regenerate_from_pcg(graph: PCGGraph, inputs: Dictionary, type: String, output: String = "") -> int:
+func regenerate_from_pcg(graph: PcgGraphScript, inputs: Dictionary, type: String, output: String = "") -> int:
 	var result: Dictionary = graph.execute(inputs)
 	var data: Variant = null
 	if output != "":
@@ -442,7 +442,7 @@ func regenerate_from_pcg(graph: PCGGraph, inputs: Dictionary, type: String, outp
 	if not (data is Dictionary):
 		return -1
 	var d: Dictionary = data
-	if str(d.get("type", "")) != PCGGraph.T_POINTS:
+	if str(d.get("type", "")) != PcgGraphScript.T_POINTS:
 		return -1
 	var pos: PackedVector3Array = d["positions"]
 	var attrs: Dictionary = d["attrs"]
@@ -454,7 +454,7 @@ func regenerate_from_pcg(graph: PCGGraph, inputs: Dictionary, type: String, outp
 	for i in pos.size():
 		var id: int = sd[i]
 		while seen.has(id) or id >= ID_MANUAL_BASE and id < ID_MANUAL_BASE * 2:
-			id = PCGGraph.mix64(id + 1)
+			id = PcgGraphScript.mix64(id + 1)
 		seen[id] = true
 		ids.append(id)
 	_push(false)
@@ -493,7 +493,7 @@ func _rebuild_procedural(type: String) -> void:
 		if not _passes_rules(type, p.x, p.y, p.z):
 			continue
 		var m: float = mask_at(type, p.x, p.z)
-		if m < 1.0 and PCGGraph.rand01(PCGGraph.mix64(id ^ 0x5bd1e995)) >= m:
+		if m < 1.0 and PcgGraphScript.rand01(PcgGraphScript.mix64(id ^ 0x5bd1e995)) >= m:
 			continue
 		_add_instance(l, p, sc[i], rt[i], id, true)
 

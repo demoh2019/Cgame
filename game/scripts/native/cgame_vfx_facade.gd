@@ -1,4 +1,3 @@
-class_name CgameVfxFacade
 extends RefCounted
 ## Single entry point for the VFX graph (Niagara-style emitter graphs, presets, budget, event
 ## bindings). Uses the native `cgame_vfx` engine module (VFXGraphAsset, VFXGraphInstance3D,

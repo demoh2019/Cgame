@@ -1,4 +1,3 @@
-class_name CgameFluidsFacade
 extends RefCounted
 ## Single entry point for the fluid solvers. Uses the native C++ classes of the
 ## `cgame_fluids` engine module (CgameSPHFluid, CgameFLIPFluid, CgameSmokeSim,

@@ -1,5 +1,5 @@
-class_name CgameRigFacade
 extends RefCounted
+const CgameAnimNative = preload("res://scripts/native/animation_native.gd")
 ## IK helpers, retargeting and skeleton modifiers. Native classes when available, `rig_ik.gd` and
 ## `rig_retarget.gd` otherwise.
 
