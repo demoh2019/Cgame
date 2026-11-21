@@ -71,7 +71,7 @@ static bool score_candidate(const Vector3 &p_point, int p_index,
 		bool p_use_threat, bool p_horizontal_only, double p_min_distance,
 		double p_max_distance, double p_desired_distance,
 		double p_distance_weight, double p_safety_weight,
-		double p_min_threat_distance, QueryHit &r_hit) {
+		double p_min_threat_distance, double p_candidate_bonus, QueryHit &r_hit) {
 	if (!p_point.is_finite()) {
 		return false;
 	}
@@ -113,7 +113,7 @@ static bool score_candidate(const Vector3 &p_point, int p_index,
 	const double scale = MAX(p_max_distance, 1.0);
 	const double distance_score = 1.0 - MIN(1.0, Math::abs(distance - p_desired_distance) / scale);
 	const double safety_score = p_use_threat ? MIN(1.0, threat_distance / scale) : 0.0;
-	const double score = p_distance_weight * distance_score + p_safety_weight * safety_score;
+	const double score = p_distance_weight * distance_score + p_safety_weight * safety_score + p_candidate_bonus;
 	if (!Math::is_finite(score)) {
 		return false;
 	}
@@ -130,6 +130,8 @@ static bool score_candidate(const Vector3 &p_point, int p_index,
 void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_candidates", "candidates"), &EnvironmentQuery3D::set_candidates);
 	ClassDB::bind_method(D_METHOD("get_candidates"), &EnvironmentQuery3D::get_candidates);
+	ClassDB::bind_method(D_METHOD("set_candidate_bonuses", "bonuses"), &EnvironmentQuery3D::set_candidate_bonuses);
+	ClassDB::bind_method(D_METHOD("get_candidate_bonuses"), &EnvironmentQuery3D::get_candidate_bonuses);
 	ClassDB::bind_method(D_METHOD("set_origin", "origin"), &EnvironmentQuery3D::set_origin);
 	ClassDB::bind_method(D_METHOD("get_origin"), &EnvironmentQuery3D::get_origin);
 	ClassDB::bind_method(D_METHOD("set_threat_position", "position"), &EnvironmentQuery3D::set_threat_position);
@@ -166,6 +168,7 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_grid", "center", "half_extents", "spacing", "max_points"), &EnvironmentQuery3D::sample_grid, DEFVAL(4096));
 
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "candidates"), "set_candidates", "get_candidates");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_FLOAT32_ARRAY, "candidate_bonuses"), "set_candidate_bonuses", "get_candidate_bonuses");
 	ADD_GROUP("Distance Filter", "");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "origin"), "set_origin", "get_origin");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "min_distance", PROPERTY_HINT_RANGE, "0,10000,0.1,or_greater,suffix:m"), "set_min_distance", "get_min_distance");
@@ -188,6 +191,22 @@ void EnvironmentQuery3D::_bind_methods() {
 
 void EnvironmentQuery3D::set_candidates(const PackedVector3Array &p_candidates) {
 	candidates = p_candidates;
+	// Offsets are bound to source indices. A different-size set must not reuse
+	// offsets from a prior candidate list.
+	if (!candidate_bonuses.is_empty() && candidate_bonuses.size() != candidates.size()) {
+		candidate_bonuses.clear();
+	}
+	emit_changed();
+}
+
+void EnvironmentQuery3D::set_candidate_bonuses(const PackedFloat32Array &p_bonuses) {
+	ERR_FAIL_COND_MSG(!p_bonuses.is_empty() && p_bonuses.size() != candidates.size(),
+			"candidate_bonuses must be empty or match the number of candidates.");
+	for (int i = 0; i < p_bonuses.size(); i++) {
+		ERR_FAIL_COND_MSG(!Math::is_finite(p_bonuses[i]) || Math::abs(p_bonuses[i]) > 1.0f,
+				"candidate_bonuses must contain finite values between -1 and 1.");
+	}
+	candidate_bonuses = p_bonuses;
 	emit_changed();
 }
 
@@ -281,7 +300,7 @@ Array EnvironmentQuery3D::query() const {
 					exclusion_positions, min_exclusion_distance,
 					use_threat, horizontal_only, min_distance, max_distance,
 					desired_distance, distance_weight, safety_weight,
-					min_threat_distance, hit)) {
+					min_threat_distance, candidate_bonuses.is_empty() ? 0.0 : candidate_bonuses[i], hit)) {
 			hits.push_back(hit);
 		}
 	}
@@ -331,7 +350,7 @@ PackedVector3Array EnvironmentQuery3D::query_top_positions(int p_count) const {
 					exclusion_positions, min_exclusion_distance,
 					use_threat, horizontal_only, min_distance, max_distance,
 					desired_distance, distance_weight, safety_weight,
-					min_threat_distance, hit)) {
+					min_threat_distance, candidate_bonuses.is_empty() ? 0.0 : candidate_bonuses[i], hit)) {
 			continue;
 		}
 		if (best.size() == limit && !better(hit, best[best.size() - 1])) {
@@ -374,7 +393,7 @@ PackedVector3Array EnvironmentQuery3D::query_spread_positions(int p_count, doubl
 					exclusion_positions, min_exclusion_distance,
 					use_threat, horizontal_only, min_distance, max_distance,
 					desired_distance, distance_weight, safety_weight,
-					min_threat_distance, hit)) {
+					min_threat_distance, candidate_bonuses.is_empty() ? 0.0 : candidate_bonuses[i], hit)) {
 			hits.push_back(hit);
 		}
 	}

@@ -22,27 +22,38 @@ const QUERY_MAX_DISTANCE := 64.0
 ## score as this deterministic stock-Godot fallback. No client-supplied
 ## candidate coordinates or RPCs enter this authoritative selection.
 static func rank_sites(candidates: Array[Vector2], threats: Array[Vector2],
-		center: Vector2, prefer_native: bool = true) -> Array[Vector2]:
+		center: Vector2, prefer_native: bool = true,
+		candidate_bonuses: Array[float] = []) -> Array[Vector2]:
 	var ranked: Array[Vector2] = []
 	if not center.is_finite():
 		return ranked
-	for point in candidates:
+	var use_bonuses: bool = candidate_bonuses.size() == candidates.size() and not candidate_bonuses.is_empty()
+	if use_bonuses:
+		for bonus in candidate_bonuses:
+			if not is_finite(bonus) or absf(bonus) > 1.0:
+				use_bonuses = false
+				break
+	var filtered_bonuses := PackedFloat32Array()
+	for index in candidates.size():
+		var point: Vector2 = candidates[index]
 		if point.is_finite() and point.distance_to(center) <= QUERY_MAX_DISTANCE:
 			ranked.append(point)
-	if ranked.is_empty() or threats.is_empty():
+			if use_bonuses:
+				filtered_bonuses.append(candidate_bonuses[index])
+	if ranked.is_empty():
 		return ranked
 	var valid_threats: Array[Vector2] = []
 	for threat in threats:
 		if threat.is_finite():
 			valid_threats.append(threat)
-	if valid_threats.is_empty():
+	if valid_threats.is_empty() and not use_bonuses:
 		return ranked
 
-	# Cgame's multi-threat context is a native, capped Environment Query
-	# resource. The same ordering is available without the custom module.
+	# Native and stock-Godot paths must evaluate the same aligned bonuses.
 	if prefer_native and valid_threats.size() <= MAX_THREAT_CONTEXTS and ClassDB.class_exists("EnvironmentQuery3D"):
 		var query: Object = ClassDB.instantiate("EnvironmentQuery3D")
-		if query != null and query.has_method("set_threat_positions"):
+		if query != null and query.has_method("set_threat_positions") \
+				and (not use_bonuses or query.has_method("set_candidate_bonuses")):
 			var positions := PackedVector3Array()
 			for point in ranked:
 				positions.append(Vector3(point.x, 0.0, point.y))
@@ -50,12 +61,14 @@ static func rank_sites(candidates: Array[Vector2], threats: Array[Vector2],
 			for threat in valid_threats:
 				contexts.append(Vector3(threat.x, 0.0, threat.y))
 			query.set("candidates", positions)
+			if use_bonuses:
+				query.set("candidate_bonuses", filtered_bonuses)
 			query.set("origin", Vector3(center.x, 0.0, center.y))
 			query.set("horizontal_only", true)
 			query.set("max_distance", QUERY_MAX_DISTANCE)
 			query.set("distance_weight", 0.0)
 			query.set("safety_weight", 1.0)
-			query.set("use_threat", true)
+			query.set("use_threat", not valid_threats.is_empty())
 			query.set("threat_positions", contexts)
 			var native_positions: PackedVector3Array = query.call("query_positions")
 			var native_result: Array[Vector2] = []
@@ -64,16 +77,18 @@ static func rank_sites(candidates: Array[Vector2], threats: Array[Vector2],
 			if native_result.size() == ranked.size():
 				return native_result
 
-	# Stable sort on the same score as the native EQS resource:
-	# min(nearest-threat-distance / 64, 1), ties by candidate index.
 	var scored: Array[Dictionary] = []
 	for index in ranked.size():
 		var point: Vector2 = ranked[index]
-		var nearest: float = INF
-		for threat in valid_threats:
-			nearest = minf(nearest, point.distance_to(threat))
-		scored.append({"point": point, "index": index,
-			"score": minf(1.0, nearest / QUERY_MAX_DISTANCE)})
+		var score := 0.0
+		if not valid_threats.is_empty():
+			var nearest: float = INF
+			for threat in valid_threats:
+				nearest = minf(nearest, point.distance_to(threat))
+			score = minf(1.0, nearest / QUERY_MAX_DISTANCE)
+		if use_bonuses:
+			score += float(filtered_bonuses[index])
+		scored.append({"point": point, "index": index, "score": score})
 	scored.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		if float(a["score"]) == float(b["score"]):
 			return int(a["index"]) < int(b["index"])
@@ -90,16 +105,27 @@ static func rank_sites(candidates: Array[Vector2], threats: Array[Vector2],
 static func spread_sites(candidates: Array[Vector2], threats: Array[Vector2],
 		center: Vector2, count: int, min_separation: float,
 		prefer_native: bool = true, exclusions: Array[Vector2] = [],
-		min_exclusion_distance: float = 0.0) -> Array[Vector2]:
+		min_exclusion_distance: float = 0.0,
+		candidate_bonuses: Array[float] = []) -> Array[Vector2]:
 	var selected: Array[Vector2] = []
 	if not center.is_finite() or count <= 0 or count > 64 \
 			or not is_finite(min_separation) or min_separation < 0.0 \
 			or not is_finite(min_exclusion_distance) or min_exclusion_distance < 0.0:
 		return selected
+	var use_bonuses: bool = candidate_bonuses.size() == candidates.size() and not candidate_bonuses.is_empty()
+	if use_bonuses:
+		for bonus in candidate_bonuses:
+			if not is_finite(bonus) or absf(bonus) > 1.0:
+				use_bonuses = false
+				break
 	var vetted: Array[Vector2] = []
-	for point in candidates:
+	var vetted_bonuses: Array[float] = []
+	for index in candidates.size():
+		var point: Vector2 = candidates[index]
 		if point.is_finite() and point.distance_to(center) <= QUERY_MAX_DISTANCE:
 			vetted.append(point)
+			if use_bonuses:
+				vetted_bonuses.append(candidate_bonuses[index])
 	if vetted.is_empty():
 		return selected
 
@@ -112,14 +138,14 @@ static func spread_sites(candidates: Array[Vector2], threats: Array[Vector2],
 		if blocker.is_finite():
 			valid_exclusions.append(blocker)
 
-	# On native binaries we score and choose separated sites in one query,
-	# scanning beyond near-duplicate top candidates rather than truncating first.
-	if prefer_native and not valid_threats.is_empty() \
+	# Native score, occupancy, and spacing share the same candidate bonus array.
+	if prefer_native and (not valid_threats.is_empty() or use_bonuses) \
 			and valid_threats.size() <= MAX_THREAT_CONTEXTS \
 			and ClassDB.class_exists("EnvironmentQuery3D"):
 		var query: Object = ClassDB.instantiate("EnvironmentQuery3D")
 		if query != null and query.has_method("query_spread_positions") \
 				and query.has_method("set_threat_positions") \
+				and (not use_bonuses or query.has_method("set_candidate_bonuses")) \
 				and (valid_exclusions.is_empty() or (
 					valid_exclusions.size() <= MAX_EXCLUSION_CONTEXTS
 					and query.has_method("set_exclusion_positions"))):
@@ -130,12 +156,14 @@ static func spread_sites(candidates: Array[Vector2], threats: Array[Vector2],
 			for threat in valid_threats:
 				contexts.append(Vector3(threat.x, 0.0, threat.y))
 			query.set("candidates", positions)
+			if use_bonuses:
+				query.set("candidate_bonuses", PackedFloat32Array(vetted_bonuses))
 			query.set("origin", Vector3(center.x, 0.0, center.y))
 			query.set("horizontal_only", true)
 			query.set("max_distance", QUERY_MAX_DISTANCE)
 			query.set("distance_weight", 0.0)
 			query.set("safety_weight", 1.0)
-			query.set("use_threat", true)
+			query.set("use_threat", not valid_threats.is_empty())
 			query.set("threat_positions", contexts)
 			if not valid_exclusions.is_empty() and min_exclusion_distance > 0.0:
 				var occupied := PackedVector3Array()
@@ -149,9 +177,10 @@ static func spread_sites(candidates: Array[Vector2], threats: Array[Vector2],
 				selected.append(Vector2(point.x, point.z))
 			return selected
 
-	# The portable path applies the same finite/XZ clearance first.
 	var permitted: Array[Vector2] = []
-	for point in vetted:
+	var permitted_bonuses: Array[float] = []
+	for index in vetted.size():
+		var point: Vector2 = vetted[index]
 		var unoccupied := true
 		if min_exclusion_distance > 0.0:
 			for blocker in valid_exclusions:
@@ -160,8 +189,9 @@ static func spread_sites(candidates: Array[Vector2], threats: Array[Vector2],
 					break
 		if unoccupied:
 			permitted.append(point)
-	# Exact stable ranking and >= threshold match the C++ implementation.
-	for point in rank_sites(permitted, valid_threats, center, prefer_native):
+			if use_bonuses:
+				permitted_bonuses.append(vetted_bonuses[index])
+	for point in rank_sites(permitted, valid_threats, center, prefer_native, permitted_bonuses):
 		var clear := true
 		for other in selected:
 			if point.distance_to(other) < min_separation:
@@ -206,6 +236,7 @@ static func sites(world, players: Dictionary, zombies: Dictionary,
 	# Preserve all authoritative terrain, zone, player distance and
 	# existing-infected exclusions *before* native or script ranking.
 	var candidates: Array[Vector2] = []
+	var tactical_bonuses: Array[float] = []
 	for radius in RADII:
 		for index in ANGLES:
 			var angle: float = float((index + phase * 5) % ANGLES) * TAU / ANGLES
@@ -223,6 +254,16 @@ static func sites(world, players: Dictionary, zombies: Dictionary,
 				continue
 			if clear:
 				candidates.append(point)
+				# Cover proximity is an inexpensive heuristic, not a visibility
+				# guarantee. Existing terrain and spawn safety checks stay authoritative.
+				var cover_bonus := 0.0
+				for blocker in world.blockers_near(point.x, point.y, 4.0):
+					var blocker_position := Vector2(float(blocker["x"]), float(blocker["z"]))
+					var clearance := point.distance_to(blocker_position) - float(blocker["radius"])
+					if clearance >= 0.0 and clearance <= 3.0:
+						cover_bonus = 0.03125
+						break
+				tactical_bonuses.append(cover_bonus)
 
 	# A bounded multi-actor context covers every nearby living survivor,
 	# rather than testing just one boss target. Sort by distance to origin
@@ -250,4 +291,4 @@ static func sites(world, players: Dictionary, zombies: Dictionary,
 		if enemy.is_alive() and enemy.position.is_finite():
 			occupied.append(Vector2(enemy.position.x, enemy.position.z))
 	return spread_sites(candidates, threats, origin, mini(count, MAX_WAVE),
-		MIN_BETWEEN_ADDS, true, occupied, MIN_INFECTED_DISTANCE)
+		MIN_BETWEEN_ADDS, true, occupied, MIN_INFECTED_DISTANCE, tactical_bonuses)
