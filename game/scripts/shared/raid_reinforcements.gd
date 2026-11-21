@@ -12,6 +12,9 @@ const MIN_INFECTED_DISTANCE := 3.5
 const MIN_BETWEEN_ADDS := 5.0
 const RADII := [9.0, 12.0, 15.0]
 const ANGLES := 16
+const CONE_RINGS := 2
+const CONE_RAYS := 9
+const CONE_DEGREES := 100.0 # Full aperture of the second raid phase. 
 const MAX_THREAT_CONTEXTS := 32
 const MAX_EXCLUSION_CONTEXTS := 128
 const QUERY_MAX_DISTANCE := 64.0
@@ -241,6 +244,36 @@ static func candidate_ring_points(center: Vector2, phase: int,
 	return points
 
 
+## Additional forward-sector positions in phase two, oriented at the closest
+## surviving player. Physics/nav validation remains in sites(), not here.
+static func candidate_cone_points(center: Vector2, direction: Vector2,
+		prefer_native: bool = true) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	if not center.is_finite() or not direction.is_finite() \
+			or not is_finite(direction.length_squared()) or direction.length_squared() <= 0.000001:
+		return points
+	var generated := PackedVector3Array()
+	if prefer_native and ClassDB.class_exists("EnvironmentQuery3D") \
+			and ClassDB.class_has_method("EnvironmentQuery3D", "sample_cone"):
+		generated = ClassDB.class_call_static("EnvironmentQuery3D", "sample_cone",
+			Vector3(center.x, 0.0, center.y), Vector3(direction.x, 0.0, direction.y),
+			float(RADII[0]), float(RADII[RADII.size() - 1]),
+			CONE_RINGS, CONE_RAYS, CONE_DEGREES)
+	if generated.size() == CONE_RINGS * CONE_RAYS:
+		for sample in generated:
+			points.append(Vector2(sample.x, sample.z))
+		return points
+	var facing: float = direction.angle()
+	var aperture: float = deg_to_rad(CONE_DEGREES)
+	for ring in CONE_RINGS:
+		var radius: float = lerpf(float(RADII[0]), float(RADII[RADII.size() - 1]),
+			float(ring) / float(CONE_RINGS - 1))
+		for ray in CONE_RAYS:
+			var angle: float = facing + aperture * (float(ray) / float(CONE_RAYS - 1) - 0.5)
+			points.append(center + Vector2.from_angle(angle) * radius)
+	return points
+
+
 ## Bounded deterministic search on walkable terrain, same PvP risk zone.
 static func sites(world, players: Dictionary, zombies: Dictionary,
 		center: Vector3, phase: int, count: int) -> Array[Vector2]:
@@ -251,25 +284,6 @@ static func sites(world, players: Dictionary, zombies: Dictionary,
 	var zone: int = world.zone_at(origin.x, origin.y)
 	if zone < 2 or world.is_safe(origin.x, origin.y):
 		return found
-	# Preserve all authoritative terrain, zone, player distance and
-	# existing-infected exclusions *before* native or script ranking.
-	var candidates: Array[Vector2] = []
-	var heights: Array[float] = []
-	for point in candidate_ring_points(origin, phase):
-		if world.zone_at(point.x, point.y) != zone or world.is_safe(point.x, point.y) \
-				or world.is_water(point.x, point.y) or not Movement._is_free(world, point):
-			continue
-		var clear := true
-		for player in players.values():
-			if player.survival.alive and player.position.is_finite() \
-					and point.distance_to(Vector2(player.position.x, player.position.z)) < MIN_PLAYER_DISTANCE:
-				clear = false
-				break
-		if not clear:
-			continue
-		candidates.append(point)
-		heights.append(world.height_at(point.x, point.y))
-
 	# A bounded multi-actor context covers every nearby living survivor,
 	# rather than testing just one boss target. Sort by distance to origin
 	# before applying the cap; dictionary insertion order cannot change
@@ -286,6 +300,33 @@ static func sites(world, players: Dictionary, zombies: Dictionary,
 		var ap: Vector2 = a["position"]
 		var bp: Vector2 = b["position"]
 		return ap.x < bp.x if ap.x != bp.x else ap.y < bp.y)
+	# Preserve all authoritative terrain, zone, player distance and
+	# existing-infected exclusions *before* native or script ranking.
+	var candidates: Array[Vector2] = []
+	var heights: Array[float] = []
+	var raw_points := candidate_ring_points(origin, phase)
+	if phase == MAX_PHASE and not nearby.is_empty():
+		var closest: Vector2 = nearby[0]["position"]
+		var direction: Vector2 = closest - origin
+		if direction.length_squared() > 0.000001:
+			raw_points.append_array(candidate_cone_points(origin, direction))
+	# Every generated cone point passes exactly the same server checks as
+	# the original donut sites, before threats/occupancy ranking begins.
+	for point in raw_points:
+		if world.zone_at(point.x, point.y) != zone or world.is_safe(point.x, point.y) \
+				or world.is_water(point.x, point.y) or not Movement._is_free(world, point):
+			continue
+		var clear := true
+		for player in players.values():
+			if player.survival.alive and player.position.is_finite() \
+					and point.distance_to(Vector2(player.position.x, player.position.z)) < MIN_PLAYER_DISTANCE:
+				clear = false
+				break
+		if not clear:
+			continue
+		candidates.append(point)
+		heights.append(world.height_at(point.x, point.y))
+
 	var threats: Array[Vector2] = []
 	for i in mini(nearby.size(), MAX_THREAT_CONTEXTS):
 		threats.append(nearby[i]["position"])
