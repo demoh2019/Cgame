@@ -359,3 +359,39 @@ side-flank filters and cache invalidation remain unchanged.
 
 Official reference:
 https://dev.epicgames.com/documentation/unreal-engine/unreal-engine-behavior-tree-node-reference-services
+
+## Count-budgeted EQS work admission across server ticks
+
+`EnvironmentQuery3D.schedule_query_mask(agent_count, tick, regular_budget,
+urgent=PackedByteArray())` is a **main-thread, deterministic EQS request
+scheduler** modeled on Unreal's `UEnvQueryManager` time-sliced testing.
+A stable array of eligible AI agents is supplied by the game: the engine
+returns a 0/1 mask of agents permitted to spend expensive EQS work this
+tick. This pure method does **not** run or asynchronously resume a query.
+
+Regular work is hard-capped to 0..64 grants per tick. A cyclic window
+starts at `(tick * min(budget, N)) % N`, with arithmetic reduced before
+multiplication. For an unchanged ordered cohort, each ordinary agent is
+admitted once per complete rotation (e.g. N=80, budget=8 => 10 ticks).
+Urgent 0/1 flags override the normal quota and cannot consume ordinary
+slots; this is intentional to allow immediate recovery from stolen AI
+Smart Object leases. Valid inputs are 0..4096 agents, nonnegative tick,
+and either an empty urgent mask or exactly N zero/one bytes.
+Invalid inputs fail closed. Time is supplied by the authoritative caller,
+never by a client or wall clock. Runtime complexity O(N), scratch/output
+memory O(N) bytes. **This is a per-tick query count cap, not a CPU time
+guarantee**; a single long-running query is still synchronous.
+
+Albion After's `GameServer._budget_eqs_replans` uses this scheduler when
+at least 64 infected are active: up to 8 ordinary *flank replans* per
+tick. Only eligible, active non-boss chasers within 3.5..14m of a live
+survivor compete. Cached goals are kept when valid; a deferred stale
+goal falls back to direct pursuit, never stale slot ownership. An
+actually preempted or expired claimed slot is urgent and may bypass
+the quota. Zombie.think() still advances every tick; target detection,
+movement, melee, acid, combat timers and server-owned slot lease
+management remain unchanged. Stock Godot/older engine builds retain
+the original unlimited flank behavior, and the native scheduler does
+not add network state or reward changes.
+
+Unreal reference: https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/AIModule/FEnvQueryManagerConfig

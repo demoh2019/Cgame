@@ -697,6 +697,7 @@ var _flank_replan_remaining := 0.0
 var _flank_target_id_cached: int = -1
 var _flank_slot_id_cached: int = 0 # Validate cached goal against current server lease.
 var flank_reservations: Variant = null # Shared server-owned smart-object lease pool.
+var flank_replan_allowed: bool = true # Only optional EQS geometry; combat remains unthrottled.
 
 
 ## Where a chasing infected heads: a pack surrounds its prey instead of queueing behind one another. The engine's
@@ -719,6 +720,11 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 		if flank_reservations == null or not flank_reservations.has_method("get_actor_slot") \
 				or int(flank_reservations.get_actor_slot(id)) == _flank_slot_id_cached:
 			return _flank_goal_cached
+	# Server admission gates ONLY a costly fresh EQS lookup. Valid cached
+	# goals are handled above; stale/lost claims take the safe direct-chase
+	# path instead of reusing a slot owned by someone else.
+	if not flank_replan_allowed:
+		return target
 	if _flank_query == null:
 		_flank_query = ClassDB.instantiate("EnvironmentQuery3D")
 		_flank_query.set("horizontal_only", true)

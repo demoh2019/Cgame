@@ -375,6 +375,10 @@ const AI_BATCH_MAX_SIZE := 4096 # Match the native guard; larger populations use
 var _ai_update_scheduler: Variant = null
 var _flank_slot_reservations: Variant = null # Shared native AI Smart Object leases per server.
 var _pack_spatial_grid: Variant = null # Shared stateless C++ broadphase for pack alerts and passive separation.
+const AI_EQS_REPLAN_MIN_POPULATION := 64
+const AI_EQS_REPLAN_QUOTA := 8 # Regular tactical queries per authoritative tick.
+var last_eqs_replan_stats: Dictionary = {"enabled": false, "population": 0, "eligible": 0,
+	"granted": 0, "deferred": 0, "urgent": 0}
 const AI_CROWD_SEPARATION_MIN := 32
 const AI_CROWD_SEPARATION_MAX := 1024 # Native source index safety limit.
 const AI_CROWD_SEPARATION_TICKS := 5 # 4Hz, not every 20Hz movement tick.
@@ -8087,6 +8091,11 @@ func get_ai_schedule_stats() -> Dictionary:
 	return last_ai_schedule_stats.duplicate(true)
 
 
+func get_eqs_replan_stats() -> Dictionary:
+	# Server-only profile counters; never serialized or sent to clients.
+	return last_eqs_replan_stats.duplicate(true)
+
+
 ## Server-only diagnostic snapshot: steering is never replicated to clients.
 func get_crowd_separation_stats() -> Dictionary:
 	return last_crowd_separation_stats.duplicate(true)
@@ -8159,6 +8168,74 @@ func _try_trigger_infected_snare(zombie, trap_id: int) -> bool:
 	return true
 
 
+## A separate per-tick budget for expensive tactical EQS replans.
+## Never throttles zombie.think(), targeting, movement, attack, status or
+## authoritative Smart Object lease expiry. On unavailable native API the
+## previous full-frequency behavior is retained without guessed masks.
+func _budget_eqs_replans(cohort: Array, delta: float) -> void:
+	for agent in cohort:
+		agent.flank_replan_allowed = true
+	var enabled: bool = cohort.size() >= AI_EQS_REPLAN_MIN_POPULATION and \
+			cohort.size() <= 4096 and tick_count >= 0 and \
+			ClassDB.class_exists("EnvironmentQuery3D") and \
+			ClassDB.class_has_method("EnvironmentQuery3D", "schedule_query_mask")
+	if not enabled:
+		last_eqs_replan_stats = {"enabled": false, "population": cohort.size(),
+			"eligible": 0, "granted": 0, "deferred": 0, "urgent": 0}
+		return
+	var eligible: Array = []
+	var urgent := PackedByteArray()
+	for agent in cohort:
+		if not agent.is_alive() or agent.raid_boss or agent.type == "brute" or \
+				agent.state != Zombie.State.CHASE or agent.target_id <= 0:
+			continue
+		var victim: Player = players.get(agent.target_id)
+		if victim == null or not _alive(victim):
+			continue
+		var here := Vector2(agent.position.x, agent.position.z)
+		var destination := Vector2(victim.position.x, victim.position.z)
+		var distance: float = here.distance_to(destination)
+		if distance < Zombie.FLANK_FROM or distance > Zombie.FLANK_RANGE:
+			continue
+		# Cached flanks require no new query until a timer/target/movement
+		# change (or preempted Smart Object lease) invalidates them.
+		var invalid_lease: bool = agent._flank_slot_id_cached > 0 and \
+				_flank_slot_reservations != null and \
+				_flank_slot_reservations.has_method("get_actor_slot") and \
+				int(_flank_slot_reservations.get_actor_slot(agent.id)) != agent._flank_slot_id_cached
+		var cache_valid: bool = not invalid_lease and \
+				agent._flank_replan_remaining > delta and \
+				agent._flank_target_id_cached == agent.target_id and \
+				here.distance_squared_to(agent._flank_here_cached) <= 3.24 and \
+				destination.distance_squared_to(agent._flank_target_cached) <= 1.0
+		if cache_valid:
+			continue
+		eligible.append(agent)
+		urgent.append(1 if invalid_lease else 0)
+	if eligible.is_empty():
+		last_eqs_replan_stats = {"enabled": true, "population": cohort.size(),
+			"eligible": 0, "granted": 0, "deferred": 0, "urgent": 0}
+		return
+	var mask: PackedByteArray = ClassDB.class_call_static("EnvironmentQuery3D",
+		"schedule_query_mask", eligible.size(), tick_count, AI_EQS_REPLAN_QUOTA, urgent)
+	if mask.size() != eligible.size():
+		# Fail open for optional optimization, not for safety/combat.
+		last_eqs_replan_stats = {"enabled": false, "population": cohort.size(),
+			"eligible": eligible.size(), "granted": eligible.size(), "deferred": 0, "urgent": 0}
+		return
+	var granted: int = 0
+	var urgent_count: int = 0
+	for i in range(eligible.size()):
+		eligible[i].flank_replan_allowed = mask[i] != 0
+		if mask[i] != 0:
+			granted += 1
+		if urgent[i] != 0:
+			urgent_count += 1
+	last_eqs_replan_stats = {"enabled": true, "population": cohort.size(),
+		"eligible": eligible.size(), "granted": granted,
+		"deferred": eligible.size() - granted, "urgent": urgent_count}
+
+
 func _tick_zombies(delta: float) -> void:
 	var info: Dictionary = {}
 	for player in players.values():
@@ -8203,6 +8280,7 @@ func _tick_zombies(delta: float) -> void:
 	# of infected iterated below. Masks use array indices, never client IDs.
 	# Older engines or cohorts above the safety cap use the scalar native API.
 	var ai_cohort: Array = zombies.values()
+	_budget_eqs_replans(ai_cohort, delta)
 	# A single native 3x3-cell query every five server ticks feeds gentle
 	# steering for noncombat infected only. Clear stale vectors immediately
 	# when the crowd falls below the large-group threshold.

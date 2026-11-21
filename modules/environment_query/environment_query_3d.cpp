@@ -217,6 +217,7 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_grid", "center", "half_extents", "spacing", "max_points"), &EnvironmentQuery3D::sample_grid, DEFVAL(4096));
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_oriented_grid", "center", "forward", "half_extents", "spacing", "max_points"), &EnvironmentQuery3D::sample_oriented_grid, DEFVAL(4096));
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_fibonacci_annulus", "center", "inner_radius", "outer_radius", "count", "phase"), &EnvironmentQuery3D::sample_fibonacci_annulus, DEFVAL(0.0));
+	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("schedule_query_mask", "agent_count", "tick", "regular_budget", "urgent"), &EnvironmentQuery3D::schedule_query_mask, DEFVAL(PackedByteArray()));
 
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "candidates"), "set_candidates", "get_candidates");
 	ADD_GROUP("Distance Filter", "");
@@ -742,6 +743,42 @@ PackedVector3Array EnvironmentQuery3D::sample_fibonacci_annulus(const Vector3 &p
 		ptr[index] = point;
 	}
 	return output;
+}
+
+// A deterministic main-thread, per-tick work-admission counterpart to
+// Unreal EQS manager time slicing. Each ordinary agent receives an
+// exclusive round-robin slot in the provided stable cohort. Urgent agents
+// (e.g. a preempted Smart Object lease) are always admitted, separately
+// from the regular work quota. No query is run here.
+PackedByteArray EnvironmentQuery3D::schedule_query_mask(int p_agent_count, int64_t p_tick, int p_regular_budget, const PackedByteArray &p_urgent) {
+	PackedByteArray result;
+	ERR_FAIL_COND_V_MSG(p_agent_count < 0 || p_agent_count > 4096 || p_tick < 0 ||
+			p_regular_budget < 0 || p_regular_budget > 64, result,
+			"EQS scheduling requires 0..4096 agents, a nonnegative tick and a 0..64 regular query budget.");
+	ERR_FAIL_COND_V_MSG(!p_urgent.is_empty() && p_urgent.size() != p_agent_count, result,
+			"Urgent mask must be empty or match the ordered EQS cohort size.");
+	for (int i = 0; i < p_urgent.size(); i++) {
+		ERR_FAIL_COND_V_MSG(p_urgent[i] > 1, PackedByteArray(), "Urgent EQS mask accepts only 0 and 1.");
+	}
+	result.resize(p_agent_count);
+	uint8_t *write = result.ptrw();
+	for (int i = 0; i < p_agent_count; i++) {
+		write[i] = p_urgent.is_empty() ? 0 : p_urgent[i];
+	}
+	if (p_agent_count == 0 || p_regular_budget == 0) {
+		return result;
+	}
+	const int quota = MIN(p_regular_budget, p_agent_count);
+	const int start = int((p_tick % p_agent_count) * quota % p_agent_count);
+	int ordinary = 0;
+	for (int i = 0; i < p_agent_count && ordinary < quota; i++) {
+		const int index = (start + i) % p_agent_count;
+		if (write[index] == 0) {
+			write[index] = 1;
+			ordinary++;
+		}
+	}
+	return result;
 }
 
 PackedVector3Array EnvironmentQuery3D::sample_grid(const Vector3 &p_center, const Vector2 &p_half_extents, double p_spacing, int p_max_points) {
