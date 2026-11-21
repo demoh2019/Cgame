@@ -862,3 +862,35 @@ References:
 - https://docs.godotengine.org/en/4.6/getting_started/first_3d_game/07.killing_player.html
 - https://docs.godotengine.org/en/4.6/classes/class_characterbody3d.html
 - https://dev.epicgames.com/documentation/en-us/unreal-engine/gameplay-effects-for-the-gameplay-ability-system-in-unreal-engine
+
+
+## Visual Quality Lab v18 — cover-aware combat, physics-safe attacks, develop integration
+
+The combat engine now uses a reusable `WorldCombatVisibility3D` with Godot
+`PhysicsRayQueryParameters3D` / `direct_space_state.intersect_ray` to determine
+whether a solid wall or streamed rock blocks an attack. A ray that hits the
+intended collider is accepted; source actor RID is excluded to avoid hitting
+its own collider. Wall checks are enabled for normal player melee strikes,
+shockwaves, and hostile sentry melee attacks (mask defaults to layer 1).
+
+**Physics-thread safety:** input events queue M (strike) / N (shockwave)
+requests; the director consumes them in `_physics_process`, so all physics
+space queries run at a safe time. Only camera-visible enemies within range
+are selected, and ray checks are capped per command to limit CPU cost.
+Shockwave is no longer an attack that passes through walls. Cover can be
+configured by collision mask per combat director / sentry.
+
+The existing v17 world, enemy persistence, player respawn, inventory,
+streaming, AI LOD and graphics systems remain intact. The new features run
+in the playable forest demo, not just in an isolated utility module.
+
+Validation: 48 Python source/packaging checks pass locally; new headless
+Godot test scripts `test_combat_visibility.gd` and
+`test_combat_visibility_runtime.gd` test ray classification, request queues,
+a blocking wall, unobstructed target, and an off-axis cover body. They are
+registered in CI, but Godot runtime tests are unverified until a Godot
+executable becomes available. On-device Metal FPS remains unmeasured.
+
+References:
+- https://docs.godotengine.org/en/stable/tutorials/physics/ray-casting.html
+- https://docs.godotengine.org/en/stable/classes/class_physicsrayqueryparameters3d.html
