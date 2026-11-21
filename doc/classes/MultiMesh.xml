@@ -119,6 +119,16 @@
 				For the color to take effect, ensure that [member use_colors] is [code]true[/code] on the [MultiMesh] and [member BaseMaterial3D.vertex_color_use_as_albedo] is [code]true[/code] on the material. If you intend to set an absolute color instead of tinting, make sure the material's albedo color is set to pure white ([code]Color(1, 1, 1)[/code]).
 			</description>
 		</method>
+		<method name="set_instance_custom_data_batch">
+			<return type="bool" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<param index="1" name="custom_data" type="PackedColorArray" />
+			<description>
+				Sets the per-instance custom shader payload for multiple MultiMesh slots, using matching entries in [param indices] and [param custom_data]. This can be used for instanced gameplay progress indicators, animation phases, health meters and other packed simulation values.
+				[member use_custom_data] must be enabled. Indices may be in any order but must be unique and within [member instance_count]; hidden instances may also be updated. Values must be finite and the two arrays must have equal lengths. Invalid input returns [code]false[/code] before modifying any instance. An empty pair is valid if custom data is enabled.
+				This only groups calls across the script-to-engine boundary. Internally, each custom data value still requires an individual RenderingServer update; it is not one GPU command or a new instancing renderer. The method does not change transforms, visibility, collision or instance count.
+			</description>
+		</method>
 		<method name="set_instance_custom_data">
 			<return type="void" />
 			<param index="0" name="instance" type="int" />
@@ -164,6 +174,56 @@
 			<param index="1" name="transform" type="Transform2D" />
 			<description>
 				Sets the [Transform2D] for a specific instance.
+			</description>
+		</method>
+		<method name="activate_hidden_instances">
+			<return type="int" />
+			<param index="0" name="hidden_instances" type="PackedInt32Array" />
+			<description>
+				Activates multiple hidden instances in an existing MultiMesh buffer without changing [member instance_count]. Indices refer to the [b]original hidden slots[/b] at the start of the call; their order in [param hidden_instances] does not matter. The method validates all indices, rejects duplicates and already-visible or out-of-bounds indices, sorts the copy, then activates each in ascending order so the intended complete payloads are preserved.
+				Returns the number activated, [code]0[/code] for an empty array, or [code]-1[/code] for invalid input without changing any instances. Works with a partial visible prefix (including [code]0[/code]); when [member visible_instance_count] is [code]-1[/code], all instances are visible, so any nonempty request fails.
+				This method preserves paired transforms, optional colors and shader custom data through [method activate_hidden_instance]. It never changes memory allocation, physics collision, navigation or entity IDs. After activation the ordering of hidden slots may change; game code is responsible for persistent entity IDs and restoring original payloads if needed.
+				[b]Performance:[/b] Validation and sorting cost [code]O(K log K)[/code] and activation uses [code]K[/code] individual rendering server operations. It reduces scripting API crossings but is not a single GPU command.
+			</description>
+		</method>
+		<method name="activate_hidden_instance">
+			<return type="bool" />
+			<param index="0" name="hidden_instance" type="int" />
+			<description>
+				Reactivates one currently hidden MultiMesh instance without allocating a new buffer. It swaps the complete payload (transform, optional color and shader custom data) from [param hidden_instance] into the first hidden slot, then increases [member visible_instance_count] by one. The instance count is unchanged. It resets physics interpolation for moved slots.
+				If [member visible_instance_count] is [code]-1[/code], all instances are already visible and this call returns [code]false[/code]. The method also returns [code]false[/code] for indices outside the allocated buffer or indices that are already in the visible prefix, without modifying state.
+				An empty buffer has no hidden slots. Use [method remove_visible_instance] to free an active slot first or allocate a larger buffer using [member instance_count].
+				[b]Important:[/b] This is a low-level instance-pooling primitive. It does not restore a game entity's persistent ID, physics collision, or original transform automatically. Game code must track stable IDs and restore the desired payload to the chosen hidden instance before calling. When an instance is activated from a different hidden slot, hidden slot order changes.
+			</description>
+		</method>
+		<method name="remove_visible_instances">
+			<return type="int" />
+			<param index="0" name="instances" type="PackedInt32Array" />
+			<description>
+				Removes multiple currently visible instance indices from the active prefix, without changing [member instance_count]. The list may be unsorted; this method validates every index, rejects duplicates, then performs swap-removal from the [b]highest original index to the lowest[/b], preserving the requested set of removals. It copies and sorts the list internally.
+				Returns the number of instances removed, [code]0[/code] for an empty array, or [code]-1[/code] if any index is invalid, hidden, or repeated. Invalid input causes [b]no[/b] modifications. When [member visible_instance_count] is [code]-1[/code], all allocated instances are initially visible. Optional instance color and shader data are transferred together with their transforms.
+				[b]Important:[/b] Slot indices of surviving instances may change after removal. Track stable gameplay IDs separately. This call only changes rendering state; game collision and navigation must be handled elsewhere.
+				The batch validates and sorts indices in [code]O(K log K)[/code] time and performs [code]K[/code] individual renderer updates. It reduces script API crossings and safely handles unordered input, but does [b]not[/b] submit a single GPU batch command.
+			</description>
+		</method>
+		<method name="remove_visible_instance">
+			<return type="bool" />
+			<param index="0" name="instance" type="int" />
+			<description>
+				Removes one currently visible instance from the active prefix without resizing the [MultiMesh] buffer. This is a constant-time swap-removal: the last visible instance's complete payload (transform, optional color and custom data) replaces the removed slot, then [member visible_instance_count] decreases by one. The actual [member instance_count] remains unchanged.
+				If [member visible_instance_count] is [code]-1[/code], all allocated instances are initially considered visible. Removing the final visible instance sets the visible count to [code]0[/code], not [code]-1[/code]. Returns [code]false[/code] for a negative index, an index outside the currently visible prefix, or when no instances remain, without changing the buffer or its visibility.
+				[b]Important:[/b] This method does not preserve the order or stable IDs of visible instances. Maintain a separate mapping between game entity IDs and buffer indices if they must survive removal or serialization. Physics interpolation is reset for swapped slots via [method swap_instance_data].
+				[b]Note:[/b] This operation does not affect collision objects, navigation data or higher-level game entities. It removes the instance only from rendering.
+			</description>
+		</method>
+		<method name="swap_instance_data">
+			<return type="bool" />
+			<param index="0" name="first" type="int" />
+			<param index="1" name="second" type="int" />
+			<description>
+				Swaps the complete payload of two instances: their [Transform3D] or [Transform2D], instance color (if [member use_colors] is enabled), and per-instance custom data (if [member use_custom_data] is enabled). Returns [code]true[/code] on success; invalid indices return [code]false[/code] without changing any instance. Passing the same index twice succeeds without modifying anything.
+				This method can be used for constant-time, order-independent removal from an active prefix: swap the unwanted index with the last visible slot, then decrease [member visible_instance_count]. The method itself does [b]not[/b] change the instance count, visible count, or persistent game entity IDs. It resets physics interpolation of the swapped slots to avoid visual trails.
+				[b]Note:[/b] In-memory slot indices are not persistent entity identifiers when swap-removal is used. Maintain a separate mapping from stable game IDs to current indices. This helper does not perform culling, collision or allocation changes.
 			</description>
 		</method>
 	</methods>
