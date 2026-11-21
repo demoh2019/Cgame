@@ -19,10 +19,14 @@ static var density_scale: float = 1.0
 # "size": [min, max] scale with a long tail ("big": share of instances drawn from [max, max * 1.8]).
 # "files": explicit baked meshes (relative to baked/) for scanned props such as rocks and sticks.
 const SPECIES := {
+	# Lush green carpet: crossed photo cards of the dense tufts photographed in the grass_medium_01 atlas.
+	# ~16 triangles a tuft, so thousands per tile; this is what covers the terrain.
+	"lush_grass": {"cards": true, "biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 1600, "scale": [0.7, 1.9],
+		"big": 0.12, "cluster": false, "variants": 5, "distance": 72.0},
 	# The grass carpet itself: the most common, everywhere, many variants, every size from short tufts to big clumps.
-	"grass_medium_01": {"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 800, "scale": [1.2, 4.4], "big": 0.2,
+	"grass_medium_01": {"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 260, "scale": [1.2, 4.4], "big": 0.2,
 		"cluster": false, "variants": 6, "distance": 60.0},
-	"grass_medium_02": {"biomes": ["plains", "forest", "swamp", "mountain"], "count": 340, "scale": [1.2, 4.0], "big": 0.2,
+	"grass_medium_02": {"biomes": ["plains", "forest", "swamp", "mountain"], "count": 120, "scale": [1.2, 4.0], "big": 0.2,
 		"cluster": false, "variants": 4, "distance": 60.0},
 	"dandelion_01": {"biomes": ["plains", "forest"], "count": 40, "scale": [1.1, 2.4], "cluster": true, "variants": 2},
 	"celandine_01": {"biomes": ["forest", "swamp", "plains"], "count": 34, "scale": [1.1, 2.4], "cluster": true, "variants": 2},
@@ -60,7 +64,61 @@ static func variants(species: String) -> Array:
 	return _manifest.get(species, [])
 
 
+## Pixel regions (x, y, w, h) of dense grass tufts in the 1024 px grass_medium_01 atlas.
+const CARD_ATLAS := "res://assets/models/polyhaven/grass_medium_01/textures/grass_medium_01_diff_alpha.png"
+const CARD_REGIONS := [Rect2(210, 790, 290, 112), Rect2(620, 784, 220, 106), Rect2(30, 900, 170, 124),
+	Rect2(256, 900, 260, 110), Rect2(580, 890, 240, 130)]
+const CARD_HEIGHT := 0.55
+static var _card_material: StandardMaterial3D
+
+
+static func card_material() -> StandardMaterial3D:
+	if _card_material == null:
+		_card_material = StandardMaterial3D.new()
+		_card_material.albedo_texture = load(CARD_ATLAS) as Texture2D
+		_card_material.albedo_color = Color(0.86, 1.12, 0.66) # Fresh, saturated green from the olive scan.
+		_card_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		_card_material.alpha_scissor_threshold = 0.35
+		_card_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_card_material.diffuse_mode = BaseMaterial3D.DIFFUSE_LAMBERT_WRAP
+		_card_material.roughness = 0.85
+		_card_material.backlight_enabled = true
+		_card_material.backlight = Color(0.3, 0.42, 0.12)
+	return _card_material
+
+
+## One tuft: three vertical photo cards crossed at 60 degrees. Normals lean up so the cards
+## light like a soft mass of grass instead of showing their flat sides.
+static func card_mesh(region_index: int) -> Mesh:
+	var region: Rect2 = CARD_REGIONS[region_index]
+	var uv0 := region.position / 1024.0
+	var uv1 := (region.position + region.size) / 1024.0
+	var height := CARD_HEIGHT
+	var half_width := height * region.size.x / region.size.y * 0.5
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for k in 3:
+		var angle := PI * float(k) / 3.0
+		var side := Vector3(cos(angle), 0.0, sin(angle)) * half_width
+		var facing := Vector3(-sin(angle), 0.0, cos(angle))
+		var normal := (Vector3.UP * 0.8 + facing * 0.2).normalized()
+		var corners := [[-side, Vector2(uv0.x, uv1.y)], [side, Vector2(uv1.x, uv1.y)],
+			[side + Vector3.UP * height, Vector2(uv1.x, uv0.y)], [-side + Vector3.UP * height, Vector2(uv0.x, uv0.y)]]
+		for tri in [[0, 1, 2], [0, 2, 3]]:
+			for i in tri:
+				surface.set_normal(normal)
+				surface.set_uv(corners[i][1])
+				surface.add_vertex(corners[i][0])
+	var result := surface.commit()
+	result.surface_set_material(0, card_material())
+	return result
+
+
 static func mesh(file: String, dry: bool = false) -> Mesh:
+	if file.begins_with("#card"):
+		if not _meshes.has(file):
+			_meshes[file] = card_mesh(int(file.substr(5)))
+		return _meshes[file]
 	var key := file + ("|dry" if dry else "")
 	if not _meshes.has(key):
 		var loaded: Mesh = load(FOLDER + file) if ResourceLoader.exists(FOLDER + file) else null
@@ -125,7 +183,10 @@ static func build_tile(origin: Vector2, tile: int, tiles_per_side: int, sample: 
 	for species in SPECIES:
 		var info: Dictionary = SPECIES[species]
 		var choices: Array = []
-		if info.has("files"):
+		if bool(info.get("cards", false)):
+			for c in CARD_REGIONS.size():
+				choices.append({"file": "#card%d" % c})
+		elif info.has("files"):
 			for file in info["files"]:
 				choices.append({"file": "../" + str(file)})
 		else:
