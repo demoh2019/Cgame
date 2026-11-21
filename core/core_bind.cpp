@@ -1265,6 +1265,76 @@ Vector<Vector2> Geometry2D::heightfield_gradients(const Vector<float> &p_heights
 	return result;
 }
 
+
+PackedByteArray Geometry2D::max_filter_mask(const PackedByteArray &p_mask, const Vector2i &p_size, int p_radius) {
+	PackedByteArray result;
+	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2048 || p_size.y > 2048, result,
+			"Max-filter mask dimensions must be between 1 and 2048 pixels per axis.");
+	ERR_FAIL_COND_V_MSG(p_radius < 0 || p_radius > 64, result, "Max-filter radius must be between 0 and 64 pixels.");
+	const int width = p_size.x;
+	const int height = p_size.y;
+	const int count = width * height;
+	ERR_FAIL_COND_V_MSG(p_mask.size() != count, result, "Max-filter mask must contain width * height bytes.");
+	if (p_radius == 0) {
+		return p_mask; // Copy-on-write: the caller's input remains unmodified.
+	}
+	// Two separable maximum-filter passes. A monotone deque stores only
+	// indices from the current row/column, giving O(width * height) work
+	// independent of the filter radius (unlike a per-pixel 2D kernel).
+	Vector<uint8_t> horizontal;
+	ERR_FAIL_COND_V_MSG(horizontal.resize(count) != OK, result, "Could not allocate horizontal max-filter scratch.");
+	ERR_FAIL_COND_V_MSG(result.resize(count) != OK, PackedByteArray(), "Could not allocate max-filter output.");
+	Vector<int> queue;
+	ERR_FAIL_COND_V_MSG(queue.resize(MAX(width, height)) != OK, PackedByteArray(), "Could not allocate max-filter deque.");
+	int *indices = queue.ptrw();
+	const uint8_t *input = p_mask.ptr();
+	uint8_t *intermediate = horizontal.ptrw();
+	uint8_t *output = result.ptrw();
+
+	for (int y = 0; y < height; y++) {
+		const int row = y * width;
+		int front = 0;
+		int back = 0;
+		int next = 0;
+		for (int x = 0; x < width; x++) {
+			const int right = MIN(width - 1, x + p_radius);
+			while (next <= right) {
+				const uint8_t value = input[row + next];
+				while (back > front && input[row + indices[back - 1]] <= value) {
+					back--;
+				}
+				indices[back++] = next++;
+			}
+			const int left = MAX(0, x - p_radius);
+			while (front < back && indices[front] < left) {
+				front++;
+			}
+			intermediate[row + x] = input[row + indices[front]];
+		}
+	}
+	for (int x = 0; x < width; x++) {
+		int front = 0;
+		int back = 0;
+		int next = 0;
+		for (int y = 0; y < height; y++) {
+			const int bottom = MIN(height - 1, y + p_radius);
+			while (next <= bottom) {
+				const uint8_t value = intermediate[next * width + x];
+				while (back > front && intermediate[indices[back - 1] * width + x] <= value) {
+					back--;
+				}
+				indices[back++] = next++;
+			}
+			const int top = MAX(0, y - p_radius);
+			while (front < back && indices[front] < top) {
+				front++;
+			}
+			output[y * width + x] = intermediate[indices[front] * width + x];
+		}
+	}
+	return result;
+}
+
 PackedByteArray Geometry2D::distance_transform_8(const PackedByteArray &p_mask, const Vector2i &p_size, int p_max_distance) {
 	PackedByteArray result;
 	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2048 || p_size.y > 2048, result,
@@ -1580,6 +1650,7 @@ void Geometry2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("prune_points_min_distance", "points", "min_distance", "max_kept"), &Geometry2D::prune_points_min_distance, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("rasterize_segments_mask", "segment_endpoints", "size", "half_width", "softness"), &Geometry2D::rasterize_segments_mask);
 	ClassDB::bind_method(D_METHOD("distance_transform_8", "mask", "size", "max_distance"), &Geometry2D::distance_transform_8);
+	ClassDB::bind_method(D_METHOD("max_filter_mask", "mask", "size", "radius"), &Geometry2D::max_filter_mask);
 	ClassDB::bind_method(D_METHOD("heightfield_gradients", "heights", "size", "cell_spacing"), &Geometry2D::heightfield_gradients);
 	ClassDB::bind_method(D_METHOD("bake_heightfield_curvature_colors", "padded_heights", "size", "cell_spacing", "cavity_start", "cavity_end", "ridge_start", "ridge_end"),
 			&Geometry2D::bake_heightfield_curvature_colors, DEFVAL(0.015), DEFVAL(0.32), DEFVAL(0.015), DEFVAL(0.42));
