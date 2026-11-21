@@ -68,6 +68,7 @@ void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 		node->queue_free();
 	}
 	active_cells.erase(p_cell);
+	_invalidate_cell_path_cache(false);
 	cell_creation_physics_frames.erase(p_cell);
 	active_detail_levels.erase(p_cell);
 	active_simulation_cells.erase(p_cell);
@@ -206,6 +207,7 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 	}
 	add_child(instance);
 	active_cells.insert(p_cell, instance->get_instance_id());
+	_invalidate_cell_path_cache(false);
 	navigation_mesh_generation++;
 	cell_creation_physics_frames.insert(p_cell, Engine::get_singleton()->get_physics_frames());
 	emit_signal(SNAME("cell_loaded"), p_cell);
@@ -1296,7 +1298,121 @@ int WorldPartition3D::get_last_navigation_tile_retested_triangle_count() const {
 	return last_navigation_tile_retested_triangles;
 }
 
+void WorldPartition3D::_invalidate_cell_path_cache(bool p_registered_topology) {
+	if (p_registered_topology) {
+		cell_registration_revision++;
+		cell_path_cache.clear(); // Registered paths and live-only paths both changed.
+		return;
+	}
+	cell_loading_revision++;
+	// Loading or unloading changes only paths constrained to live scene roots.
+	// Keep configured-graph routes valid for the quest compass and planners.
+	Vector<String> stale;
+	for (const KeyValue<String, CellPathCacheEntry> &E : cell_path_cache) {
+		if (E.value.loaded_only) {
+			stale.push_back(E.key);
+		}
+	}
+	for (const String &key : stale) {
+		cell_path_cache.erase(key);
+	}
+}
+
+void WorldPartition3D::set_max_cell_path_cache_entries(int p_count) {
+	ERR_FAIL_COND_MSG(p_count < 0 || p_count > MAX_CELL_PATH_CACHE_ENTRIES, "Cell route cache size must be 0 to 128.");
+	if (max_cell_path_cache_entries != p_count) {
+		max_cell_path_cache_entries = p_count;
+		cell_path_cache.clear(); // Reject stale evictions after a capacity change.
+	}
+}
+
+int WorldPartition3D::get_max_cell_path_cache_entries() const {
+	return max_cell_path_cache_entries;
+}
+
+int WorldPartition3D::get_cell_path_cache_entry_count() const {
+	return cell_path_cache.size();
+}
+
+int WorldPartition3D::get_cell_path_cache_hit_count() const {
+	return cell_path_cache_hits;
+}
+
+int WorldPartition3D::get_cell_path_cache_miss_count() const {
+	return cell_path_cache_misses;
+}
+
+void WorldPartition3D::clear_cell_path_cache() {
+	cell_path_cache.clear();
+	cell_path_cache_hits = 0;
+	cell_path_cache_misses = 0;
+	cell_path_cache_serial = 0;
+}
+
 Array WorldPartition3D::find_cell_path(const Vector2i &p_from, const Vector2i &p_to, bool p_loaded_only) const {
+	// Full signed coordinates + the loaded-only flag form a collision-free
+	// identity. Never key on a 32-bit hash alone (different maps can collide).
+	const String key = vformat("%d,%d;%d,%d;%d", p_from.x, p_from.y, p_to.x, p_to.y, int(p_loaded_only));
+	if (max_cell_path_cache_entries > 0) {
+		CellPathCacheEntry *cached = cell_path_cache.getptr(key);
+		if (cached != nullptr) {
+			bool valid = cached->registration_revision == cell_registration_revision &&
+					(!p_loaded_only || cached->loaded_revision == cell_loading_revision);
+			if (valid && p_loaded_only) {
+				// User scripts may queue_free a child scene without asking the native
+				// streamer. Do not return a cached live route through that root.
+				for (int i = 0; i < cached->route.size(); i++) {
+					if (get_cell_instance(cached->route[i]) == nullptr) {
+						valid = false;
+						break;
+					}
+				}
+			}
+			if (valid) {
+				cached->last_access = ++cell_path_cache_serial;
+				if (cell_path_cache_hits < INT32_MAX) {
+					cell_path_cache_hits++;
+				}
+				// Godot Array is reference-counted. Never share the internal cached
+				// Array with scripts, which are free to append/erase/reorder cells.
+				return cached->route.duplicate();
+			}
+			cell_path_cache.erase(key);
+		}
+	}
+	if (cell_path_cache_misses < INT32_MAX) {
+		cell_path_cache_misses++;
+	}
+	const Array route = _find_cell_path_uncached(p_from, p_to, p_loaded_only);
+	if (max_cell_path_cache_entries > 0) {
+		if (cell_path_cache.size() >= max_cell_path_cache_entries) {
+			bool found = false;
+			String oldest_key;
+			uint64_t oldest_access = UINT64_MAX;
+			for (const KeyValue<String, CellPathCacheEntry> &E : cell_path_cache) {
+				if (!found || E.value.last_access < oldest_access ||
+						(E.value.last_access == oldest_access && E.key < oldest_key)) {
+					found = true;
+					oldest_key = E.key;
+					oldest_access = E.value.last_access;
+				}
+			}
+			if (found) {
+				cell_path_cache.erase(oldest_key);
+			}
+		}
+		CellPathCacheEntry fresh;
+		fresh.route = route.duplicate();
+		fresh.registration_revision = cell_registration_revision;
+		fresh.loaded_revision = cell_loading_revision;
+		fresh.last_access = ++cell_path_cache_serial;
+		fresh.loaded_only = p_loaded_only;
+		cell_path_cache.insert(key, fresh);
+	}
+	return route;
+}
+
+Array WorldPartition3D::_find_cell_path_uncached(const Vector2i &p_from, const Vector2i &p_to, bool p_loaded_only) const {
 	Array result;
 	// A valid route must begin and end on registered cells, including singleton
 	// paths. A 'loaded only' route cannot cross a queued-for-free scene root.
@@ -1377,6 +1493,7 @@ void WorldPartition3D::set_cell_scenes(const Dictionary &p_cells) {
 	pending_cells.clear();
 	failed_cells.clear();
 	cell_scenes = clean;
+	_invalidate_cell_path_cache(true);
 	// Keep pins for retained registrations; prevent stale pins from keeping
 	// a future replacement scene loaded under the same grid coordinate.
 	Vector<Vector2i> stale_pins;
@@ -1407,6 +1524,7 @@ void WorldPartition3D::set_cell_scene(const Vector2i &p_cell, const String &p_sc
 	pending_cells.erase(p_cell);
 	failed_cells.erase(p_cell);
 	cell_scenes[p_cell] = p_scene_path;
+	_invalidate_cell_path_cache(true);
 	_purge_unused_ready_scenes();
 }
 
@@ -1419,6 +1537,7 @@ void WorldPartition3D::remove_cell_scene(const Vector2i &p_cell) {
 	pending_cells.erase(p_cell);
 	failed_cells.erase(p_cell);
 	cell_scenes.erase(p_cell);
+	_invalidate_cell_path_cache(true);
 	pinned_cells.erase(p_cell);
 	_purge_unused_ready_scenes();
 }
@@ -1428,6 +1547,7 @@ void WorldPartition3D::clear_cell_scenes() {
 	pending_cells.clear();
 	failed_cells.clear();
 	cell_scenes.clear();
+	_invalidate_cell_path_cache(true);
 	pinned_cells.clear();
 	_purge_unused_ready_scenes();
 }
@@ -1976,6 +2096,12 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_cell_scenes"), &WorldPartition3D::clear_cell_scenes);
 	ClassDB::bind_method(D_METHOD("get_configured_cell_count"), &WorldPartition3D::get_configured_cell_count);
 	ClassDB::bind_method(D_METHOD("find_cell_path", "from", "to", "loaded_only"), &WorldPartition3D::find_cell_path, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("set_max_cell_path_cache_entries", "count"), &WorldPartition3D::set_max_cell_path_cache_entries);
+	ClassDB::bind_method(D_METHOD("get_max_cell_path_cache_entries"), &WorldPartition3D::get_max_cell_path_cache_entries);
+	ClassDB::bind_method(D_METHOD("get_cell_path_cache_entry_count"), &WorldPartition3D::get_cell_path_cache_entry_count);
+	ClassDB::bind_method(D_METHOD("get_cell_path_cache_hit_count"), &WorldPartition3D::get_cell_path_cache_hit_count);
+	ClassDB::bind_method(D_METHOD("get_cell_path_cache_miss_count"), &WorldPartition3D::get_cell_path_cache_miss_count);
+	ClassDB::bind_method(D_METHOD("clear_cell_path_cache"), &WorldPartition3D::clear_cell_path_cache);
 	ClassDB::bind_method(D_METHOD("build_navigation_tile", "vertices", "resolution", "blockers", "agent_radius", "max_slope_degrees"), &WorldPartition3D::build_navigation_tile, DEFVAL(0.45), DEFVAL(45.0));
 	ClassDB::bind_method(D_METHOD("patch_navigation_tile", "previous", "resolution", "previous_blockers", "blockers", "agent_radius", "max_slope_degrees"), &WorldPartition3D::patch_navigation_tile, DEFVAL(0.45), DEFVAL(45.0));
 	ClassDB::bind_method(D_METHOD("get_last_navigation_tile_retested_triangle_count"), &WorldPartition3D::get_last_navigation_tile_retested_triangle_count);
@@ -2041,6 +2167,8 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "physics_radius", PROPERTY_HINT_RANGE, "-1,32,1"), "set_physics_radius", "get_physics_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "physics_hysteresis_cells", PROPERTY_HINT_RANGE, "0,8,1"), "set_physics_hysteresis_cells", "get_physics_hysteresis_cells");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_physics_transitions_per_frame", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_physics_transitions_per_frame", "get_max_physics_transitions_per_frame");
+	ADD_GROUP("Cell Route Cache", "");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cell_path_cache_entries", PROPERTY_HINT_RANGE, "0,128,1"), "set_max_cell_path_cache_entries", "get_max_cell_path_cache_entries");
 	ADD_GROUP("Navigation Regions", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "navigation_radius", PROPERTY_HINT_RANGE, "-1,32,1"), "set_navigation_radius", "get_navigation_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "navigation_hysteresis_cells", PROPERTY_HINT_RANGE, "0,8,1"), "set_navigation_hysteresis_cells", "get_navigation_hysteresis_cells");
