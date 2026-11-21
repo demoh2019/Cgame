@@ -6,6 +6,7 @@ extends SceneTree
 
 const FOREST: String = "res://cells/forest_cell.tscn"
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
+const ForestNavigationMesh = preload("res://scripts/forest_navigation_mesh.gd")
 const MAX_FRAMES: int = 420
 const REMOTE: Vector2i = Vector2i(1, 0)
 
@@ -43,6 +44,17 @@ func _root(world: WorldPartition3D, cell: Vector2i) -> Node3D:
 
 func _region(cell_root: Node3D) -> NavigationRegion3D:
     return cell_root.get_node_or_null("StreamingNavigationRegion") as NavigationRegion3D
+
+
+func _same_navmesh_polygons(a: NavigationMesh, b: NavigationMesh) -> bool:
+    if a == null or b == null or a.vertices != b.vertices:
+        return false
+    if a.get_polygon_count() != b.get_polygon_count():
+        return false
+    for i in range(a.get_polygon_count()):
+        if a.get_polygon(i) != b.get_polygon(i):
+            return false
+    return true
 
 
 func _run() -> void:
@@ -128,6 +140,16 @@ func _run() -> void:
     if updated == original or updated.get_polygon_count() >= previous_polygons:
         _fail("dynamic obstacle did not replace the mesh with a smaller walkable surface")
         return
+    if (int(local_root.get("navigation_patch_count")) != 1
+            or int(local_root.get("navigation_last_retested_triangles")) <= 0
+            or int(local_root.get("navigation_last_retested_triangles")) >= 512):
+        _fail("real dynamic barricade bypassed the bounded incremental native NavMesh patch")
+        return
+    var expected_mesh: NavigationMesh = ForestNavigationMesh.build_tile(
+        local_root.global_position, world, local_root.call("_current_navigation_blockers"))
+    if not _same_navmesh_polygons(updated, expected_mesh):
+        _fail("real barricade patch differs from a complete native terrain build")
+        return
     var barricade: StaticBody3D = local_root.get_node_or_null("DynamicBarricade") as StaticBody3D
     if barricade == null or barricade.collision_layer != 1:
         _fail("buildable obstacle is not a physical collision body")
@@ -155,6 +177,11 @@ func _run() -> void:
         return
     if _region(local_root).navigation_mesh.get_polygon_count() != previous_polygons:
         _fail("removing the barrier did not restore the original navigation surface")
+        return
+    if (int(local_root.get("navigation_patch_count")) != 2
+            or int(local_root.get("navigation_last_retested_triangles")) >= 512
+            or not _same_navmesh_polygons(_region(local_root).navigation_mesh, original)):
+        _fail("removal did not perform a localized exact incremental polygon restoration")
         return
     await physics_frame
     contact = root.get_world_3d().direct_space_state.intersect_ray(ray)
