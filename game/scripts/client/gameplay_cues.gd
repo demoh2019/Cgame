@@ -50,7 +50,13 @@ static func sync(node: Node, kind: String, state: Dictionary) -> void:
 		return
 	var cues: Object = node.get_meta("gameplay_cues", null) as Object
 	if cues != null and cues.has_method("replace_active"):
-		cues.call("replace_active", active_snapshot(kind, state), 2)
+		var next: Dictionary = active_snapshot(kind, state)
+		# Resilient native admission prevents busy ambient particle bursts from
+		# swallowing authoritative status start/stop visuals. No combat writes.
+		if cues.has_method("replace_active_resilient"):
+			cues.call("replace_active_resilient", next, 2)
+		else:
+			cues.call("replace_active", next, 2)
 
 
 ## Bridge repeated native EffectTimeline pulse counts to one cue per tag.

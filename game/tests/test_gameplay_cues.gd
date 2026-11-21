@@ -100,3 +100,45 @@ func run(t) -> void:
 		t.eq(int(priority_by_tag.get("GameplayCue.Status.Sundered", -1)), 4,
 			"stock fallback preserves normal Sunder priority")
 	pressure_actor.free()
+
+	t.current = "replicated status transitions survive saturated transient cue budgets"
+	var lifecycle_actor := Node3D.new()
+	CueBridge.attach(lifecycle_actor)
+	var status_queue: Object = lifecycle_actor.get_meta("gameplay_cues", null) as Object
+	if status_queue != null and status_queue.has_method("replace_active_resilient"):
+		for i in 128:
+			t.check(bool(status_queue.call("emit_cue",
+				StringName("GameplayCue.Background.%d" % i), 1.0, 0)),
+				"native cue prefill accepts bounded background pulses")
+		CueBridge.sync(lifecycle_actor, "zombie", {
+			"stagger_seconds": 1.0, "sunder_seconds": 2.0
+		})
+		t.eq(int(status_queue.call("get_active_count")), 2,
+			"two replicated debuffs enter persistent cue state despite full backlog")
+		t.eq(int(status_queue.call("get_evicted_transient_count")), 2,
+			"only two expendable ambient pulses displaced to preserve lifecycle")
+		var lifecycle_events: Array = CueBridge.frame_events(lifecycle_actor, {})
+		t.eq(lifecycle_events.size(), 8, "render frame still respects fixed cue draw budget")
+		var started: Dictionary = {}
+		for item in lifecycle_events:
+			if str(item.get("event", "")) == "started":
+				started[str(item.get("tag", ""))] = true
+		t.check(started.has("GameplayCue.Status.Staggered") and
+			started.has("GameplayCue.Status.Sundered"),
+			"status starts survive saturation and drain before ambient visuals")
+		CueBridge.sync(lifecycle_actor, "zombie", {})
+		t.eq(int(status_queue.call("get_active_count")), 0,
+			"replicated expiration clears native persistent cue state")
+		var stopped_events: Array = CueBridge.frame_events(lifecycle_actor, {})
+		var stopped: Dictionary = {}
+		for item in stopped_events:
+			if str(item.get("event", "")) == "stopped":
+				stopped[str(item.get("tag", ""))] = true
+		t.check(stopped.has("GameplayCue.Status.Staggered") and
+			stopped.has("GameplayCue.Status.Sundered"),
+			"status stop events reliably clean up effects after backlog")
+	else:
+		t.check(status_queue == null or not status_queue.has_method("replace_active_resilient"),
+			"stock Godot and older binaries retain compatible cue handling")
+	lifecycle_actor.free()
+

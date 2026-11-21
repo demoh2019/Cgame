@@ -834,6 +834,66 @@ TEST_CASE("[GameplayFX] application gate atomic snapshot rollback and hostile ta
 }
 
 
+TEST_CASE("[GameplayFX] CueQueue resilient lifecycle survives low-priority visual saturation") {
+	Ref<GameplayCueQueue> cue;
+	cue.instantiate();
+	for (int i = 0; i < GameplayCueQueue::MAX_PENDING; ++i) {
+		CHECK(cue->emit_cue(StringName(String("GameplayCue.Ambient.") + itos(i)), 1.0, 0));
+	}
+	Dictionary statuses;
+	statuses["GameplayCue.Status.Resolve"] = 3;
+	statuses["GameplayCue.Status.Sundered"] = 1;
+	CHECK_FALSE(cue->replace_active(statuses, 2)); // Legacy atomic contract unchanged.
+	CHECK(cue->get_active_count() == 0);
+	CHECK(cue->replace_active_resilient(statuses, 2));
+	CHECK(cue->get_active_count() == 2);
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(cue->get_evicted_transient_count() == 2);
+	CHECK(cue->replace_active_resilient(statuses, 2)); // Idempotent snapshots.
+	CHECK(cue->get_evicted_transient_count() == 2);
+	const Array events = cue->take_events(2);
+	REQUIRE(events.size() == 2);
+	CHECK(String(events[0]["event"]) == "started");
+	CHECK(String(events[1]["event"]) == "started");
+	CHECK(int(events[0]["priority"]) == 2);
+	CHECK(int(events[1]["priority"]) == 2);
+	CHECK(cue->emit_cue("GameplayCue.Ambient.Refill1", 1.0, 0));
+	CHECK(cue->emit_cue("GameplayCue.Ambient.Refill2", 1.0, 0));
+	CHECK(cue->replace_active_resilient(Dictionary(), 2));
+	CHECK(cue->get_active_count() == 0);
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(cue->get_evicted_transient_count() == 4);
+	const Array stopped = cue->take_events(2);
+	REQUIRE(stopped.size() == 2);
+	CHECK(String(stopped[0]["event"]) == "stopped");
+	CHECK(String(stopped[1]["event"]) == "stopped");
+}
+
+TEST_CASE("[GameplayFX] CueQueue resilient preflight rolls back when not enough lower-priority victims") {
+	Ref<GameplayCueQueue> cue;
+	cue.instantiate();
+	for (int i = 0; i < GameplayCueQueue::MAX_PENDING - 1; ++i) {
+		CHECK(cue->emit_cue(StringName(String("GameplayCue.Critical.") + itos(i)), 1.0, 7));
+	}
+	CHECK(cue->emit_cue("GameplayCue.Minor.One", 1.0, 0));
+	Dictionary statuses;
+	statuses["GameplayCue.Status.Resolve"] = 2;
+	statuses["GameplayCue.Status.Sundered"] = 1;
+	CHECK_FALSE(cue->replace_active_resilient(statuses, 2));
+	CHECK(cue->get_active_count() == 0);
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(cue->get_evicted_transient_count() == 0);
+	CHECK(cue->get_rejected_transient_count() == 0);
+	CHECK(cue->get_active_snapshot().is_empty());
+	CHECK_FALSE(cue->replace_active_resilient(statuses, 8));
+	CHECK_FALSE(cue->replace_active_resilient(statuses, -1));
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(cue->get_evicted_transient_count() == 0);
+	// A larger policy priority may not sacrifice equal-priority visual events.
+	CHECK_FALSE(cue->replace_active_resilient(statuses, 7));
+	CHECK(cue->get_active_count() == 0);
+}
+
 TEST_CASE("[GameplayFX] CueQueue preserves lifecycle while higher-priority pulses displace ambience") {
 	Ref<GameplayCueQueue> cue;
 	cue.instantiate();
