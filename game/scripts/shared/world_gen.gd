@@ -346,7 +346,7 @@ static func _jitter(rng: RandomNumberGenerator, radius: float) -> Vector2:
 ## of ruins, often with a loot crate and some clutter. Collidable structures shared by server and
 ## client; own random stream (ids 850-899), so everything else in the chunk keeps its place.
 const OUTPOST_ID_BASE := 850
-const OUTPOST_CHANCE := 0.22
+const OUTPOST_CHANCE := 0.32
 
 
 func _add_outposts(cell: Vector2i, origin: Vector2, zone: int, ruin: bool, structures: Array, crates: Array,
@@ -381,7 +381,7 @@ func _add_outposts(cell: Vector2i, origin: Vector2, zone: int, ruin: bool, struc
 		index += 1
 	else:
 		# Overgrown ruins: a few broken walls and remains.
-		for r in orng.randi_range(2, 4):
+		for r in orng.randi_range(3, 6):
 			var p := at + Vector2.from_angle(orng.randf() * TAU) * orng.randf_range(3.0, 9.0)
 			if is_water(p.x, p.y):
 				continue
@@ -502,7 +502,7 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 	# Ruins: scavenging sites, never inside the hub, rarer in the safe green zone.
 	var hub_distance := center.length()
 	if hub_distance > Defs.HUB_SAFE_RADIUS + 60.0 and not is_water(center.x, center.y):
-		var ruin_chance := 0.16 + 0.05 * zone
+		var ruin_chance := 0.24 + 0.06 * zone
 		ruin = rng.randf() < ruin_chance
 		# A site already fills the area: no extra ruin on top of it.
 		for site in sites:

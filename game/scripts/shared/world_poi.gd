@@ -24,7 +24,8 @@ const WALL_STONE := 1 # Fort wall.
 # What blocks movement, per variant, of the client's PROPS and RUINS lists (the server never loads a model): a test checks
 # that these tables and the lists in model_catalog.gd have the same length.
 const PROP_RADII := [0.45, 0.45, 0.6, 0.6, 0.35, 0.3, 0.5, 0.5, 0.6, 2.4, 0.4, 0.7, 0.9, 0.7, 0.8, 0.5, 0.9, 0.2, 1.0, 0.9, 0.8, 0.45, 1.5, 0.25, 0.25, 1.3, 0.45, 0.45, 0.5, 0.25, 0.25, 0.6, 0.55, 0.25, 0.4, 0.3, 1.1, 0.4, 0.35, 0.35, 0.5, 0.3, 0.25, 0.9, 0.25, 0.3, 0.45, 0.8, 0.5, 0.6, 0.5, 0.6, 0.8, 0.8, 0.4, 0.5]
-const RUIN_RADII := [0.8, 0.8, 1.8, 1.8, 1.1, 2.6, 1.6, 0.5, 1.9, 2.2]
+const RUIN_RADII := [0.8, 0.8, 1.8, 1.8, 1.1, 2.6, 1.6, 0.5, 1.9, 2.2,
+	1.8, 1.8, 0.9, 1.2, 2.4, 2.4, 2.2, 2.2, 1.5, 1.6, 1.8, 1.4, 0.8, 0.7, 2.0, 2.6, 1.2, 1.8, 1.8, 0.7, 1.0, 2.0, 1.6, 1.7, 1.7]
 const CRATE_VARIANTS := 6
 # Landmarks fill the regions that hold no settlement: odd, memorable places to find. Their big pieces are "monument"
 # structures; the client's MONUMENTS list draws them (standing stone, giant crystal, great tree, shrine pillar).
