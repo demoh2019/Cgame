@@ -7,6 +7,18 @@
 		A native, stateless significance selector inspired by Unreal Engine's Significance Manager. For equal priority (0 to 3, higher means more important), closer distance wins, followed by the original candidate index. Results are ordered indices, not a mutated candidate array. Up to 16,384 candidates, 16 viewers, and 128 selection slots are supported. Invalid input returns an empty result atomically. The caller decides whether a selected actor receives HUD, VFX, audio or other optional work. Gameplay authority, visibility and physics are unchanged by the planner.
 	</description>
 	<methods>
+		<method name="select_shadow_casters" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="bounds_min" type="PackedVector3Array" />
+			<param index="1" name="bounds_max" type="PackedVector3Array" />
+			<param index="2" name="roles" type="PackedByteArray" />
+			<param index="3" name="current" type="PackedByteArray" />
+			<param index="4" name="camera" type="Vector3" />
+			<param index="5" name="role_radii" type="PackedFloat64Array" />
+			<param index="6" name="budget" type="int" default="16" />
+			<param index="7" name="hysteresis" type="float" default="5.0" />
+			<description>Returns up to [param budget] stable source indices of eligible decorative shadow casters ranked by role (0 bush, 1 tree, 2 structure, 3 disabled), horizontal distance to world bounds, and current activation hysteresis. The three role radii are in order bush, tree, structure. Nonpositive radii disable their role. Existing casters remain eligible until radius + hysteresis, while inactive casters require a distance within radius - hysteresis. Active candidates receive a small ranking retention bonus; exact ties preserve source order. Invalid/nonfinite input, reversed bounds, mismatched arrays, over-16,384 candidates, and budgets outside 0..128 reject the entire plan. The caller owns actual shadow enabling and must not use this for gameplay visibility.</description>
+		</method>
 		<method name="select_top" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="distances" type="PackedFloat64Array" />

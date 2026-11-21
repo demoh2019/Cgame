@@ -258,4 +258,149 @@ TEST_CASE("[SignificanceBudget] priority-stable malformed inputs reject atomical
 	CHECK(p->select_top_priority_stable(distances, pri, ids, {}, 2, 10.0, 11.0).is_empty());
 }
 
+
+TEST_CASE("[SignificanceBudget] HLOD shadow significance preserves structures and active hysteresis") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	PackedVector3Array low;
+	PackedVector3Array high;
+	PackedByteArray roles;
+	PackedByteArray active;
+	const double distances[] = { 10.0, 1.0, 60.0, 9.0, 0.0 };
+	const uint8_t kinds[] = { 1, 0, 2, 1, 3 };
+	const uint8_t states[] = { 0, 0, 0, 1, 0 };
+	for (int i = 0; i < 5; i++) {
+		low.push_back(Vector3(distances[i], 100.0, 0.0));
+		high.push_back(Vector3(distances[i] + 2.0, 150.0, 3.0));
+		roles.push_back(kinds[i]);
+		active.push_back(states[i]);
+	}
+	PackedFloat64Array radii;
+	radii.push_back(26.0);
+	radii.push_back(48.0);
+	radii.push_back(68.0);
+	const PackedInt32Array chosen = planner->select_shadow_casters(
+			low, high, roles, active, Vector3(0, 0, 0), radii, 3);
+	REQUIRE(chosen.size() == 3);
+	CHECK(chosen[0] == 2); // Landmark structures before disposable bushes.
+	CHECK(chosen[1] == 3); // Existing caster receives a 5 m retention bonus.
+	CHECK(chosen[2] == 0);
+	CHECK(planner->select_shadow_casters(low, high, roles, active,
+			Vector3(0, 0, 0), radii, 0).is_empty());
+	CHECK(planner->select_shadow_casters(low, high, roles, active,
+			Vector3(0, 0, 0), radii, 128).size() == 4);
+	// Camera altitude does not cause a surface shadow to be lost.
+	low.set(0, Vector3(0, 100, 0));
+	high.set(0, Vector3(10, 150, 10));
+	const PackedInt32Array vertical = planner->select_shadow_casters(
+			low, high, roles, active, Vector3(5, 1000, 5), radii, 3);
+	CHECK(vertical.size() == 3);
+	CHECK(vertical[1] == 0);
+}
+
+TEST_CASE("[SignificanceBudget] HLOD shadow margins include boundaries without flickering") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	PackedVector3Array low;
+	PackedVector3Array high;
+	PackedByteArray roles;
+	PackedByteArray active;
+	for (int i = 0; i < 5; ++i) {
+		const double x[] = { 44, 52, 53, 54, 43 };
+		low.push_back(Vector3(x[i], 0, 0));
+		high.push_back(Vector3(x[i], 1, 1));
+		roles.push_back(1);
+		active.push_back(i == 1 || i == 2 || i == 3 ? 1 : 0);
+	}
+	PackedFloat64Array radii;
+	radii.push_back(26.0);
+	radii.push_back(48.0);
+	radii.push_back(68.0);
+	const PackedInt32Array chosen = planner->select_shadow_casters(
+			low, high, roles, active, Vector3(), radii, 3, 5.0);
+	REQUIRE(chosen.size() == 3);
+	CHECK(chosen[0] == 4); // Inactive 43 m is exactly at the threshold.
+	CHECK(chosen[1] == 1); // Active 52 m retained to 53 m boundary.
+	CHECK(chosen[2] == 2); // Exact active 53 m boundary included.
+	radii.set(1, 0.0);
+	CHECK(planner->select_shadow_casters(low, high, roles, active, Vector3(),
+			radii, 3).is_empty()); // Quality 0 disables even retained shadows.
+}
+
+TEST_CASE("[SignificanceBudget] HLOD shadow planning rejects malformed batches atomically") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	PackedVector3Array low;
+	PackedVector3Array high;
+	low.push_back(Vector3(1, 0, 1));
+	high.push_back(Vector3(2, 1, 2));
+	PackedByteArray roles;
+	roles.push_back(1);
+	PackedByteArray active;
+	active.push_back(0);
+	PackedFloat64Array radii;
+	radii.push_back(26.0);
+	radii.push_back(48.0);
+	radii.push_back(68.0);
+	CHECK(planner->select_shadow_casters(low, high, roles, active, Vector3(),
+			radii, 1).size() == 1);
+	CHECK(planner->select_shadow_casters(low, high, roles, active, Vector3(),
+			radii, -1).is_empty());
+	CHECK(planner->select_shadow_casters(low, high, roles, active, Vector3(),
+			radii, 129).is_empty());
+	CHECK(planner->select_shadow_casters(low, high, roles, active,
+			Vector3(Math::INF, 0, 0), radii, 1).is_empty());
+	radii.set(0, Math::NaN);
+	CHECK(planner->select_shadow_casters(low, high, roles, active, Vector3(),
+			radii, 1).is_empty());
+	radii.set(0, 26.0);
+	roles.set(0, 4);
+	CHECK(planner->select_shadow_casters(low, high, roles, active, Vector3(),
+			radii, 1).is_empty());
+	roles.set(0, 1);
+	active.set(0, 2);
+	CHECK(planner->select_shadow_casters(low, high, roles, active, Vector3(),
+			radii, 1).is_empty());
+	active.set(0, 0);
+	low.push_back(Vector3(Math::NaN, 0, 1)); // Invalid late candidate.
+	high.push_back(Vector3(3, 1, 2));
+	roles.push_back(1);
+	active.push_back(0);
+	CHECK(planner->select_shadow_casters(low, high, roles, active, Vector3(),
+			radii, 1).is_empty());
+	low.set(1, Vector3(3, 0, 1));
+	high.set(1, Vector3(2, 1, 2)); // Reversed AABB.
+	CHECK(planner->select_shadow_casters(low, high, roles, active, Vector3(),
+			radii, 1).is_empty());
+	high.remove_at(1);
+	CHECK(planner->select_shadow_casters(low, high, roles, active, Vector3(),
+			radii, 1).is_empty()); // Mismatched arrays.
+}
+
+TEST_CASE("[SignificanceBudget] HLOD shadow cap returns stable 128 of 512 groups") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	PackedVector3Array low;
+	PackedVector3Array high;
+	PackedByteArray roles;
+	PackedByteArray active;
+	for (int i = 0; i < 512; ++i) {
+		low.push_back(Vector3(1, 0, 1));
+		high.push_back(Vector3(2, 1, 2));
+		roles.push_back(1);
+		active.push_back(0);
+	}
+	PackedFloat64Array radii;
+	radii.push_back(26.0);
+	radii.push_back(48.0);
+	radii.push_back(68.0);
+	const PackedInt32Array chosen = planner->select_shadow_casters(
+			low, high, roles, active, Vector3(), radii, 128);
+	REQUIRE(chosen.size() == 128);
+	for (int i = 0; i < chosen.size(); ++i) {
+		CHECK(chosen[i] == i);
+	}
+}
+
+
 } // namespace TestSignificanceBudgetPlanner
