@@ -56,7 +56,13 @@ func _smoke() -> void:
             push_error("Native PCG weighted variants lost decorative point identities")
             ok = false
         if not foliage.multimesh.use_colors:
-            push_error("Weighted foliage variants were not packed as MultiMesh instance colors")
+            push_error("Weighted foliage variants lost per-instance colors")
+            ok = false
+        if foliage.get_child_count() != 2:
+            push_error("Expected two persistent extra instancing batches, not per-plant nodes")
+            ok = false
+        if not bool(foliage.call("verify_variant_partition_native_fallback_parity")):
+            push_error("Native variant mesh buckets disagree with GDScript fallback")
             ok = false
         if not bool(foliage.call("verify_variant_native_fallback_parity")):
             push_error("Weighted PCG variant selection diverged from stock Godot fallback")
@@ -70,16 +76,61 @@ func _smoke() -> void:
                 variant_counts[1] + variant_counts[2] != positions.size():
             push_error("Weighted native variant counts did not cover the MultiMesh")
             ok = false
-        if weighted.size() == positions.size():
-            for i in range(weighted.size()):
-                if weighted[i] < 0 or weighted[i] > 2:
-                    push_error("Native weighted PCG returned an invalid plant variant")
+        var packed_counts: PackedInt32Array = foliage.call("get_variant_batch_sizes")
+        if packed_counts != variant_counts:
+            push_error("Per-geometry native PCG instance buckets disagree with visual variants")
+            ok = false
+        var source_visits := PackedInt32Array()
+        source_visits.resize(positions.size())
+        var child_renderer_ids := PackedInt64Array()
+        for variant in 3:
+            var renderer := foliage.call("get_variant_renderer", variant) as MultiMeshInstance3D
+            if renderer == null or renderer.multimesh == null or renderer.multimesh.mesh == null:
+                push_error("Missing procedural MultiMesh mesh variant %d" % variant)
+                ok = false
+                continue
+            if not renderer.multimesh.use_colors:
+                push_error("Procedural mesh batch lost per-instance colors")
+                ok = false
+            if variant == 0 and not (renderer.multimesh.mesh is BoxMesh):
+                push_error("Green foliage must use box-blade geometry")
+                ok = false
+            elif variant == 1 and not (renderer.multimesh.mesh is CylinderMesh):
+                push_error("Autumn foliage must use tapered reed geometry")
+                ok = false
+            elif variant == 2 and not (renderer.multimesh.mesh is SphereMesh):
+                push_error("Dry foliage must use distinct seed-head geometry")
+                ok = false
+            if variant > 0:
+                child_renderer_ids.append(renderer.get_instance_id())
+            var source_indices: PackedInt32Array = foliage.call(
+                "get_variant_source_indices", variant)
+            if source_indices.size() != renderer.multimesh.instance_count:
+                push_error("PCG per-mesh batch lost instance attributes")
+                ok = false
+                continue
+            for local_index in source_indices.size():
+                var source_index: int = source_indices[local_index]
+                if source_index < 0 or source_index >= weighted.size():
+                    push_error("PCG mesh batch contained an invalid source index")
                     ok = false
-                    break
-                if foliage.multimesh.get_instance_color(i).a < 0.99:
-                    push_error("Weighted MultiMesh plant variant lost opaque instance tint")
+                    continue
+                source_visits[source_index] += 1
+                if weighted[source_index] != variant:
+                    push_error("PCG mesh batch assigned an incorrect geometry")
                     ok = false
-                    break
+                if renderer.multimesh.get_instance_transform(local_index).origin.distance_to(
+                        positions[source_index]) > 0.0001:
+                    push_error("PCG mesh grouping moved a plant from its authored location")
+                    ok = false
+                if renderer.multimesh.get_instance_color(local_index).a < 0.99:
+                    push_error("PCG mesh grouping lost the opaque per-plant color")
+                    ok = false
+        for visits in source_visits:
+            if visits != 1:
+                push_error("PCG mesh grouping duplicated or dropped an instance")
+                ok = false
+                break
         var centers: PackedVector3Array = foliage.call("get_exclusion_centers")
         var radii: PackedFloat64Array = foliage.call("get_exclusion_radii")
         var box_mins: PackedVector3Array = foliage.call("get_exclusion_box_mins")
@@ -152,7 +203,8 @@ func _smoke() -> void:
             if low_density < 50 or high_density < 100:
                 push_error("PCG biome density regions were not generated")
                 ok = false
-        if positions.size() == 0 or positions.size() > 160 or foliage.multimesh.instance_count != positions.size():
+        if positions.size() == 0 or positions.size() > 160 or \
+                int(foliage.call("get_rendered_instance_count")) != positions.size():
             push_error("PCG foliage did not create a bounded instancing batch")
             ok = false
         for i in range(positions.size()):
@@ -196,6 +248,18 @@ func _smoke() -> void:
                 stable_ids != foliage.call("get_selected_stable_ids"):
             push_error("PCG weighted visual variants changed after regeneration")
             ok = false
+        if int(foliage.call("get_rendered_instance_count")) != positions.size() or \
+                foliage.call("get_variant_batch_sizes") != packed_counts or \
+                foliage.get_child_count() != 2:
+            push_error("PCG mesh batching duplicated or lost instances during regeneration")
+            ok = false
+        for variant in range(1, 3):
+            var renderer_after := foliage.call(
+                "get_variant_renderer", variant) as MultiMeshInstance3D
+            if renderer_after == null or child_renderer_ids.size() < variant or \
+                    renderer_after.get_instance_id() != child_renderer_ids[variant - 1]:
+                push_error("PCG regenerate allocated new mesh nodes instead of reusing them")
+                ok = false
 
     var state = game.get("state")
     var pickups := get_nodes_in_group("days_after_pickup")
