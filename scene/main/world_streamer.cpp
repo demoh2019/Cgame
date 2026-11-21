@@ -348,11 +348,13 @@ void WorldStreamer::_trim_cached_chunks() {
 		for (const KeyValue<Vector3i, CachedChunk> &entry : cached_chunks) {
 			const Vector3i &cell = entry.key;
 			const bool requested = have_focus && _cell_requested(focus_position_local, cell);
+			const bool tie_before = cell.x < oldest_cell.x ||
+					(cell.x == oldest_cell.x && (cell.y < oldest_cell.y ||
+							(cell.y == oldest_cell.y && cell.z < oldest_cell.z)));
+			const bool older = entry.value.age < oldest_age ||
+					(entry.value.age == oldest_age && tie_before);
 			if (!found || (oldest_requested && !requested) ||
-					(requested == oldest_requested && (entry.value.age < oldest_age ||
-							(entry.value.age == oldest_age && (cell.x < oldest_cell.x ||
-								(cell.x == oldest_cell.x && (cell.y < oldest_cell.y ||
-										(cell.y == oldest_cell.y && cell.z < oldest_cell.z)))))))) {
+					(requested == oldest_requested && older)) {
 				oldest_cell = cell;
 				oldest_age = entry.value.age;
 				oldest_requested = requested;
