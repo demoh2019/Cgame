@@ -42,6 +42,15 @@ public:
 			const PackedByteArray &p_visible, const PackedInt32Array &p_category_caps,
 			int p_budget, double p_max_distance) const;
 
+	// Niagara-style second budget for particle work. Select by urgency,
+	// frustum relevance and proximity, but admit only candidates whose cost
+	// fits the remaining per-frame particle budget. Pure and deterministic.
+	PackedInt32Array select_effects_visible_costed(const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_priorities, const PackedByteArray &p_categories,
+			const PackedByteArray &p_visible, const PackedInt32Array &p_particle_costs,
+			const PackedInt32Array &p_category_caps, int p_budget,
+			double p_max_distance, int p_particle_budget) const;
+
 	// Priority-tier ranking with stable ID retention: only peers in the same
 	// priority tier compete via distance hysteresis, never bosses vs normals.
 	PackedInt32Array select_top_priority_stable(const PackedFloat64Array &p_distances,
