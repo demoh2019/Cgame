@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameOcclusionRaster" inherits="RefCounted" api_type="core" keywords="occlusion,culling,hi-z,software rasterizer" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Software occlusion culling with a low-resolution depth buffer and a Hi-Z pyramid.
+	</brief_description>
+	<description>
+		[CgameOcclusionRaster] rasterizes occluder triangles into a small conservative depth buffer on the CPU and answers visibility queries for bounding boxes using a max-depth mip chain (Hi-Z), so a query touches only a few texels whatever the box size.
+		Depth is the view distance (clip-space w), which is linear and independent of reversed-Z or other clip conventions. Larger values are farther; texels without an occluder hold infinity. Only perspective projections are supported. All answers are conservative: when unsure, the box is reported visible. Boxes that cross or lie behind the near plane are always visible.
+		Typical per-frame usage:
+		[codeblock]
+		var raster = CgameOcclusionRaster.new()
+		raster.begin(view_proj, 256, 128) # view_proj: world-to-clip matrix.
+		raster.rasterize_occluder(wall_triangles)
+		if raster.is_visible(object_aabb):
+		    draw(object)
+		[/codeblock]
+	</description>
+	<methods>
+		<method name="begin">
+			<return type="void" />
+			<param index="0" name="view_proj" type="Projection" />
+			<param index="1" name="width" type="int" default="256" />
+			<param index="2" name="height" type="int" default="128" />
+			<description>
+				Starts a frame: clears the depth buffer to infinity, resets the statistics and stores [param view_proj], the world-to-clip matrix. The previous frame's depth is kept for [method temporal_reproject]. [param width] and [param height] are clamped to at least 1.
+			</description>
+		</method>
+		<method name="build_hiz">
+			<return type="void" />
+			<description>
+				Rebuilds the max-depth mip pyramid. Queries call this automatically when the depth buffer changed, so calling it manually is only needed to measure or force the cost.
+			</description>
+		</method>
+		<method name="hiz_get">
+			<return type="float" />
+			<param index="0" name="level" type="int" />
+			<param index="1" name="x" type="int" />
+			<param index="2" name="y" type="int" />
+			<description>
+				Returns the Hi-Z texel at [param x], [param y] of mip [param level]. Level 0 is the depth buffer itself. Returns [code]0.0[/code] and prints an error when an argument is out of range or [method begin] was not called.
+			</description>
+		</method>
+		<method name="hiz_level_count">
+			<return type="int" />
+			<description>
+				Returns the number of Hi-Z levels. The last level is 1x1.
+			</description>
+		</method>
+		<method name="hiz_size">
+			<return type="Vector2i" />
+			<param index="0" name="level" type="int" />
+			<description>
+				Returns the size in texels of the Hi-Z [param level].
+			</description>
+		</method>
+		<method name="is_visible">
+			<return type="bool" />
+			<param index="0" name="aabb" type="AABB" />
+			<description>
+				Returns [code]false[/code] only when [param aabb] is provably hidden behind the rasterized occluders. Increases [member tested] and, when the box is hidden, [member culled].
+			</description>
+		</method>
+		<method name="rasterize_occluder">
+			<return type="void" />
+			<param index="0" name="triangles" type="PackedVector3Array" />
+			<description>
+				Rasterizes world-space triangles, three vertices each, into the depth buffer. Triangles are double sided and clipped against the near plane. Depth is pushed slightly away from the camera so that partially covered pixels never over-occlude. Call after [method begin].
+			</description>
+		</method>
+		<method name="temporal_reproject">
+			<return type="void" />
+			<param index="0" name="prev_view_proj" type="Projection" />
+			<description>
+				Seeds the current depth buffer with the previous frame's depth, reprojected from [param prev_view_proj]. Call after [method begin] and before [method rasterize_occluder]. The result is approximate: depth is pushed 5% farther and disocclusions can leak stale occluders.
+			</description>
+		</method>
+		<method name="test_many">
+			<return type="PackedByteArray" />
+			<param index="0" name="aabbs" type="Array" />
+			<description>
+				Tests an array of [AABB] and returns one byte per box: [code]1[/code] when visible, [code]0[/code] when occluded.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="culled" type="int" setter="" getter="get_culled">
+			Number of boxes found hidden since [method begin].
+		</member>
+		<member name="height" type="int" setter="" getter="get_height">
+			Depth buffer height in pixels.
+		</member>
+		<member name="occluder_triangles" type="int" setter="" getter="get_occluder_triangles">
+			Number of triangles rasterized since [method begin], after near-plane rejection.
+		</member>
+		<member name="pixels_written" type="int" setter="" getter="get_pixels_written">
+			Number of depth pixels that received their first occluder since [method begin].
+		</member>
+		<member name="tested" type="int" setter="" getter="get_tested">
+			Number of boxes tested since [method begin].
+		</member>
+		<member name="width" type="int" setter="" getter="get_width">
+			Depth buffer width in pixels.
+		</member>
+	</members>
+</class>

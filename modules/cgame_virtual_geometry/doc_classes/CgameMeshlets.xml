@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameMeshlets" inherits="RefCounted" api_type="core" keywords="meshlet,cluster,nanite,virtualized geometry" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Splits triangle meshes into small clusters (meshlets) and culls them.
+	</brief_description>
+	<description>
+		[CgameMeshlets] is a building block for virtualized geometry. It splits an indexed triangle mesh into meshlets of bounded size using meshoptimizer, and computes for each meshlet a bounding sphere and a normal cone for culling. All methods are static; the class is never instantiated.
+		Each meshlet is a [Dictionary] with the keys:
+		- [code]indices[/code] ([PackedInt32Array]): triangle list, local indices into [code]vertex_ids[/code].
+		- [code]vertex_ids[/code] ([PackedInt32Array]): indices into the source vertex array.
+		- [code]bounds_center[/code] ([Vector3]) and [code]bounds_radius[/code] ([float]): a sphere containing every meshlet vertex.
+		- [code]cone_axis[/code] ([Vector3]) and [code]cone_cutoff[/code] ([float]): normal cone. A cutoff of [code]1.0[/code] means the meshlet is never cone-culled.
+		Triangle winding follows Godot's convention (front faces are clockwise), so [code]cone_axis[/code] points along the outward geometric normal.
+		[codeblock]
+		var meshlets = CgameMeshlets.build_meshlets(vertices, indices)
+		for m in meshlets:
+		    if CgameMeshlets.cone_cull(m, camera_position):
+		        continue # Every triangle faces away from the camera.
+		[/codeblock]
+	</description>
+	<methods>
+		<method name="build_meshlets" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="vertices" type="PackedVector3Array" />
+			<param index="1" name="indices" type="PackedInt32Array" />
+			<param index="2" name="max_vertices" type="int" default="64" />
+			<param index="3" name="max_triangles" type="int" default="124" />
+			<description>
+				Builds meshlets from [param vertices] and the triangle list [param indices]. Every triangle ends up in exactly one meshlet, and no meshlet exceeds [param max_vertices] vertices or [param max_triangles] triangles. [param max_vertices] is clamped to [code][3, 255][/code] and [param max_triangles] to [code][1, 512][/code]. Returns an empty array for empty input, and also, with an error message, when an index is negative or out of range.
+			</description>
+		</method>
+		<method name="cone_cull" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="meshlet" type="Dictionary" />
+			<param index="1" name="camera_pos" type="Vector3" />
+			<description>
+				Returns [code]true[/code] when every triangle of [param meshlet] faces away from [param camera_pos], so the meshlet can be skipped. The test is conservative and never culls a meshlet that has a front-facing triangle.
+			</description>
+		</method>
+		<method name="frustum_cull" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="meshlet" type="Dictionary" />
+			<param index="1" name="planes" type="Plane[]" />
+			<description>
+				Returns [code]true[/code] when the bounding sphere of [param meshlet] lies completely outside at least one of [param planes]. The planes use outward normals, as returned by [method Camera3D.get_frustum]: a point is inside when [method Plane.distance_to] is not positive.
+			</description>
+		</method>
+	</methods>
+</class>

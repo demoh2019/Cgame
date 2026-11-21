@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameClusterLOD" inherits="RefCounted" api_type="core" keywords="lod,cluster,nanite,virtualized geometry,simplification" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Builds a Nanite-style cluster LOD hierarchy and selects a crack-free cut from it.
+	</brief_description>
+	<description>
+		[CgameClusterLOD] builds a directed acyclic graph of mesh clusters. Level 0 holds the [CgameMeshlets] of the source mesh. Each following level groups up to four neighbouring clusters, simplifies the merged triangles to half with meshoptimizer while locking the border of the group, and splits the result into new clusters. All clusters of a group share one error value and one LOD sphere, so every cut selected with [method select_cut] is watertight.
+		Vertices of the source mesh must be welded (shared by index) so that neighbouring clusters share vertex ids. All methods are static.
+		The hierarchy is a [Dictionary] with the keys [code]vertices[/code], [code]clusters[/code] ([Array] of [Dictionary]), [code]levels[/code] ([int]) and [code]roots[/code] ([PackedInt32Array] of clusters without a parent). Each cluster has:
+		- [code]indices[/code], [code]vertex_ids[/code]: triangle list with global vertex ids and the vertices it uses.
+		- [code]center[/code], [code]radius[/code], [code]cone_axis[/code], [code]cone_cutoff[/code]: culling bounds, as in [CgameMeshlets].
+		- [code]level[/code], [code]error[/code]: hierarchy level and absolute object-space simplification error (0 at level 0).
+		- [code]lod_center[/code], [code]lod_radius[/code]: LOD sphere shared by the whole group the cluster belongs to.
+		- [code]parent_error[/code], [code]parent_center[/code], [code]parent_radius[/code]: error and LOD sphere of the group that replaces this cluster; the error is infinite for roots.
+		- [code]children[/code]: ids of the clusters this one was simplified from.
+		[codeblock]
+		var h = CgameClusterLOD.build_hierarchy(vertices, indices, 4)
+		var cut = CgameClusterLOD.select_cut(h, camera.global_position, deg_to_rad(camera.fov), 1080.0, 1.0)
+		print(CgameClusterLOD.triangle_count(h, cut))
+		[/codeblock]
+	</description>
+	<methods>
+		<method name="build_hierarchy" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="vertices" type="PackedVector3Array" />
+			<param index="1" name="indices" type="PackedInt32Array" />
+			<param index="2" name="levels" type="int" default="4" />
+			<description>
+				Builds the hierarchy with at most [param levels] levels (clamped to [code][1, 16][/code]). Stops early when a level cannot be simplified further. Groups whose simplification gains nothing, for example because their border is fully locked, are left as roots. Returns an empty dictionary, with an error message, for an empty mesh or an index outside [param vertices].
+			</description>
+		</method>
+		<method name="select_cut" qualifiers="static">
+			<return type="PackedInt32Array" />
+			<param index="0" name="hierarchy" type="Dictionary" />
+			<param index="1" name="camera_pos" type="Vector3" />
+			<param index="2" name="fov_y" type="float" />
+			<param index="3" name="screen_height" type="float" />
+			<param index="4" name="error_pixels" type="float" default="1.0" />
+			<description>
+				Returns the ids of the clusters to draw for a perspective camera. [param fov_y] is the vertical field of view in radians and [param screen_height] is in pixels. A cluster is selected when its own projected error is at most [param error_pixels] and the projected error of its parent group is larger. Together the selected clusters cover the surface exactly once.
+			</description>
+		</method>
+		<method name="triangle_count" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="hierarchy" type="Dictionary" />
+			<param index="1" name="cut" type="PackedInt32Array" />
+			<description>
+				Returns the number of triangles of all clusters in [param cut].
+			</description>
+		</method>
+	</methods>
+</class>
