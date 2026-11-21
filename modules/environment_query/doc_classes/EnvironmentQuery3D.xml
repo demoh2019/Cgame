@@ -65,6 +65,15 @@
 			<param index="7" name="include_center" type="bool" default="false" />
 			<description>Generates concentric rays within an oriented XZ-plane sector, analogous to Unreal EQS Points: Cone. [param cone_degrees] is the [b]full[/b] aperture from 0 to 360 degrees. Each ring is generated from left edge to right edge; one ray is centered on [param direction], and a single ring uses the outer radius. [param include_center] prepends the context location once. Input direction requires a nonzero XZ projection, all positions and radii must be finite, radii must satisfy 0 &lt;= inner_radius &lt;= outer_radius, and counts must be 1–256 rings and 1–4096 rays per ring, at most 65536 total points. Invalid inputs return no points. This is geometric candidate generation, not visibility tracing, physics or navigation projection.</description>
 		</method>
+		<method name="sample_oriented_grid" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="forward" type="Vector3" />
+			<param index="2" name="half_extents" type="Vector2" />
+			<param index="3" name="spacing" type="float" />
+			<param index="4" name="max_points" type="int" default="4096" />
+			<description>Generates a deterministic rectangular grid on the XZ plane rotated so local +Z points along the XZ projection of [param forward] and local +X is perpendicular to the right. As in [method sample_grid], [param half_extents] controls the local X/Z size and points are emitted in row-major order. Positive finite spacing, finite center/direction/extents, a nonzero horizontal forward vector, nonnegative extents, and a maximum allocation of 65536 points are required. Invalid inputs return an empty array. Does not test pathfinding, physics, terrain or actor occupancy.</description>
+		</method>
 		<method name="sample_grid" qualifiers="static">
 			<return type="PackedVector3Array" />
 			<param index="0" name="center" type="Vector3" />
