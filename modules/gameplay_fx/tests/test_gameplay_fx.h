@@ -863,6 +863,25 @@ TEST_CASE("[GameplayFX] CueQueue preserves lifecycle while higher-priority pulse
 	CHECK(String(events[1]["tag"]) == "GameplayCue.Status.CriticalHit");
 	CHECK(int(events[1]["priority"]) == 6);
 	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING - 2);
+	// Under equal background priorities, the oldest eligible event goes.
+	bool saw_oldest = false;
+	bool saw_next = false;
+	int remaining_count = 0;
+	while (cue->get_pending_count() > 0) {
+		const Array batch = cue->take_events(32);
+		for (int i = 0; i < batch.size(); ++i) {
+			const String tag = String(batch[i]["tag"]);
+			saw_oldest |= tag == "GameplayCue.Ambient.0";
+			if (tag == "GameplayCue.Ambient.1") {
+				saw_next = true;
+				CHECK(int(batch[i]["count"]) == 2);
+			}
+			++remaining_count;
+		}
+	}
+	CHECK_FALSE(saw_oldest);
+	CHECK(saw_next);
+	CHECK(remaining_count == GameplayCueQueue::MAX_PENDING - 2);
 	cue->reset();
 	CHECK(cue->get_evicted_transient_count() == 0);
 	CHECK(cue->get_rejected_transient_count() == 0);
