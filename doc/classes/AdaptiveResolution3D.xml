@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AdaptiveResolution3D" inherits="Node" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Automatically adjusts the internal 3D rendering resolution according to GPU frame time.
+	</brief_description>
+	<description>
+		Add one [AdaptiveResolution3D] as a child of the [Viewport] you want to manage (for the main window, add it anywhere in the scene tree). The node measures the viewport's GPU rendering time, smooths short spikes, and adjusts [member Viewport.scaling_3d_scale] toward [member target_fps]. The scene's 2D interface keeps its original resolution.
+		The node has a dead zone and adjusts resolution in small steps to avoid oscillation. It does not change anti-aliasing, lighting, shadows, post-processing, or the 3D scaling mode. Choose an appropriate mode such as FSR 2 or MetalFX Temporal on supported hardware before enabling it.
+		[b]Note:[/b] A GPU-bound scene can benefit from resolution scaling, but CPU-bound scenes may not. If the renderer does not provide valid GPU timestamps, the node leaves the rendering resolution unchanged. Headless or unsupported devices therefore do not automatically fall back to potentially misleading CPU frame time.
+		[b]Note:[/b] Use at most one adaptive resolution controller per viewport. While active, the node enables GPU timing measurement for that viewport; disabling or removing the node disables that measurement. Other consumers of viewport timing should coordinate with this node.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_current_scale" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the active viewport's 3D scaling factor. If inactive, returns [code]1.0[/code].
+			</description>
+		</method>
+		<method name="get_smoothed_gpu_time_ms" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the smoothed measured GPU frame time in milliseconds. A value of [code]0.0[/code] means no valid sample has been collected yet.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="decrease_step" type="float" setter="set_decrease_step" getter="get_decrease_step" default="0.05">
+			Maximum reduction of the scaling factor per update when the GPU exceeds its budget.
+		</member>
+		<member name="enabled" type="bool" setter="set_enabled" getter="is_enabled" default="true">
+			Whether this node adjusts resolution at runtime. Disabling it preserves the last applied scale.
+		</member>
+		<member name="gpu_budget_fraction" type="float" setter="set_gpu_budget_fraction" getter="get_gpu_budget_fraction" default="0.9">
+			Portion of the target frame time reserved for GPU work, leaving some headroom for fluctuations.
+		</member>
+		<member name="increase_step" type="float" setter="set_increase_step" getter="get_increase_step" default="0.025">
+			Maximum increase of the scaling factor per update when the GPU has sustained headroom.
+		</member>
+		<member name="max_scale" type="float" setter="set_max_scale" getter="get_max_scale" default="1.0">
+			Upper limit for internal 3D render resolution. Set above [code]1.0[/code] only if supersampling is desired and supported by the chosen scaling mode.
+		</member>
+		<member name="min_scale" type="float" setter="set_min_scale" getter="get_min_scale" default="0.67">
+			Lowest permitted 3D scaling factor.
+		</member>
+		<member name="target_fps" type="int" setter="set_target_fps" getter="get_target_fps" default="60">
+			Desired frame rate for computing the GPU rendering-time budget.
+		</member>
+		<member name="update_interval" type="float" setter="set_update_interval" getter="get_update_interval" default="0.75">
+			Minimum time in seconds between changes to render resolution.
+		</member>
+	</members>
+	<signals>
+		<signal name="scale_changed">
+			<param index="0" name="scale" type="float" />
+			<description>
+				Emitted when the 3D resolution scale is changed.
+			</description>
+		</signal>
+	</signals>
+</class>

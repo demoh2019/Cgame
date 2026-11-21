@@ -1,0 +1,106 @@
+extends RefCounted
+## Versioned local demo savegame: data stays on the player's device (user://).
+## Never execute or instantiate user-provided saved contents.
+
+const SAVE_PATH: String = "user://aurora_forest_save_v1.json"
+const FORMAT_VERSION: int = 1
+
+
+static func save_state(state: Dictionary, path: String = SAVE_PATH) -> bool:
+    var payload: Dictionary = {
+        "version": FORMAT_VERSION,
+        "relics": state.get("relics", []),
+        "position_xz": state.get("position_xz", [0.0, 9.0]),
+        "look": state.get("look", [0.0, 0.0]),
+        "quality": state.get("quality", true),
+        # Additive v1 fields: older saves lacking these keys remain compatible.
+        "time_of_day": state.get("time_of_day", 17.25),
+        "weather": state.get("weather", 0),
+        # Optional progression field; older v1 saves still load without it.
+        "defeated_enemies": state.get("defeated_enemies", [])
+    }
+    var file := FileAccess.open(path, FileAccess.WRITE)
+    if file == null:
+        push_error("Aurora Forest: failed to open local save file")
+        return false
+    file.store_string(JSON.stringify(payload))
+    file.close()
+    return true
+
+
+static func load_state(max_relics: int, path: String = SAVE_PATH) -> Dictionary:
+    if not FileAccess.file_exists(path):
+        return {}
+    var file := FileAccess.open(path, FileAccess.READ)
+    if file == null:
+        return {}
+    var parsed: Variant = JSON.parse_string(file.get_as_text())
+    file.close()
+    if typeof(parsed) != TYPE_DICTIONARY:
+        return {}
+    var raw: Dictionary = parsed
+    if raw.get("version", 0) != FORMAT_VERSION:
+        return {}
+
+    var ids: Array[int] = []
+    var raw_ids: Variant = raw.get("relics", [])
+    if raw_ids is Array:
+        for value in raw_ids:
+            if typeof(value) == TYPE_FLOAT or typeof(value) == TYPE_INT:
+                var id: int = int(value)
+                if id >= 0 and id < max_relics and not ids.has(id):
+                    ids.append(id)
+
+    var position := Vector2(0.0, 9.0)
+    var xy: Variant = raw.get("position_xz", [])
+    if xy is Array and xy.size() == 2:
+        if (typeof(xy[0]) == TYPE_FLOAT or typeof(xy[0]) == TYPE_INT) \
+                and (typeof(xy[1]) == TYPE_FLOAT or typeof(xy[1]) == TYPE_INT):
+            position.x = clampf(float(xy[0]), -62.0, 62.0)
+            position.y = clampf(float(xy[1]), -62.0, 62.0)
+
+    var look := Vector2.ZERO
+    var angles: Variant = raw.get("look", [])
+    if angles is Array and angles.size() == 2:
+        if (typeof(angles[0]) == TYPE_FLOAT or typeof(angles[0]) == TYPE_INT) \
+                and (typeof(angles[1]) == TYPE_FLOAT or typeof(angles[1]) == TYPE_INT):
+            look.x = clampf(float(angles[0]), -1.42, 1.42)
+            look.y = clampf(float(angles[1]), -PI * 2.0, PI * 2.0)
+
+    var time_of_day: float = 17.25
+    var raw_clock: Variant = raw.get("time_of_day", 17.25)
+    if (typeof(raw_clock) == TYPE_FLOAT or typeof(raw_clock) == TYPE_INT) \
+            and is_finite(float(raw_clock)):
+        time_of_day = fposmod(float(raw_clock), 24.0)
+
+    var weather: int = 0
+    var raw_weather: Variant = raw.get("weather", 0)
+    if typeof(raw_weather) == TYPE_INT and int(raw_weather) >= 0 and int(raw_weather) <= 2:
+        weather = int(raw_weather)
+
+    var defeated: Array[String] = []
+    var raw_defeated: Variant = raw.get("defeated_enemies", [])
+    if raw_defeated is Array:
+        for value in raw_defeated:
+            if not (value is String) or defeated.size() >= 15:
+                continue
+            var pieces: PackedStringArray = value.split(":")
+            if pieces.size() != 2 or not pieces[0].is_valid_int() or not pieces[1].is_valid_int():
+                continue
+            var x: int = pieces[0].to_int()
+            var z: int = pieces[1].to_int()
+            if x < -2 or x > 1 or z < -2 or z > 1 or (x == 0 and z == 0):
+                continue
+            var id: String = "%d:%d" % [x, z]
+            if not defeated.has(id):
+                defeated.append(id)
+
+    return {
+        "relics": ids,
+        "position_xz": position,
+        "look": look,
+        "quality": raw.get("quality", true) == true,
+        "time_of_day": time_of_day,
+        "weather": weather,
+        "defeated_enemies": defeated
+    }

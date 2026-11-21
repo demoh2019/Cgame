@@ -1,0 +1,15 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/world.gd" id="1_world"]
+
+[node name="AuroraForest" type="Node3D"]
+script = ExtResource("1_world")
+
+[node name="AdaptiveResolution3D" type="AdaptiveResolution3D" parent="."]
+target_fps = 60
+min_scale = 0.7
+max_scale = 1.0
+update_interval = 0.85
+decrease_step = 0.045
+increase_step = 0.02
+gpu_budget_fraction = 0.9
