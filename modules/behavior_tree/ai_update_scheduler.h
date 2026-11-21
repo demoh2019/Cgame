@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/object/ref_counted.h"
+#include "core/variant/variant.h"
 
 #include <cstdint>
 
@@ -58,6 +59,12 @@ public:
 	// True exactly once per slots_per_cycle simulation ticks for each ID.
 	// Urgent decisions bypass staggering. Negative ticks are invalid.
 	bool is_due(int64_t p_agent_id, int64_t p_tick_index, bool p_urgent = false) const;
+
+	// One native call for a dense NPC population. The byte at index i is 1
+	// when agent_ids[i] is due, 0 otherwise. Input order and duplicates are
+	// preserved. Returns empty for invalid ticks or batches above 4096 IDs.
+	// This does not bypass first-contact, combat or other urgent server logic.
+	PackedByteArray get_due_mask(const PackedInt64Array &p_agent_ids, int64_t p_tick_index) const;
 
 	// Number of simulation ticks until the next eligible slot (0 = now).
 	// -1 for a negative tick index.

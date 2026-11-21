@@ -149,3 +149,31 @@ timers continue at their original rates. Stock Godot uses the previous
 Source concepts:
 https://dev.epicgames.com/documentation/unreal-engine/overview-of-mass-gameplay-in-unreal-engine
 https://docs.unity.cn/Manual/CullingGroupAPI.html
+
+## Native batched AI target-scan scheduling
+
+`AIUpdateScheduler.get_due_mask(PackedInt64Array agent_ids, int tick_index)`
+returns a `PackedByteArray` with one admission bit (0 or 1) at the same
+array index. It reuses the exact scalar `is_due` hashing and slot cycle,
+including signed agent IDs and duplicate IDs. Its only benefit is to move
+a full cohort of deterministic slot checks through **one GDScript/C++ call**;
+the packed input/output allocation still has a cost, so benchmark actual
+frame time before claiming a speedup.
+
+- At most 4096 agent IDs; negative tick or larger input returns an empty
+  array, allowing the caller to use the old scalar method.
+- Stateless and reproducible; the result does not grant target acquisition
+  or move an agent and does not override urgent `is_due(..., true)`.
+- Albion After's authoritative `GameServer._tick_zombies()` snapshots its
+  current infected cohort once per tick and consumes the native byte mask
+  by **matching array index**. Combat, movement, invulnerability checks,
+  perception urgency, target reevaluation and all normal `Zombie.think`
+  calls still occur on every simulation tick. Older fork binaries fall
+  back to the scalar per-infected API, stock Godot retains the original
+  non-staggered behavior.
+- Server-side `get_ai_schedule_stats()` reports `batch_used`,
+  `batch_size`, and the existing admitted/deferred scan counts. These are
+  diagnostics, not a network protocol change.
+
+Concept references: Unreal Engine MassEntity chunk processors and Unity
+Entities IJobEntity; no external code was copied or used.

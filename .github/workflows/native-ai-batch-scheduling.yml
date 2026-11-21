@@ -1,0 +1,102 @@
+name: Native AI batch scheduling and Albion After server parity
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_update_scheduler.*'
+      - 'modules/behavior_tree/tests/test_ai_update_scheduler.h'
+      - 'modules/behavior_tree/doc_classes/AIUpdateScheduler.xml'
+      - 'modules/behavior_tree/README.md'
+      - 'game/scripts/server/game_server.gd'
+      - 'game/tests/test_ai_update_scheduler.gd'
+      - 'game/tests/run_ai_batch.gd'
+      - 'tests/scene/test_ai_batch_scheduler_contract.py'
+      - '.github/workflows/native-ai-batch-scheduling.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_update_scheduler.*'
+      - 'modules/behavior_tree/tests/test_ai_update_scheduler.h'
+      - 'modules/behavior_tree/doc_classes/AIUpdateScheduler.xml'
+      - 'game/scripts/server/game_server.gd'
+      - 'game/tests/test_ai_update_scheduler.gd'
+      - 'game/tests/run_ai_batch.gd'
+      - 'tests/scene/test_ai_batch_scheduler_contract.py'
+      - '.github/workflows/native-ai-batch-scheduling.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  batch-source-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            modules/behavior_tree/ai_update_scheduler.h
+            modules/behavior_tree/ai_update_scheduler.cpp
+            game/scripts/server/game_server.gd
+            game/tests/test_ai_update_scheduler.gd
+            game/tests/run_ai_batch.gd
+            tests/scene/test_ai_batch_scheduler_contract.py
+          sparse-checkout-cone-mode: false
+      - name: Verify batch parity model and server integration
+        run: python3 -m unittest tests/scene/test_ai_batch_scheduler_contract.py -v
+
+  native-and-game:
+    needs: batch-source-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-ai-batch-scheduler
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-ai-batch-scheduler
+        continue-on-error: true
+      - name: Native AI scheduler unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[AIUpdateScheduler]*" 2>&1 | tee ai-batch-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' ai-batch-native.log; then exit 1; fi
+      - name: Import Albion After and parse GDScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee ai-batch-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' ai-batch-import.log; then exit 1; fi
+      - name: Headless authoritative infected batch integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --script res://tests/run_ai_batch.gd 2>&1 | tee ai-batch-game.log
+          grep -E '^AI BATCH TOTAL: [0-9]+ checks, 0 failures$' ai-batch-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' ai-batch-game.log; then exit 1; fi
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-ai-batch-scheduler-logs
+          if-no-files-found: ignore
+          path: |
+            ai-batch-native.log
+            ai-batch-import.log
+            ai-batch-game.log

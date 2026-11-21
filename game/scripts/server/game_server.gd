@@ -351,6 +351,7 @@ var zombies: Dictionary = {} # zombie id -> Zombie
 # Under this population threshold, every NPC retains previous scan timings.
 const AI_STAGGER_MIN_POPULATION := 128
 const AI_STAGGER_SLOTS := 4
+const AI_BATCH_MAX_SIZE := 4096 # Match the native guard; larger populations use safe scalar calls.
 var _ai_update_scheduler: Variant = null
 var last_ai_schedule_stats: Dictionary = {"enabled": false, "population": 0, "phase_due": 0, "phase_deferred": 0}
 var last_population_query_stats: Dictionary = {} # Last once-per-second maintenance broadphase counters.
@@ -7594,7 +7595,22 @@ func _tick_zombies(delta: float) -> void:
 	# hearing range. Active chases and combat threat always take priority.
 	if tick_count % 5 == 0 and not decoys.is_empty():
 		_alert_noise_decoys()
-	for zombie in zombies.values():
+	# The optional native batch computes one phase mask for the exact snapshot
+	# of infected iterated below. Masks use array indices, never client IDs.
+	# Older engines or cohorts above the safety cap use the scalar native API.
+	var ai_cohort: Array = zombies.values()
+	var due_mask := PackedByteArray()
+	if stagger_decisions and _ai_update_scheduler.has_method("get_due_mask") \
+			and ai_cohort.size() <= AI_BATCH_MAX_SIZE:
+		var cohort_ids := PackedInt64Array()
+		cohort_ids.resize(ai_cohort.size())
+		for i in range(ai_cohort.size()):
+			cohort_ids[i] = int(ai_cohort[i].id)
+		due_mask = _ai_update_scheduler.get_due_mask(cohort_ids, tick_count)
+	var batch_used: bool = stagger_decisions and not due_mask.is_empty() \
+		and due_mask.size() == ai_cohort.size()
+	for i in range(ai_cohort.size()):
+		var zombie = ai_cohort[i]
 		# One-shot root triggered by a living non-boss infected. All hit checks
 		# use authoritative zombie positions; players cannot submit target IDs.
 		for trap_id in infected_snares.keys():
@@ -7616,7 +7632,13 @@ func _tick_zombies(delta: float) -> void:
 		# cannot be postponed by this optimization.
 		zombie.ai_selection_allowed = true
 		if stagger_decisions and zombie.think_timer <= delta:
-			zombie.ai_selection_allowed = _ai_update_scheduler.is_due(zombie.id, tick_count)
+			# Cached native decision is identical to the per-agent scalar hash.
+			# Urgent first contact, taunts and combat threats still bypass this
+			# optional gate inside Zombie.think(), as before this change.
+			if batch_used:
+				zombie.ai_selection_allowed = due_mask[i] != 0
+			else:
+				zombie.ai_selection_allowed = _ai_update_scheduler.is_due(zombie.id, tick_count)
 			if zombie.ai_selection_allowed:
 				phase_due += 1
 			else:
@@ -7739,6 +7761,8 @@ func _tick_zombies(delta: float) -> void:
 		"slots": AI_STAGGER_SLOTS if stagger_decisions else 1,
 		"phase_due": phase_due,
 		"phase_deferred": phase_deferred,
+		"batch_used": batch_used,
+		"batch_size": due_mask.size() if batch_used else 0,
 	}
 	# Real survivors are considered before idle infected investigate remains.
 	# Reuse existing investigate_decoy: never replace combat targets or spawn mobs.

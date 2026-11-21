@@ -27,6 +27,38 @@ func run(t) -> void:
         for count in counts:
             t.check(count >= 15, "a crowd is distributed across several phases")
 
+    t.current = "Batch phase mask is index-preserving and scalar-equivalent"
+    var batch_available: bool = scheduler != null and scheduler.has_method("get_due_mask")
+    if batch_available:
+        var cohort_ids := PackedInt64Array()
+        for id in range(256):
+            cohort_ids.append(50000 + id)
+        cohort_ids.append(-1)
+        cohort_ids.append(50000)
+        for tick in range(12):
+            var mask: PackedByteArray = scheduler.get_due_mask(cohort_ids, tick)
+            t.eq(mask.size(), cohort_ids.size(), "batch returns exactly one flag per ID")
+            for i in range(cohort_ids.size()):
+                t.eq(int(mask[i]), 1 if scheduler.is_due(cohort_ids[i], tick) else 0,
+                    "batched phases equal scalar phases for every signed ID")
+            t.eq(mask[0], mask[257], "duplicate agent IDs have identical admission")
+        t.check(scheduler.get_due_mask(cohort_ids, -1).is_empty(),
+            "negative authoritative ticks reject the whole batch")
+        var huge := PackedInt64Array()
+        huge.resize(4097)
+        t.check(scheduler.get_due_mask(huge, 0).is_empty(),
+            "native API bounds untrusted array sizes to 4096")
+        var maximal := PackedInt64Array()
+        maximal.resize(4096)
+        t.eq(scheduler.get_due_mask(maximal, 0).size(), 4096,
+            "legal maximum cohort is processed")
+        scheduler.set_slots_per_cycle(1)
+        var forced: PackedByteArray = scheduler.get_due_mask(cohort_ids, 99)
+        t.eq(forced.size(), cohort_ids.size(), "single-slot cohort returns all flags")
+        t.check(forced[0] == 1 and forced[1] == 1,
+            "single-slot scheduling never delays a survivor encounter")
+        scheduler.set_slots_per_cycle(4)
+
     t.current = "Direct infected AI preserves first-contact and urgent selection"
     var world := WorldGen.new(42)
     var ground: float = WorldGen.HUB_HEIGHT
@@ -89,6 +121,10 @@ func run(t) -> void:
         "large crowds activate staggering only with the native Cgame class")
     t.eq(int(stats.get("population", -1)), 128,
         "server diagnostic counts the actual population")
+    t.eq(bool(stats.get("batch_used", false)), batch_available and native_available,
+        "authoritative server uses native masks only when the API is present")
+    t.eq(int(stats.get("batch_size", 0)), 128 if batch_available and native_available else 0,
+        "batch reports exactly the active server zombie cohort")
     if native_available:
         t.eq(int(stats.get("slots", -1)), 4,
             "server uses four stable update phases")
