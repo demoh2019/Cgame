@@ -171,7 +171,51 @@ Array AIProximityGrid2D::query_nearest_batch(const PackedVector2Array &p_positio
 	return _query_impl(p_positions, p_source_indices, p_radius, p_cell_size, p_max_neighbors);
 }
 
+PackedVector2Array AIProximityGrid2D::query_separation_batch(const PackedVector2Array &p_positions,
+		const PackedInt32Array &p_source_indices, double p_radius,
+		double p_cell_size, int p_max_neighbors) const {
+	PackedVector2Array result;
+	// A zero separation radius has no steering direction and must not allow
+	// division by zero. _query_impl atomically validates all other inputs,
+	// including the source indices and the 8192/1024/64 resource limits.
+	if (!Math::is_finite(p_radius) || p_radius <= 0.0 ||
+			p_max_neighbors < 1 || p_max_neighbors > 64) {
+		return result;
+	}
+	const Array nearest_batches = _query_impl(p_positions, p_source_indices,
+			p_radius, p_cell_size, p_max_neighbors);
+	if (nearest_batches.size() == 0) {
+		return result;
+	}
+	result.resize(p_source_indices.size());
+	for (int i = 0; i < p_source_indices.size(); i++) {
+		const int source_index = p_source_indices[i];
+		const Vector2 origin = p_positions[source_index];
+		const PackedInt32Array neighbors = nearest_batches[i];
+		Vector2 separation;
+		for (int j = 0; j < neighbors.size(); j++) {
+			const int nearby = neighbors[j];
+			const Vector2 delta = origin - p_positions[nearby];
+			const real_t distance = delta.length();
+			if (distance <= real_t(0.0001)) {
+				// Equal-position agents would otherwise receive no force.
+				// Opposite signs are deterministic without using randomness.
+				separation.x += source_index < nearby ? real_t(-1.0) : real_t(1.0);
+			} else {
+				const real_t weight = real_t(1.0) - distance / real_t(p_radius);
+				separation += (delta / distance) * weight;
+			}
+		}
+		if (separation.length_squared() > real_t(1.0)) {
+			separation.normalize();
+		}
+		result.set(i, separation);
+	}
+	return result;
+}
+
 void AIProximityGrid2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query_radius_batch", "positions", "source_indices", "radius", "cell_size"), &AIProximityGrid2D::query_radius_batch);
 	ClassDB::bind_method(D_METHOD("query_nearest_batch", "positions", "source_indices", "radius", "cell_size", "max_neighbors"), &AIProximityGrid2D::query_nearest_batch);
+	ClassDB::bind_method(D_METHOD("query_separation_batch", "positions", "source_indices", "radius", "cell_size", "max_neighbors"), &AIProximityGrid2D::query_separation_batch);
 }
