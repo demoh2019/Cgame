@@ -4,6 +4,11 @@ extends RefCounted
 ## parameters glide toward a preset chosen from where the listener stands.
 
 const BUS := "SFX"
+const AudioNative = preload("res://scripts/native/cgame_audio_facade.gd")
+## Underground rooms also get true convolution reverb (native AudioEffectConvolutionReverb, a
+## 12 m stone dungeon room impulse from the image-source method) when the engine module is built.
+const DUNGEON_ROOM := Vector3(12.0, 4.0, 12.0)
+const CONVOLUTION_SLOT := 1
 const PRESETS := {
 	"underground": {"room_size": 0.85, "damping": 0.35, "wet": 0.42, "spread": 1.0},
 	"forest": {"room_size": 0.35, "damping": 0.75, "wet": 0.12, "spread": 0.8},
@@ -31,6 +36,13 @@ static func ensure_bus() -> int:
 		reverb.dry = 1.0
 		reverb.wet = 0.0
 		AudioServer.add_bus_effect(index, reverb)
+		if AudioNative.has_native_reverb():
+			var impulse: PackedFloat32Array = AudioNative.room_impulse(DUNGEON_ROOM, Vector3(3.0, 1.5, 4.0),
+				Vector3(-2.0, 1.6, -3.0), 48000, 1.2, 3, 0.25, Vector3(1.4, 1.2, 0.8), 7)
+			var convolution: AudioEffect = AudioNative.make_convolution_reverb(impulse, 256, 0.35, 1.0, 48000.0)
+			if convolution != null:
+				AudioServer.add_bus_effect(index, convolution)
+				AudioServer.set_bus_effect_enabled(index, CONVOLUTION_SLOT, false)
 	return index
 
 
@@ -44,9 +56,19 @@ static func reverb(index: int) -> AudioEffectReverb:
 static func blend(effect: AudioEffectReverb, zone: String, weight: float) -> void:
 	if effect == null:
 		return
+	_toggle_convolution(zone == "underground")
 	var p: Dictionary = PRESETS.get(zone, PRESETS["open"])
 	var w := clampf(weight, 0.0, 1.0)
 	effect.room_size = lerpf(effect.room_size, p["room_size"], w)
 	effect.damping = lerpf(effect.damping, p["damping"], w)
 	effect.wet = lerpf(effect.wet, p["wet"], w)
 	effect.spread = lerpf(effect.spread, p["spread"], w)
+
+
+## Convolution runs only underground: it costs real DSP time and open air has no room to model.
+static func _toggle_convolution(on: bool) -> void:
+	var index := AudioServer.get_bus_index(BUS)
+	if index < 0 or AudioServer.get_bus_effect_count(index) <= CONVOLUTION_SLOT:
+		return
+	if AudioServer.is_bus_effect_enabled(index, CONVOLUTION_SLOT) != on:
+		AudioServer.set_bus_effect_enabled(index, CONVOLUTION_SLOT, on)

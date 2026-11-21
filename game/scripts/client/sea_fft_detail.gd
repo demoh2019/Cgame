@@ -5,7 +5,7 @@ extends Node
 ## frame, so motion stays smooth at ~1 ms of script time per update.
 ## High/Ultra only; lower presets keep the pure Gerstner surface.
 
-const FftOcean = preload("res://scripts/shared/fft_ocean.gd")
+const Fluids = preload("res://scripts/native/cgame_fluids_facade.gd") # Native CgameFFTOcean when built in.
 const QUALITY_SCRIPT := "res://scripts/client/graphics_quality.gd"
 
 const GRID := 32
@@ -13,7 +13,7 @@ const PATCH := 48.0 # Metres per tile; the shader repeats it.
 const STEP := 0.1
 const STRENGTH := [0.0, 0.0, 0.18, 0.26]
 
-var _ocean := FftOcean.new()
+var _ocean: Object = null
 var _material: ShaderMaterial
 var _tex_a: ImageTexture
 var _tex_b: ImageTexture
@@ -29,7 +29,7 @@ static func strength_for(level: int) -> float:
 
 func setup(material: ShaderMaterial, level: int, seed: int = 1337) -> void:
 	_material = material
-	_ocean.setup(GRID, PATCH, Vector2(0.8, 0.6) * 9.0, 1.0, seed)
+	_ocean = Fluids.make_fft_ocean(GRID, PATCH, Vector2(0.8, 0.6) * 9.0, 1.0, seed)
 	_tex_a = ImageTexture.create_from_image(_normalized(_ocean.displacement_image(0.0)))
 	_tex_b = ImageTexture.create_from_image(_normalized(_ocean.displacement_image(STEP)))
 	_t0 = 0.0

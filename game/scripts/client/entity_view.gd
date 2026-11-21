@@ -27,6 +27,7 @@ const CorpseBurn = preload("res://scripts/client/corpse_burn.gd")
 const BlobShadow = preload("res://scripts/client/blob_shadow.gd")
 const FarmPlotVisual = preload("res://scripts/client/farm_plot_visual.gd")
 const MotionWarp = preload("res://scripts/client/motion_warp.gd")
+const Locomotion = preload("res://scripts/native/locomotion_facade.gd") # Native CgameLocomotionTools when built in.
 const Combat = preload("res://scripts/shared/combat.gd")
 var _anim_lod: Node = null # Native AnimationLODController when the engine has it, else the GDScript AnimLod.
 var _priority_quality: int = -1
@@ -926,7 +927,7 @@ func warp_model(model: Node3D, origin: Vector3, weapon_id: String, direction: Ve
 		var other := _nodes[other_key] as Node3D
 		if other != null and other.visible:
 			targets.append(other.global_position)
-	var warp: Dictionary = MotionWarp.solve(origin, direction, Combat.weapon_reach(weapon_id), targets)
+	var warp: Dictionary = Locomotion.solve_motion_warp(origin, direction, Combat.weapon_reach(weapon_id), targets)
 	if not warp.is_empty():
 		MotionWarp.play(model, warp["offset"])
 
