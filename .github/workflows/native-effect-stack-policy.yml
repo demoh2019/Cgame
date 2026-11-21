@@ -1,0 +1,78 @@
+name: Native Gameplay Effect stacking and Albion Resolve parity
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/gameplay_effect_stack_policy.*'
+      - 'modules/gameplay_fx/doc_classes/GameplayEffectStackPolicy.xml'
+      - 'modules/gameplay_fx/config.py'
+      - 'modules/gameplay_fx/register_types.cpp'
+      - 'modules/gameplay_fx/tests/test_gameplay_fx.h'
+      - 'game/scripts/shared/infected_resolve.gd'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_gameplay_effect_stack_policy.gd'
+      - 'game/tests/run_gameplay_effect_stack_policy.gd'
+      - 'game/tests/run_all.gd'
+      - '.github/workflows/native-effect-stack-policy.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/gameplay_effect_stack_policy.*'
+      - 'modules/gameplay_fx/doc_classes/GameplayEffectStackPolicy.xml'
+      - 'modules/gameplay_fx/config.py'
+      - 'modules/gameplay_fx/register_types.cpp'
+      - 'modules/gameplay_fx/tests/test_gameplay_fx.h'
+      - 'game/scripts/shared/infected_resolve.gd'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_gameplay_effect_stack_policy.gd'
+      - 'game/tests/run_gameplay_effect_stack_policy.gd'
+      - 'game/tests/run_all.gd'
+      - '.github/workflows/native-effect-stack-policy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stack-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native Gameplay Effect stack policy doctests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*stack policy*" 2>&1 | tee stack-policy-native.log
+      - name: Import Albion After
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee stack-policy-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' stack-policy-import.log; then exit 1; fi
+      - name: Gameplay Resolve parity on native or stock Godot
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_gameplay_effect_stack_policy.gd 2>&1 | tee stack-policy-game.log
+          grep -E '^GAMEPLAY STACK POLICY TOTAL: [0-9]+ checks, 0 failures$' stack-policy-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' stack-policy-game.log; then exit 1; fi
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-gameplay-stack-policy-logs
+          if-no-files-found: ignore
+          path: |
+            stack-policy-native.log
+            stack-policy-import.log
+            stack-policy-game.log

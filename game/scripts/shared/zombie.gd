@@ -752,11 +752,12 @@ func apply_stagger(seconds: float) -> bool:
 	if not EffectRules.can_apply(EffectRules.STAGGER, is_alive(), raid_boss):
 		return false
 	var stacks: int = stagger_resolve_stacks if stagger_resolve_seconds > 0.0 else 0
-	var effective: float = InfectedResolve.duration(seconds, stacks, elite)
-	if effective <= stagger_seconds:
+	var application: Dictionary = InfectedResolve.plan_application(
+		seconds, stacks, stagger_seconds, elite)
+	if not bool(application["accepted"]):
 		return false
-	stagger_seconds = effective
-	stagger_resolve_stacks = mini(stacks + 1, InfectedResolve.MAX_STACKS)
+	stagger_seconds = float(application["remaining"])
+	stagger_resolve_stacks = int(application["stacks"])
 	stagger_resolve_seconds = InfectedResolve.RESET_SECONDS
 	# An effective stun interrupts an in-flight acid windup.
 	spit_pending = false
