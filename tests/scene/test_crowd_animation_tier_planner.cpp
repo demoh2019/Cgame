@@ -199,5 +199,70 @@ TEST_CASE("[CrowdAnimationTierPlanner] stable IK validates bounds and ties atomi
 	ERR_PRINT_ON
 }
 
+
+TEST_CASE("[CrowdAnimationTierPlanner] CPU-budgeted full IK never demotes combat below tier 1") {
+	Ref<CrowdAnimationTierPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distances = { 2.0, 4.0, 10.0, 18.0, 55.0 };
+	const PackedByteArray priority = { 0, 0, 0, 1, 1 };
+	const PackedByteArray visible = { 1, 1, 1, 1, 1 };
+	const PackedByteArray retained = { 0, 0, 0, 0, 0 };
+	const PackedInt32Array measured = { 500, 100, 100, 100, 0 };
+	const PackedInt32Array limited = planner->plan_visible_tiers_costed(
+			distances, priority, visible, retained, measured, 3, 1, 250);
+	REQUIRE(limited.size() == 5);
+	CHECK(limited[0] == 1); // Expensive near IK is skipped this frame.
+	CHECK(limited[1] == 0);
+	CHECK(limited[2] == 0); // Remaining 200us fits two near models.
+	CHECK(limited[3] == 1); // Visible combat tell remains full-rate.
+	CHECK(limited[4] == 2); // Farther combatant doesn't steal a slot.
+	const PackedInt32Array unlimited = planner->plan_visible_tiers_costed(
+			distances, priority, visible, retained, measured, 3, 1, 0);
+	CHECK(unlimited == planner->plan_visible_tiers_stable(distances, priority, visible,
+			retained, 3, 1)); // A zero time limit preserves legacy results.
+}
+
+TEST_CASE("[CrowdAnimationTierPlanner] CPU estimated cost fallback, visibility, stable order and validation") {
+	Ref<CrowdAnimationTierPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distances = { 10.0, 10.4, 21.0, 22.0 };
+	const PackedByteArray priority = { 0, 0, 0, 1 };
+	const PackedByteArray visible = { 1, 1, 1, 1 };
+	const PackedByteArray retained = { 0, 1, 1, 1 };
+	const PackedInt32Array costs = { 1000, 75, 100, 0 };
+	const PackedInt32Array small_budget = planner->plan_visible_tiers_costed(
+			distances, priority, visible, retained, costs, 2, 1, 80);
+	REQUIRE(small_budget.size() == 4);
+	CHECK(small_budget[0] == 1);
+	CHECK(small_budget[1] == 0); // Retained cheaper model wins.
+	CHECK(small_budget[2] == 1); // Only 5us remain.
+	CHECK(small_budget[3] == 1); // Combat priority not measured as IK.
+	const PackedByteArray gone = { 1, 0, 1, 1 };
+	const PackedInt32Array offscreen = planner->plan_visible_tiers_costed(
+			distances, priority, gone, retained, costs, 2, 1, 80);
+	REQUIRE(offscreen.size() == 4);
+	CHECK(offscreen[1] == 2); // Invisible previous IK owner releases its slot.
+	const PackedInt32Array unknown_cost = { 0, 0, 0, 0 };
+	const PackedInt32Array initial = planner->plan_visible_tiers_costed(
+			distances, priority, visible, retained, unknown_cost, 2, 1, 100);
+	REQUIRE(initial.size() == 4);
+	CHECK(initial[1] == 0); // Unknown model starts at 100us.
+	CHECK(initial[0] == 1); // Remaining work is deferred.
+	ERR_PRINT_OFF
+	CHECK(planner->plan_visible_tiers_costed(distances, priority, visible, retained,
+			{ 100 }, 2, 1, 100).is_empty());
+	CHECK(planner->plan_visible_tiers_costed(distances, priority, visible, retained,
+			{ 0, -1, 0, 0 }, 2, 1, 100).is_empty());
+	CHECK(planner->plan_visible_tiers_costed(distances, priority, visible, retained,
+			{ 0, 100001, 0, 0 }, 2, 1, 100).is_empty());
+	CHECK(planner->plan_visible_tiers_costed(distances, priority, visible, retained,
+			costs, 2, 1, -1).is_empty());
+	CHECK(planner->plan_visible_tiers_costed(distances, priority, visible, retained,
+			costs, 2, 1, 1000001).is_empty());
+	CHECK(planner->plan_visible_tiers_costed(distances, priority, visible, retained,
+			costs, 2, 1, 100, Math::NaN).is_empty());
+	ERR_PRINT_ON
+}
+
 } // namespace TestCrowdAnimationTierPlanner
 #endif // MODULE_CROWD_ANIMATION_TIER_PLANNER_ENABLED
