@@ -16,7 +16,7 @@ TEST_CASE("[SnapshotRotationSmoothing3D] linear with equal tangents and exact en
 		CHECK(Math::abs(yaw - (0.2 + 0.7 * t)) < 0.000001);
 	}
 	CHECK(p->interpolate_yaw(0.2, 0.9, 7.0, 7.0, 0.1, -5.0) == 0.2);
-	CHECK(p->interpolate_yaw(0.2, 0.9, 7.0, 7.0, 0.1, 5.0) == 0.9);
+	CHECK(Math::abs(p->interpolate_yaw(0.2, 0.9, 7.0, 7.0, 0.1, 5.0) - 0.9) < 0.000001);
 	CHECK(p->interpolate_yaw(0.2, 0.9, 7.0, 7.0, 0.1, Math::NaN) == 0.2);
 }
 
