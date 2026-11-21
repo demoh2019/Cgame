@@ -48,6 +48,8 @@ public:
 	bool remove_effect(const StringName &p_tag);
 	void clear();
 	bool replace_snapshot(const Dictionary &p_effects);
+	// Atomic authoritative update of one dotted tag namespace; other effects survive.
+	bool replace_effect_branch(const StringName &p_branch, const Dictionary &p_effects);
 	Dictionary get_snapshot() const;
 	PackedStringArray tick(double p_delta);
 	double get_remaining(const StringName &p_tag) const;
