@@ -181,6 +181,57 @@ TEST_CASE("[AIStimulusHistory2D] Invalid events and limits fail closed") {
 	CHECK(history->get_event_count() == 0);
 }
 
+TEST_CASE("[AIStimulusHistory2D] Ranked top-K returns stable decayed confidence") {
+	Ref<AIStimulusHistory2D> a;
+	a.instantiate();
+	Ref<AIStimulusHistory2D> b;
+	b.instantiate();
+	CHECK(a->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(9, 0), 0.95, 2.0, 9));
+	CHECK(b->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(9, 0), 0.95, 2.0, 9));
+	a->advance_time(1.0);
+	b->advance_time(1.0);
+	CHECK(a->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(7, 0), 0.6, 3.0, 3));
+	CHECK(a->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(1, 0), 0.6, 3.0, 2));
+	CHECK(b->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(1, 0), 0.6, 3.0, 2));
+	CHECK(b->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(7, 0), 0.6, 3.0, 3));
+	CHECK(a->record_stimulus(AIStimulusHistory2D::SIGHT, Vector2(3, 0), 1.0, 6.0, 20));
+	const Array ranked = a->get_ranked(AIStimulusHistory2D::SOUND, 3);
+	const Array reversed = b->get_ranked(AIStimulusHistory2D::SOUND, 3);
+	REQUIRE(ranked.size() == 3);
+	REQUIRE(reversed.size() == 3);
+	const Dictionary first = ranked[0];
+	const Dictionary second = ranked[1];
+	const Dictionary third = ranked[2];
+	const Dictionary reverse_first = reversed[0];
+	const Dictionary reverse_second = reversed[1];
+	const Dictionary reverse_third = reversed[2];
+	CHECK(first["source_id"] == 2);
+	CHECK(second["source_id"] == 3);
+	CHECK(third["source_id"] == 9);
+	CHECK(reverse_first["source_id"] == 2);
+	CHECK(reverse_second["source_id"] == 3);
+	CHECK(reverse_third["source_id"] == 9);
+	CHECK(first["score"] == real_t(0.6));
+	CHECK(third["score"] == real_t(0.95 * 0.5));
+	CHECK(a->get_best(AIStimulusHistory2D::SOUND)["source_id"] == first["source_id"]);
+	CHECK(a->get_ranked(AIStimulusHistory2D::SOUND, 1).size() == 1);
+	CHECK(a->get_ranked(AIStimulusHistory2D::SOUND, 0).is_empty());
+	CHECK(a->get_ranked(AIStimulusHistory2D::DAMAGE).is_empty());
+	Dictionary detached = ranked[0];
+	detached["position"] = Vector2(999, 0);
+	const Array isolated = a->get_ranked(AIStimulusHistory2D::SOUND, 1);
+	const Dictionary readback = isolated[0];
+	CHECK(readback["position"] == Vector2(1, 0));
+	a->advance_time(3.1);
+	CHECK(a->get_ranked(AIStimulusHistory2D::SOUND).is_empty());
+	ERR_PRINT_OFF;
+	CHECK(a->get_ranked(-1).is_empty());
+	CHECK(a->get_ranked(3).is_empty());
+	CHECK(a->get_ranked(AIStimulusHistory2D::SOUND, -1).is_empty());
+	CHECK(a->get_ranked(AIStimulusHistory2D::SOUND, 65).is_empty());
+	ERR_PRINT_ON;
+}
+
 TEST_CASE("[AIStimulusHistory2D] Reset and per-listener isolation") {
 	Ref<AIStimulusHistory2D> one;
 	one.instantiate();

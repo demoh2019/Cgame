@@ -397,6 +397,29 @@ unalerted). The scoped CI workflow builds the custom Godot engine and
 runs headless tests. Benchmark actual frame time on dense encounters before
 asserting performance gains.
 
+## Ranked confirmed stimuli and bounded investigation (Unreal AI Perception-inspired)
+
+`AIStimulusHistory2D.get_ranked(sense, limit=8)` exposes a detached,
+highest-decayed-score-first list of up to 64 **previously admitted** sound,
+sight or damage events. Exact ties resolve deterministically by source ID
+then 2D position, not arrival order. Per-agent history is already capped at
+64; the implementation keeps a bounded top-K of indices (O(N*K)). Invalid
+senses or limits fail with an empty result, and the old `get_best` and
+`get_recent` contracts remain intact.
+
+Albion After adds `NativeInfectedSenses.get_ranked_confirmed_stimuli()`
+with a no-op fallback on older binaries that cannot rank events. Infected
+investigating a lost target may check **one additional** remembered sound
+location after reaching the first location, provided the event is still
+alive, distinct and inside the existing pursuit leash. No new target
+is acquired; safe-zone, sight, occlusion, affiliation, sound acceptance,
+damage, movement and server ownership remain game responsibilities. The
+history coordinates and ranked source IDs remain server-side only.
+
+This is a minimal memory and search extension, not Unreal's complete
+automatic perception subsystem.
+
+Follow-up locations are also screened against the current authoritative safe-zone and water checks before the server chooses to investigate them.
 ## Native encounter pressure budgeting — MassSpawner-inspired
 
 `AIEncounterBudget` provides an optional, deterministic, configurable
