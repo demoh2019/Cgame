@@ -24,6 +24,9 @@ var streaming_physics_active: bool = true
 var streaming_navigation_active: bool = true
 var navigation_region: NavigationRegion3D
 var navigation_mesh_cache: NavigationMesh
+var navigation_mesh_blocker_snapshot: PackedVector3Array = PackedVector3Array()
+var navigation_patch_count: int = 0
+var navigation_last_retested_triangles: int = 0
 var navigation_blockers: PackedVector3Array = PackedVector3Array()
 # One gameplay-built barricade per loaded forest cell. It updates navigation
 # through the native dirty-tile queue, without reloading or rebuilding foliage.
@@ -82,8 +85,16 @@ func _current_navigation_blockers() -> PackedVector3Array:
 
 
 func _build_current_navigation_mesh() -> NavigationMesh:
-    return ForestNavigationMesh.build_tile(
-        global_position, get_parent() as WorldPartition3D, _current_navigation_blockers())
+    var current: PackedVector3Array = _current_navigation_blockers()
+    var partition := get_parent() as WorldPartition3D
+    var built: NavigationMesh = ForestNavigationMesh.build_tile(
+        global_position, partition, current)
+    if built != null:
+        navigation_mesh_blocker_snapshot = current
+        navigation_last_retested_triangles = (
+            partition.get_last_navigation_tile_retested_triangle_count()
+            if partition != null else 0)
+    return built
 
 
 func rebuild_streaming_navigation_mesh() -> bool:
@@ -92,11 +103,28 @@ func rebuild_streaming_navigation_mesh() -> bool:
     if (not is_node_ready() or streaming_lod != 0 or not streaming_navigation_active
             or not is_instance_valid(navigation_region) or not navigation_region.enabled):
         return false
-    var refreshed: NavigationMesh = _build_current_navigation_mesh()
+    var partition := get_parent() as WorldPartition3D
+    var current: PackedVector3Array = _current_navigation_blockers()
+    var incremental: bool = partition != null and navigation_mesh_cache != null
+    var refreshed: NavigationMesh
+    if incremental:
+        refreshed = ForestNavigationMesh.patch_tile(
+            global_position, partition, navigation_mesh_cache,
+            navigation_mesh_blocker_snapshot, current)
+    else:
+        refreshed = ForestNavigationMesh.build_tile(global_position, partition, current)
     if refreshed == null or refreshed.get_polygon_count() == 0:
         return false
+    # Do not re-publish the resource if old/new blocker multisets are equal.
+    if refreshed != navigation_mesh_cache:
+        navigation_region.navigation_mesh = refreshed
     navigation_mesh_cache = refreshed
-    navigation_region.navigation_mesh = refreshed
+    navigation_mesh_blocker_snapshot = current
+    navigation_last_retested_triangles = (
+        partition.get_last_navigation_tile_retested_triangle_count()
+        if partition != null else 0)
+    if incremental:
+        navigation_patch_count += 1
     navigation_rebuilds += 1
     return true
 
@@ -240,6 +268,7 @@ func _rebuild_lod() -> void:
     navigation_region = null # Old region is queued for removal with the LOD.
     barricade_body = null # Preserve state while regenerating the cell's LOD.
     navigation_mesh_cache = null # Invalidate if authored obstacle geometry changes.
+    navigation_mesh_blocker_snapshot.clear() # Old snapshot cannot outlive a LOD rebuild.
     navigation_blockers.clear()
     rng.seed = cell_seed
 
