@@ -343,6 +343,7 @@ var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
 var next_supply_drop_at: float = SupplyDrops.INTERVAL_SECONDS # Server-owned session clock.
 var next_incident_at: float = 45.0 # First random world incident soon after start.
+var incident_spawn_cap: int = 10 # Server-only adaptive cap on *new* random incident enemies.
 var next_horde_at: float = NightHorde.START_DELAY # Separate night event schedule.
 var night_horde: Dictionary = {} # Active IDs, expiry, tier, public event coordinates.
 var caravan_ambushes: Array[Dictionary] = [] # Bounded server waves with expiry.
@@ -7542,6 +7543,9 @@ func _tick_world_incidents() -> void:
 	var incident_budget: int = WorldEncounterDirector.spawn_budget(
 		zombies.size(), nearby_threat, health_ratio,
 		world.zone_at(target.position.x, target.position.z))
+	# A slow server can suppress *additional* random reinforcements; all
+	# existing actors still receive their normal authoritative simulation.
+	incident_budget = mini(incident_budget, clampi(incident_spawn_cap, 0, 10))
 	if incident_budget == 0:
 		return
 	var site: Dictionary = WorldIncidents.site_near(world, target.position, rng)
