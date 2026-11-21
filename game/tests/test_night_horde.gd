@@ -33,6 +33,26 @@ class FlatDanger:
 		return [{"x": 0.0, "z": 0.0, "radius": 2000.0}] if blocked else []
 
 
+class ScatterOnlyDanger:
+	extends RefCounted
+	var center := Vector2(230.0, 180.0)
+	var only_site := Vector2.INF
+	func zone_at(_x: float, _z: float) -> int:
+		return 2
+	func is_safe(_x: float, _z: float) -> bool:
+		return false
+	func is_water(x: float, z: float) -> bool:
+		var point := Vector2(x, z)
+		return point.distance_to(center) > 0.001 and \
+			point.distance_to(only_site) > 0.001
+	func normal_at(_x: float, _z: float) -> Vector3:
+		return Vector3.UP
+	func height_at(_x: float, _z: float) -> float:
+		return 10.0
+	func blockers_near(_x: float, _z: float, _r: float) -> Array:
+		return []
+
+
 func _site(world) -> Vector3:
 	for i in 96:
 		var point := Vector2.from_angle(TAU * float(i) / 96.0) * 800.0
@@ -43,6 +63,39 @@ func _site(world) -> Vector3:
 
 
 func run(t) -> void:
+	t.current = "native area-uniform scatter for night horde fallback"
+	var scatter_center := Vector2(230.0, 180.0)
+	for phase_offset in [0, 5, -3]:
+		var script_points := NightHorde.scatter_candidates(scatter_center, phase_offset, false)
+		var native_points := NightHorde.scatter_candidates(scatter_center, phase_offset, true)
+		t.eq(script_points.size(), NightHorde.SCATTER_COUNT,
+			"stock Godot keeps the bounded radial scatter candidate budget")
+		t.eq(native_points.size(), script_points.size(),
+			"native and portable radial scatter have identical candidate counts")
+		for index in script_points.size():
+			t.check(native_points[index].distance_to(script_points[index]) < 0.001,
+				"native Fibonacci scatter preserves portable candidate positions and order")
+			var r: float = native_points[index].distance_to(scatter_center)
+			t.check(r >= float(NightHorde.RADII[0]) - 0.001 and \
+				r <= float(NightHorde.RADII[-1]) + 0.001,
+				"scatter points remain within the existing night horde radial bounds")
+	t.eq(NightHorde.scatter_candidates(Vector2.INF).size(), 0,
+		"invalid incident center cannot generate unsafe positions")
+	var isolated := ScatterOnlyDanger.new()
+	isolated.only_site = NightHorde.scatter_candidates(isolated.center, 0, false)[0]
+	var rescue := NightHorde.sites(isolated,
+		Vector3(isolated.center.x, 10, isolated.center.y), [], {}, 3)
+	t.eq(rescue.size(), 1,
+		"authoritative night horde finds a valid area-uniform scatter site after every ring fails")
+	if rescue.size() == 1:
+		t.check(Vector2(float(rescue[0]["x"]), float(rescue[0]["z"])).distance_to(
+			isolated.only_site) < 0.001,
+			"native/portable scatter site passes the exact same server terrain checks")
+	isolated.only_site = Vector2.INF
+	t.check(NightHorde.sites(isolated,
+		Vector3(isolated.center.x, 10, isolated.center.y), [], {}, 3).is_empty(),
+		"scatter is also rejected when no terrain is walkable")
+
 	t.current = "real rewards and bounded terrain-safe enemy compositions"
 	t.eq(NightHorde.kinds(2), ["runner", "walker", "runner"],
 		"red zone sends three recognizable infected")
