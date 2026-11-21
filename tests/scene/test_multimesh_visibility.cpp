@@ -39,6 +39,72 @@ namespace TestMultiMeshVisibility {
 
 // The renderer's low-level regression additionally needs an RD-backed GPU
 // capture: this test exercises the public API with the mock rendering server.
+TEST_CASE("[SceneTree][MultiMesh] Native static scenery transforms and visible bounds") {
+	Ref<MultiMesh> instance_batch;
+	instance_batch.instantiate();
+	instance_batch->set_transform_format(MultiMesh::TRANSFORM_3D);
+	instance_batch->set_use_colors(true);
+	Ref<BoxMesh> mesh;
+	mesh.instantiate();
+	mesh->set_size(Vector3(2, 3, 4));
+	instance_batch->set_mesh(mesh);
+	instance_batch->set_instance_count(2);
+
+	const Transform3D first(Basis(Vector3(0, 1, 0), 0.65).scaled(Vector3(1.1, 0.8, 2.0)), Vector3(15, 2, -8));
+	const Transform3D second(Basis().scaled(Vector3(2, 1.5, 0.5)), Vector3(-3, -1, 9));
+	Array transforms;
+	transforms.push_back(first);
+	transforms.push_back(second);
+	Vector<Color> pigments;
+	pigments.push_back(Color(0.9, 0.75, 0.95, 1));
+	pigments.push_back(Color(0.85, 0.9, 1, 1));
+
+	const Vector<float> packed = instance_batch->pack_transform_buffer(transforms, pigments);
+	REQUIRE(packed.size() == 32);
+	for (int i = 0; i < 2; i++) {
+		const Transform3D t = transforms[i];
+		const Vector3 x = t.basis.get_column(0);
+		const Vector3 y = t.basis.get_column(1);
+		const Vector3 z = t.basis.get_column(2);
+		const int o = i * 16;
+		CHECK(packed[o] == x.x);
+		CHECK(packed[o + 1] == y.x);
+		CHECK(packed[o + 2] == z.x);
+		CHECK(packed[o + 3] == t.origin.x);
+		CHECK(packed[o + 4] == x.y);
+		CHECK(packed[o + 5] == y.y);
+		CHECK(packed[o + 6] == z.y);
+		CHECK(packed[o + 7] == t.origin.y);
+		CHECK(packed[o + 8] == x.z);
+		CHECK(packed[o + 9] == y.z);
+		CHECK(packed[o + 10] == z.z);
+		CHECK(packed[o + 11] == t.origin.z);
+		CHECK(packed[o + 12] == pigments[i].r);
+		CHECK(packed[o + 13] == pigments[i].g);
+		CHECK(packed[o + 14] == pigments[i].b);
+		CHECK(packed[o + 15] == pigments[i].a);
+	}
+	const AABB expected = first.xform(mesh->get_aabb()).merge(second.xform(mesh->get_aabb())).grow(0.6);
+	const AABB bounds = instance_batch->transformed_mesh_bounds(transforms, 0.6);
+	CHECK(bounds.is_equal_approx(expected));
+	CHECK(bounds.has_point(first.origin));
+	CHECK(bounds.has_point(second.origin));
+	// Returning only raw points would incorrectly clip rotated or tall trees.
+	CHECK(bounds.size.x > 0 && bounds.size.y > 3 && bounds.size.z > 0);
+
+	// Untinted meshes (rocks and buildings) pack only transform channels.
+	instance_batch->set_instance_count(0);
+	instance_batch->set_use_colors(false);
+	instance_batch->set_instance_count(2);
+	const Vector<float> uncolored = instance_batch->pack_transform_buffer(transforms, Vector<Color>());
+	REQUIRE(uncolored.size() == 24);
+	for (int i = 0; i < 2; i++) {
+		for (int field = 0; field < 12; field++) {
+			CHECK(uncolored[i * 12 + field] == packed[i * 16 + field]);
+		}
+	}
+}
+
 TEST_CASE("[SceneTree][MultiMesh] Reveal hidden instances with -1") {
 	Ref<MultiMesh> batch;
 	batch.instantiate();

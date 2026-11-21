@@ -51,6 +51,22 @@
 				Returns the [Transform2D] of a specific instance.
 			</description>
 		</method>
+		<method name="pack_transform_buffer" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="transforms" type="Array" />
+			<param index="1" name="colors" type="PackedColorArray" />
+			<description>
+				Cgame extension: returns a packed GPU-ready instance buffer from an array of [Transform3D] values and optional colors. This CPU-only method does not modify the MultiMesh or upload data to the renderer. The current MultiMesh must use [constant TRANSFORM_3D], have an [member instance_count] matching the array length, and have [member use_custom_data] disabled. If [member use_colors] is enabled, provide exactly one color per transform; otherwise pass an empty [PackedColorArray]. Every transform uses the RenderingServer 3D row-major layout (12 floats per instance), followed by four RGBA color floats when enabled. Invalid inputs yield an empty buffer and log an error. Assign the result to [member buffer] once after validating inputs. This is intended for large static scenery batches created during world streaming, not dynamic per-frame animation.
+			</description>
+		</method>
+		<method name="transformed_mesh_bounds" qualifiers="const">
+			<return type="AABB" />
+			<param index="0" name="transforms" type="Array" />
+			<param index="1" name="margin" type="float" />
+			<description>
+				Cgame extension: returns the union of the current [member mesh]'s [method Mesh.get_aabb] after applying each provided [Transform3D], expanded by the nonnegative [param margin] on all sides. This CPU-only method has no rendering-server calls and is suitable for [member MultiMeshInstance3D.custom_aabb]. A conservative transformed bound is essential because a MultiMesh is frustum-culled as a single object, not per instance. Requires a valid mesh, at least one transform and a finite nonnegative margin.
+			</description>
+		</method>
 		<method name="reset_instance_physics_interpolation">
 			<return type="void" />
 			<param index="0" name="instance" type="int" />

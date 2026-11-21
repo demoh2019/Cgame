@@ -1,0 +1,72 @@
+name: Native scenery GPU packing and visibility bounds
+
+on:
+  pull_request:
+    paths:
+      - 'scene/resources/multimesh.cpp'
+      - 'scene/resources/multimesh.h'
+      - 'doc/classes/MultiMesh.xml'
+      - 'tests/scene/test_multimesh_visibility.cpp'
+      - 'game/scripts/client/scenery_batches.gd'
+      - 'game/tests/test_native_scenery_geometry.gd'
+      - '.github/workflows/native-scenery-geometry.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/resources/multimesh.cpp'
+      - 'scene/resources/multimesh.h'
+      - 'tests/scene/test_multimesh_visibility.cpp'
+      - 'game/scripts/client/scenery_batches.gd'
+      - 'game/tests/test_native_scenery_geometry.gd'
+      - '.github/workflows/native-scenery-geometry.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-scenery-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-native-scenery-geometry
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-native-scenery-geometry
+        continue-on-error: true
+      - name: Native engine buffer and AABB regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          "$BIN" --headless --test --test-case="*Native static scenery transforms and visible bounds*"
+      - name: Headless Albion After graphics tests using native engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee native-scenery-import.log
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_graphics.gd 2>&1 | tee native-scenery-tests.log
+          grep -E '^GRAPHICS TOTAL: [0-9]+ checks, 0 failures$' native-scenery-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' native-scenery-tests.log; then exit 1; fi
+      - name: Store detailed test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-scenery-geometry-logs
+          if-no-files-found: ignore
+          path: |
+            native-scenery-import.log
+            native-scenery-tests.log

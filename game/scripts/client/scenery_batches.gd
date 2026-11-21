@@ -89,6 +89,33 @@ static func packed_group(transforms: Array, tinted: bool = false,
 	return floats
 
 
+## Use the fork's bulk native packing when present. Unlike N*12 script
+## writes, Cgame marshals matrices into linear GPU-ready memory in one pass.
+## Stock Godot uses the unchanged original layout and seeded pigment logic.
+static func packed_group_for(multimesh: MultiMesh, transforms: Array,
+		tinted: bool = false, world_origin: Vector2 = Vector2.ZERO) -> PackedFloat32Array:
+	if multimesh != null and multimesh.has_method("pack_transform_buffer"):
+		var colors := PackedColorArray()
+		if tinted:
+			colors.resize(transforms.size())
+			for i in transforms.size():
+				var t: Transform3D = transforms[i]
+				colors[i] = tint_at(world_origin + Vector2(t.origin.x, t.origin.z))
+		var packed: PackedFloat32Array = multimesh.call("pack_transform_buffer", transforms, colors)
+		if packed.size() == transforms.size() * (16 if tinted else 12):
+			return packed
+	return packed_group(transforms, tinted, world_origin)
+
+
+## Correct world-space AABBs are essential: Godot culls a whole MultiMesh
+## cluster, never individual trees. Use native union if available.
+static func bounds_for_instance(multimesh: MultiMesh, mesh: Mesh,
+		transforms: Array) -> AABB:
+	if multimesh != null and multimesh.has_method("transformed_mesh_bounds"):
+		return multimesh.call("transformed_mesh_bounds", transforms, BOUNDS_MARGIN)
+	return bounds_for(mesh, transforms)
+
+
 ## The mesh shader must opt in to using the instance COLOR attribute.
 ## Only leaves/flowers/grass/ferns/green plants have this enabled in
 ## ChunkView. Rocks, buildings, mushrooms and original PBR art are unchanged.
@@ -110,10 +137,10 @@ static func add(parent: Node3D, mesh: Mesh, transforms: Array[Transform3D], draw
 		multimesh.use_colors = tint_variation
 		multimesh.mesh = mesh
 		multimesh.instance_count = group.size()
-		multimesh.buffer = packed_group(group, tint_variation, world_origin)
+		multimesh.buffer = packed_group_for(multimesh, group, tint_variation, world_origin)
 		var instance := MultiMeshInstance3D.new()
 		instance.multimesh = multimesh
-		instance.custom_aabb = bounds_for(mesh, group)
+		instance.custom_aabb = bounds_for_instance(multimesh, mesh, group)
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast_shadows else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		instance.visibility_range_end = draw_distance
 		instance.visibility_range_end_margin = fade_margin
