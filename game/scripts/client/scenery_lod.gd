@@ -52,13 +52,94 @@ static func range_for(kind: String, quality: int, base_distance: float = 0.0) ->
 	return float(limits[group])
 
 
+## Unreal Cull Distance Volume-inspired pure size-pair resolution.
+## The native engine resolves nearest longest-side size, unsorted pairs, and
+## a designer-authored max draw distance. Stock Godot uses the same policy.
+static var _cull_native: Object = null
+static var _cull_checked := false
+
+
+static func _cull_range_fallback(bounds: AABB,
+		sizes: PackedFloat32Array, ranges: PackedFloat32Array,
+		authored_distance: float) -> float:
+	if sizes.is_empty() or sizes.size() != ranges.size() or sizes.size() > 128 or \
+			not is_finite(authored_distance) or authored_distance < 0.0 or \
+			authored_distance > 1000000.0 or \
+			not bounds.position.is_finite() or not bounds.size.is_finite() or \
+			absf(bounds.position.x) > 10000000.0 or \
+			absf(bounds.position.y) > 10000000.0 or \
+			absf(bounds.position.z) > 10000000.0 or \
+			bounds.size.x < 0.0 or bounds.size.y < 0.0 or bounds.size.z < 0.0 or \
+			bounds.size.x > 1000000.0 or bounds.size.y > 1000000.0 or \
+			bounds.size.z > 1000000.0:
+		return -1.0
+	for i in sizes.size():
+		if not is_finite(sizes[i]) or not is_finite(ranges[i]) or \
+				sizes[i] < 0.0 or sizes[i] > 1000000.0 or \
+				ranges[i] < 0.0 or ranges[i] > 1000000.0:
+			return -1.0
+	var longest: float = maxf(bounds.size.x, maxf(bounds.size.y, bounds.size.z))
+	var nearest := INF
+	var selected := 0.0
+	for i in sizes.size():
+		var difference: float = absf(longest - sizes[i])
+		var candidate: float = ranges[i]
+		if difference < nearest or (difference == nearest and candidate > 0.0 \
+				and (selected == 0.0 or candidate < selected)):
+			nearest = difference
+			selected = candidate
+	if selected == 0.0:
+		return authored_distance
+	return minf(selected, authored_distance) if authored_distance > 0.0 else selected
+
+
+## Public game wrapper for both Cgame and stock Godot. -1 from an invalid
+## native profile is not applied to the scene.
+static func cull_range_for_bounds(bounds: AABB, sizes: PackedFloat32Array,
+		ranges: PackedFloat32Array, authored_distance: float,
+		prefer_native: bool = true) -> float:
+	if prefer_native:
+		if not _cull_checked:
+			_cull_checked = true
+			if ClassDB.class_exists("CullDistanceProfile3D"):
+				var instance: Object = ClassDB.instantiate("CullDistanceProfile3D")
+				if instance != null and instance.has_method("get_cull_distance"):
+					_cull_native = instance
+		if _cull_native != null:
+			var native_result: float = _cull_native.call(
+				"get_cull_distance", bounds, sizes, ranges, authored_distance)
+			return native_result
+	return _cull_range_fallback(bounds, sizes, ranges, authored_distance)
+
+
+## Size-distance pairs are quality-scaled but never override the category or
+## the author's draw cap. Largest batches are left unchanged (range zero).
+## This affects cosmetic decor only: tree shaders, resources and landmarks
+## retain their previous culling and silhouette ranges.
+static func decor_range_for_bounds(bounds: AABB, quality: int,
+		authored_distance: float, prefer_native: bool = true) -> float:
+	if authored_distance <= 0.0 or not is_finite(authored_distance) or \
+			not bounds.size.is_finite() or bounds.size == Vector3.ZERO:
+		return authored_distance
+	var scale: float = float(PRESETS[clampi(quality, 0, 3)]["decor_scale"])
+	var sizes := PackedFloat32Array([1.0, 4.0, 10.0, 24.0, 64.0])
+	var ranges := PackedFloat32Array([45.0 * scale, 75.0 * scale,
+		105.0 * scale, 160.0 * scale, 0.0])
+	var range_result: float = cull_range_for_bounds(bounds, sizes,
+		ranges, authored_distance, prefer_native)
+	return range_result if range_result >= 0.0 else authored_distance
+
+
 static func apply(instance: MultiMeshInstance3D, kind: String, quality: int,
 		base_distance: float = 0.0) -> void:
 	if instance == null:
 		return
 	var limits: Dictionary = preset(quality)
 	instance.lod_bias = float(limits["lod_bias"])
-	instance.visibility_range_end = range_for(kind, quality, base_distance)
+	var end_distance: float = range_for(kind, quality, base_distance)
+	if category(kind) == "decor" and base_distance > 0.0:
+		end_distance = decor_range_for_bounds(instance.custom_aabb, quality, end_distance)
+	instance.visibility_range_end = end_distance
 	# Hysteresis, not alpha transparency: avoiding a translucent overlap
 	# keeps fill rate low and helps reduce popping at LOD thresholds.
 	instance.visibility_range_end_margin = 12.0 if instance.visibility_range_end > 0.0 else 0.0
