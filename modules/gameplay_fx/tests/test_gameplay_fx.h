@@ -288,4 +288,66 @@ TEST_CASE("[GameplayFX] periodic policy, validation, coalescing, and rollback") 
 	CHECK(timeline->take_periodic_pulses().is_empty());
 }
 
+TEST_CASE("[GameplayFX] scoped effect snapshots keep independent periodic pulses") {
+	Ref<GameplayEffectTimeline> timeline;
+	timeline.instantiate();
+	CHECK(timeline->set_effect("Local.Visual.Hit", 2.0));
+	CHECK(timeline->set_periodic("Local.Visual.Hit", 0.2, false));
+	CHECK(timeline->set_effect("Runtime.Status.Staggered", 3.0));
+	CHECK(timeline->set_effect("RuntimeExtra.Keep", 5.0, 2));
+	CHECK(timeline->set_effect("Runtime.Status.Resolve", 5.0, 2));
+	CHECK(timeline->set_periodic("Runtime.Status.Resolve", 1.0, false));
+	CHECK(timeline->tick(0.25).is_empty());
+	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(1.75));
+
+	Dictionary state;
+	state["remaining"] = 4.0;
+	state["stacks"] = 3;
+	Dictionary snapshot;
+	snapshot[StringName("Runtime.Status.Resolve")] = state;
+	CHECK(timeline->replace_effect_branch("Runtime", snapshot));
+	CHECK(timeline->get_remaining("Runtime.Status.Staggered") == 0.0);
+	CHECK(timeline->get_remaining("Runtime.Status.Resolve") == doctest::Approx(4.0));
+	CHECK(timeline->get_periodic("Runtime.Status.Resolve") == doctest::Approx(1.0));
+	CHECK(timeline->get_stacks("Runtime.Status.Resolve") == 3);
+	CHECK(timeline->get_remaining("RuntimeExtra.Keep") == doctest::Approx(4.75));
+	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(1.75));
+	Dictionary pulses = timeline->take_periodic_pulses();
+	CHECK(pulses.get(StringName("Local.Visual.Hit"), 0) == 1);
+	CHECK(pulses.get(StringName("Runtime.Status.Resolve"), 0) == 0);
+
+	const int old_count = timeline->get_effect_count();
+	Dictionary invalid = snapshot.duplicate(true);
+	invalid[StringName("Elsewhere.Bad")] = state;
+	CHECK_FALSE(timeline->replace_effect_branch("Runtime", invalid));
+	invalid.erase(StringName("Elsewhere.Bad"));
+	Dictionary malformed;
+	malformed["remaining"] = Math::NaN;
+	malformed["stacks"] = 2;
+	invalid[StringName("Runtime.Status.Bad")] = malformed;
+	CHECK_FALSE(timeline->replace_effect_branch("Runtime", invalid));
+	malformed["remaining"] = 2.0;
+	malformed["stacks"] = 0;
+	invalid[StringName("Runtime.Status.Bad")] = malformed;
+	CHECK_FALSE(timeline->replace_effect_branch("Runtime", invalid));
+	malformed["stacks"] = 1;
+	malformed["period"] = 0.01;
+	invalid[StringName("Runtime.Status.Bad")] = malformed;
+	CHECK_FALSE(timeline->replace_effect_branch("Runtime", invalid));
+	CHECK_FALSE(timeline->replace_effect_branch("Runtime..Invalid", snapshot));
+	CHECK(timeline->get_effect_count() == old_count);
+	CHECK(timeline->get_stacks("Runtime.Status.Resolve") == 3);
+	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(1.75));
+
+	CHECK(timeline->replace_effect_branch("Runtime", snapshot)); // Same values preserve phase.
+	CHECK(timeline->tick(0.8).is_empty());
+	pulses = timeline->take_periodic_pulses();
+	CHECK(pulses.get(StringName("Runtime.Status.Resolve"), 0) == 1);
+	CHECK(pulses.get(StringName("Local.Visual.Hit"), 0) == 4);
+	CHECK(timeline->replace_effect_branch("Runtime", Dictionary()));
+	CHECK(timeline->get_remaining("Runtime.Status.Resolve") == 0.0);
+	CHECK(timeline->get_remaining("RuntimeExtra.Keep") == doctest::Approx(3.95));
+	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(0.95));
+}
+
 } // namespace TestGameplayFX
