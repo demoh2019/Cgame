@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CrowdAnimationTierPlanner" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Batch-selects procedural pose LOD tiers for crowds with bounded stable nearest-actor selection.</brief_description>
+	<description>
+		An independent, main-thread-compatible numeric planner for up to 16384 characters. Given camera distances and a mask of visible combat-critical actors, returns tier 0 (full pose with modifiers), 1 (full rate without expensive modifiers), 2 (half rate), 3 (quarter rate), or 4 (eighth rate). Thresholds are 22, 38, 60, and 90 world units.
+		Only the closest full_budget characters within 22 units may use tier 0. Among actors with nonzero priority_flags within 90 units, the closest priority_budget may use at least tier 1. Equal distances are ordered by original actor index for reproducibility. Never modifies the input, scene tree, animation state, physics, or network authority; the game applies the returned tiers.
+		Invalid inputs, mismatched sizes, non-finite or negative distances, or out-of-range budgets return an empty result. Budgets must be from 0 to 256.
+	</description>
+	<methods>
+		<method name="plan_tiers" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priority_flags" type="PackedByteArray" />
+			<param index="2" name="full_budget" type="int" />
+			<param index="3" name="priority_budget" type="int" />
+			<description>Returns the selected LOD tier for each actor, preserving input order. Validates the complete batch before producing a result.</description>
+		</method>
+	</methods>
+</class>
