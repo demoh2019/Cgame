@@ -92,11 +92,15 @@ void SceneNodePool::set_template_scene(const Ref<PackedScene> &p_scene) {
 
 void SceneNodePool::set_max_idle(int p_count) {
 	max_idle = CLAMP(p_count, 0, 4096);
+	_prune_idle();
 	while (idle.size() > max_idle) {
-		Node *instance = idle[idle.size() - 1];
+		const ObjectID id = idle[idle.size() - 1];
 		idle.remove_at(idle.size() - 1);
-		memdelete(instance);
-		disposed_total++;
+		Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(id));
+		if (instance != nullptr && !instance->is_queued_for_deletion()) {
+			memdelete(instance);
+			disposed_total++;
+		}
 	}
 }
 
@@ -111,6 +115,15 @@ void SceneNodePool::_prune_active() {
 	}
 	for (const ObjectID &id : stale) {
 		active.erase(id);
+	}
+}
+
+void SceneNodePool::_prune_idle() {
+	for (int i = idle.size() - 1; i >= 0; i--) {
+		Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(idle[i]));
+		if (instance == nullptr || instance->is_queued_for_deletion()) {
+			idle.remove_at(i);
+		}
 	}
 }
 
@@ -132,6 +145,7 @@ int SceneNodePool::prewarm(int p_target) {
 	if (template_scene.is_null()) {
 		return 0;
 	}
+	_prune_idle();
 	const int target = MIN(MAX(0, p_target), max_idle);
 	int added = 0;
 	while (idle.size() < target) {
@@ -139,7 +153,7 @@ int SceneNodePool::prewarm(int p_target) {
 		if (instance == nullptr) {
 			break;
 		}
-		idle.push_back(instance);
+		idle.push_back(instance->get_instance_id());
 		added++;
 	}
 	return added;
@@ -156,11 +170,17 @@ Node *SceneNodePool::acquire(Node *p_parent) {
 		return nullptr;
 	}
 	Node *instance = nullptr;
-	if (!idle.is_empty()) {
-		instance = idle[idle.size() - 1];
+	while (!idle.is_empty()) {
+		const ObjectID cached_id = idle[idle.size() - 1];
 		idle.remove_at(idle.size() - 1);
-		reused_total++;
-	} else {
+		instance = Object::cast_to<Node>(ObjectDB::get_instance(cached_id));
+		if (instance != nullptr && !instance->is_queued_for_deletion()) {
+			reused_total++;
+			break;
+		}
+		instance = nullptr;
+	}
+	if (instance == nullptr) {
 		instance = _new_instance();
 	}
 	if (instance == nullptr) {
@@ -200,18 +220,17 @@ bool SceneNodePool::release(Node *p_instance) {
 	if (instance->get_parent() != nullptr) {
 		instance->get_parent()->remove_child(instance);
 	}
-	// The released instance can be observed by listeners until queued for deletion.
-	emit_signal(SNAME("instance_released"), instance);
-	if (ObjectDB::get_instance(id) != instance || instance->is_queued_for_deletion()) {
-		return true;
-	}
 	released_total++;
+	_prune_idle();
 	if (idle.size() < max_idle) {
-		idle.push_back(instance);
+		idle.push_back(id);
 	} else {
 		instance->queue_free();
 		disposed_total++;
 	}
+	// Signals fire after registration, so handlers can immediately acquire
+	// the just-released object without racing the pool's bookkeeping.
+	emit_signal(SNAME("instance_released"), instance);
 	return true;
 }
 
@@ -220,9 +239,12 @@ void SceneNodePool::release_deferred(Node *p_instance) {
 }
 
 void SceneNodePool::clear_idle() {
-	for (Node *instance : idle) {
-		memdelete(instance);
-		disposed_total++;
+	for (const ObjectID &id : idle) {
+		Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(id));
+		if (instance != nullptr && !instance->is_queued_for_deletion()) {
+			memdelete(instance);
+			disposed_total++;
+		}
 	}
 	idle.clear();
 }
@@ -232,8 +254,14 @@ int SceneNodePool::get_active_count() {
 	return active.size();
 }
 
+int SceneNodePool::get_idle_count() {
+	_prune_idle();
+	return idle.size();
+}
+
 Dictionary SceneNodePool::get_stats() {
 	_prune_active();
+	_prune_idle();
 	Dictionary stats;
 	stats["active"] = active.size();
 	stats["idle"] = idle.size();

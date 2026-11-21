@@ -41,7 +41,7 @@ class SceneNodePool : public Node {
 	GDCLASS(SceneNodePool, Node);
 
 	Ref<PackedScene> template_scene;
-	Vector<Node *> idle;
+	Vector<ObjectID> idle; // Cached IDs survive external free()/queue_free().
 	HashSet<ObjectID> active;
 	int prewarm_count = 0;
 	int max_idle = 32;
@@ -57,6 +57,7 @@ class SceneNodePool : public Node {
 
 	Node *_new_instance();
 	void _prune_active();
+	void _prune_idle();
 
 protected:
 	void _notification(int p_what);
@@ -81,7 +82,7 @@ public:
 	void release_deferred(Node *p_instance);
 	void clear_idle();
 	int get_active_count();
-	int get_idle_count() const { return idle.size(); }
+	int get_idle_count();
 	Dictionary get_stats();
 
 	~SceneNodePool();

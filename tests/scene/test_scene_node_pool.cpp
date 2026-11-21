@@ -76,6 +76,13 @@ TEST_CASE("[SceneNodePool] Prewarm, reuse, overload and eviction") {
 	CHECK(pool.get_idle_count() == 2);
 	CHECK(pool.get_stats()["peak_active"] == 2);
 
+	// External code may still hold the returned pointer and free it:
+	// the idle cache must never dereference or resurrect a dangling pointer.
+	memdelete(a);
+	CHECK(pool.get_idle_count() == 1);
+	CHECK(pool.prewarm(2) == 1);
+	CHECK(pool.get_idle_count() == 2);
+
 	pool.set_max_idle(1);
 	CHECK(pool.get_idle_count() == 1);
 	pool.clear_idle();
