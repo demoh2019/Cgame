@@ -225,7 +225,9 @@ static func runtime_has_resolve(node: Node, fallback_stacks: int = 0) -> bool:
 static func hit_feedback_strength(node: Node, base_strength: float) -> float:
 	if not is_finite(base_strength) or base_strength <= 0.0:
 		return 0.0
-	var timeline: Object = node.get_meta("effect_timeline", null) as Object if node != null else null
+	var timeline: Object = null
+	if node != null:
+		timeline = node.get_meta("effect_timeline", null) as Object
 	if timeline != null and timeline.has_method("apply_effect") and timeline.has_method("get_stacks"):
 		var tag := StringName("Local.Visual.RecentHit")
 		if bool(timeline.call("apply_effect", tag, 0.22, 1, 4, 0)):
