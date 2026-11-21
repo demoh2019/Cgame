@@ -178,3 +178,42 @@ builds, with parity and gameplay smoke coverage.
 
 Based on the *distance to spline* and *density remapping* concepts
 in [Unreal Engine PCG framework node reference](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).
+
+## Unreal-style weighted procedural variant selection
+
+Native `PCGWeightedVariantSelector` implements the selection policy
+of Unreal's **PCG Mesh Selector Weighted** as an independent,
+data-only operation, without reproducing the Unreal PCG graph editor.
+It returns indices rather than loading mesh assets.
+
+```gdscript
+var selector := PCGWeightedVariantSelector.new()
+var variants := selector.choose_variants(
+    PackedInt64Array([101, 102, 103]),
+    PackedFloat32Array([6.0, 3.0, 1.0]), 81419)
+# One variant index (0, 1 or 2) per stable point ID.
+```
+
+- From 1–32 finite, nonnegative relative weights (each <=1,000,000),
+  at least one must be strictly positive. Weights can be unnormalized.
+  A zero-weight variant can never be chosen.
+- Up to 16,384 stable point IDs in [0, 2147483647] and seed in the same
+  range. The 32-bit avalanche hash guarantees a repeatable choice for
+  every ID independently of traversal order and global RNG state.
+  Duplicate IDs yield identical choices. Empty valid point input returns
+  empty output; invalid inputs reject the entire batch without output.
+- The selector is deterministic and CPU-only, but **does not perform
+  spacing, exclusions, mesh creation, texture loading or GPU rendering**.
+  Compose with existing native PCG filters for those behaviors.
+- `games/days_after/pcg_weighted_variants.gd` implements the same
+  unsigned 32-bit operations for stock Godot. Native C++ doctests and a
+  headless gameplay runner check stable ID behavior, weight ratios,
+  invalid input, zero weights and parity.
+
+The Days After game uses weights 6:3:1 for green, autumn and dry blades,
+tinting and scaling each instance within a **single MultiMesh**.
+No per-frame point sampling or extra per-variant draw calls are introduced.
+This is variation of *instance attributes* rather than allocation of three
+separate mesh resources.
+
+Reference: [Unreal PCG weighted mesh selectors](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).

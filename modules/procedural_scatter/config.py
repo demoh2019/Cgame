@@ -7,7 +7,7 @@ def configure(env):
 
 
 def get_doc_classes():
-    return ["PCGSpatialFilter2D", "PCGSpatialFilter3D", "PCGDensitySelector"]
+    return ["PCGSpatialFilter2D", "PCGSpatialFilter3D", "PCGWeightedVariantSelector", "PCGDensitySelector"]
 
 
 def get_doc_path():

@@ -50,6 +50,36 @@ func _smoke() -> void:
         ok = false
     else:
         var positions: PackedVector3Array = foliage.call("get_selected_positions")
+        var weighted: PackedInt32Array = foliage.call("get_selected_variants")
+        var stable_ids: PackedInt64Array = foliage.call("get_selected_stable_ids")
+        if weighted.size() != positions.size() or stable_ids.size() != positions.size():
+            push_error("Native PCG weighted variants lost decorative point identities")
+            ok = false
+        if not foliage.multimesh.use_colors:
+            push_error("Weighted foliage variants were not packed as MultiMesh instance colors")
+            ok = false
+        if not bool(foliage.call("verify_variant_native_fallback_parity")):
+            push_error("Weighted PCG variant selection diverged from stock Godot fallback")
+            ok = false
+        var variant_counts: PackedInt32Array = foliage.call("get_variant_counts")
+        if variant_counts.size() != 3 or variant_counts[0] <= 0 or \
+                variant_counts[1] <= 0 or variant_counts[2] <= 0:
+            push_error("Weighted native plant variants were not all represented")
+            ok = false
+        if variant_counts.size() == 3 and variant_counts[0] + \
+                variant_counts[1] + variant_counts[2] != positions.size():
+            push_error("Weighted native variant counts did not cover the MultiMesh")
+            ok = false
+        if weighted.size() == positions.size():
+            for i in range(weighted.size()):
+                if weighted[i] < 0 or weighted[i] > 2:
+                    push_error("Native weighted PCG returned an invalid plant variant")
+                    ok = false
+                    break
+                if foliage.multimesh.get_instance_color(i).a < 0.99:
+                    push_error("Weighted MultiMesh plant variant lost opaque instance tint")
+                    ok = false
+                    break
         var centers: PackedVector3Array = foliage.call("get_exclusion_centers")
         var radii: PackedFloat64Array = foliage.call("get_exclusion_radii")
         var box_mins: PackedVector3Array = foliage.call("get_exclusion_box_mins")
@@ -135,6 +165,10 @@ func _smoke() -> void:
         foliage.call("regenerate")
         if positions != foliage.call("get_selected_positions"):
             push_error("PCG foliage placement was not deterministic")
+            ok = false
+        if weighted != foliage.call("get_selected_variants") or \
+                stable_ids != foliage.call("get_selected_stable_ids"):
+            push_error("PCG weighted visual variants changed after regeneration")
             ok = false
 
     var state = game.get("state")

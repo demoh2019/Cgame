@@ -6,6 +6,14 @@ extends MultiMeshInstance3D
 const GRID_SIZE: int = 25
 const MAX_INSTANCES: int = 160
 const MIN_SPACING: float = 2.1
+const WeightedVariants = preload("res://pcg_weighted_variants.gd")
+const VARIANT_WEIGHTS = [6.0, 3.0, 1.0]
+const VARIANT_SEED := 81419
+const VARIANT_COLORS := [
+    Color(0.27, 0.41, 0.21), # Damp green vegetation (60%)
+    Color(0.47, 0.45, 0.27), # Autumn/dry-green vegetation (30%)
+    Color(0.57, 0.36, 0.20), # Dead straw vegetation (10%)
+]
 const DENSITY_SEED: int = 90421
 const DENSITY_MODULUS: int = 2147483647
 const TRAIL_INNER_RADIUS: float = 1.8
@@ -51,6 +59,30 @@ const BOX_MAXS = [
 ]
 
 var _selected_positions := PackedVector3Array()
+var _selected_variants := PackedInt32Array()
+var _selected_stable_ids := PackedInt64Array()
+
+
+func get_selected_variants() -> PackedInt32Array:
+    return _selected_variants.duplicate()
+
+
+func get_selected_stable_ids() -> PackedInt64Array:
+    return _selected_stable_ids.duplicate()
+
+
+func verify_variant_native_fallback_parity() -> bool:
+    return (WeightedVariants.choose_variants(_selected_stable_ids,
+        PackedFloat32Array(VARIANT_WEIGHTS), VARIANT_SEED, false) == _selected_variants)
+
+
+func get_variant_counts() -> PackedInt32Array:
+    var counts := PackedInt32Array([0, 0, 0])
+    for variant in _selected_variants:
+        if variant >= 0 and variant < counts.size():
+            counts[variant] += 1
+    return counts
+
 
 
 func _ready() -> void:
@@ -313,22 +345,40 @@ func regenerate() -> void:
         get_exclusion_centers(), get_exclusion_radii(),
         get_exclusion_box_mins(), get_exclusion_box_maxs())
     _selected_positions.clear()
+    _selected_stable_ids.clear()
+    var source_ids: PackedInt32Array = _make_ids()
     for index in selected:
         _selected_positions.push_back(candidates[index])
+        _selected_stable_ids.push_back(source_ids[index])
+    # Selection runs only when a cosmetic batch is rebuilt, never per frame.
+    # Stable physical cell IDs preserve the visual variant on regeneration.
+    _selected_variants = WeightedVariants.choose_variants(
+        _selected_stable_ids, PackedFloat32Array(VARIANT_WEIGHTS), VARIANT_SEED)
+    if _selected_variants.size() != _selected_positions.size():
+        _selected_variants.resize(_selected_positions.size())
+        _selected_variants.fill(0) # Fail open: retain all cosmetic plants.
 
     var blades := BoxMesh.new()
     blades.size = Vector3(0.10, 0.44, 0.10)
     var material := StandardMaterial3D.new()
-    material.albedo_color = Color(0.28, 0.38, 0.23)
+    material.albedo_color = Color.WHITE
+    material.vertex_color_use_as_albedo = true
     material.roughness = 1.0
     blades.material = material
     var batch := MultiMesh.new()
     batch.transform_format = MultiMesh.TRANSFORM_3D
+    batch.use_colors = true
     batch.mesh = blades
     batch.instance_count = _selected_positions.size()
     for i in range(_selected_positions.size()):
+        var variant: int = _selected_variants[i]
         var orientation := Basis(Vector3.UP, float(i) * 0.41)
-        orientation = orientation.scaled(Vector3(1.0, 0.8 + 0.1 * float(i % 5), 1.0))
+        # Shape variety stays in the same MultiMesh: no per-variant draw call.
+        var width_scale: float = [0.8, 1.0, 1.15][variant]
+        var height_scale: float = [0.90, 0.78, 0.63][variant]
+        orientation = orientation.scaled(Vector3(width_scale,
+            height_scale + 0.08 * float(i % 5), width_scale))
         batch.set_instance_transform(i, Transform3D(orientation, _selected_positions[i]))
+        batch.set_instance_color(i, VARIANT_COLORS[variant])
     multimesh = batch
     cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

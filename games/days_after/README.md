@@ -132,3 +132,31 @@ placement bounds and reproducibility.
 The path is currently a bounded XZ polyline mask, **not** an editor
 spline tool or a navigation mesh. Performance gains are not claimed
 without building and profiling Cgame.
+
+## Native weighted instanced foliage variants
+
+Days After now applies the reusable native Cgame
+`PCGWeightedVariantSelector.choose_variants()` policy **after**
+all previously implemented biome density, curved trail, sphere/AABB exclusion
+and spacing filters. It uses the original grid-cell stable IDs, not
+position in the final MultiMesh array. The same plant therefore keeps
+its green (60%), dry-green (30%) or dead-straw (10%) variant across
+regeneration, independent of point ordering. The proportions are
+weights/probabilities, not exact guaranteed counts per tile.
+
+The selection adjusts each blade's instance color, width and height
+inside **one MultiMeshInstance3D**. No additional mesh nodes, gameplay
+colliders, networking objects or draw calls per species are created.
+Older Godot builds use `pcg_weighted_variants.gd` to reproduce the
+same unsigned 32-bit selection. Native and fallback implementations
+produce identical index choices with the same IDs, weights and seed.
+
+Regression:
+```sh
+godot --headless --path games/days_after --script res://pcg_weighted_variants_smoke_test.gd
+godot --headless --path games/days_after --script res://smoke_test.gd
+```
+
+The focused `native-pcg-spatial-filter.yml` workflow additionally
+executes C++ `[PCGWeightedVariantSelector]` doctests. This is a
+functional rendering-variation feature, not evidence of FPS gains.
