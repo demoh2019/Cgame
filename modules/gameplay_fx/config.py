@@ -14,6 +14,7 @@ def get_doc_classes():
         "RadialForceField3D",
         "GameplayEffectTimeline",
         "GameplayAttributeSet",
+        "AudioDuckMix",
     ]
 
 

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AudioDuckMix" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Source-keyed, bounded, overlapping audio ducking envelope for game mix buses.
+	</brief_description>
+	<description>
+		A data-only audio ducking mixer inspired by Unreal Engine Audio Modulation control-bus mixes. Up to 32 named events can hold independent volume reductions (from -60 dB to less than 0 dB); the deepest live event wins. Re-triggering a source refreshes its duration and retains the deeper attenuation without creating a duplicate. [method tick] expires sources and ramps current gain toward the deepest active target, defaulting to a 40 dB/s attack and 4 dB/s release. The caller may apply [method get_current_db] as an offset to the existing AudioServer bus gain, preserving user volume sliders. Does not perform audio DSP, communicate with the audio render thread, or modify buses itself.
+	</description>
+	<methods>
+		<method name="trigger">
+			<return type="bool" />
+			<param index="0" name="source" type="StringName" />
+			<param index="1" name="depth_db" type="float" />
+			<param index="2" name="hold_seconds" type="float" default="1.2" />
+			<description>Creates or re-triggers one independent ducking event. Source length must be 1 to 128 characters; depth must be finite in [-60, 0), and hold must be finite in (0, 30] seconds. Returns false for invalid inputs or when the 32-source limit is reached.</description>
+		</method>
+		<method name="release_source">
+			<return type="bool" />
+			<param index="0" name="source" type="StringName" />
+			<description>Stops this event immediately, then allows the next [method tick] to release its attenuation.</description>
+		</method>
+		<method name="tick">
+			<return type="float" />
+			<param index="0" name="delta" type="float" />
+			<description>Advances timers and returns the current dB attenuation. Nonfinite, zero and negative delta values do not advance state.</description>
+		</method>
+		<method name="set_rates">
+			<return type="bool" />
+			<param index="0" name="attack_db_per_second" type="float" />
+			<param index="1" name="release_db_per_second" type="float" />
+			<description>Configures independent positive finite attack and release speeds (at most 120 dB/s), atomically.</description>
+		</method>
+		<method name="get_current_db" qualifiers="const">
+			<return type="float" />
+			<description>Returns the smoothed volume attenuation, at most 0 dB.</description>
+		</method>
+		<method name="get_target_db" qualifiers="const">
+			<return type="float" />
+			<description>Returns the deepest currently active source attenuation, or 0 dB.</description>
+		</method>
+		<method name="get_remaining" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="source" type="StringName" />
+			<description>Returns this source's remaining hold duration, or zero.</description>
+		</method>
+		<method name="get_source_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns the number of currently active named sources.</description>
+		</method>
+		<method name="has_source" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="source" type="StringName" />
+			<description>Returns whether this source currently contributes to the ducking mix.</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>Immediately resets the mix to 0 dB and removes all sources.</description>
+		</method>
+	</methods>
+</class>
