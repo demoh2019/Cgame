@@ -140,4 +140,51 @@ TEST_CASE("[SmartObjects] hashed claim indices survive swap removal, migration a
 	CHECK(pool->get_claim_count() == 0);
 }
 
+TEST_CASE("[SmartObjects] priority preempts pending slots, but never active interaction") {
+	Ref<SmartObjectSlotReservations> pool;
+	pool.instantiate();
+	CHECK(pool->try_claim_first_priority({ 100, 101 }, 1, 2.0, 0) == 100);
+	CHECK(pool->try_claim_first_priority({ 100, 101 }, 2, 2.0, 0) == 101);
+	CHECK(pool->try_claim_first_priority({ 100, 101 }, 3, 2.0, 2) == 100);
+	CHECK(pool->get_owner(100) == 3);
+	CHECK(pool->get_actor_slot(3) == 100);
+	CHECK(pool->get_actor_slot(1) == 0);
+	CHECK(pool->get_owner(101) == 2);
+	CHECK(pool->get_claim_count() == 2);
+	CHECK(pool->try_claim_first({ 100, 101 }, 1, 2.0) == 0); // Legacy cannot steal.
+	CHECK(pool->set_slot_occupied(100, 3, true));
+	CHECK(pool->is_slot_occupied(100));
+	CHECK_FALSE(pool->set_slot_occupied(100, 1, false)); // Owner only.
+	CHECK(pool->try_claim_first_priority({ 100, 101 }, 4, 2.0, 3) == 101);
+	CHECK(pool->get_owner(100) == 3); // Occupied is protected.
+	CHECK(pool->get_owner(101) == 4);
+	CHECK(pool->try_claim_first_priority({ 100, 101 }, 5, 2.0, 3) == 0);
+	CHECK(pool->set_slot_occupied(100, 3, false));
+	CHECK(pool->try_claim_first_priority({ 100, 101 }, 5, 2.0, 3) == 100);
+	CHECK_FALSE(pool->is_slot_occupied(100));
+	CHECK_FALSE(pool->is_slot_occupied(9999));
+}
+
+TEST_CASE("[SmartObjects] priority transfer and invalid input are atomic") {
+	Ref<SmartObjectSlotReservations> pool;
+	pool.instantiate();
+	CHECK(pool->try_claim_first_priority({ 10 }, 1, 2.0, 2) == 10);
+	CHECK(pool->try_claim_first_priority({ 20 }, 2, 2.0, 0) == 20);
+	CHECK(pool->set_slot_occupied(10, 1, true));
+	CHECK(pool->try_claim_first_priority({ 10 }, 2, 2.0, 3) == 0);
+	CHECK(pool->get_owner(20) == 2);
+	CHECK(pool->try_claim_first_priority({ 20 }, 2, 2.0, 4) == 0);
+	CHECK(pool->try_claim_first_priority({ 20, 20 }, 2, 2.0, 3) == 0);
+	CHECK(pool->try_claim_first_priority({ 10, -3 }, 2, 2.0, 3) == 0);
+	CHECK(pool->get_owner(20) == 2);
+	CHECK(pool->try_claim_first_priority({ 20 }, 2, 2.0, 1) == 20);
+	CHECK(pool->try_claim_first_priority({ 20 }, 3, 2.0, 0) == 0);
+	CHECK(pool->set_slot_occupied(10, 1, false));
+	CHECK(pool->try_claim_first_priority({ 10 }, 2, 2.0, 3) == 10);
+	CHECK(pool->get_owner(20) == 0); // Own old claim relinquished only on success.
+	CHECK(pool->get_claim_count() == 1);
+	pool->advance_time(2.0);
+	CHECK(pool->get_claim_count() == 0);
+}
+
 } // namespace TestSmartObjectSlotReservations
