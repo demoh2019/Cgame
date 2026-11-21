@@ -7,7 +7,9 @@ extends RefCounted
 static func compute(mask: PackedByteArray, size: Vector2i, max_distance: int = 7,
 		force_scalar: bool = false) -> PackedByteArray:
 	var empty := PackedByteArray()
-	if size.x < 1 or size.y < 1 or size.x > 2048 or size.y > 2048 			or max_distance < 0 or max_distance > 254 or mask.size() != size.x * size.y:
+	if size.x < 1 or size.y < 1 or size.x > 2048 or size.y > 2048:
+		return empty
+	if max_distance < 0 or max_distance > 254 or mask.size() != size.x * size.y:
 		return empty
 	if not force_scalar and Geometry2D.has_method("distance_transform_8"):
 		var native: PackedByteArray = Geometry2D.call("distance_transform_8", mask, size, max_distance)
@@ -53,7 +55,9 @@ static func compute(mask: PackedByteArray, size: Vector2i, max_distance: int = 7
 static func from_heights(heights: PackedFloat32Array, size: Vector2i,
 		land_threshold: float, max_distance: int = 7,
 		force_scalar: bool = false) -> PackedByteArray:
-	if not is_finite(land_threshold) or size.x < 1 or size.y < 1 			or size.x > 2048 or size.y > 2048 or heights.size() != size.x * size.y:
+	if not is_finite(land_threshold) or size.x < 1 or size.y < 1:
+		return PackedByteArray()
+	if size.x > 2048 or size.y > 2048 or heights.size() != size.x * size.y:
 		return PackedByteArray()
 	var mask := PackedByteArray()
 	mask.resize(heights.size())
