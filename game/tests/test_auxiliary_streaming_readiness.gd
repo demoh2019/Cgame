@@ -136,9 +136,9 @@ func run(t) -> void:
 	retry.refresh(true)
 	for i in 128:
 		retry.refresh()
-		if retry.is_auxiliary_source_ready(true):
+		if retry.is_auxiliary_source_ready():
 			break
-	t.check(retry.is_auxiliary_source_ready(true),
+	t.check(retry.is_auxiliary_source_ready(),
 		"retrying failed chunks recovers source streaming completion")
 	t.eq(retry.get_auxiliary_source_failed_count(), 0,
 		"successful retry clears failed source status")
