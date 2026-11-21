@@ -659,7 +659,7 @@ TEST_CASE("[EnvironmentQuery3D] Donut spiral stagger and phase are deterministic
 	REQUIRE(spiral.size() == 8);
 	CHECK(spokes[0] == spiral[0]); // First ring has no extra phase.
 	CHECK(!spiral[4].is_equal_approx(spokes[4]));
-	CHECK(spiral[4].is_equal_approx(Vector3(Math::SQRT2, 0, Math::SQRT2)));
+	CHECK(spiral[4].is_equal_approx(Vector3(Math::sqrt(2.0), 0, Math::sqrt(2.0))));
 	CHECK(spiral == EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 2.0, 2, 4, 0.0, true));
 	const PackedVector3Array rotated = EnvironmentQuery3D::sample_donut(Vector3(), 1.0, 1.0, 1, 4, Math::PI / 2.0);
 	REQUIRE(rotated.size() == 4);
