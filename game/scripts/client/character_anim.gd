@@ -52,11 +52,17 @@ static func assign_tiers(distances: Array, budget: int) -> PackedInt32Array:
 
 ## Batch-selects pose tiers. Native Cgame does bounded top-K on numeric
 ## arrays; stock Godot uses an equivalent deterministic GDScript fallback.
+## visible_flags is optional for backward compatibility. When provided, off-screen
+## characters retain their distance tier but never outrank tier 2, and cannot
+## consume expensive procedural or combat-priority slots.
 static func plan_crowd_tiers(distances: PackedFloat64Array, priority_flags: PackedByteArray,
-		full_slots: int, priority_slots: int, prefer_native: bool = true) -> PackedInt32Array:
+		full_slots: int, priority_slots: int, prefer_native: bool = true,
+		visible_flags: PackedByteArray = PackedByteArray()) -> PackedInt32Array:
 	var count: int = distances.size()
 	if count != priority_flags.size() or count > 16384 or full_slots < 0 or full_slots > 256 \
-			or priority_slots < 0 or priority_slots > 256:
+			or priority_slots < 0 or priority_slots > 256 or \
+			(not visible_flags.is_empty() and visible_flags.size() != count):
+
 		return PackedInt32Array()
 	for distance in distances:
 		if not is_finite(distance) or distance < 0.0:
@@ -64,11 +70,20 @@ static func plan_crowd_tiers(distances: PackedFloat64Array, priority_flags: Pack
 	if prefer_native and ClassDB.class_exists("CrowdAnimationTierPlanner"):
 		if _native_tier_planner == null:
 			_native_tier_planner = ClassDB.instantiate("CrowdAnimationTierPlanner")
-		if _native_tier_planner != null and _native_tier_planner.has_method("plan_tiers"):
-			var native_tiers: PackedInt32Array = _native_tier_planner.call(
-				"plan_tiers", distances, priority_flags, full_slots, priority_slots)
-			if native_tiers.size() == count:
-				return native_tiers
+		if _native_tier_planner != null:
+			# An older Cgame build may have only the original four-argument
+			# API; never call it with visibility flags and lose safety parity.
+			if not visible_flags.is_empty() and _native_tier_planner.has_method("plan_visible_tiers"):
+				var native_visible: PackedInt32Array = _native_tier_planner.call(
+					"plan_visible_tiers", distances, priority_flags, visible_flags,
+					full_slots, priority_slots)
+				if native_visible.size() == count:
+					return native_visible
+			elif visible_flags.is_empty() and _native_tier_planner.has_method("plan_tiers"):
+				var native_tiers: PackedInt32Array = _native_tier_planner.call(
+					"plan_tiers", distances, priority_flags, full_slots, priority_slots)
+				if native_tiers.size() == count:
+					return native_tiers
 	# Stable ties by input index. The script path is intentionally simple;
 	# the C++ path avoids sorting every actor in the world each frame.
 	var order: Array[int] = []
@@ -81,7 +96,10 @@ static func plan_crowd_tiers(distances: PackedFloat64Array, priority_flags: Pack
 	var granted_full: int = 0
 	for index in order:
 		var tier: int = lod_tier(distances[index])
-		if tier == 0:
+		var visible: bool = visible_flags.is_empty() or visible_flags[index] != 0
+		if not visible:
+			tier = maxi(tier, 2)
+		elif tier == 0:
 			if granted_full < full_slots:
 				granted_full += 1
 			else:
@@ -91,7 +109,8 @@ static func plan_crowd_tiers(distances: PackedFloat64Array, priority_flags: Pack
 	for index in order:
 		if granted_priority >= priority_slots:
 			break
-		if priority_flags[index] == 0 or distances[index] >= 90.0:
+		if (not visible_flags.is_empty() and visible_flags[index] == 0) or \
+				priority_flags[index] == 0 or distances[index] >= 90.0:
 			continue
 		tiers[index] = mini(tiers[index], 1)
 		granted_priority += 1
@@ -246,18 +265,23 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 	var cam: Vector3 = camera.global_position
 	var distances := PackedFloat64Array()
 	var priority_mask := PackedByteArray()
+	var visible_mask := PackedByteArray()
 	for model in models:
 		var distance: float = model.global_position.distance_to(cam)
 		distances.append(distance)
+		# Use the actual camera, but keep close actors conservative: their
+		# limbs may cross the frustum while the root point is outside.
+		var visible: bool = model.is_visible_in_tree() and (distance < 8.0 or \
+			camera.is_position_in_frustum(model.global_position + Vector3.UP))
+		visible_mask.append(1 if visible else 0)
 		# Combat urgency is visual-only, and the native mixer controller
 		# already handles critical poses when external_anim_lod is enabled.
 		var critical: bool = not bool(model.get("external_anim_lod")) \
 			and bool(model.get_meta("aa_combat_animation_priority", false)) \
-			and distance < 90.0 and camera.is_position_in_frustum(
-				model.global_position + Vector3.UP)
+			and distance < 90.0 and visible
 		priority_mask.append(1 if critical else 0)
 	var tiers: PackedInt32Array = plan_crowd_tiers(distances, priority_mask,
-		full_budget(quality), CombatAnimationPriority.slots(quality))
+		full_budget(quality), CombatAnimationPriority.slots(quality), true, visible_mask)
 	if tiers.size() != models.size():
 		return
 	for i in models.size():
