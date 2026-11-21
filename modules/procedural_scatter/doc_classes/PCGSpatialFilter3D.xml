@@ -7,6 +7,17 @@
 		Returns indices of 3D candidate points separated by at least the specified full Euclidean distance, preserving input order. Uses a spatial hash checking up to 27 neighboring cells. Unlike 2D XZ filtering, objects on stacked platforms and cliff terraces can coexist. It consumes no randomness, changes no candidates, and creates no scene nodes. Accepts at most 16,384 finite candidates with coordinates within +/- 10,000,000. Minimum spacing is zero or 0.05 through 10,000; output capacity is 0 through 4,096. Invalid input rejects the entire batch.
 	</description>
 	<methods>
+		<method name="filter_indices_scaled" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="candidates" type="PackedVector3Array" />
+			<param index="1" name="scales" type="PackedFloat32Array" />
+			<param index="2" name="min_spacing" type="float" />
+			<param index="3" name="max_selected" type="int" default="4096" />
+			<param index="4" name="largest_first" type="bool" default="true" />
+			<description>
+				3D scale-aware self-pruning inspired by Unreal PCG. Two selected points require Euclidean separation at least [code]min_spacing * (scales[a] + scales[b]) / 2[/code]. Scales must be finite within 0.5–2.0. Candidates are visited largest-first by default, ties by original index, but returned indices preserve source order. With [param largest_first] disabled, original input order defines precedence. A bounded 5x5x5 spatial-hash neighborhood handles steep slopes and vertically separated terraces. Zero spacing retains the first max_selected input indices in original order. Finite coordinates, batch sizes and spacing follow [method filter_indices]; any invalid or mismatched input rejects the whole batch. Pure data: no RNG, scene tree access or gameplay authority changes.
+			</description>
+		</method>
 		<method name="filter_indices" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="candidates" type="PackedVector3Array" />
