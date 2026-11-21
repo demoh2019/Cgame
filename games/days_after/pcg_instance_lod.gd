@@ -101,3 +101,37 @@ static func partition_variant_lods(variants: PackedInt32Array,
         if native != null:
             return native.call("partition_variant_lods", variants, lod_tiers, variant_count)
     return _partition_fallback(variants, lod_tiers, variant_count)
+
+
+## Returns one byte per [variant*2 + LOD] group: 1 only if at least
+## one source point enters/leaves that GPU batch, 0 if membership unchanged.
+## Valid no-change inputs return an array of zeros, not an empty array.
+static func plan_dirty_variant_lod_groups(variants: PackedInt32Array,
+        previous_tiers: PackedInt32Array, next_tiers: PackedInt32Array,
+        variant_count: int, prefer_native: bool = true) -> PackedByteArray:
+    var result := PackedByteArray()
+    if variants.size() != previous_tiers.size() or \
+            variants.size() != next_tiers.size() or \
+            variants.size() > MAX_POINTS or \
+            variant_count < 1 or variant_count > MAX_VARIANTS:
+        return result
+    # Validate all input before returning any update flags.
+    for i in variants.size():
+        if variants[i] < 0 or variants[i] >= variant_count or \
+                previous_tiers[i] < 0 or previous_tiers[i] > 1 or \
+                next_tiers[i] < 0 or next_tiers[i] > 1:
+            return result
+    if prefer_native:
+        var native: Object = _engine()
+        if native != null and native.has_method("plan_dirty_variant_lod_groups"):
+            return native.call("plan_dirty_variant_lod_groups", variants,
+                previous_tiers, next_tiers, variant_count)
+    result.resize(variant_count * 2)
+    result.fill(0)
+    for i in variants.size():
+        if previous_tiers[i] == next_tiers[i]:
+            continue
+        var offset: int = variants[i] * 2
+        result[offset + previous_tiers[i]] = 1
+        result[offset + next_tiers[i]] = 1
+    return result
