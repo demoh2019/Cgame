@@ -264,5 +264,74 @@ TEST_CASE("[CrowdAnimationTierPlanner] Combat retention never crosses hard visib
 	ERR_PRINT_ON
 }
 
+
+TEST_CASE("[CrowdAnimationTierPlanner] CPU gate preserves both prior IK and independent combat scheduling") {
+	Ref<CrowdAnimationTierPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distances = { 5.6, 5.4, 60.5, 60.3 };
+	const PackedByteArray priority = { 0, 0, 1, 1 };
+	const PackedByteArray visible = { 1, 1, 1, 1 };
+	const PackedByteArray retained_full = { 1, 0, 0, 0 };
+	const PackedByteArray retained_combat = { 0, 0, 1, 0 };
+	const PackedInt32Array estimate = { 800, 90, 0, 0 };
+	const PackedInt32Array base = planner->plan_visible_tiers_temporal(
+			distances, priority, visible, retained_full, retained_combat, 1, 1, 1.5, 1.0);
+	const PackedInt32Array base_expected = { 0, 1, 1, 3 };
+	REQUIRE(base == base_expected);
+	const PackedInt32Array capped = planner->cap_full_pose_cost(
+			base, distances, retained_full, estimate, 100);
+	const PackedInt32Array capped_expected = { 1, 1, 1, 3 };
+	CHECK(capped == capped_expected); // Cost defers IK, not the 60.5m combat cue.
+	CHECK(base == base_expected); // Never mutate the caller's previous tiers.
+	CHECK(planner->cap_full_pose_cost(base, distances, retained_full, estimate, 0) == base);
+
+	const PackedInt32Array candidate_tiers = { 0, 0, 0, 1, 2 };
+	const PackedFloat64Array candidate_distances = { 2.0, 4.0, 10.0, 18.0, 55.0 };
+	const PackedByteArray candidate_retained = { 0, 0, 0, 0, 0 };
+	const PackedInt32Array costs = { 500, 100, 100, 100, 0 };
+	const PackedInt32Array admitted = planner->cap_full_pose_cost(
+			candidate_tiers, candidate_distances, candidate_retained, costs, 250);
+	const PackedInt32Array admitted_expected = { 1, 0, 0, 1, 2 };
+	CHECK(admitted == admitted_expected);
+	CHECK(candidate_tiers[0] == 0);
+}
+
+TEST_CASE("[CrowdAnimationTierPlanner] CPU gate validates input and unsampled estimates") {
+	Ref<CrowdAnimationTierPlanner> planner;
+	planner.instantiate();
+	const PackedInt32Array tiers = { 0, 0, 1 };
+	const PackedFloat64Array distance = { 10.0, 10.4, 80.0 };
+	const PackedByteArray retained = { 0, 1, 0 };
+	const PackedInt32Array unknown = { 0, 0, 0 };
+	const PackedInt32Array budgeted = planner->cap_full_pose_cost(
+			tiers, distance, retained, unknown, 100);
+	REQUIRE(budgeted.size() == 3);
+	CHECK(budgeted[0] == 1);
+	CHECK(budgeted[1] == 0); // Retained 10.4m owner consumes the 100us fallback.
+	CHECK(budgeted[2] == 1);
+	ERR_PRINT_OFF
+	CHECK(planner->cap_full_pose_cost(tiers, distance, { 1 }, unknown, 100).is_empty());
+	CHECK(planner->cap_full_pose_cost(tiers, distance, retained, { 0 }, 100).is_empty());
+	CHECK(planner->cap_full_pose_cost({ 0, 5, 1 }, distance, retained, unknown, 100).is_empty());
+	CHECK(planner->cap_full_pose_cost(tiers, { -1.0, 10.4, 80.0 }, retained, unknown, 100).is_empty());
+	CHECK(planner->cap_full_pose_cost(tiers, distance, retained, { 0, -1, 0 }, 100).is_empty());
+	CHECK(planner->cap_full_pose_cost(tiers, distance, retained, { 0, 100001, 0 }, 100).is_empty());
+	CHECK(planner->cap_full_pose_cost(tiers, distance, retained, unknown, -1).is_empty());
+	CHECK(planner->cap_full_pose_cost(tiers, distance, retained, unknown, 1000001).is_empty());
+	CHECK(planner->cap_full_pose_cost(tiers, distance, retained, unknown, 100, Math::NaN).is_empty());
+	CHECK(planner->cap_full_pose_cost(tiers, distance, retained, unknown, 100, 8.1).is_empty());
+	PackedInt32Array too_many;
+	PackedFloat64Array many_distances;
+	PackedByteArray many_retained;
+	PackedInt32Array many_costs;
+	too_many.resize(257);
+	many_distances.resize(257);
+	many_retained.resize(257);
+	many_costs.resize(257);
+	CHECK(planner->cap_full_pose_cost(too_many, many_distances,
+			many_retained, many_costs, 100).is_empty());
+	ERR_PRINT_ON
+}
+
 } // namespace TestCrowdAnimationTierPlanner
 #endif // MODULE_CROWD_ANIMATION_TIER_PLANNER_ENABLED

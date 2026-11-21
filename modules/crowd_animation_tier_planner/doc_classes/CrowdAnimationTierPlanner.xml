@@ -7,6 +7,18 @@
 		Invalid inputs, mismatched sizes, non-finite or negative distances, or out-of-range budgets return an empty result. Budgets must be from 0 to 256.
 	</description>
 	<methods>
+		<method name="cap_full_pose_cost" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="tiers" type="PackedInt32Array" />
+			<param index="1" name="distances" type="PackedFloat64Array" />
+			<param index="2" name="retained_full_flags" type="PackedByteArray" />
+			<param index="3" name="full_pose_cost_us" type="PackedInt32Array" />
+			<param index="4" name="full_pose_budget_us" type="int" />
+			<param index="5" name="hysteresis" type="float" default="1.5" />
+			<description>
+				Composes an additional estimated CPU budget with tiers from [method plan_visible_tiers_temporal], [method plan_visible_tiers_stable] or another validated planner. Only tier-0 optional full-pose IK owners are considered: they are visited in ascending effective camera distance with previous-IK retention discount and stable source-index ties. Owners whose estimated full-pose cost does not fit are demoted to tier 1 (still full-rate locomotion and combat animation). All other tiers, including independently retained combat poses, are left unchanged. The output is a copy and inputs are never mutated. Zero per-actor estimate uses an initial 100-microsecond assumption; [param full_pose_budget_us] equal to zero disables the additional cap. The four arrays must match, have at most 16,384 actors, 0..4 tiers, at most 256 tier-0 owners, finite nonnegative distances and 0..100,000 microsecond estimates. Total budget is 0..1,000,000 microseconds and [param hysteresis] must be finite 0..8 metres. Invalid input returns empty. This is a soft predictive admission gate, not real-time preemption, GPU timing or an animation mixer profiler.
+			</description>
+		</method>
 		<method name="plan_visible_tiers_stable" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="distances" type="PackedFloat64Array" />

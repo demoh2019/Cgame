@@ -69,6 +69,8 @@ void CrowdAnimationTierPlanner::_bind_methods() {
 			&CrowdAnimationTierPlanner::plan_visible_tiers_stable, DEFVAL(1.5));
 	ClassDB::bind_method(D_METHOD("plan_visible_tiers_temporal", "distances", "priority_flags", "visible_flags", "retained_full_flags", "retained_priority_flags", "full_budget", "priority_budget", "full_hysteresis", "priority_hysteresis"),
 			&CrowdAnimationTierPlanner::plan_visible_tiers_temporal);
+	ClassDB::bind_method(D_METHOD("cap_full_pose_cost", "tiers", "distances", "retained_full_flags", "full_pose_cost_us", "full_pose_budget_us", "hysteresis"),
+			&CrowdAnimationTierPlanner::cap_full_pose_cost, DEFVAL(1.5));
 }
 
 // Shared budget planner: no second sorting pass and no additional per-actor
@@ -173,4 +175,60 @@ PackedInt32Array CrowdAnimationTierPlanner::plan_visible_tiers_temporal(
 	return plan_tiers_internal(p_distances, p_priority_flags, &p_visible_flags,
 			&p_retained_full_flags, p_full_budget, p_priority_budget, p_full_hysteresis,
 			&p_retained_priority_flags, p_priority_hysteresis);
+}
+
+
+PackedInt32Array CrowdAnimationTierPlanner::cap_full_pose_cost(
+		const PackedInt32Array &p_tiers, const PackedFloat64Array &p_distances,
+		const PackedByteArray &p_retained_full_flags, const PackedInt32Array &p_full_pose_cost_us,
+		int p_full_pose_budget_us, double p_hysteresis) const {
+	PackedInt32Array rejected;
+	const int count = p_tiers.size();
+	ERR_FAIL_COND_V_MSG(count != p_distances.size() || count != p_retained_full_flags.size() ||
+					count != p_full_pose_cost_us.size() || count > 16384,
+			rejected, "Full-pose cost inputs must have the same bounded actor count.");
+	ERR_FAIL_COND_V_MSG(p_full_pose_budget_us < 0 || p_full_pose_budget_us > 1000000 ||
+					!Math::is_finite(p_hysteresis) || p_hysteresis < 0.0 || p_hysteresis > 8.0,
+			rejected, "Full-pose CPU allowance and retention hysteresis must be finite and bounded.");
+	// Validate every input before making a copy or writing any new result.
+	int full_count = 0;
+	for (int i = 0; i < count; ++i) {
+		ERR_FAIL_COND_V_MSG(p_tiers[i] < 0 || p_tiers[i] > 4 ||
+						!Math::is_finite(p_distances[i]) || p_distances[i] < 0.0 ||
+						p_full_pose_cost_us[i] < 0 || p_full_pose_cost_us[i] > 100000,
+				rejected, "Invalid tier, distance, or estimated full-pose CPU cost.");
+		if (p_tiers[i] == 0) {
+			full_count++;
+		}
+	}
+	ERR_FAIL_COND_V_MSG(full_count > 256, rejected, "Full-pose CPU admission supports up to 256 IK owners.");
+	if (p_full_pose_budget_us == 0) {
+		return p_tiers; // Opt-out retains the exact current animation policy.
+	}
+	PackedInt32Array output = p_tiers;
+	Vector<RankedCandidate> ranked_full;
+	for (int i = 0; i < count; ++i) {
+		if (p_tiers[i] != 0) {
+			continue;
+		}
+		// The input planner has already enforced visibility, radius,
+		// importance, and combat retention. We only re-rank tier-0 owners.
+		const double score = MAX(0.0, p_distances[i] -
+				(p_retained_full_flags[i] != 0 ? p_hysteresis : 0.0));
+		insert_top(ranked_full, { score, i }, full_count);
+	}
+	int64_t reserved_us = 0;
+	for (const RankedCandidate &candidate : ranked_full) {
+		const int idx = candidate.index;
+		const int64_t predicted_us = p_full_pose_cost_us[idx] == 0 ?
+				100 : p_full_pose_cost_us[idx];
+		if (reserved_us + predicted_us <= p_full_pose_budget_us) {
+			reserved_us += predicted_us;
+		} else {
+			// Never defer base locomotion or urgent combat: tier 1 is still
+			// full rate, but without optional foot IK and head look-at.
+			output.set(idx, 1);
+		}
+	}
+	return output;
 }
