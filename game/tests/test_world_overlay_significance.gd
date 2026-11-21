@@ -111,7 +111,50 @@ func run(t) -> void:
 				crowd_priorities, crowd_ids, prior_visible, 3, 10.0, 2.0),
 				expected_stable, "the C++ priority-stable API matches the stock Godot reference")
 
-	
+	t.current = "multi-viewer stable POI significance in the playable compass"
+	var poi_positions := PackedVector3Array([Vector3(4, 0, 0), Vector3(6, 0, 0),
+		Vector3(96, 0, 0), Vector3(200, 0, 0)])
+	var poi_viewers := PackedVector3Array([Vector3.ZERO, Vector3(100, 0, 0)])
+	var poi_priority := PackedByteArray([0, 0, 2, 3])
+	var poi_ids := PackedInt64Array([42, 43, 44, 45])
+	var poi_retained := PackedInt64Array([43, 45])
+	var expected_poi := PackedInt32Array([2, 1])
+	t.eq(Overlay.select_world_marker_indices(poi_positions, poi_viewers, poi_priority,
+		poi_ids, poi_retained, 2, 10.0, 3.0, false), expected_poi,
+		"stock fallback keeps same-tier POIs, but not ahead of higher priority")
+	t.eq(Overlay.select_world_marker_indices(poi_positions, poi_viewers, poi_priority,
+		poi_ids, poi_retained, 2, 10.0, 3.0), expected_poi,
+		"native and stock fallback select the same stable POIs")
+	t.eq(Overlay.select_world_marker_indices(PackedVector3Array([Vector3(6, 0, 0),
+		Vector3(6, 0, 0)]), PackedVector3Array([Vector3.ZERO]),
+		PackedByteArray([0, 0]), PackedInt64Array([9, 7]), PackedInt64Array(),
+		2, 10.0, 0.0, false), PackedInt32Array([1, 0]),
+		"stable IDs break identical-distance ties")
+	t.eq(Overlay.select_world_marker_indices(PackedVector3Array([Vector3(11, 0, 0),
+		Vector3(1, 0, 0)]), PackedVector3Array([Vector3.ZERO]),
+		PackedByteArray([3, 0]), PackedInt64Array([9, 7]), PackedInt64Array([9]),
+		2, 10.0, 2.0, false), PackedInt32Array([1]),
+		"retained marker cannot survive outside max_distance")
+	t.check(Overlay.select_world_marker_indices(poi_positions, PackedVector3Array(),
+		poi_priority, poi_ids, poi_retained).is_empty(), "no observers rejects selection")
+	t.check(Overlay.select_world_marker_indices(poi_positions, poi_viewers,
+		poi_priority, PackedInt64Array([42, 43, 44, 44]), poi_retained, 2,
+		10.0, 3.0, false).is_empty(), "duplicate IDs fail closed")
+	t.check(Overlay.select_world_marker_indices(poi_positions, poi_viewers,
+		poi_priority, poi_ids, PackedInt64Array([43, 43]), 2,
+		10.0, 3.0, false).is_empty(), "duplicate retained IDs fail closed")
+	var marker_source: String = (Overlay as Script).source_code
+	t.check(marker_source.contains("var chosen := select_world_marker_indices(positions,"),
+		"actual in-game compass invokes significance ranking")
+	t.check(marker_source.contains("_marker_retained_ids = next_retained"),
+		"actual compass advances retained IDs each update")
+	if ClassDB.class_exists("SignificanceBudgetPlanner"):
+		var native_world = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if native_world != null and native_world.has_method("select_world_priority_stable"):
+			t.eq(native_world.call("select_world_priority_stable", poi_positions,
+				poi_viewers, poi_priority, poi_ids, poi_retained, 2, 10.0, 3.0),
+				expected_poi, "native multi-viewer selection matches GDScript")
+
 	t.current = "multi-viewer stable world-significance matches single-viewer legacy ranking"
 	var actors := PackedVector3Array([
 		Vector3(7, 0, 0), Vector3(6, 0, 0), Vector3(5, 0, 0),
@@ -153,4 +196,3 @@ func run(t) -> void:
 			t.eq(world_native.call("select_world_priority_stable", across, cameras,
 				cross_priority, cross_ids, PackedInt64Array(), 2, 10.0, 0.0),
 				expected_cross, "new native method is callable by game scripts")
-

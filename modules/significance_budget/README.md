@@ -69,32 +69,29 @@ Godot or older Cgame binaries. Gameplay, audio, server state and networking
 are not affected. The user-visible impact requires profiling in a running
 scene; no FPS improvement is claimed.
 
-
-## Stable multi-observer visual LOD (Days After)
+## Stable significance for multiple observers
 
 `select_world_priority_stable(positions, viewers, priorities, ids, retained_ids,
-budget, max_distance=1000.0, hysteresis=0.0)` combines nearest-of-16 observer
-ranking with strict 0–3 importance, persistent-ID retention and a hard range.
-It builds nearest-observer distances and reuses the native priority-stable
-bounded selector. It never changes scene nodes or physics itself.
+budget, max_distance, hysteresis=0.0)` ranks at most 16,384 world-space
+candidates from up to 16 viewers, using strict priority tiers followed by
+nearest-viewer distance, bounded retention hysteresis and stable positive ID.
+It has deterministic ties, up to 128 slots, and a hard inclusive range that
+retention cannot extend. The pure native algorithm performs O(N × (V + K))
+work with a bounded top-K insertion rather than sorting the entire crowd.
 
-`games/days_after/debris_lod.gd` calls this at 5 Hz for 96 non-colliding
-ruin fragments, showing at most 18 nearby meshes. Stock Godot uses a matching
-GDScript fallback. Collectibles, collisions, infected AI and survival state
-are unaffected. Native unit tests cover multi-viewer ranking, retention,
-priority, hard range and invalid inputs. Measure runtime frame time before
-claiming a speedup.
+The playable Albion After client uses it for its three nearest POI compass
+markers; an 8m retention bonus reduces flickering as sites exchange order.
+All marker urgency values are zero to preserve nearest-site semantics.
+The game keeps the original entered-site and 650m exclusions and includes
+stock Godot fallback parity tests. No measured performance claim is made.
 
 
-## Infected HUD native reuse and bounded insertion
+## Albion After infected HUD integration
 
-The Albion After infected health-bar overlay now uses the same
-`select_world_priority_stable` engine method already shared with the
-Days After visual-debris LOD example. Candidates are prefiltered using
-squared distance, camera projection and screen bounds. Native selection
-now inserts only the best at most 128 *in-range* results directly,
-instead of allocating a float distance for every candidate first.
-The stock-Godot fallback preserves identical priority and stable-ID
-tie ordering. A 32-health-bar render cap and all server-side combat,
-AI, physics and networking rules are unchanged. No frame-time win is
-claimed without measurements.
+The on-screen infected health-bar overlay also uses the shared native
+`select_world_priority_stable` selector, with the same stock-Godot fallback
+as POI markers. Eligible enemies are filtered by squared distance and
+projected screen bounds before native priority ranking. At most 32 bars
+are drawn; no combat, enemy simulation or networking is affected.
+Headless game regression tests cover two-viewer ranking, retention and
+invalid input. No performance gains are claimed without runtime profiling.

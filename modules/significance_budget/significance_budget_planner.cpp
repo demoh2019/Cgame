@@ -518,43 +518,40 @@ PackedInt32Array SignificanceBudgetPlanner::select_world_priority_stable(
 			p_max_distance < 0.0 || p_max_distance > MAX_RANGE ||
 			!Math::is_finite(p_hysteresis) || p_hysteresis < 0.0 ||
 			p_hysteresis > p_max_distance,
-			empty, "Invalid multi-viewer stable significance arrays or bounds.");
+			empty, "Invalid stable world significance bounds or array sizes.");
 
 	for (int v = 0; v < p_viewers.size(); ++v) {
-		ERR_FAIL_COND_V_MSG(!p_viewers[v].is_finite(), empty, "Viewer coordinates must be finite.");
+		ERR_FAIL_COND_V_MSG(!p_viewers[v].is_finite(), empty, "Stable world viewers must be finite.");
 	}
 	HashSet<int64_t> ids;
 	for (int i = 0; i < count; ++i) {
-		ERR_FAIL_COND_V_MSG(!p_positions[i].is_finite() ||
-				!valid_priority(p_priorities[i]) || p_ids[i] <= 0 ||
-				ids.has(p_ids[i]), empty,
-				"World candidates require finite positions, priority 0..3 and unique positive IDs.");
+		ERR_FAIL_COND_V_MSG(!p_positions[i].is_finite() || !valid_priority(p_priorities[i]) ||
+				p_ids[i] <= 0 || ids.has(p_ids[i]), empty,
+				"Stable world candidates require finite positions, priorities 0..3 and unique positive IDs.");
 		ids.insert(p_ids[i]);
 	}
 	HashSet<int64_t> retained;
 	for (int i = 0; i < p_retained_ids.size(); ++i) {
 		const int64_t id = p_retained_ids[i];
 		ERR_FAIL_COND_V_MSG(id <= 0 || retained.has(id), empty,
-				"Retained world-significance IDs must be unique and positive.");
+				"Stable world retained IDs must be unique and positive.");
 		retained.insert(id);
 	}
 	if (p_budget == 0) {
 		return empty;
 	}
 
-	const double max_squared = p_max_distance * p_max_distance;
+	const double max_distance_squared = p_max_distance * p_max_distance;
 	Vector<PriorityStableCandidate> best;
-	// At most 16 viewer-distance checks and 128 bounded insertions per actor.
-	// Never let a retained low-priority actor displace a higher-priority one.
 	for (int i = 0; i < count; ++i) {
 		double nearest_squared = Math::INF;
 		for (int v = 0; v < p_viewers.size(); ++v) {
-			const double squared = (p_positions[i] - p_viewers[v]).length_squared();
-			ERR_FAIL_COND_V_MSG(!Math::is_finite(squared), empty, "World distance overflow.");
-			nearest_squared = MIN(nearest_squared, squared);
+			const double distance_squared = (p_positions[i] - p_viewers[v]).length_squared();
+			ERR_FAIL_COND_V_MSG(!Math::is_finite(distance_squared), empty, "Stable world distance overflow.");
+			nearest_squared = MIN(nearest_squared, distance_squared);
 		}
-		if (nearest_squared > max_squared) {
-			continue; // A retention bonus must never extend the visible radius.
+		if (nearest_squared > max_distance_squared) {
+			continue; // Hard range uses real distance, not retained distance.
 		}
 		const double distance = Math::sqrt(nearest_squared);
 		PriorityStableCandidate candidate;
@@ -564,8 +561,7 @@ PackedInt32Array SignificanceBudgetPlanner::select_world_priority_stable(
 		candidate.candidate.raw_distance = distance;
 		candidate.candidate.id = p_ids[i];
 		candidate.candidate.index = i;
-		if (best.size() == p_budget &&
-				!priority_stable_better(candidate, best[best.size() - 1])) {
+		if (best.size() == p_budget && !priority_stable_better(candidate, best[best.size() - 1])) {
 			continue;
 		}
 		int at = 0;

@@ -464,60 +464,49 @@ TEST_CASE("[SignificanceBudget] stable multi-viewer inputs reject atomically") {
 			priorities, ids, {}, 2, 10.0).is_empty());
 }
 
-TEST_CASE("[SignificanceBudget] multi-viewer stable selection keeps peers without hiding bosses") {
+TEST_CASE("[SignificanceBudget] stable multi-viewer world selection protects priority and range") {
 	Ref<SignificanceBudgetPlanner> p;
 	p.instantiate();
-	const PackedVector3Array positions = {
-		Vector3(7, 0, 0), Vector3(6, 0, 0), Vector3(5, 0, 0),
-		Vector3(13, 0, 0), Vector3(8, 0, 0)
-	};
-	const PackedVector3Array viewers = { Vector3(0, 0, 0) };
-	const PackedByteArray priority = { 0, 0, 3, 2, 2 };
-	const PackedInt64Array ids = { 100, 101, 50, 52, 55 };
-	const PackedInt64Array retained = { 100, 55 };
-	CHECK(p->select_world_priority_stable(positions, viewers, priority, ids, retained,
-			3, 10.0, 2.0) == PackedInt32Array({ 2, 4, 0 }));
-	CHECK(p->select_world_priority_stable(positions, viewers, priority, ids, retained,
-			0, 10.0, 2.0).is_empty());
-	CHECK(p->select_world_priority_stable(positions, viewers, priority, ids, retained,
-			5, 10.0, 2.0).size() == 4);
-	// A distant urgent boss is not brought into range by hysteresis.
-	CHECK(p->select_world_priority_stable({ Vector3(10.01, 0, 0), Vector3(2, 0, 0) },
-			viewers, { 3, 0 }, { 777, 7 }, { 777 },
-			2, 10.0, 2.0) == PackedInt32Array({ 1 }));
-	const PackedVector3Array multiple = { Vector3(0, 0, 0), Vector3(100, 0, 0) };
-	CHECK(p->select_world_priority_stable(
-			{ Vector3(1, 0, 0), Vector3(99, 0, 0), Vector3(50, 0, 0) },
-			multiple, { 0, 0, 3 }, { 31, 30, 32 }, {}, 2, 10.0) ==
-			PackedInt32Array({ 1, 0 })); // Equal distances: stable ID 30 before 31.
+	const PackedVector3Array positions = { Vector3(4, 0, 0), Vector3(6, 0, 0), Vector3(96, 0, 0), Vector3(200, 0, 0) };
+	const PackedVector3Array viewers = { Vector3(), Vector3(100, 0, 0) };
+	const PackedByteArray priorities = { 0, 0, 2, 3 };
+	const PackedInt64Array ids = { 42, 43, 44, 45 };
+	const PackedInt64Array retained = { 43, 45 };
+	const PackedInt32Array expected = { 2, 1 };
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids, retained, 2, 10.0, 3.0) == expected);
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids, retained, 4, 10.0, 3.0).size() == 3);
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids, retained, 0, 10.0).is_empty());
+	const PackedInt32Array ties = { 1, 0 };
+	CHECK(p->select_world_priority_stable({ Vector3(6, 0, 0), Vector3(6, 0, 0) },
+			{ Vector3() }, { 0, 0 }, { 9, 7 }, {}, 2, 10.0) == ties);
+	const PackedInt32Array in_range = { 1 };
+	CHECK(p->select_world_priority_stable({ Vector3(11, 0, 0), Vector3(1, 0, 0) },
+			{ Vector3() }, { 3, 0 }, { 9, 7 }, { 9 }, 2, 10.0, 2.0) == in_range);
+	CHECK(ids[0] == 42);
 }
 
-TEST_CASE("[SignificanceBudget] multi-viewer stable rejects malformed inputs atomically") {
+TEST_CASE("[SignificanceBudget] stable world input validation is atomic") {
 	Ref<SignificanceBudgetPlanner> p;
 	p.instantiate();
 	const PackedVector3Array positions = { Vector3(1, 0, 0), Vector3(2, 0, 0) };
-	const PackedVector3Array viewers = { Vector3(0, 0, 0) };
-	const PackedByteArray priority = { 3, 0 };
-	const PackedInt64Array ids = { 12, 13 };
-	CHECK(p->select_world_priority_stable(positions, viewers, priority, ids, {}, 2, 10.0).size() == 2);
-	CHECK(p->select_world_priority_stable(positions, {}, priority, ids, {}, 2, 10.0).is_empty());
-	CHECK(p->select_world_priority_stable(positions, { Vector3(Math::INF, 0, 0) },
-			priority, ids, {}, 2, 10.0).is_empty());
-	CHECK(p->select_world_priority_stable({ Vector3(Math::NaN, 0, 0), Vector3(2, 0, 0) },
-			viewers, priority, ids, {}, 2, 10.0).is_empty());
-	CHECK(p->select_world_priority_stable(positions, viewers, { 3 }, ids, {}, 2, 10.0).is_empty());
-	CHECK(p->select_world_priority_stable(positions, viewers, priority, { 12, 12 },
-			{}, 2, 10.0).is_empty());
-	CHECK(p->select_world_priority_stable(positions, viewers, priority, ids,
-			{ 12, 12 }, 2, 10.0).is_empty());
-	CHECK(p->select_world_priority_stable(positions, viewers, priority, ids,
-			{}, 129, 10.0).is_empty());
-	CHECK(p->select_world_priority_stable(positions, viewers, priority, ids,
-			{}, 2, 10.0, 11.0).is_empty());
-	CHECK(p->select_world_priority_stable(positions, viewers, priority, ids,
-			{}, 2, Math::NaN).is_empty());
-	CHECK(p->select_world_priority_stable(positions, viewers, priority, ids,
-			{}, 2, 10.0, -1.0).is_empty());
+	const PackedVector3Array viewers = { Vector3() };
+	const PackedByteArray pri = { 1, 0 };
+	const PackedInt64Array ids = { 4, 5 };
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, {}, 2, 10.0).size() == 2);
+	CHECK(p->select_world_priority_stable(positions, {}, pri, ids, {}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, { Vector3(Math::INF, 0, 0) }, pri, ids, {}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable({ Vector3(Math::INF, 0, 0) }, viewers, { 1 }, { 4 }, {}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, { 1 }, ids, {}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, { 1, 4 }, ids, {}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, { 4, 4 }, {}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, { 0, 5 }, {}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, { 4, 4 }, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, { -4 }, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, {}, -1, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, {}, 129, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, {}, 2, Math::NaN).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, {}, 2, 10.0, -1.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, {}, 2, 10.0, 11.0).is_empty());
 }
 
 } // namespace TestSignificanceBudgetPlanner
