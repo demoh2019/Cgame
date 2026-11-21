@@ -276,6 +276,108 @@ BehaviorTreeTask::Status BehaviorTreeInverter::execute(const Dictionary &p_black
 	return RUNNING;
 }
 
+void BehaviorTreeDecorator::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_task", "task"), &BehaviorTreeDecorator::set_task);
+	ClassDB::bind_method(D_METHOD("get_task"), &BehaviorTreeDecorator::get_task);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "task", PROPERTY_HINT_RESOURCE_TYPE, "BehaviorTreeTask"), "set_task", "get_task");
+}
+
+void BehaviorTreeDecorator::set_task(const Ref<BehaviorTreeTask> &p_task) {
+	ERR_FAIL_COND_MSG(p_task.is_valid() && p_task->contains_task(this), "A decorator cannot contain itself through a descendant.");
+	task = p_task;
+	emit_changed();
+}
+
+bool BehaviorTreeDecorator::contains_task(const BehaviorTreeTask *p_target, int p_depth) const {
+	const Ref<BehaviorTreeTask> child = task;
+	return BehaviorTreeTask::contains_task(p_target, p_depth) ||
+			(child.is_valid() && child->contains_task(p_target, p_depth + 1));
+}
+
+void BehaviorTreeDecorator::clear_branch_memory(Dictionary &r_memory, const String &p_path) {
+	// Forget only this decorator and its descendants; never touch sibling
+	// instances of the same shared Resource used elsewhere in a tree.
+	const Array keys = r_memory.keys();
+	for (int i = 0; i < keys.size(); ++i) {
+		const String key = keys[i];
+		if (key == p_path || key.begins_with(p_path + "/")) {
+			r_memory.erase(key);
+		}
+	}
+}
+
+void BehaviorTreeTimeout::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_duration", "duration"), &BehaviorTreeTimeout::set_duration);
+	ClassDB::bind_method(D_METHOD("get_duration"), &BehaviorTreeTimeout::get_duration);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "duration", PROPERTY_HINT_RANGE, "0,3600,0.01,or_greater,suffix:s"), "set_duration", "get_duration");
+}
+
+void BehaviorTreeTimeout::set_duration(double p_duration) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_duration) || p_duration < 0.0, "BehaviorTreeTimeout.duration must be finite and nonnegative.");
+	duration = p_duration;
+	emit_changed();
+}
+
+BehaviorTreeTask::Status BehaviorTreeTimeout::execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+	const Ref<BehaviorTreeTask> child = get_task();
+	if (child.is_null()) {
+		clear_branch_memory(r_memory, p_path);
+		return FAILURE;
+	}
+	const double safe_delta = Math::is_finite(p_delta) ? MAX(0.0, p_delta) : 0.0;
+	const double elapsed = double(r_memory.get(p_path, 0.0)) + safe_delta;
+	// A deadline at exactly duration expires before evaluating the child;
+	// a zero-second limit always fails, including for instant children.
+	if (elapsed >= duration) {
+		clear_branch_memory(r_memory, p_path);
+		return FAILURE;
+	}
+	const Status status = child->execute(p_blackboard, r_memory, p_path + "/0", safe_delta);
+	if (status == RUNNING) {
+		r_memory[p_path] = elapsed;
+	} else {
+		clear_branch_memory(r_memory, p_path);
+	}
+	return status;
+}
+
+void BehaviorTreeCooldown::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_duration", "duration"), &BehaviorTreeCooldown::set_duration);
+	ClassDB::bind_method(D_METHOD("get_duration"), &BehaviorTreeCooldown::get_duration);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "duration", PROPERTY_HINT_RANGE, "0,3600,0.01,or_greater,suffix:s"), "set_duration", "get_duration");
+}
+
+void BehaviorTreeCooldown::set_duration(double p_duration) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_duration) || p_duration < 0.0, "BehaviorTreeCooldown.duration must be finite and nonnegative.");
+	duration = p_duration;
+	emit_changed();
+}
+
+BehaviorTreeTask::Status BehaviorTreeCooldown::execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+	const Ref<BehaviorTreeTask> child = get_task();
+	if (child.is_null()) {
+		clear_branch_memory(r_memory, p_path);
+		return FAILURE;
+	}
+	const double safe_delta = Math::is_finite(p_delta) ? MAX(0.0, p_delta) : 0.0;
+	if (r_memory.has(p_path)) {
+		const double remaining = MAX(0.0, double(r_memory[p_path]) - safe_delta);
+		if (remaining > 0.0) {
+			r_memory[p_path] = remaining;
+			return FAILURE;
+		}
+		r_memory.erase(p_path);
+	}
+	const Status status = child->execute(p_blackboard, r_memory, p_path + "/0", safe_delta);
+	if (status != RUNNING) {
+		clear_branch_memory(r_memory, p_path);
+		if (status == SUCCESS && duration > 0.0) {
+			r_memory[p_path] = duration;
+		}
+	}
+	return status;
+}
+
 void BehaviorTreeBlackboardCheck::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_key", "key"), &BehaviorTreeBlackboardCheck::set_key);
 	ClassDB::bind_method(D_METHOD("get_key"), &BehaviorTreeBlackboardCheck::get_key);
