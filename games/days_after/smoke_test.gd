@@ -49,6 +49,22 @@ func _smoke() -> void:
         push_error("Missing exclusion-aware instanced foliage")
         ok = false
     else:
+        var density_count: int = int(foliage.call("get_density_candidate_count"))
+        if density_count < 100 or density_count >= 625:
+            push_error("Stable density mask did not reduce the procedural foliage candidates")
+            ok = false
+        var density_candidates: PackedVector3Array = foliage.call(
+            "_density_candidates", foliage.call("_make_candidates"), false)
+        var west_count: int = 0
+        var east_count: int = 0
+        for plant in density_candidates:
+            if plant.x < 0.0:
+                west_count += 1
+            else:
+                east_count += 1
+        if west_count <= east_count:
+            push_error("PCG density remap did not preserve denser western undergrowth")
+            ok = false
         var positions: PackedVector3Array = foliage.call("get_selected_positions")
         var centers: PackedVector3Array = foliage.call("get_exclusion_centers")
         var radii: PackedFloat64Array = foliage.call("get_exclusion_radii")
@@ -183,5 +199,5 @@ func _smoke() -> void:
     game.queue_free()
     await process_frame
     if ok:
-        print("PASS: scene, bounded visual LOD, exclusion-safe PCG foliage, scavenging, gathering, XP, crafting, gear, combat and survival")
+        print("PASS: scene, bounded visual LOD, stable PCG biome density, exclusion-safe PCG foliage, scavenging, gathering, XP, crafting, gear, combat and survival")
     quit(0 if ok else 1)
