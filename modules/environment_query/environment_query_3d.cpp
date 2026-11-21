@@ -67,6 +67,7 @@ static double point_distance(const Vector3 &p_a, const Vector3 &p_b, bool p_hori
 static bool score_candidate(const Vector3 &p_point, int p_index,
 		const Vector3 &p_origin, const Vector3 &p_threat_position,
 		const PackedVector3Array &p_threat_positions,
+		const PackedVector3Array &p_exclusion_positions, double p_min_exclusion_distance,
 		bool p_use_threat, bool p_horizontal_only, double p_min_distance,
 		double p_max_distance, double p_desired_distance,
 		double p_distance_weight, double p_safety_weight,
@@ -77,6 +78,16 @@ static bool score_candidate(const Vector3 &p_point, int p_index,
 	const double distance = point_distance(p_origin, p_point, p_horizontal_only);
 	if (!Math::is_finite(distance) || distance < p_min_distance || distance > p_max_distance) {
 		return false;
+	}
+	// Low-cost exclusion contexts are tested before expensive threat scoring.
+	// The exact boundary is allowed, matching the min_threat_distance filter.
+	if (p_min_exclusion_distance > 0.0) {
+		for (int i = 0; i < p_exclusion_positions.size(); i++) {
+			const double clearance = point_distance(p_point, p_exclusion_positions[i], p_horizontal_only);
+			if (!Math::is_finite(clearance) || clearance < p_min_exclusion_distance) {
+				return false;
+			}
+		}
 	}
 	double threat_distance = -1.0;
 	if (p_use_threat) {
@@ -125,6 +136,10 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_threat_position"), &EnvironmentQuery3D::get_threat_position);
 	ClassDB::bind_method(D_METHOD("set_threat_positions", "positions"), &EnvironmentQuery3D::set_threat_positions);
 	ClassDB::bind_method(D_METHOD("get_threat_positions"), &EnvironmentQuery3D::get_threat_positions);
+	ClassDB::bind_method(D_METHOD("set_exclusion_positions", "positions"), &EnvironmentQuery3D::set_exclusion_positions);
+	ClassDB::bind_method(D_METHOD("get_exclusion_positions"), &EnvironmentQuery3D::get_exclusion_positions);
+	ClassDB::bind_method(D_METHOD("set_min_exclusion_distance", "distance"), &EnvironmentQuery3D::set_min_exclusion_distance);
+	ClassDB::bind_method(D_METHOD("get_min_exclusion_distance"), &EnvironmentQuery3D::get_min_exclusion_distance);
 	ClassDB::bind_method(D_METHOD("set_use_threat", "enabled"), &EnvironmentQuery3D::set_use_threat);
 	ClassDB::bind_method(D_METHOD("is_using_threat"), &EnvironmentQuery3D::is_using_threat);
 	ClassDB::bind_method(D_METHOD("set_horizontal_only", "enabled"), &EnvironmentQuery3D::set_horizontal_only);
@@ -161,6 +176,9 @@ void EnvironmentQuery3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_threat"), "set_use_threat", "is_using_threat");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "threat_position"), "set_threat_position", "get_threat_position");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "threat_positions"), "set_threat_positions", "get_threat_positions");
+	ADD_GROUP("Occupancy Exclusions", "");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "exclusion_positions"), "set_exclusion_positions", "get_exclusion_positions");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "min_exclusion_distance", PROPERTY_HINT_RANGE, "0,10000,0.1,or_greater,suffix:m"), "set_min_exclusion_distance", "get_min_exclusion_distance");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "min_threat_distance", PROPERTY_HINT_RANGE, "0,10000,0.1,or_greater,suffix:m"), "set_min_threat_distance", "get_min_threat_distance");
 	ADD_GROUP("Scoring", "");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "distance_weight", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater"), "set_distance_weight", "get_distance_weight");
@@ -191,6 +209,21 @@ void EnvironmentQuery3D::set_threat_positions(const PackedVector3Array &p_positi
 		ERR_FAIL_COND_MSG(!p_positions[i].is_finite(), "EnvironmentQuery3D threat contexts must contain finite coordinates.");
 	}
 	threat_positions = p_positions;
+	emit_changed();
+}
+
+void EnvironmentQuery3D::set_exclusion_positions(const PackedVector3Array &p_positions) {
+	ERR_FAIL_COND_MSG(p_positions.size() > 128, "EnvironmentQuery3D supports at most 128 occupancy exclusions.");
+	for (int i = 0; i < p_positions.size(); i++) {
+		ERR_FAIL_COND_MSG(!p_positions[i].is_finite(), "EnvironmentQuery3D exclusions must have finite coordinates.");
+	}
+	exclusion_positions = p_positions;
+	emit_changed();
+}
+
+void EnvironmentQuery3D::set_min_exclusion_distance(double p_distance) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_distance) || p_distance < 0.0, "min_exclusion_distance must be finite and nonnegative.");
+	min_exclusion_distance = p_distance;
 	emit_changed();
 }
 
@@ -245,6 +278,7 @@ Array EnvironmentQuery3D::query() const {
 	for (int i = 0; i < candidates.size(); i++) {
 		QueryHit hit;
 		if (score_candidate(candidates[i], i, origin, threat_position, threat_positions,
+					exclusion_positions, min_exclusion_distance,
 					use_threat, horizontal_only, min_distance, max_distance,
 					desired_distance, distance_weight, safety_weight,
 					min_threat_distance, hit)) {
@@ -294,6 +328,7 @@ PackedVector3Array EnvironmentQuery3D::query_top_positions(int p_count) const {
 	for (int i = 0; i < candidates.size(); i++) {
 		QueryHit hit;
 		if (!score_candidate(candidates[i], i, origin, threat_position, threat_positions,
+					exclusion_positions, min_exclusion_distance,
 					use_threat, horizontal_only, min_distance, max_distance,
 					desired_distance, distance_weight, safety_weight,
 					min_threat_distance, hit)) {
@@ -336,6 +371,7 @@ PackedVector3Array EnvironmentQuery3D::query_spread_positions(int p_count, doubl
 	for (int i = 0; i < candidates.size(); i++) {
 		QueryHit hit;
 		if (score_candidate(candidates[i], i, origin, threat_position, threat_positions,
+					exclusion_positions, min_exclusion_distance,
 					use_threat, horizontal_only, min_distance, max_distance,
 					desired_distance, distance_weight, safety_weight,
 					min_threat_distance, hit)) {

@@ -61,6 +61,26 @@ func run(t) -> void:
 	t.eq(no_threats[0], Vector2(8, 0), "no threats preserves source order")
 	t.eq(no_threats[1], Vector2(16, 0), "empty threats still respects spacing")
 
+
+	t.current = "native occupancy contexts exclude all living infected without bypassing guards"
+	var blocked: Array[Vector2] = [Vector2(25, 0)]
+	var script_filtered: Array[Vector2] = RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, false, blocked, 4.0)
+	var native_filtered: Array[Vector2] = RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true, blocked, 4.0)
+	t.eq(native_filtered, script_filtered, "occupied site filtering agrees on stock Godot and Cgame")
+	t.eq(script_filtered, [Vector2(16, 0), Vector2(8, 0)],
+		"blocked best-ranked point is rejected before EQS ranking")
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true, blocked, INF),
+		[], "nonfinite exclusion radius cannot return server-owned spawn sites")
+	var many_occupied: Array[Vector2] = []
+	for i in 129:
+		many_occupied.append(Vector2(1000.0 + float(i), 0.0))
+	t.eq(RaidReinforcements.spread_sites(
+		candidates, threats, Vector2.ZERO, 2, 4.0, true, many_occupied, 4.0),
+		actual, "large exclusion lists fall back without ignoring extra infected")
+
 	t.current = "server only, genuine infected, safe coordinates"
 	var world := FlatWorld.new()
 	var server := GameServer.new(world, 721)
