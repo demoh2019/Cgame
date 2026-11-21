@@ -49,8 +49,10 @@ uniform sampler2D contact_map : hint_default_white, filter_linear, repeat_disabl
 uniform vec2 chunk_origin = vec2(0.0);
 uniform float chunk_size = 64.0;
 uniform float biome_texels = 17.0;
-uniform float tile_meters = 6.0;
-uniform float normal_strength = 0.8;
+uniform float tile_meters = 4.5;
+// Poly Haven displacement per layer (0.5 = flat for layers without one), for close-range parallax.
+uniform sampler2DArray height_layers : filter_linear_mipmap, repeat_enable;
+uniform float normal_strength = 1.3;
 // Per-layer multiplier that moves the photo's average colour to the game's palette (computed on load).
 uniform vec3 layer_tint[13];
 // Average color of each material: cheap residual retains all biome transitions when texture taps are limited.
@@ -121,6 +123,7 @@ void vertex() {
 // Wherever the near tile is magnified (under ~1 texel per pixel) the same layer is also sampled at a
 // 4.5x finer, rotated scale and applied as luminance detail: crisp grit underfoot, no extra textures.
 const float AA_MICRO_SCALE = 0.22;
+const float AA_PARALLAX_DEPTH = 0.06; // Metres of apparent relief at full displacement contrast.
 const mat2 AA_MICRO_ROT = mat2(vec2(0.8776, 0.4794), vec2(-0.4794, 0.8776));
 
 float aa_micro_weight(vec2 lod_dx, vec2 lod_dy) {
@@ -210,6 +213,9 @@ void fragment() {
 		lod_dx += dFdx(warp / tile_meters);
 		lod_dy += dFdy(warp / tile_meters);
 	}
+	// Direction from the surface toward the camera, in world space, for parallax.
+	vec3 view_world = normalize(CAMERA_POSITION_WORLD - world_position);
+	float parallax_fade = 1.0 - smoothstep(6.0, 16.0, camera_distance);
 	vec2 cliff_dx_zy = dFdx(world_position.zy / tile_meters);
 	vec2 cliff_dy_zy = dFdy(world_position.zy / tile_meters);
 	vec2 cliff_dx_xy = dFdx(world_position.xy / tile_meters);
@@ -428,8 +434,14 @@ void fragment() {
 			}
 			normal_sample = vec4(0.0, 0.0, 1.0, cliff_coherence);
 		} else {
-			c = top_albedo(layer, material_p, mixer, detail_fade, lod_dx, lod_dy);
-			normal_sample = top_normal(layer, material_p, detail_fade, lod_dx, lod_dy);
+			// Parallax offset: pebbles and clods appear raised at grazing angles near the camera.
+			vec2 layer_p = material_p;
+			if (parallax_fade > 0.01) {
+				float height = textureGrad(height_layers, vec3(material_p / tile_meters, layer), lod_dx, lod_dy).r;
+				layer_p -= view_world.xz / max(view_world.y, 0.3) * (height - 0.5) * AA_PARALLAX_DEPTH * parallax_fade;
+			}
+			c = top_albedo(layer, layer_p, mixer, detail_fade, lod_dx, lod_dy);
+			normal_sample = top_normal(layer, layer_p, detail_fade, lod_dx, lod_dy);
 		}
 		// Replace the approximate layer color with the actual PBR texture; the
 		// unselected layers still contribute their average palette color.

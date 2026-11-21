@@ -483,6 +483,7 @@ static func textured_material() -> ShaderMaterial:
 	_textured_checked = true
 	var albedo: Array[Image] = []
 	var normals: Array[Image] = []
+	var heights: Array[Image] = []
 	for layer in TERRAIN_LAYERS:
 		var diffuse_texture: Texture2D = null
 		var normal_texture: Texture2D = null
@@ -498,7 +499,8 @@ static func textured_material() -> ShaderMaterial:
 		if diffuse_texture == null or normal_texture == null:
 			return null
 		albedo.append(_layer_image(diffuse_texture, 1024))
-		normals.append(_layer_image(normal_texture, 512))
+		normals.append(_layer_image(normal_texture, 1024))
+		heights.append(_height_image(layer))
 	# The forked engine builds Toksvig normal mipmaps once per layer.
 	# Stock Godot keeps the existing RGB8 mipmaps, with alpha=1 in sampling.
 	# Avoid partially converted arrays: Texture2DArray requires one format.
@@ -533,6 +535,9 @@ static func textured_material() -> ShaderMaterial:
 		averages.append(average * tint)
 	var albedo_array := Texture2DArray.new()
 	var normal_array := Texture2DArray.new()
+	var height_array := Texture2DArray.new()
+	if height_array.create_from_images(heights) == OK:
+		pass
 	if albedo_array.create_from_images(albedo) != OK or normal_array.create_from_images(normals) != OK:
 		return null
 	var shader: Shader = TerrainAnisotropy.shader_for_quality(terrain_filter_quality)
@@ -542,6 +547,7 @@ static func textured_material() -> ShaderMaterial:
 	_textured_material.shader = shader
 	_textured_material.set_shader_parameter("albedo_layers", albedo_array)
 	_textured_material.set_shader_parameter("normal_layers", normal_array)
+	_textured_material.set_shader_parameter("height_layers", height_array)
 	_textured_material.set_shader_parameter("biome_texels", float(BIOME_TEXELS))
 	_textured_material.set_shader_parameter("layer_tint", tints)
 	_textured_material.set_shader_parameter("layer_average", averages)
@@ -549,6 +555,29 @@ static func textured_material() -> ShaderMaterial:
 
 
 ## An imported texture as a plain RGB image of a fixed size with mipmaps, so all layers of an array match.
+## The layer's Poly Haven displacement as a 512 px L8 image with mipmaps, or flat grey when it has none.
+static func _height_image(layer: String) -> Image:
+	var image: Image = null
+	if TERRAIN_SOURCES.has(layer):
+		var id: String = TERRAIN_SOURCES[layer]
+		var path: String = TERRAIN_PBR_DIR + id + "/" + id + "_disp.jpg"
+		if ResourceLoader.exists(path):
+			var texture := load(path) as Texture2D
+			if texture != null:
+				image = texture.get_image()
+	if image == null:
+		image = Image.create(512, 512, false, Image.FORMAT_L8)
+		image.fill(Color(0.5, 0.5, 0.5))
+	if image.is_compressed():
+		image.decompress()
+	image.convert(Image.FORMAT_L8)
+	if image.get_width() != 512 or image.get_height() != 512:
+		image.resize(512, 512, Image.INTERPOLATE_BILINEAR)
+	image.clear_mipmaps()
+	image.generate_mipmaps()
+	return image
+
+
 static func _layer_image(texture: Texture2D, size: int) -> Image:
 	var image: Image = texture.get_image()
 	if image.is_compressed():
