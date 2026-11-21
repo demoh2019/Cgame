@@ -19,8 +19,9 @@ buckets use **exact squared XZ distances**, retaining the original circular
 radii and side-of-boundary behavior.
 
 For solo and small co-op sessions (**8 or fewer** survivors), the engine
-uses a direct scan instead: no unnecessary dictionary lookups for small
-groups. For larger groups, the bucket index is used automatically.
+uses a direct scan without allocating grid buckets. For larger groups, the
+bucket index is used automatically. A query with a radius **above 512 m**
+also falls back to an exact direct scan, avoiding an unbounded grid walk.
 
 ## Existing gameplay behavior preserved
 
