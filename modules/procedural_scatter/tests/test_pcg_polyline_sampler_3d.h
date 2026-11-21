@@ -112,4 +112,112 @@ TEST_CASE("[PCGPolylineSampler3D] invalid input rejects entire batch without uns
 	CHECK(sampler->sample_positions(exact, 0.5).is_empty());
 }
 
+TEST_CASE("[PCGPolylineSampler3D] transform frames follow 3D path with orthonormal bases") {
+	Ref<PCGPolylineSampler3D> sampler;
+	sampler.instantiate();
+	const PackedVector3Array path = {
+		Vector3(0, 0, 0), Vector3(0, 0, 4)
+	};
+	const PackedVector3Array positions = sampler->sample_positions(path, 2.0);
+	const Array frames = sampler->sample_transforms(path, 2.0);
+	REQUIRE(frames.size() == positions.size());
+	REQUIRE(frames.size() == 3);
+	for (int i = 0; i < frames.size(); ++i) {
+		const Transform3D frame = frames[i];
+		CHECK(frame.origin.distance_to(positions[i]) < 0.00001);
+		CHECK(frame.basis.get_column(2).distance_to(Vector3(0, 0, 1)) < 0.00001);
+		CHECK(frame.basis.get_column(0).distance_to(Vector3(1, 0, 0)) < 0.00001);
+		CHECK(frame.basis.get_column(1).distance_to(Vector3(0, 1, 0)) < 0.00001);
+		CHECK(Math::is_equal_approx(frame.basis.determinant(), 1.0));
+	}
+	CHECK(sampler->sample_transforms(path, 2.0) == frames);
+}
+
+TEST_CASE("[PCGPolylineSampler3D] centered tangent bisectors turn smoothly through corners") {
+	Ref<PCGPolylineSampler3D> sampler;
+	sampler.instantiate();
+	const PackedVector3Array path = {
+		Vector3(0, 0, 0), Vector3(4, 0, 0), Vector3(4, 0, 4)
+	};
+	const Array frames = sampler->sample_transforms(path, 2.0);
+	REQUIRE(frames.size() == 5);
+	const Transform3D before = frames[1];
+	const Transform3D corner = frames[2];
+	const Transform3D after = frames[3];
+	CHECK(before.basis.get_column(2).distance_to(Vector3(1, 0, 0)) < 0.00001);
+	CHECK(corner.origin == Vector3(4, 0, 0));
+	CHECK(corner.basis.get_column(2).distance_to(
+			Vector3(1, 0, 1).normalized()) < 0.00001);
+	CHECK(after.basis.get_column(2).distance_to(Vector3(0, 0, 1)) < 0.00001);
+	CHECK(Math::is_equal_approx(corner.basis.determinant(), 1.0));
+	CHECK(Math::abs(corner.basis.get_column(0).dot(corner.basis.get_column(2))) < 0.00001);
+	CHECK(Math::abs(corner.basis.get_column(1).dot(corner.basis.get_column(2))) < 0.00001);
+}
+
+TEST_CASE("[PCGPolylineSampler3D] vertical segments U-turns and single points have finite frames") {
+	Ref<PCGPolylineSampler3D> sampler;
+	sampler.instantiate();
+	const Array vertical = sampler->sample_transforms(
+			{ Vector3(0, 0, 0), Vector3(0, 6, 0) }, 3.0);
+	REQUIRE(vertical.size() == 3);
+	for (int i = 0; i < vertical.size(); ++i) {
+		const Transform3D frame = vertical[i];
+		CHECK(frame.basis.get_column(2).distance_to(Vector3(0, 1, 0)) < 0.00001);
+		CHECK(frame.basis.get_column(0).is_finite());
+		CHECK(frame.basis.get_column(1).is_finite());
+		CHECK(Math::is_equal_approx(frame.basis.determinant(), 1.0));
+	}
+	const Array loop = sampler->sample_transforms(
+			{ Vector3(0, 0, 0), Vector3(2, 0, 0), Vector3(0, 0, 0) }, 1.0);
+	REQUIRE(loop.size() == 5);
+	for (int i = 0; i < loop.size(); ++i) {
+		const Transform3D frame = loop[i];
+		CHECK(frame.basis.get_column(0).is_finite());
+		CHECK(frame.basis.get_column(1).is_finite());
+		CHECK(frame.basis.get_column(2).is_finite());
+		CHECK(Math::is_equal_approx(frame.basis.determinant(), 1.0));
+	}
+	const Transform3D reversal = loop[2];
+	CHECK(reversal.origin == Vector3(2, 0, 0));
+	CHECK(reversal.basis.get_column(2).distance_to(Vector3(-1, 0, 0)) < 0.00001);
+	const Array singleton = sampler->sample_transforms({ Vector3(1, 2, 3) }, 1.0);
+	REQUIRE(singleton.size() == 1);
+	const Transform3D single = singleton[0];
+	CHECK(single.origin == Vector3(1, 2, 3));
+	CHECK(single.basis == Basis());
+	// Fit-disabled routes with fewer than one spacing interval still
+	// orient the single generated sample using the input path direction.
+	const Array short_route = sampler->sample_transforms(
+			{ Vector3(0, 0, 0), Vector3(0, 2, 0) }, 3.0, 4096, false);
+	REQUIRE(short_route.size() == 1);
+	const Transform3D first = short_route[0];
+	CHECK(first.basis.get_column(2).distance_to(Vector3(0, 1, 0)) < 0.00001);
+}
+
+TEST_CASE("[PCGPolylineSampler3D] transform frames preserve atomic path and budget validation") {
+	Ref<PCGPolylineSampler3D> sampler;
+	sampler.instantiate();
+	const PackedVector3Array path = {
+		Vector3(0, 0, 0), Vector3(10, 0, 0)
+	};
+	CHECK(sampler->sample_transforms({}, 1.0).is_empty());
+	CHECK(sampler->sample_transforms(path, Math::NaN).is_empty());
+	CHECK(sampler->sample_transforms(path, 0.01).is_empty());
+	CHECK(sampler->sample_transforms(path, 1.0, 0).is_empty());
+	CHECK(sampler->sample_transforms(path, 1.0, 4097).is_empty());
+	CHECK(sampler->sample_transforms(path, 1.0, 3).is_empty());
+	CHECK(sampler->sample_transforms(
+			{ Vector3(0, 0, 0), Vector3(0, Math::INF, 0) }, 1.0).is_empty());
+	CHECK(sampler->sample_transforms(
+			{ Vector3(0, 0, 0), Vector3(10000001, 0, 0) }, 1.0).is_empty());
+	const PackedVector3Array far = {
+		Vector3(-10000000, 0, 0), Vector3(10000000, 0, 0)
+	};
+	CHECK(sampler->sample_transforms(far, 0.05).is_empty());
+	const Array maximum = sampler->sample_transforms(
+			{ Vector3(0, 0, 0), Vector3(4095, 0, 0) }, 1.0);
+	CHECK(maximum.size() == 4096);
+	CHECK(path[0] == Vector3(0, 0, 0));
+}
+
 } // namespace TestPCGPolylineSampler3D

@@ -1,6 +1,6 @@
 extends MultiMeshInstance3D
 ## Visual trail stones generated with the same waypoints as foliage masks.
-## Cgame uses PCGPolylineSampler3D, stock Godot uses exact GDScript parity.
+## Cgame samples path-aligned Transform3D frames, stock Godot mirrors the math.
 ## Decorative only: collisions, navigation and survival state are untouched.
 
 const SAMPLE_SPACING: float = 1.35
@@ -9,6 +9,7 @@ const STRUCTURE_CLEARANCE: float = 0.5
 
 var _waypoints := PackedVector3Array()
 var _raw_samples := PackedVector3Array()
+var _raw_frames: Array = []
 var _selected_positions := PackedVector3Array()
 var _exclusion_mins := PackedVector3Array()
 var _exclusion_maxs := PackedVector3Array()
@@ -31,6 +32,10 @@ func get_path_points() -> PackedVector3Array:
 
 func get_raw_samples() -> PackedVector3Array:
     return _raw_samples.duplicate()
+
+
+func get_raw_frames() -> Array:
+    return _raw_frames.duplicate()
 
 
 func get_selected_positions() -> PackedVector3Array:
@@ -80,13 +85,59 @@ func _sample_points(prefer_native: bool = true) -> PackedVector3Array:
     return _sample_fallback()
 
 
+func _sample_frames_fallback() -> Array:
+    var positions: PackedVector3Array = _sample_fallback()
+    var frames: Array = []
+    for i in range(positions.size()):
+        var previous: int = maxi(0, i - 1)
+        var next: int = mini(positions.size() - 1, i + 1)
+        var tangent: Vector3 = positions[next] - positions[previous]
+        if tangent.length_squared() <= 1.0e-12:
+            if i + 1 < positions.size():
+                tangent = positions[i + 1] - positions[i]
+            if tangent.length_squared() <= 1.0e-12 and i > 0:
+                tangent = positions[i] - positions[i - 1]
+        if tangent.length_squared() <= 1.0e-12:
+            for seg in range(1, _waypoints.size()):
+                tangent = _waypoints[seg] - _waypoints[seg - 1]
+                if tangent.length_squared() > 1.0e-12:
+                    break
+        if tangent.length_squared() <= 1.0e-12:
+            tangent = Vector3(0.0, 0.0, 1.0)
+        tangent = tangent.normalized()
+        var reference_up := Vector3(0.0, 0.0, 1.0) if absf(tangent.y) >= 0.98 else Vector3.UP
+        var right: Vector3 = reference_up.cross(tangent).normalized()
+        var up: Vector3 = tangent.cross(right).normalized()
+        frames.push_back(Transform3D(Basis(right, up, tangent), positions[i]))
+    return frames
+
+
+func _sample_frames(prefer_native: bool = true) -> Array:
+    if prefer_native and ClassDB.class_exists("PCGPolylineSampler3D"):
+        var sampler: Object = ClassDB.instantiate("PCGPolylineSampler3D")
+        if sampler != null and sampler.has_method("sample_transforms"):
+            return sampler.call("sample_transforms", _waypoints,
+                SAMPLE_SPACING, MAX_SAMPLES, true)
+    return _sample_frames_fallback()
+
+
 func verify_native_fallback_parity() -> bool:
-    var a: PackedVector3Array = _sample_points()
-    var b: PackedVector3Array = _sample_points(false)
-    if a.size() != b.size():
+    var positions_native: PackedVector3Array = _sample_points()
+    var positions_fallback: PackedVector3Array = _sample_points(false)
+    var native_frames: Array = _sample_frames()
+    var fallback_frames: Array = _sample_frames_fallback()
+    if (positions_native.size() != positions_fallback.size()
+            or native_frames.size() != fallback_frames.size()
+            or native_frames.size() != positions_native.size()):
         return false
-    for i in range(a.size()):
-        if a[i].distance_to(b[i]) > 0.001:
+    for i in range(native_frames.size()):
+        var a: Transform3D = native_frames[i]
+        var b: Transform3D = fallback_frames[i]
+        if (positions_native[i].distance_to(positions_fallback[i]) > 0.001
+                or a.origin.distance_to(b.origin) > 0.001
+                or a.basis.x.distance_to(b.basis.x) > 0.002
+                or a.basis.y.distance_to(b.basis.y) > 0.002
+                or a.basis.z.distance_to(b.basis.z) > 0.002):
             return false
     return true
 
@@ -106,7 +157,11 @@ func _inside_structure(point: Vector3) -> bool:
 
 
 func regenerate() -> void:
-    _raw_samples = _sample_points()
+    _raw_frames = _sample_frames()
+    _raw_samples.clear()
+    for frame in _raw_frames:
+        var point_frame: Transform3D = frame
+        _raw_samples.push_back(point_frame.origin)
     _selected_positions.clear()
     var kept_indices := PackedInt32Array()
     for i in range(_raw_samples.size()):
@@ -127,17 +182,10 @@ func regenerate() -> void:
     batch.instance_count = _selected_positions.size()
     for i in range(_selected_positions.size()):
         var original_index: int = kept_indices[i]
-        var forward := Vector3.FORWARD
-        if original_index + 1 < _raw_samples.size():
-            forward = _raw_samples[original_index + 1] - _raw_samples[original_index]
-        elif original_index > 0:
-            forward = _raw_samples[original_index] - _raw_samples[original_index - 1]
-        forward.y = 0.0
-        if forward.length_squared() < 0.000001:
-            forward = Vector3.FORWARD
-        var direction: float = atan2(forward.x, forward.z)
-        var basis := Basis(Vector3.UP, direction)
+        var frame: Transform3D = _raw_frames[original_index]
+        # Use native tangent orientation; offset slightly from the ground,
+        # but never add physics or a scene node per marker.
         batch.set_instance_transform(i, Transform3D(
-            basis, _selected_positions[i] + Vector3(0.0, 0.045, 0.0)))
+            frame.basis, frame.origin + Vector3(0.0, 0.045, 0.0)))
     multimesh = batch
     cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
