@@ -99,6 +99,15 @@ private:
 	// refresh(true) or a change of the grid or the path template.
 	HashSet<Vector3i> missing;
 	HashSet<Vector3i> failed;
+	// Automatic retries are opt-in; failures are bounded to active world cells.
+	struct RetryState {
+		int attempts = 0;
+		uint64_t next_retry_usec = 0;
+	};
+	HashMap<Vector3i, RetryState> retry_states;
+	int max_auto_retries = 0;
+	real_t retry_initial_delay = 1.0;
+	real_t retry_max_delay = 16.0;
 	double time_since_update = 1e9;
 	bool truncated_warned = false;
 
@@ -117,6 +126,8 @@ private:
 	void _run_generator_queue(int &r_instantiation_budget, uint64_t p_frame_started_usec);
 	void _unload_cell(const Vector3i &p_cell);
 	void _reset_state();
+	void _record_failure(const Vector3i &p_cell, const String &p_reason);
+	void _update_retries(const Vector3 &p_focus, real_t p_keep_radius);
 
 protected:
 	void _notification(int p_what);
@@ -159,6 +170,13 @@ public:
 	int get_max_instantiations_per_frame() const { return max_instantiations_per_frame; }
 	void set_max_chunk_work_usec(int p_usec);
 	int get_max_chunk_work_usec() const { return max_chunk_work_usec; }
+	void set_max_auto_retries(int p_count);
+	int get_max_auto_retries() const { return max_auto_retries; }
+	void set_retry_initial_delay(real_t p_seconds);
+	real_t get_retry_initial_delay() const { return retry_initial_delay; }
+	void set_retry_max_delay(real_t p_seconds);
+	real_t get_retry_max_delay() const { return retry_max_delay; }
+	int get_retry_pending_count() const;
 	void set_update_interval(double p_seconds);
 	double get_update_interval() const { return update_interval; }
 	void set_chunk_path_template(const String &p_template);
