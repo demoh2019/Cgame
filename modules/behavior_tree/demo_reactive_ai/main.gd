@@ -65,7 +65,7 @@ func _ready() -> void:
     # This fork's develop branch uses Resource-backed BehaviorTreeTask nodes,
     # not Dictionary-defined trees. Keep each runner's memory independent.
     var priorities := BehaviorTreeReactiveSelector.new()
-    priorities.add_task(_make_behavior("low_health", "retreat"))
+    priorities.add_task(_make_guarded_behavior(_make_health_guard(), "retreat"))
     priorities.add_task(_make_behavior("target_visible", "chase"))
     priorities.add_task(_make_behavior("target_remembered", "investigate"))
     priorities.add_task(_make_behavior("sound_remembered", "investigate_sound"))
@@ -96,9 +96,22 @@ func _make_action(action_name: String) -> BehaviorTreeBlackboardSet:
     return action_task
 
 
+func _make_health_guard() -> BehaviorTreeBlackboardCompare:
+    var check := BehaviorTreeBlackboardCompare.new()
+    check.key = &"health"
+    check.use_other_key = true
+    check.other_key = &"retreat_at_or_below"
+    check.comparison = BehaviorTreeBlackboardCompare.LESS_OR_EQUAL
+    return check
+
+
 func _make_behavior(flag: StringName, action_name: String) -> BehaviorTreeReactiveSequence:
+    return _make_guarded_behavior(_make_condition(flag), action_name)
+
+
+func _make_guarded_behavior(guard: BehaviorTreeTask, action_name: String) -> BehaviorTreeReactiveSequence:
     var sequence := BehaviorTreeReactiveSequence.new()
-    sequence.add_task(_make_condition(flag))
+    sequence.add_task(guard)
     sequence.add_task(_make_action(action_name))
     var hold := BehaviorTreeWait.new()
     hold.duration = 1.0
@@ -135,7 +148,8 @@ func _physics_process(delta: float) -> void:
         if brain.is_finished():
             brain.reset()
         brain.set_blackboard({
-            "low_health": enemy_health <= 30,
+            "health": enemy_health,
+            "retreat_at_or_below": 30,
             "target_visible": sensor.is_target_visible(),
             "target_remembered": sensor.has_target_memory(),
             "last_known_position": sensor.get_last_known_position(),
@@ -311,6 +325,10 @@ func _update_hud() -> void:
     hud.text = "SIGHT + HEARING + A* NAVIGATION | Arrows: move | F: shout | Space: hit | R: reset\n"
     hud.text += "Enemy HP: %d | AI: %s | Tree: %s | Visible: %s\n" % [enemy_health, current_action, status_text, str(sensor.is_target_visible())]
     hud.text += "Sight: %.1fs | Sound: %.1fs | Gray wall blocks LOS | Yellow X = last seen position" % [sensor.get_memory_remaining(), hearing.get_memory_remaining()]
+    # Runner debug inspection makes a detached snapshot only when requested.
+    var debug_state: Dictionary = brain.get_debug_snapshot()
+    var cursors: Dictionary = debug_state.get("execution_memory", {})
+    hud.text += "\nNative Blackboard guard: HP <= %d | Running node memories: %d" % [30, cursors.size()]
 
 
 func _draw() -> void:
