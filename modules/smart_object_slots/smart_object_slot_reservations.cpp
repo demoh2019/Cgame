@@ -38,14 +38,19 @@ void SmartObjectSlotReservations::_erase_claim(int p_index) {
 
 int64_t SmartObjectSlotReservations::try_claim_first(const PackedInt64Array &p_slot_ids,
 		int64_t p_actor_id, double p_lease_seconds) {
-	if (p_actor_id <= 0 || p_slot_ids.is_empty() ||
-			p_slot_ids.size() > MAX_CANDIDATES ||
-			!Math::is_finite(p_lease_seconds) ||
-			p_lease_seconds <= 0.0 || p_lease_seconds > MAX_LEASE_SECONDS) {
+	return try_claim_first_priority(p_slot_ids, p_actor_id, p_lease_seconds, 0);
+}
+
+int64_t SmartObjectSlotReservations::try_claim_first_priority(
+		const PackedInt64Array &p_slot_ids, int64_t p_actor_id,
+		double p_lease_seconds, int p_priority) {
+	if (p_actor_id <= 0 || p_priority < 0 || p_priority > 3 ||
+			p_slot_ids.is_empty() || p_slot_ids.size() > MAX_CANDIDATES ||
+			!Math::is_finite(p_lease_seconds) || p_lease_seconds <= 0.0 ||
+			p_lease_seconds > MAX_LEASE_SECONDS) {
 		return 0;
 	}
-	// Validate the complete preference list before changing anything. Actor
-	// must provide server-created positive IDs; malformed requests fail closed.
+	// Never mutate anything until the complete request has been validated.
 	for (int i = 0; i < p_slot_ids.size(); ++i) {
 		if (p_slot_ids[i] <= 0) {
 			return 0;
@@ -57,16 +62,16 @@ int64_t SmartObjectSlotReservations::try_claim_first(const PackedInt64Array &p_s
 		}
 	}
 	const int owned = _find_actor(p_actor_id);
-	// Preserve a valid reservation if it is still among the actor's requested
-	// positions: avoids thundering-herd churn on every AI replan.
 	if (owned >= 0) {
 		for (int i = 0; i < p_slot_ids.size(); ++i) {
 			if (claims[owned].slot_id == p_slot_ids[i]) {
 				claims.write[owned].remaining = p_lease_seconds;
+				claims.write[owned].priority = p_priority;
 				return claims[owned].slot_id;
 			}
 		}
 	}
+	// A free slot is always preferable to preempting any existing agent.
 	for (int i = 0; i < p_slot_ids.size(); ++i) {
 		const int64_t slot = p_slot_ids[i];
 		if (_find_slot(slot) >= 0) {
@@ -77,6 +82,8 @@ int64_t SmartObjectSlotReservations::try_claim_first(const PackedInt64Array &p_s
 			slot_indices.erase(existing.slot_id);
 			existing.slot_id = slot;
 			existing.remaining = p_lease_seconds;
+			existing.priority = p_priority;
+			existing.occupied = false;
 			slot_indices[slot] = owned;
 			return slot;
 		}
@@ -87,13 +94,53 @@ int64_t SmartObjectSlotReservations::try_claim_first(const PackedInt64Array &p_s
 		claim.slot_id = slot;
 		claim.actor_id = p_actor_id;
 		claim.remaining = p_lease_seconds;
+		claim.priority = p_priority;
 		const int index = claims.size();
 		claims.push_back(claim);
 		slot_indices[slot] = index;
 		actor_indices[p_actor_id] = index;
 		return slot;
 	}
-	return 0; // Fully occupied: the caller may take a default AI action.
+	// Only pending claims at strictly lower priority are preemptible.
+	for (int i = 0; i < p_slot_ids.size(); ++i) {
+		const int target = _find_slot(p_slot_ids[i]);
+		if (target < 0 || claims[target].occupied || claims[target].priority >= p_priority) {
+			continue;
+		}
+		const int64_t slot = claims[target].slot_id;
+		if (owned >= 0) {
+			_erase_claim(owned); // Swap-removal may move the target slot.
+		}
+		const int current = _find_slot(slot);
+		const int64_t preempted_actor = claims[current].actor_id;
+		actor_indices.erase(preempted_actor);
+		Claim &claim = claims.write[current];
+		claim.actor_id = p_actor_id;
+		claim.remaining = p_lease_seconds;
+		claim.priority = p_priority;
+		claim.occupied = false;
+		actor_indices[p_actor_id] = current;
+		return slot;
+	}
+	return 0;
+}
+
+bool SmartObjectSlotReservations::set_slot_occupied(
+		int64_t p_slot_id, int64_t p_actor_id, bool p_occupied) {
+	if (p_slot_id <= 0 || p_actor_id <= 0) {
+		return false;
+	}
+	const int index = _find_slot(p_slot_id);
+	if (index < 0 || claims[index].actor_id != p_actor_id) {
+		return false;
+	}
+	claims.write[index].occupied = p_occupied;
+	return true;
+}
+
+bool SmartObjectSlotReservations::is_slot_occupied(int64_t p_slot_id) const {
+	const int index = _find_slot(p_slot_id);
+	return index >= 0 && claims[index].occupied;
 }
 
 bool SmartObjectSlotReservations::release_slot(int64_t p_slot_id, int64_t p_actor_id) {
@@ -152,6 +199,12 @@ int64_t SmartObjectSlotReservations::get_actor_slot(int64_t p_actor_id) const {
 void SmartObjectSlotReservations::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("try_claim_first", "slot_ids", "actor_id", "lease_seconds"),
 			&SmartObjectSlotReservations::try_claim_first);
+	ClassDB::bind_method(D_METHOD("try_claim_first_priority", "slot_ids", "actor_id", "lease_seconds", "priority"),
+			&SmartObjectSlotReservations::try_claim_first_priority);
+	ClassDB::bind_method(D_METHOD("set_slot_occupied", "slot_id", "actor_id", "occupied"),
+			&SmartObjectSlotReservations::set_slot_occupied);
+	ClassDB::bind_method(D_METHOD("is_slot_occupied", "slot_id"),
+			&SmartObjectSlotReservations::is_slot_occupied);
 	ClassDB::bind_method(D_METHOD("release_slot", "slot_id", "actor_id"),
 			&SmartObjectSlotReservations::release_slot);
 	ClassDB::bind_method(D_METHOD("release_actor", "actor_id"),

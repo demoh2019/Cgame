@@ -69,9 +69,49 @@ func _exercise(t, pool) -> void:
 	t.eq(pool.get_claim_count(), 0, "clear is idempotent")
 
 
+func _exercise_priority(t, pool) -> void:
+	t.eq(pool.try_claim_first_priority(PackedInt64Array([101, 102]), 1, 2.0, 0),
+		101, "ordinary infected claims first free slot")
+	t.eq(pool.try_claim_first_priority(PackedInt64Array([101, 102]), 2, 2.0, 0),
+		102, "second infected uses a distinct free slot")
+	t.eq(pool.try_claim_first_priority(PackedInt64Array([101, 102]), 3, 2.0, 2),
+		101, "elite can preempt an unused ordinary claim")
+	t.eq(pool.get_owner(101), 3, "ownership transferred exclusively")
+	t.eq(pool.get_claim_count(), 2, "preemption never duplicates a claim")
+	t.check(not pool.set_slot_occupied(101, 1, true),
+		"preempted actor cannot alter another owner's occupancy")
+	t.check(pool.set_slot_occupied(101, 3, true),
+		"owner may mark reached flank position as occupied")
+	t.check(pool.is_slot_occupied(101), "occupied state can be queried")
+	t.eq(pool.try_claim_first_priority(PackedInt64Array([101, 102]), 4, 2.0, 3),
+		102, "priority cannot override active user, but may steal unused slot")
+	t.eq(pool.get_owner(101), 3, "occupied infected keeps its flank position")
+	t.eq(pool.try_claim_first_priority(PackedInt64Array([101, 102]), 5, 2.0, 3),
+		0, "equal priority plus active user cannot be evicted")
+	t.eq(pool.try_claim_first_priority(PackedInt64Array([101, 102]), 2, 2.0, 0),
+		0, "ordinary infected cannot steal elite claim")
+	t.check(pool.set_slot_occupied(101, 3, false), "owner can clear occupancy")
+	t.eq(pool.try_claim_first_priority(PackedInt64Array([101, 102]), 5, 2.0, 3),
+		101, "higher priority can reclaim once interaction ends")
+	t.eq(pool.try_claim_first_priority(PackedInt64Array([103]), 4, 2.0, 3),
+		103, "reassignment moves an existing claim atomically")
+	t.eq(pool.get_owner(102), 0, "old spot is free on successful reassignment")
+	t.eq(pool.try_claim_first_priority(PackedInt64Array([105, 105]), 4, 2.0, 3),
+		0, "duplicate candidates reject without modifying the claim")
+	t.eq(pool.get_owner(103), 4, "invalid request preserves the original slot")
+	t.eq(pool.try_claim_first_priority(PackedInt64Array([105]), 4, 2.0, 4),
+		0, "out-of-range priority fails closed")
+	t.eq(pool.get_owner(103), 4, "invalid priority preserves ownership")
+	pool.advance_time(2.0)
+	t.eq(pool.get_claim_count(), 0, "expiry releases both claims and occupancy")
+
+
 func run(t) -> void:
 	t.current = "Smart Object slot allocator portable reference"
 	_exercise(t, Portable.new())
+
+	t.current = "portable Smart Object priority claims and occupancy"
+	_exercise_priority(t, Portable.new())
 
 	t.current = "native C++ reservation table matches portable API"
 	if ClassDB.class_exists("SmartObjectSlotReservations"):
@@ -79,6 +119,7 @@ func run(t) -> void:
 		t.check(native != null, "native allocator is registered in ClassDB")
 		if native != null:
 			_exercise(t, native)
+			_exercise_priority(t, native)
 	else:
 		t.check(true, "stock Godot executes the same deterministic fallback")
 
@@ -146,7 +187,11 @@ func run(t) -> void:
 	t.check(code.contains('_flank_slot_reservations.advance_time(delta)'),
 		"leases use server simulation time and cannot be client-clock accelerated")
 	code = (Zombie as Script).source_code
-	t.check(code.contains('flank_reservations.try_claim_first(slot_ids, id, 1.5)'),
-		"actual flanking movement allocates exclusive target positions")
+	t.check(code.contains('flank_reservations.try_claim_first_priority('),
+		"actual flanking movement allocates priority-aware target positions")
+	t.check(code.contains('flank_reservations.set_slot_occupied(claimed, id, active)'),
+		"the physical flank slot is protected only while its owner is nearby")
+	t.check(code.contains('int(flank_reservations.get_actor_slot(id)) == _flank_slot_id_cached'),
+		"server AI invalidates preempted/expired cached slot goals")
 	t.check(code.contains('return target # An overcrowded pack still pursues normally.'),
 		"full slot tables never disable attacking or pursuit")

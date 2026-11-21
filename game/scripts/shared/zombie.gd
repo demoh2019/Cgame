@@ -729,7 +729,14 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 					break
 		if slot_ids.is_empty():
 			return target
-		var claimed: int = int(flank_reservations.try_claim_first(slot_ids, id, 1.5))
+		# Elite AI may preempt ordinary pending claims, not occupied slots.
+		# Legacy native builds still use the original exclusive reservation API.
+		var claimed: int = 0
+		if flank_reservations.has_method("try_claim_first_priority"):
+			claimed = int(flank_reservations.try_claim_first_priority(
+				slot_ids, id, 1.5, 2 if elite else 0))
+		else:
+			claimed = int(flank_reservations.try_claim_first(slot_ids, id, 1.5))
 		if claimed <= 0:
 			return target # An overcrowded pack still pursues normally.
 		var claimed_index: int = (claimed - target_id * 16 - 1)
@@ -737,6 +744,9 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 			return target
 		spot = ring[claimed_index]
 		claimed_slot = claimed
+		if flank_reservations.has_method("set_slot_occupied"):
+			var active: bool = here.distance_squared_to(Vector2(spot.x, spot.z)) <= 1.0
+			flank_reservations.set_slot_occupied(claimed, id, active)
 	_flank_slot_id_cached = claimed_slot
 	_flank_goal_cached = Vector2(spot.x, spot.z)
 	_flank_here_cached = here

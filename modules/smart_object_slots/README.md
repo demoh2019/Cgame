@@ -39,3 +39,29 @@ This is a data-structure optimization, not measured FPS or TPS acceleration.
 Measure under a loaded server before claiming a throughput gain.
 Reference: Unreal Engine Smart Objects slot claims and invalidation —
 https://dev.epicgames.com/documentation/en-us/unreal-engine/smart-objects-in-unreal-engine---overview
+
+## Unreal-style priority claims and active occupancy
+
+`try_claim_first_priority(slot_ids, actor_id, lease_seconds, priority)`
+extends the original first-free lease allocator with strict priorities 0..3.
+Free slots are always preferred; only when all candidates are reserved may
+a higher-priority actor preempt a strictly lower-priority claim that has **not
+yet been marked occupied**. An agent actively using its slot cannot be
+preempted, including by priority 3. The preempted actor loses ownership and
+must replan before assuming its old position is available.
+
+`set_slot_occupied(slot_id, actor_id, occupied)` is owner-checked.
+`is_slot_occupied(slot_id)` is read-only. Moving an actor to a different
+slot resets occupancy; clearing or expiring the lease removes it. The
+original `try_claim_first` retains priority-zero behavior without
+unexpected preemption. Failed requests and invalid priorities do not
+relinquish existing claims.
+
+Albion After integrates this into server-owned infected flanking: elite
+infected may displace ordinary unoccupied ring reservations, while infected
+already within 1m of their claimed flank positions remain protected. The
+same rules run in the portable GDScript fallback when the updated native
+engine is unavailable; existing combat, targeting and network authority
+are unchanged.
+
+Reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/smart-objects-in-unreal-engine---overview
