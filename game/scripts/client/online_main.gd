@@ -60,6 +60,7 @@ const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const AmbientTickBudget = preload("res://scripts/client/ambient_tick_budget.gd")
+const AMBIENT_CPU_BUDGET_US := [900, 1500, 2500, 4000] # Quality tiers, main-thread cosmetics only.
 const GraphicsCinematicDof = preload("res://scripts/client/graphics_cinematic_dof.gd")
 const RainGear = preload("res://scripts/client/character_rain_gear.gd")
 const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
@@ -257,6 +258,8 @@ func _ready() -> void:
 		[&"Albion/AmbientSkipped", Callable(_ambient_budget, "skipped_total")],
 		[&"Albion/AmbientSlots", Callable(_ambient_budget, "current_budget")],
 		[&"Albion/AmbientPressurePct", Callable(_ambient_budget, "pressure_percent")],
+		[&"Albion/AmbientCPUus", Callable(_ambient_budget, "last_frame_cost_us")],
+		[&"Albion/AmbientCPUBudgetus", Callable(_ambient_budget, "get_frame_time_budget_us")],
 	]:
 		var monitor_name: StringName = monitor[0]
 		if not Performance.has_custom_monitor(monitor_name):
@@ -1612,7 +1615,9 @@ func _update_time_of_day(delta: float) -> void:
 	var underground: bool = client != null and client.you.has("x") and Dungeon.is_underground(float(client.you["x"]))
 	# Only cosmetic ambience is time-sliced; network interpolation and combat
 	# still update every frame. Force an immediate refresh across dungeon edges.
-	_ambient_budget.begin_frame(delta, GraphicsQuality.level())
+	var ambient_quality: int = GraphicsQuality.level()
+	_ambient_budget.set_frame_time_budget_us(AMBIENT_CPU_BUDGET_US[ambient_quality])
+	_ambient_budget.begin_frame(delta, ambient_quality)
 	var ambient_force: bool = underground != _ambient_was_underground
 	_ambient_was_underground = underground
 	# Occlusion has a CPU cost: enable it only when enclosed dungeon walls
@@ -1732,29 +1737,37 @@ func _update_time_of_day(delta: float) -> void:
 		if _dust_devils != null:
 			var dust_delta: float = _ambient_budget.consume("dust_devils", delta, ambient_force)
 			if dust_delta > 0.0:
+				var dust_devils_start_us: int = Time.get_ticks_usec()
 				_dust_devils.update_view(client.world, here, _visual_biome, _visual_weather_wind, atmosphere.storm,
 					WorldCycle.daylight(clock), 0 if underground else GraphicsQuality.level(), dust_delta)
+				_ambient_budget.record_cost("dust_devils", maxi(0, Time.get_ticks_usec() - dust_devils_start_us))
 		if _shooting_stars != null:
 			_shooting_stars.update_view(WorldCycle.daylight(clock), atmosphere.storm,
 				0 if underground else GraphicsQuality.level(), delta)
 		if _dragonflies != null:
 			var dragonfly_delta: float = _ambient_budget.consume("dragonflies", delta, ambient_force)
 			if dragonfly_delta > 0.0:
+				var dragonflies_start_us: int = Time.get_ticks_usec()
 				_dragonflies.update_view(client.world, here, WorldCycle.daylight(clock), atmosphere.storm,
 					GraphicsQuality.level(), dragonfly_delta, underground)
+				_ambient_budget.record_cost("dragonflies", maxi(0, Time.get_ticks_usec() - dragonflies_start_us))
 		if _zombie_flies != null:
 			_zombie_flies.update_view(entities, here, WorldCycle.daylight(clock), atmosphere.storm,
 				0 if underground else GraphicsQuality.level(), delta)
 		if _tumbleweeds != null:
 			var tumble_delta: float = _ambient_budget.consume("tumbleweeds", delta, ambient_force)
 			if tumble_delta > 0.0:
+				var tumbleweeds_start_us: int = Time.get_ticks_usec()
 				_tumbleweeds.update_view(client.world, here, _visual_biome, _visual_weather_wind,
 					GraphicsQuality.level(), tumble_delta, underground)
+				_ambient_budget.record_cost("tumbleweeds", maxi(0, Time.get_ticks_usec() - tumbleweeds_start_us))
 		if _dusk_bats != null:
 			var bats_delta: float = _ambient_budget.consume("dusk_bats", delta, ambient_force)
 			if bats_delta > 0.0:
+				var dusk_bats_start_us: int = Time.get_ticks_usec()
 				_dusk_bats.update_view(here, WorldCycle.daylight(clock), atmosphere.storm,
 					GraphicsQuality.level(), bats_delta, underground)
+				_ambient_budget.record_cost("dusk_bats", maxi(0, Time.get_ticks_usec() - dusk_bats_start_us))
 
 
 func _aim_direction() -> Vector2:
