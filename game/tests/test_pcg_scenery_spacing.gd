@@ -38,9 +38,86 @@ func run(t) -> void:
 	bad.append(Vector2(NAN, 0))
 	t.eq(SceneryBatches.pcg_filter_indices(bad, 1.0, 4096, false).size(),
 		0, "NaN in late candidate rejects entire input")
+	t.current = "PCG scale-aware self-pruning: larger instances take precedence"
+	var scaled_points := PackedVector2Array([
+		Vector2(0, 0), Vector2(0.9, 0), Vector2(3, 0),
+		Vector2(3.8, 0), Vector2(-2.6, 0)])
+	var sizes := PackedFloat32Array([0.5, 2.0, 1.0, 0.5, 1.2])
+	var expected_scaled := PackedInt32Array([1, 2, 3, 4])
+	t.eq(SceneryBatches.pcg_filter_indices_scaled(
+		scaled_points, sizes, 1.0, 4096, true, false),
+		expected_scaled, "large-to-small priority, output in stable original order")
+	t.eq(SceneryBatches.pcg_filter_indices_scaled(
+		scaled_points, sizes, 1.0, 4096, false, false),
+		PackedInt32Array([0, 2, 3, 4]), "input-order alternative is supported")
+	t.eq(SceneryBatches.pcg_filter_indices_scaled(
+		scaled_points, sizes, 0.0, 2, true, false),
+		PackedInt32Array([0, 1]), "zero spacing bypasses pruning")
+	t.eq(SceneryBatches.pcg_filter_indices_scaled(
+		scaled_points, PackedFloat32Array([1.0]), 1.0, 4096, true, false).size(),
+		0, "mismatched scale lengths reject all points")
+	var bad_sizes: PackedFloat32Array = sizes.duplicate()
+	bad_sizes[4] = NAN
+	t.eq(SceneryBatches.pcg_filter_indices_scaled(
+		scaled_points, bad_sizes, 1.0, 4096, true, false).size(),
+		0, "invalid late scale rejects atomically")
+	bad_sizes[4] = 2.01
+	t.eq(SceneryBatches.pcg_filter_indices_scaled(
+		scaled_points, bad_sizes, 1.0, 4096, true, false).size(),
+		0, "unbounded footprints are rejected")
+	var crossing_points := PackedVector2Array([Vector2(0.99, -1), Vector2(2.01, -1)])
+	t.eq(SceneryBatches.pcg_filter_indices_scaled(
+		crossing_points, PackedFloat32Array([2.0, 2.0]), 1.0, 4096, false, false),
+		PackedInt32Array([0]), "5x5 grid catches overlaps across two cells")
+	t.eq(SceneryBatches.pcg_filter_indices_scaled(
+		PackedVector2Array([Vector2.ZERO, Vector2(1.25, 0)]),
+		PackedFloat32Array([0.5, 2.0]), 1.0, 4096, true, false),
+		PackedInt32Array([0, 1]), "pairwise exclusion boundary is inclusive")
+	var size_transforms: Array[Transform3D] = []
+	for i in scaled_points.size():
+		var p: Vector2 = scaled_points[i]
+		size_transforms.append(Transform3D(Basis.IDENTITY.scaled(
+			Vector3.ONE * sizes[i]), Vector3(p.x, 0, p.y)))
+	var expected_transforms: Array[Transform3D] = [
+		size_transforms[1], size_transforms[2], size_transforms[3], size_transforms[4]]
+	t.eq(SceneryBatches.thin_cosmetic_transforms_scaled(size_transforms, 1.0, false),
+		expected_transforms, "actual varying-scale MultiMesh transforms are pruned")
+	t.eq(SceneryBatches.thin_cosmetic_transforms_scaled(size_transforms, 0.0, false),
+		size_transforms, "disabled scale-aware spacing retains every transform")
+	var original_transform: Transform3D = size_transforms[0]
+	SceneryBatches.thin_cosmetic_transforms_scaled(size_transforms, 1.0, false)
+	t.eq(size_transforms[0], original_transform, "caller transforms never mutate")
+	var chunk_source := FileAccess.get_file_as_string("res://scripts/client/chunk_view.gd")
+	t.check(chunk_source.contains("SceneryBatches.thin_cosmetic_transforms_scaled("),
+		"Albion streamed scenery is wired to the scale-aware API")
+
 	if ClassDB.class_exists("PCGSpatialFilter2D"):
 		var native: Object = ClassDB.instantiate("PCGSpatialFilter2D")
 		t.check(native != null and native.has_method("filter_indices"), "native PCG class registered")
+		if native != null and native.has_method("filter_indices_scaled"):
+			t.eq(native.call("filter_indices_scaled", scaled_points, sizes, 1.0),
+				expected_scaled, "new native scaled method is registered and correct")
+			t.eq(SceneryBatches.thin_cosmetic_transforms_scaled(size_transforms, 1.0),
+				expected_transforms, "game scale-aware path uses native engine")
+			var scale_rng := RandomNumberGenerator.new()
+			scale_rng.seed = 253201
+			for sample in 16:
+				var random_points := PackedVector2Array()
+				var random_scales := PackedFloat32Array()
+				for i in 180:
+					random_points.append(Vector2(scale_rng.randf_range(-50.0, 50.0),
+						scale_rng.randf_range(-50.0, 50.0)))
+					random_scales.append(scale_rng.randf_range(0.5, 2.0))
+				for priority in [false, true]:
+					t.eq(native.call("filter_indices_scaled",
+						random_points, random_scales, 1.5, 4096, priority),
+						SceneryBatches.pcg_filter_indices_scaled(
+							random_points, random_scales, 1.5, 4096, priority, false),
+						"native/fallback scaled parity sample %d priority %s" % [
+							sample, str(priority)])
+		else:
+			t.eq(SceneryBatches.thin_cosmetic_transforms_scaled(size_transforms, 1.0),
+				expected_transforms, "older native builds use scaled GDScript fallback")
 		if native != null and native.has_method("filter_indices"):
 			t.eq(native.call("filter_indices", candidates, 1.0), expected,
 				"native grid matches fallback for border cells")
