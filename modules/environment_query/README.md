@@ -38,6 +38,37 @@ Results are sorted by descending score, with source index breaking ties.
 lattice and rejects accidentally excessive allocation. A ring accepts
 1..4096 points; a grid is limited to a maximum of 65536 points.
 
+## UE-style directional dot test for AI position queries
+
+An optional directional filter allows the same query to select forward, side,
+or rear candidates without scene nodes or physics raycasts. This follows the
+context + directional Test concept in Unreal EQS while remaining a small,
+deterministic geometric primitive. It is opt-in, shared by `query()`,
+`query_positions()`, `query_top_positions()` and
+`query_spread_positions()`, and runs before heavier threat scoring.
+
+```gdscript
+query.use_direction = true
+query.direction_origin = player.global_position
+query.direction_axis = (player.global_position - enemy.global_position).normalized()
+query.min_direction_dot = -0.25 # sides and far side; excludes direct near side
+query.horizontal_only = true
+```
+
+The direction origin is independent of the travel origin, the cosine cutoff is
+inclusive and finite in [-1, 1], and zero-length candidate directions are
+rejected when enabled. In XZ-only mode, a vertical-only axis rejects all
+candidates rather than relying on an undefined direction. Invalid axis,
+origin and cutoff setters preserve the previous values. Leaving
+`use_direction` disabled retains the existing query ordering and output.
+
+Albion After infected use the directional filter when the native feature
+exists; older Cgame binaries retain legacy ring ranking, and stock Godot
+continues directly pursuing targets. This geometry-only feature never
+overrides validated targeting, safe-zone, melee or navigation rules.
+
+Reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/eqs-node-reference-tests-in-unreal-engine
+
 ## Scope and limitations
 
 This is a **foundation**, not the full EQS implementation seen in Unreal.

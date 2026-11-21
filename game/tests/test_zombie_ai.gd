@@ -128,6 +128,12 @@ func run(t) -> void:
 			"native top-3 flanking keeps a deterministic circle around survivor")
 		var owned_query: Resource = flanker._flank_query
 		t.check(owned_query != null, "one native query resource is cached per infected")
+		if owned_query != null and owned_query.has_method("set_direction_axis"):
+			var candidate_side: Vector2 = (flank_first - prey).normalized()
+			t.check(candidate_side.dot(prey.normalized()) >= -0.251,
+				"directional EQS prevents a near-side-only flank")
+			t.check(bool(owned_query.get("use_direction")),
+				"flank replanning enables the reusable native directional test")
 		t.eq(flanker._flank_goal(Vector2(0.4, 0.0), Vector2(10.4, 0.0)),
 			flank_first, "small positional changes retain a stable flank point")
 		t.check(flanker._flank_query == owned_query,
