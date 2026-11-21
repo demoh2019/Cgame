@@ -474,9 +474,12 @@ TEST_CASE("[EnvironmentQuery3D] Occupancy exclusion precedes stable separated se
 TEST_CASE("[EnvironmentQuery3D] Occupancy follows horizontal-only and output limits") {
 	Ref<EnvironmentQuery3D> q = make_query({ Vector3(2, 12, 0), Vector3(8, 0, 0) });
 	q->set_max_results(1);
+	q->set_desired_distance(12.0);
 	const PackedVector3Array occupied = { Vector3(2, 0, 0) };
 	// Full 3D clearance does not suppress an elevated candidate.
-	CHECK(q->query_spread_positions_avoiding(2, 1.0, occupied, 3.0).size() == 1);
+	const PackedVector3Array elevated = q->query_spread_positions_avoiding(2, 1.0, occupied, 3.0);
+	REQUIRE(elevated.size() == 1);
+	CHECK(elevated[0] == Vector3(2, 12, 0));
 	q->set_horizontal_only(true);
 	const PackedVector3Array filtered = q->query_spread_positions_avoiding(2, 1.0, occupied, 3.0);
 	REQUIRE(filtered.size() == 1);
