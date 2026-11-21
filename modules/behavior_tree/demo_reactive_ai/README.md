@@ -12,7 +12,7 @@ Move the blue survivor with **arrow keys**, press **F** to shout, **Space** near
 
 The game uses:
 - `BehaviorTreeRunner` (Node) with `BehaviorTreeReactiveSelector` and `BehaviorTreeReactiveSequence` (Resource tasks);
-- `BehaviorTreeBlackboardCheck`, `BehaviorTreeBlackboardSet`, and `BehaviorTreeWait` (time-based waits);
+- `BehaviorTreeBlackboardCheck`, `BehaviorTreeBlackboardCompare`, `BehaviorTreeBlackboardSet`, and `BehaviorTreeWait` (time-based waits);
 - `AIVisualSensor2D`, `AIHearingSensor2D` (native reusable sensors);
 - Godot `AStarGrid2D` with an inflated four-way grid for obstacle navigation;
 - a `StaticBody2D` and `PhysicsRayQueryParameters2D` for line-of-sight.
