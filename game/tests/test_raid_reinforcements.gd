@@ -114,6 +114,9 @@ func run(t) -> void:
 		t.eq(world.zone_at(site.x, site.y), 2, "adds stay in encounter zone")
 		t.check(site.distance_to(Vector2(fighter.position.x, fighter.position.z))
 			>= RaidReinforcements.MIN_PLAYER_DISTANCE, "adds cannot spawn onto players")
+		t.check(site.distance_to(Vector2(boss.position.x, boss.position.z))
+			>= RaidReinforcements.MIN_INFECTED_DISTANCE,
+			"native or fallback occupancy filter prevents spawn inside the living boss")
 	boss.health = 390.0
 	server._tick_raid_encounter()
 	t.eq(server.raid_wave, 1, "server starts phase 1 from actual boss health")
