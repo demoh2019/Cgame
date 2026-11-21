@@ -1,0 +1,101 @@
+name: Native WorldStreamer simulation data layers and Albion After integration
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'scene/main/world_streamer.*'
+      - 'doc/classes/WorldStreamer.xml'
+      - 'tests/scene/test_world_streamer_simulation_tiers.cpp'
+      - 'tests/scene/test_world_streamer_data_layers_contract.py'
+      - 'game/scripts/client/chunk_view.gd'
+      - 'game/scripts/client/world_streaming_policy.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/tests/test_world_streamer_simulation_tiers.gd'
+      - 'game/docs/OPEN_WORLD_STREAMING_FRAME_PACING.md'
+      - '.github/workflows/native-world-streamer-data-layers.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/main/world_streamer.*'
+      - 'doc/classes/WorldStreamer.xml'
+      - 'tests/scene/test_world_streamer_simulation_tiers.cpp'
+      - 'tests/scene/test_world_streamer_data_layers_contract.py'
+      - 'game/scripts/client/chunk_view.gd'
+      - 'game/scripts/client/world_streaming_policy.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/tests/test_world_streamer_simulation_tiers.gd'
+      - '.github/workflows/native-world-streamer-data-layers.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  layer-source-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate native simulation layer contracts and game application
+        run: python3 -m unittest tests/scene/test_world_streamer_data_layers_contract.py -v
+
+  native-and-game:
+    needs: layer-source-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-world-streamer-data-layers
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native WorldStreamer simulation tier and data layer tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --test --test-case="*[WorldStreamer]*" 2>&1 | tee world-layers-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' world-layers-native.log; then exit 1; fi
+      - name: Parse Albion After
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee world-layers-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' world-layers-import.log; then exit 1; fi
+      - name: Headless game simulation layer lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_simulation_tiers.gd 2>&1 | tee world-layers-game.log
+          grep -Eq '^SIMULATION TIERS TOTAL: [0-9]+ checks, 0 failures$' world-layers-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' world-layers-game.log; then exit 1; fi
+      - name: Full Albion After headless regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 900s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee world-layers-all-game.log
+          grep -Fq 'test_world_streamer_simulation_tiers.gd' world-layers-all-game.log
+          grep -Fq '0 failures' world-layers-all-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' world-layers-all-game.log; then exit 1; fi
+      - name: Keep native and game diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-streamer-data-layers
+          if-no-files-found: ignore
+          path: |
+            world-layers-native.log
+            world-layers-import.log
+            world-layers-game.log
+            world-layers-all-game.log

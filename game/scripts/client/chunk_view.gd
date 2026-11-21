@@ -1383,6 +1383,13 @@ func on_streaming_cache_restored() -> void:
 	set_process(_streaming_simulation_active)
 
 
+## Surface-only decorative processing; the engine may suspend this named
+## layer when the observer enters a dungeon. Meshes, terrain collisions and
+## real server entities remain resident and unaffected.
+func get_streaming_simulation_layer() -> StringName:
+	return &"SurfaceCosmetics"
+
+
 func set_streaming_simulation_active(active: bool) -> void:
 	if _streaming_simulation_active == active:
 		return

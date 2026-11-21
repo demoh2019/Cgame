@@ -1971,6 +1971,10 @@ func _process(delta: float) -> void:
 		camera.look_at(position + Vector3(0.0, 20.0, -60.0))
 	# Camera-visible chunks load first while residency remains player-centered.
 	if streamer != null:
+		# Surface cosmetic chunks need no CPU animation when the survivor is
+		# underground. Scene streaming and collision stay enabled throughout.
+		WorldStreamingPolicy.apply_simulation_layers(streamer,
+			Dungeon.is_underground(position.x))
 		WorldStreamingPolicy.apply_view(streamer, camera, GraphicsQuality.level())
 	# Native far-only DOF tracks player zoom/photo orbit at a bounded rate.
 	# The character and nearby combat remain in focus; CanvasLayer HUD never
