@@ -2941,6 +2941,10 @@ func _wound_on_zombie(event: Dictionary) -> void:
 	var spectacular: bool = _wound_fx.on_hit(model, origin, direction, float(event.get("damage", 0.0)),
 		bool(event.get("ranged", false)), bool(event.get("fatal", false)), true, str(event.get("weapon", "")),
 		float(_last_charge.get(by, 0.0)))
+	if audio != null and not bool(event.get("ranged", false)):
+		audio.play_gore(false, model.global_position + Vector3.UP * 1.2, -8.0 + minf(float(event.get("damage", 0.0)) * 0.1, 4.0))
+	if audio != null and spectacular:
+		audio.play_gore(true, model.global_position + Vector3.UP * 1.0, -2.0)
 	if spectacular and by == client.peer_id and camera_fx != null:
 		camera_fx._start_stop(Vector2(0.32, 0.3)) # A beat of slow motion on a brutal blow.
 	if bool(event.get("fatal", false)) and _blood_decals != null \

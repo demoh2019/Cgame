@@ -184,6 +184,29 @@ func set_footsteps(active: bool) -> void:
 		_steps.stop()
 
 
+## Gore foley (CC0, assets/gore): wet flesh hits and bone cracks, with pitch variation.
+const FLESH := [preload("res://assets/gore/flesh_1.ogg"), preload("res://assets/gore/flesh_2.ogg"), preload("res://assets/gore/flesh_3.ogg")]
+const BONE := [preload("res://assets/gore/bone_break_1.ogg"), preload("res://assets/gore/bone_break_2.ogg"),
+	preload("res://assets/gore/bone_break_3.ogg"), preload("res://assets/gore/bone_break_4.ogg")]
+
+
+func play_gore(bone: bool, position: Vector3, volume_db: float = -6.0) -> void:
+	if not enabled:
+		return
+	var pool: Array = BONE if bone else FLESH
+	var player := AudioStreamPlayer3D.new()
+	player.stream = pool[randi() % pool.size()]
+	player.volume_db = volume_db
+	player.pitch_scale = randf_range(0.88, 1.12)
+	player.unit_size = 10.0
+	player.max_distance = 60.0
+	player.bus = ReverbZones.BUS
+	add_child(player)
+	player.global_position = position
+	player.play()
+	player.finished.connect(player.queue_free)
+
+
 func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> void:
 	if not enabled:
 		return

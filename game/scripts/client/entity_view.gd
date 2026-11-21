@@ -348,10 +348,10 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		pool_disk.height = 0.04
 		puddle.mesh = pool_disk
 		puddle.position.y = 0.07
-		var poison := StandardMaterial3D.new()
-		poison.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		poison.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		poison.albedo_color = Color(0.55, 0.45, 0.08, 0.55)
+		var poison := ShaderMaterial.new()
+		poison.shader = preload("res://shaders/toxic_pool.gdshader")
+		poison.set_shader_parameter("liquid", preload("res://assets/gore/poison_liquid.png"))
+		poison.set_shader_parameter("radius", pool_disk.top_radius)
 		puddle.material_override = poison
 		root.add_child(puddle)
 		return root

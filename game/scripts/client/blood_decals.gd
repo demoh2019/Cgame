@@ -26,6 +26,19 @@ static func tint(zombie: bool) -> Color:
 static func splat_texture() -> Texture2D:
 	if _splat_tex != null:
 		return _splat_tex
+	# A hand-painted CC0 splatter mask (white on alpha, tinted per decal); procedural fallback.
+	if ResourceLoader.exists("res://assets/gore/blood_splatter.png"):
+		# Crop to the painted part so the splat fills the decal.
+		var source: Image = (load("res://assets/gore/blood_splatter.png") as Texture2D).get_image()
+		if source.is_compressed():
+			source.decompress()
+		var used: Rect2i = source.get_used_rect()
+		var side: int = maxi(used.size.x, used.size.y)
+		var square := Rect2i(used.get_center() - Vector2i(side, side) / 2, Vector2i(side, side)).intersection(Rect2i(Vector2i.ZERO, source.get_size()))
+		var cropped: Image = source.get_region(square) if side > 8 else source
+		cropped.generate_mipmaps()
+		_splat_tex = ImageTexture.create_from_image(cropped)
+		return _splat_tex
 	var noise := FastNoiseLite.new()
 	noise.frequency = 0.09
 	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
