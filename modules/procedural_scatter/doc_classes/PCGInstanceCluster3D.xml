@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PCGInstanceCluster3D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Deterministically partitions procedural 3D instance positions into bounded cullable clusters.
+	</brief_description>
+	<description>
+		Returns an array of [PackedInt32Array] groups containing the original input indices for a three-dimensional world-space grid, preserving stable first-appearance group order and per-group input order. Unlike a ground-plane-only grid, this can separate instance clusters at different terrain heights, allowing MultiMeshInstance3D nodes with conservative custom bounds to be culled independently by the renderer. Inspired by the spatial clustering used for Unreal Engine hierarchical instanced static meshes; this is a preprocessing utility, not a full per-instance GPU HISM renderer. Inputs are neither modified nor reordered; no RNG, scene mutation, or graphics API calls are performed.
+		If input size is below [param min_split_count], or a valid partition would exceed [param max_clusters], a single cluster containing all input indices is returned instead. This prevents excessive draw calls and never silently drops instances. Supports at most 65,536 points with finite XYZ coordinates within +/-10,000,000, a cell size in [0.5, 10000], a min_split_count in [1, 65536], and max_clusters in [1, 256]. Invalid input returns an empty array after atomic prevalidation. An empty input returns an empty result.
+	</description>
+	<methods>
+		<method name="partition_indices" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="1" name="cell_size" type="float" default="32.0" />
+			<param index="2" name="min_split_count" type="int" default="48" />
+			<param index="3" name="max_clusters" type="int" default="256" />
+			<description>
+				Partitions positions into 3D grid buckets and returns original indices in stable encounter order. At or above max_clusters distinct occupied cells, the result is one unsplit batch if the cap would otherwise be exceeded. Results can be mapped to MultiMesh transforms to create more tightly bounded scene nodes.
+			</description>
+		</method>
+	</methods>
+</class>
