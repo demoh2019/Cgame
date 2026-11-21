@@ -19,7 +19,7 @@ static func classify(distance_m: float, in_water: bool, previous_tier: int,
 			or hysteresis_m < 0.0 or hysteresis_m > 10.0 \
 			or hysteresis_m >= simulate_radius_m \
 			or simulate_radius_m + hysteresis_m >= retire_radius_m \
-			or previous_tier not in [TIER_SIMULATE, TIER_FREEZE]:
+			or (previous_tier != TIER_SIMULATE and previous_tier != TIER_FREEZE):
 		return TIER_INVALID
 	if distance_m >= retire_radius_m:
 		return TIER_RETIRE
