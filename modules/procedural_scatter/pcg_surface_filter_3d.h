@@ -25,4 +25,10 @@ public:
 			const PackedVector3Array &p_normals, double p_min_slope_degrees = 0.0,
 			double p_max_slope_degrees = 90.0, double p_min_height = -MAX_COORDINATE,
 			double p_max_height = MAX_COORDINATE, int p_max_selected = MAX_SELECTED) const;
+
+	// Batch-rotate authored/yaw-scaled transforms toward terrain normals. Retains
+	// translation, authored yaw, scale, and stable order. Limits tilt to prevent
+	// visual props tipping over on cliffs; no RNG, physics or scene mutation.
+	Array align_transforms(const Array &p_transforms, const PackedVector3Array &p_normals,
+			double p_max_tilt_degrees = 35.0) const;
 };

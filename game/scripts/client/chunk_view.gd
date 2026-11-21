@@ -1656,8 +1656,8 @@ const DECOR := [
 	{"file": "Plant_1_Big", "anchor": "tree", "chance": 0.08, "per": [1, 1], "ring": [1.0, 3.0], "scale": [0.8, 1.2], "biomes": ["forest", "swamp"], "range": 130.0, "max_surface_slope": 40.0, "max_surface_height": 96.0},
 	{"file": "Mushroom_Common", "anchor": "tree", "chance": 0.22, "per": [1, 3], "ring": [0.5, 1.6], "scale": [0.7, 1.6], "biomes": ["forest", "swamp"], "range": 70.0, "max_surface_slope": 42.0, "max_surface_height": 100.0},
 	{"file": "Mushroom_Laetiporus", "anchor": "tree", "chance": 0.08, "per": [1, 2], "ring": [0.4, 1.0], "scale": [0.8, 1.4], "biomes": ["forest", "swamp"], "range": 70.0, "max_surface_slope": 42.0, "max_surface_height": 100.0},
-	{"file": "Pebble_Round_1", "anchor": "rock", "chance": 0.8, "per": [2, 6], "ring": [0.9, 2.8], "scale": [0.4, 2.2], "biomes": ["forest", "plains", "beach", "mountain", "swamp"], "range": 80.0},
-	{"file": "Pebble_Square_2", "anchor": "rock", "chance": 0.5, "per": [1, 3], "ring": [1.0, 3.0], "scale": [0.6, 1.8], "biomes": ["plains", "beach", "mountain"], "range": 80.0},
+	{"file": "Pebble_Round_1", "anchor": "rock", "chance": 0.8, "per": [2, 6], "ring": [0.9, 2.8], "scale": [0.4, 2.2], "biomes": ["forest", "plains", "beach", "mountain", "swamp"], "range": 80.0, "max_surface_tilt": 35.0},
+	{"file": "Pebble_Square_2", "anchor": "rock", "chance": 0.5, "per": [1, 3], "ring": [1.0, 3.0], "scale": [0.6, 1.8], "biomes": ["plains", "beach", "mountain"], "range": 80.0, "max_surface_tilt": 35.0},
 	{"file": "Flower_3_Group", "anchor": "meadow", "chance": 1.0, "per": [10, 18], "ring": [0.0, 4.5], "scale": [0.8, 1.3], "biomes": ["plains", "forest"], "range": 95.0, "max_surface_slope": 30.0, "max_surface_height": 92.0},
 	{"file": "Flower_4_Group", "anchor": "meadow", "chance": 0.8, "per": [8, 14], "ring": [0.0, 4.0], "scale": [0.8, 1.3], "biomes": ["plains"], "range": 95.0, "max_surface_slope": 30.0, "max_surface_height": 92.0},
 	{"file": "Flower_3_Single", "anchor": "meadow", "chance": 1.0, "per": [8, 14], "ring": [1.5, 6.5], "scale": [0.8, 1.4], "biomes": ["plains", "forest", "beach"], "range": 70.0, "max_surface_slope": 30.0, "max_surface_height": 92.0},
@@ -1860,6 +1860,17 @@ func _build_nature_decor_entry(entry: Dictionary) -> void:
 	elif file.begins_with("Pebble"):
 		# Surface debris keeps planar spacing, now accounting for each pebble's randomized scale.
 		transforms = SceneryBatches.thin_cosmetic_transforms_scaled(transforms, 0.75)
+	# Unreal-style AlignToNormal for small visual rocks. Sample normals only
+	# after scale-aware spacing, reducing terrain queries on dense scree.
+	# All seeded transforms are generated before alignment; no additional RNG
+	# draws, interactive resources or server-authoritative objects are touched.
+	if entry.has("max_surface_tilt") and not transforms.is_empty():
+		var alignment_normals := PackedVector3Array()
+		for transform in transforms:
+			var point := origin + Vector2(transform.origin.x, transform.origin.z)
+			alignment_normals.append(_world.normal_at(point.x, point.y))
+		transforms = SceneryBatches.align_cosmetic_transforms_surface(
+			transforms, alignment_normals, float(entry["max_surface_tilt"]))
 	# Dense vegetation is split into camera-cullable cells, sparse props remain one draw call.
 	for decor_batch in SceneryBatches.add(self, mesh, transforms,
 			float(entry["range"]), file.begins_with("Bush"), 8.0,
