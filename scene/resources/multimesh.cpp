@@ -341,6 +341,9 @@ void MultiMesh::set_buffer_interpolated(const Vector<float> &p_buffer_curr, cons
 }
 
 void MultiMesh::set_mesh(const Ref<Mesh> &p_mesh) {
+	if (mesh == p_mesh) {
+		return; // Avoid redundant RenderingServer rebinds for unchanged mesh resources.
+	}
 	mesh = p_mesh;
 	if (mesh.is_valid()) {
 		RenderingServer::get_singleton()->multimesh_set_mesh(multimesh, mesh->get_rid());
@@ -381,6 +384,10 @@ int MultiMesh::get_visible_instance_count() const {
 }
 
 void MultiMesh::set_physics_interpolation_quality(PhysicsInterpolationQuality p_quality) {
+	ERR_FAIL_COND_MSG(p_quality != INTERP_QUALITY_FAST && p_quality != INTERP_QUALITY_HIGH, "Unsupported MultiMesh physics interpolation quality.");
+	if (_physics_interpolation_quality == p_quality) {
+		return; // No need to resend unchanged interpolation quality to the renderer.
+	}
 	_physics_interpolation_quality = p_quality;
 	RenderingServer::get_singleton()->multimesh_set_physics_interpolation_quality(multimesh, (RSE::MultimeshPhysicsInterpolationQuality)p_quality);
 }
@@ -544,6 +551,7 @@ bool MultiMesh::is_using_custom_data() const {
 
 void MultiMesh::set_transform_format(TransformFormat p_transform_format) {
 	ERR_FAIL_COND_MSG(instance_count > 0, "Instance count must be 0 to change the transform format.");
+	ERR_FAIL_COND_MSG(p_transform_format != TRANSFORM_2D && p_transform_format != TRANSFORM_3D, "Unsupported MultiMesh transform format.");
 	transform_format = p_transform_format;
 }
 

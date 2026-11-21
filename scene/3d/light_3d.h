@@ -71,6 +71,7 @@ public:
 private:
 	Color color;
 	real_t param[PARAM_MAX] = {};
+	bool param_initialized[PARAM_MAX] = {};
 	bool shadow = false;
 	bool negative = false;
 	bool reverse_cull = false;
@@ -197,6 +198,7 @@ public:
 private:
 	bool blend_splits;
 	ShadowMode shadow_mode;
+	bool shadow_mode_initialized = false;
 	SkyMode sky_mode = SKY_MODE_LIGHT_AND_SKY;
 
 protected:
