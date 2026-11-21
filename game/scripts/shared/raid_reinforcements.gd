@@ -83,6 +83,70 @@ static func rank_sites(candidates: Array[Vector2], threats: Array[Vector2],
 	return ranked
 
 
+## Choose multiple safe locations without clustering. Only pre-vetted server
+## positions enter the native query. A deterministic GDScript path makes the
+## result identical on stock Godot and older Cgame binaries.
+static func spread_sites(candidates: Array[Vector2], threats: Array[Vector2],
+		center: Vector2, count: int, min_separation: float,
+		prefer_native: bool = true) -> Array[Vector2]:
+	var selected: Array[Vector2] = []
+	if not center.is_finite() or count <= 0 or count > 64 \
+			or not is_finite(min_separation) or min_separation < 0.0:
+		return selected
+	var vetted: Array[Vector2] = []
+	for point in candidates:
+		if point.is_finite() and point.distance_to(center) <= QUERY_MAX_DISTANCE:
+			vetted.append(point)
+	if vetted.is_empty():
+		return selected
+
+	var valid_threats: Array[Vector2] = []
+	for threat in threats:
+		if threat.is_finite():
+			valid_threats.append(threat)
+
+	# On native binaries we score and choose separated sites in one query,
+	# scanning beyond near-duplicate top candidates rather than truncating first.
+	if prefer_native and not valid_threats.is_empty() \
+			and valid_threats.size() <= MAX_THREAT_CONTEXTS \
+			and ClassDB.class_exists("EnvironmentQuery3D"):
+		var query: Object = ClassDB.instantiate("EnvironmentQuery3D")
+		if query != null and query.has_method("query_spread_positions") \
+				and query.has_method("set_threat_positions"):
+			var positions := PackedVector3Array()
+			for point in vetted:
+				positions.append(Vector3(point.x, 0.0, point.y))
+			var contexts := PackedVector3Array()
+			for threat in valid_threats:
+				contexts.append(Vector3(threat.x, 0.0, threat.y))
+			query.set("candidates", positions)
+			query.set("origin", Vector3(center.x, 0.0, center.y))
+			query.set("horizontal_only", true)
+			query.set("max_distance", QUERY_MAX_DISTANCE)
+			query.set("distance_weight", 0.0)
+			query.set("safety_weight", 1.0)
+			query.set("use_threat", true)
+			query.set("threat_positions", contexts)
+			var native_points: PackedVector3Array = query.call(
+				"query_spread_positions", count, min_separation)
+			for point in native_points:
+				selected.append(Vector2(point.x, point.z))
+			return selected
+
+	# Exact stable ranking and >= threshold match the C++ implementation.
+	for point in rank_sites(vetted, valid_threats, center, prefer_native):
+		var clear := true
+		for other in selected:
+			if point.distance_to(other) < min_separation:
+				clear = false
+				break
+		if clear:
+			selected.append(point)
+			if selected.size() >= count:
+				break
+	return selected
+
+
 
 static func next_phase(hp: float, max_hp: float, completed: int) -> int:
 	if not is_finite(hp) or not is_finite(max_hp) or hp <= 0.0 or max_hp <= 0.0:
@@ -156,15 +220,4 @@ static func sites(world, players: Dictionary, zombies: Dictionary,
 	var threats: Array[Vector2] = []
 	for i in mini(nearby.size(), MAX_THREAT_CONTEXTS):
 		threats.append(nearby[i]["position"])
-	for point in rank_sites(candidates, threats, origin):
-		var separated := true
-		for other in found:
-			if point.distance_to(other) < MIN_BETWEEN_ADDS:
-				separated = false
-				break
-		if not separated:
-			continue
-		found.append(point)
-		if found.size() >= mini(count, MAX_WAVE):
-			return found
-	return found
+	return spread_sites(candidates, threats, origin, mini(count, MAX_WAVE), MIN_BETWEEN_ADDS)

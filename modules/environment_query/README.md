@@ -77,3 +77,20 @@ flank distribution; direct chase remains for bosses, brutes and stock Godot.
 Tests: `tests/scene/test_environment_query_3d.cpp`, numerical Python
 contracts `tests/scene/test_environment_query_topk.py`, and live zombie AI
 checks. Engine binary and server benchmark still required for measured gains.
+
+## Separated multi-position selection
+
+`query_spread_positions(count, min_separation)` performs a deterministic
+score-first, distance-separated selection for up to 64 positions. Unlike
+`query_top_positions(count)` followed by filtering nearby results, it
+continues scanning other eligible candidates when a highly ranked point is
+too close to an already chosen point. Equal scores use original candidate
+indices. `horizontal_only` also applies to pairwise spacing. `max_results`
+caps the number returned, not the set of eligible candidates evaluated.
+Invalid counts/separation return an empty result.
+
+The raid reinforcements system in `game/scripts/shared/raid_reinforcements.gd`
+uses this native API on Cgame binaries. It only sends server-vetted positions
+after terrain, water, player distance and occupancy checks. Stock Godot and
+older Cgame binaries continue to use an equivalent stable GDScript algorithm.
+The native query does not replace the server's trust boundary.

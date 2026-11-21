@@ -146,6 +146,7 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query"), &EnvironmentQuery3D::query);
 	ClassDB::bind_method(D_METHOD("query_positions"), &EnvironmentQuery3D::query_positions);
 	ClassDB::bind_method(D_METHOD("query_top_positions", "count"), &EnvironmentQuery3D::query_top_positions);
+	ClassDB::bind_method(D_METHOD("query_spread_positions", "count", "min_separation"), &EnvironmentQuery3D::query_spread_positions);
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_ring", "center", "radius", "count", "phase"), &EnvironmentQuery3D::sample_ring, DEFVAL(0.0));
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_grid", "center", "half_extents", "spacing", "max_points"), &EnvironmentQuery3D::sample_grid, DEFVAL(4096));
 
@@ -314,6 +315,50 @@ PackedVector3Array EnvironmentQuery3D::query_top_positions(int p_count) const {
 	Vector3 *write = output.ptrw();
 	for (int i = 0; i < best.size(); i++) {
 		write[i] = best[i].position;
+	}
+	return output;
+}
+
+// Greedy non-maximum suppression after the exact same safety/distance tests
+// as query(). Unlike selecting top-K then spacing, this scans ALL scored
+// candidates so a nearby runner-up cannot prevent a more distant safe pick.
+// Deterministic order: score descending, original candidate index on ties.
+PackedVector3Array EnvironmentQuery3D::query_spread_positions(int p_count, double p_min_separation) const {
+	PackedVector3Array output;
+	ERR_FAIL_COND_V_MSG(p_count < 1 || p_count > 64, output, "Spread count must be between 1 and 64.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_min_separation) || p_min_separation < 0.0, output, "Minimum separation must be finite and nonnegative.");
+	if (!origin.is_finite() || (use_threat && !threat_position.is_finite()) || min_distance > max_distance) {
+		return output;
+	}
+
+	const int limit = max_results == 0 ? p_count : MIN(p_count, max_results);
+	Vector<QueryHit> hits;
+	for (int i = 0; i < candidates.size(); i++) {
+		QueryHit hit;
+		if (score_candidate(candidates[i], i, origin, threat_position, threat_positions,
+					use_threat, horizontal_only, min_distance, max_distance,
+					desired_distance, distance_weight, safety_weight,
+					min_threat_distance, hit)) {
+			hits.push_back(hit);
+		}
+	}
+	if (hits.size() > 1) {
+		SortArray<QueryHit, HitComparator> sorter;
+		sorter.sort(hits.ptrw(), hits.size());
+	}
+
+	for (int i = 0; i < hits.size() && output.size() < limit; i++) {
+		const Vector3 &point = hits[i].position;
+		bool separated = true;
+		for (int j = 0; j < output.size(); j++) {
+			if (point_distance(point, output[j], horizontal_only) < p_min_separation) {
+				separated = false;
+				break;
+			}
+		}
+		if (separated) {
+			output.push_back(point);
+		}
 	}
 	return output;
 }

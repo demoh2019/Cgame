@@ -10,6 +10,7 @@ on:
       - 'tests/scene/test_environment_query_3d.cpp'
       - 'game/scripts/shared/raid_reinforcements.gd'
       - 'game/tests/test_raid_multi_threat_query.gd'
+      - 'game/tests/test_raid_reinforcements.gd'
       - 'game/tests/run_raid_eqs.gd'
       - 'game/tests/run_all.gd'
       - '.github/workflows/native-multi-threat-eqs.yml'
@@ -21,6 +22,7 @@ on:
       - 'tests/scene/test_environment_query_3d.cpp'
       - 'game/scripts/shared/raid_reinforcements.gd'
       - 'game/tests/test_raid_multi_threat_query.gd'
+      - 'game/tests/test_raid_reinforcements.gd'
       - '.github/workflows/native-multi-threat-eqs.yml'
   workflow_dispatch:
 
@@ -54,7 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
-          timeout 240s "$BIN" --headless --test --test-case="*Multi-threat*"
+          timeout 240s "$BIN" --headless --test --test-case="*[EnvironmentQuery3D]*"
           timeout 240s "$BIN" --headless --test --test-case="*Resource roundtrip preserves parameters*"
       - name: Import Albion After
         shell: bash

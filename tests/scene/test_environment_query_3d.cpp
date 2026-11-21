@@ -242,6 +242,66 @@ TEST_CASE("[EnvironmentQuery3D] Bounded top-K rejects unsafe requests and malfor
 	CHECK(q->query_top_positions(3).is_empty());
 }
 
+TEST_CASE("[EnvironmentQuery3D] Spread selection scans past close high-ranked points") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(1, 0, 0), Vector3(1.5, 0, 0), Vector3(6, 0, 0), Vector3(10, 0, 0)
+	});
+	CHECK(q->query_spread_positions(2, 3.0) ==
+			PackedVector3Array({ Vector3(1, 0, 0), Vector3(6, 0, 0) }));
+	q->set_max_results(1);
+	CHECK(q->query_spread_positions(2, 3.0) ==
+			PackedVector3Array({ Vector3(1, 0, 0) }));
+}
+
+TEST_CASE("[EnvironmentQuery3D] Spread zero separation preserves stable top-K order") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(1, 0, 0), Vector3(1, 0, 0), Vector3(0, 0, 1), Vector3(-1, 0, 0)
+	});
+	CHECK(q->query_spread_positions(3, 0.0) == q->query_top_positions(3));
+	CHECK(q->query_spread_positions(4, 2.0) ==
+			PackedVector3Array({ Vector3(1, 0, 0), Vector3(-1, 0, 0) }));
+}
+
+TEST_CASE("[EnvironmentQuery3D] Spread spacing respects horizontal mode and inclusive boundary") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(1, 0, 0), Vector3(1, 4, 0), Vector3(5, 0, 0)
+	});
+	CHECK(q->query_spread_positions(3, 3.0).size() == 3);
+	q->set_horizontal_only(true);
+	CHECK(q->query_spread_positions(3, 3.0) ==
+			PackedVector3Array({ Vector3(1, 0, 0), Vector3(5, 0, 0) }));
+	q->set_candidates({ Vector3(0, 0, 0), Vector3(3, 0, 0) });
+	CHECK(q->query_spread_positions(2, 3.0).size() == 2); // Boundary is inclusive.
+}
+
+TEST_CASE("[EnvironmentQuery3D] Spread honors multiple threats and safety filters") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(1, 0, 0), Vector3(0, 0, -10), Vector3(0, 0, 10), Vector3(0, 0, -12)
+	});
+	q->set_horizontal_only(true);
+	q->set_use_threat(true);
+	q->set_max_distance(64.0);
+	q->set_distance_weight(0.0);
+	q->set_safety_weight(1.0);
+	q->set_threat_positions({ Vector3(0, 0, 0), Vector3(0, 0, 9) });
+	CHECK(q->query_spread_positions(2, 5.0) ==
+			PackedVector3Array({ Vector3(0, 0, -12), Vector3(1, 0, 0) }));
+	q->set_min_threat_distance(5.0);
+	CHECK(q->query_spread_positions(2, 5.0) ==
+			PackedVector3Array({ Vector3(0, 0, -12) }));
+}
+
+TEST_CASE("[EnvironmentQuery3D] Spread rejects invalid requests without corrupting query state") {
+	Ref<EnvironmentQuery3D> q = make_query({ Vector3(Math::NaN, 0, 0), Vector3(2, 0, 0) });
+	ERR_PRINT_OFF
+	CHECK(q->query_spread_positions(0, 2.0).is_empty());
+	CHECK(q->query_spread_positions(65, 2.0).is_empty());
+	CHECK(q->query_spread_positions(2, -1.0).is_empty());
+	CHECK(q->query_spread_positions(2, Math::INF).is_empty());
+	ERR_PRINT_ON
+	CHECK(q->query_spread_positions(2, 2.0) == PackedVector3Array({ Vector3(2, 0, 0) }));
+}
+
 TEST_CASE("[EnvironmentQuery3D] Zero result cap means unlimited") {
 	Ref<EnvironmentQuery3D> q = make_query({ Vector3(1, 0, 0), Vector3(2, 0, 0) });
 	CHECK(q->get_max_results() == 0);

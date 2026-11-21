@@ -96,6 +96,9 @@ public:
 	PackedVector3Array query_positions() const;
 	// Bounded allocation-free-of-metadata stable top-K for frequent AI queries.
 	PackedVector3Array query_top_positions(int p_count) const;
+	// Rank candidates once, then greedily choose spatially separated points.
+	// Stable score/index order, max_results output cap; optional horizontal spacing.
+	PackedVector3Array query_spread_positions(int p_count, double p_min_separation) const;
 
 	// Generates candidates on the XZ plane. Count/size are bounded to avoid
 	// accidentally allocating millions of points in the editor.

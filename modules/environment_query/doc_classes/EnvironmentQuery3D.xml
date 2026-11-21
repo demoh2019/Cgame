@@ -19,6 +19,13 @@
 			<return type="PackedVector3Array" />
 			<description>Returns ranked points without score details.</description>
 		</method>
+
+		<method name="query_spread_positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<param index="0" name="count" type="int" />
+			<param index="1" name="min_separation" type="float" />
+			<description>Returns up to [param count] ranked positions while requiring pairwise separation greater than or equal to [param min_separation]. Scores all candidates first, then greedily selects from the stable score/index order; a rejected nearby candidate does not count toward the requested limit. Uses XZ-only spacing when [member horizontal_only] is true and respects [member max_results]. Count must be 1–64 and separation finite and nonnegative. No navigation or geometry validation is performed.</description>
+		</method>
 		<method name="query_top_positions" qualifiers="const">
 			<return type="PackedVector3Array" />
 			<param index="0" name="count" type="int" />
