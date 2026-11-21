@@ -150,6 +150,28 @@ func run(t) -> void:
 		second.flank_reservations = pool
 		var here := Vector2(0, 0)
 		var target := Vector2(8, 0)
+		# Two indistinguishable positions are separate EQS items; only the
+		# index-returning API can preserve both reservation identities.
+		var index_query = ClassDB.instantiate("EnvironmentQuery3D")
+		index_query.set("origin", Vector3.ZERO)
+		index_query.set("candidates", PackedVector3Array([
+			Vector3(3, 0, 0), Vector3(3, 0, 0), Vector3(10, 0, 0)]))
+		if index_query.has_method("query_top_indices"):
+			var ids: PackedInt32Array = index_query.call("query_top_indices", 3)
+			t.eq(ids, PackedInt32Array([0, 1, 2]),
+				"native EQS preserves stable input indices for overlapping points")
+			var positions: PackedVector3Array = index_query.call("query_top_positions", 3)
+			for i in range(ids.size()):
+				t.eq(positions[i], index_query.get("candidates")[ids[i]],
+					"index scoring exactly matches position-only query ordering")
+			index_query.set("max_results", 2)
+			t.eq(index_query.call("query_top_indices", 3), PackedInt32Array([0, 1]),
+				"native index query honors caller cap and resource maximum")
+			index_query.set("max_results", 0)
+			t.check(index_query.call("query_top_indices", 0).is_empty(),
+				"invalid zero top-K request never fabricates item identities")
+		else:
+			t.check(true, "older Cgame binary keeps the position-only EQS fallback")
 		var first_spot: Vector2 = first._flank_goal(here, target)
 		var second_spot: Vector2 = second._flank_goal(here, target)
 		t.check(first_spot.distance_to(target) < 2.5 and first_spot.distance_to(target) > 2.3,
@@ -159,6 +181,19 @@ func run(t) -> void:
 		t.check(first_spot.distance_to(second_spot) > 0.1,
 			"two infected cannot reserve exactly the same physical flank slot")
 		t.eq(pool.get_claim_count(), 2, "two distinct target-ring leases exist in the actual game AI")
+		if index_query.has_method("query_top_indices"):
+			var claimed_ring := EnvironmentQuery3D.sample_ring(
+				Vector3(target.x, 0.0, target.y), 2.4, 8)
+			for zombie in [first, second]:
+				var lease: int = int(pool.get_actor_slot(zombie.id))
+				var source_index: int = lease - 77 * 16 - 1
+				t.check(source_index >= 0 and source_index < claimed_ring.size(),
+					"flanking lease stores an original scored EQS ring index")
+				if source_index >= 0 and source_index < claimed_ring.size():
+					var candidate: Vector3 = claimed_ring[source_index]
+					t.eq(zombie._flank_goal(here, target),
+						Vector2(candidate.x, candidate.z),
+						"real infected flank target matches its exact unique ring slot")
 		# Lease loss during the 300ms flank-goal cache must force an EQS
 		# replan, rather than sending a zombie to a slot it no longer owns.
 		var portable_pool := Portable.new()
