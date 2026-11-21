@@ -416,3 +416,58 @@ the renderer instance transforms, frame orthogonality and native/
 fallback parity.
 
 Background: [Unreal PCG framework node reference](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).
+
+
+## Per-instance geometry LOD with hysteresis (PCGFoliageScalability3D)
+
+Unreal's instanced static meshes support per-instance LOD, and the
+[Foliage tool](https://dev.epicgames.com/documentation/en-us/unreal-engine/foliage-mode-in-unreal-engine)
+supports static-mesh LOD. The existing Cgame `PCGFoliageScalability3D`
+previously controlled **instance counts only**, not the triangle count
+of each surviving object. Two new reusable native methods fill that gap:
+
+```gdscript
+var planner := PCGFoliageScalability3D.new()
+var tiers := planner.plan_instance_lods(
+    positions, camera_global_pos, previous_tiers, 24.0, 3.0)
+var groups := planner.partition_variant_lods(variant_ids, tiers, 3)
+# Six PackedInt32Array groups in order:
+# mesh0-detailed, mesh0-proxy, mesh1-detailed, mesh1-proxy, ...
+```
+
+- `plan_instance_lods` returns per-point 0 (detailed) or 1 (proxy).
+  With empty previous history, distances <= 24m select the detailed
+  tier; on updates near objects switch far only beyond 27m, far objects
+  switch near only below 21m. Equality at hysteresis edges preserves
+  the previous tier. Uses squared 3D distances, no sqrt or RNG.
+  This is CPU planning, not GPU hierarchical culling, automatic mesh
+  decimation or Nanite.
+- `partition_variant_lods` returns two ordered source-index groups
+  per mesh type. All instances are represented **exactly once** with
+  original indices intact. Empty groups remain valid empty arrays.
+  Both methods validate their entire input before yielding any data.
+- Native constraints: <=16,384 points, 1–32 mesh variants, finite
+  positions/viewers within +/-10,000,000, finite thresholds with
+  switch distance >=0.1 and <=1,000,000, hysteresis >=0 but less than
+  switch distance, switch+hysteresis <=1,000,000. Prior tier arrays
+  must be empty or exactly match point count and contain only 0/1.
+  On invalid input both methods return empty without partial output.
+  O(N) planning and O(N + variant_count) bucketing.
+- A game may reassign the resulting group indices into one MultiMesh
+  for each **geometry + LOD** combination. The game owns the mesh
+  resources, update cadence and visibility. Native methods never create
+  nodes, load assets, change colliders, or mutate gameplay.
+- The Days After demo creates distinct detailed box/reed/seed-head
+  foliage and camera-facing two-triangle `QuadMesh` proxies. The
+  rendering setup allocates up to six MultiMesh GPU batches (rather
+  than the previous three), but retains exactly the same 160 or fewer
+  authored PCG positions/variant IDs. It caches proxy meshes/materials,
+  reuses nodes and rebuckets only when LOD tiers change. View refreshes
+  are capped at 4Hz and require at least 0.5m viewer movement.
+  Rendering cost may rise due to additional draw batches; **there
+  is no measured FPS improvement claim**.
+- Native C++ doctests and Days After headless smoke cover hysteresis
+  boundary retention, native/fallback parity, invalid input,
+  exactly-once index conservation and forced far-view restoration.
+
+Reference: [Unreal Instanced Static Mesh Component](https://dev.epicgames.com/documentation/en-us/unreal-engine/instanced-static-mesh-component-in-unreal-engine).
