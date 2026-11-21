@@ -2524,6 +2524,9 @@ func _on_event(event: Dictionary) -> void:
 					int(event.get("xp", 0)), int(event.get("level", 1))])
 		"crate":
 			say("You search the crate...")
+		"rage":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("RAGE!" if bool(event.get("active", false)) else "Rage fades.")
 		"masterwork":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Crafted %s!" % str(Defs.item(str(event.get("item", ""))).get("name", "")))

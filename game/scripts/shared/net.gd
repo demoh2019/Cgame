@@ -1044,6 +1044,27 @@ func c_stagger_finisher() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_power_attack(dir_x: float, dir_z: float, charge: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "attack", sim.cmd_attack(peer, dir_x, dir_z, charge))
+
+
+@rpc("any_peer", "reliable")
+func c_kick(dir_x: float, dir_z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "kick", sim.cmd_kick(peer, dir_x, dir_z))
+
+
+@rpc("any_peer", "reliable")
+func c_rage() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "rage", sim.cmd_rage(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_parry() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

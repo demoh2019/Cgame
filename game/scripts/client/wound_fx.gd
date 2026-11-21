@@ -12,6 +12,34 @@ const SEVER_DAMAGE := 22.0
 
 var _pieces: Array[Dictionary] = [] # {"body": RigidBody3D, "age": float}
 var _severed: Array[Dictionary] = [] # {"skeleton": Skeleton3D, "bone": int}
+
+
+## Runs after animation and ragdoll every frame: collapses severed bones and bends broken ones.
+class Breaker extends SkeletonModifier3D:
+	var severed: Dictionary = {} # bone -> true
+	var broken: Dictionary = {} # bone -> Quaternion offset
+	func _process_modification() -> void:
+		var skeleton := get_skeleton()
+		if skeleton == null:
+			return
+		for bone in broken:
+			skeleton.set_bone_pose_rotation(bone, skeleton.get_bone_pose_rotation(bone) * (broken[bone] as Quaternion))
+		for bone in severed:
+			skeleton.set_bone_pose_scale(bone, Vector3.ONE * 0.001)
+
+
+static func _breaker_of(skeleton: Skeleton3D) -> Breaker:
+	for child in skeleton.get_children():
+		if child is Breaker:
+			return child
+	var breaker := Breaker.new()
+	skeleton.add_child(breaker)
+	return breaker
+
+
+static func _is_blunt(weapon_id: String) -> bool:
+	var w := weapon_id.to_lower()
+	return w == "" or w.contains("club") or w.contains("hammer") or w.contains("bat") or w.contains("mace") or w.contains("pipe")
 var _rng := RandomNumberGenerator.new()
 
 
@@ -20,7 +48,7 @@ func _init() -> void:
 
 
 ## model: the enemy's character model; origin/direction: the line of the strike in world space.
-func on_hit(model: Node3D, origin: Vector3, direction: Vector3, damage: float, ranged: bool, fatal: bool, ichor: bool, weapon_id: String = "") -> void:
+func on_hit(model: Node3D, origin: Vector3, direction: Vector3, damage: float, ranged: bool, fatal: bool, ichor: bool, weapon_id: String = "", charge: float = 0.0) -> void:
 	if model == null or not is_instance_valid(model) or direction.length_squared() < 0.0001:
 		return
 	var skeleton := _skeleton_of(model)
@@ -37,7 +65,12 @@ func on_hit(model: Node3D, origin: Vector3, direction: Vector3, damage: float, r
 	var color := Color(0.32, 0.02, 0.02) if not ichor else Color(0.22, 0.06, 0.02)
 	_add_wound(skeleton, bone, surface, direction, wound_shape(weapon_id, ranged, damage))
 	_spray(surface, -direction, damage, color)
-	if fatal and not ranged and damage >= SEVER_DAMAGE:
+	# Blunt power blows and heavy swings snap arms and legs: the limb hangs at a sick angle.
+	var kind: String = _limb_kind(skeleton.get_bone_name(bone))
+	if not ranged and _is_blunt(weapon_id) and (charge >= 0.75 or damage >= 28.0) and (kind == "arm" or kind == "leg"):
+		_break(skeleton, bone, direction)
+	var heavy: bool = charge >= 0.75 or damage >= 35.0
+	if not ranged and not _is_blunt(weapon_id) and (fatal or heavy) and damage >= SEVER_DAMAGE:
 		var cut: int = _severable(skeleton, bone)
 		if cut >= 0:
 			_sever(skeleton, cut, direction, color)
@@ -52,16 +85,46 @@ func _surface_point(skeleton: Skeleton3D, near: Vector3, direction: Vector3) -> 
 	return near - direction * 0.06
 
 
+## Snap a limb: from now on it bends 70-110 degrees off its animated pose, with a crack of blood.
+func _break(skeleton: Skeleton3D, bone: int, direction: Vector3) -> void:
+	var breaker := _breaker_of(skeleton)
+	if breaker.broken.has(bone) or breaker.severed.has(bone):
+		return
+	var local_axis: Vector3 = (skeleton.get_bone_global_pose(bone).basis.inverse() * (skeleton.global_transform.basis.inverse() * direction.cross(Vector3.UP))).normalized()
+	if not local_axis.is_finite() or local_axis.length_squared() < 0.5:
+		local_axis = Vector3.RIGHT
+	breaker.broken[bone] = Quaternion(local_axis, deg_to_rad(_rng.randf_range(70.0, 110.0)))
+	var at: Vector3 = (skeleton.global_transform * skeleton.get_bone_global_pose(bone)).origin
+	_spray(at, -direction, 30.0, Color(0.3, 0.02, 0.02))
+
+
+## Ground finisher on a downed body: a blunt weapon caves the skull in, a blade takes the head.
+func finisher(model: Node3D, weapon_id: String, ichor: bool) -> void:
+	var skeleton := _skeleton_of(model) if model != null and is_instance_valid(model) else null
+	if skeleton == null:
+		return
+	var color := Color(0.32, 0.02, 0.02) if not ichor else Color(0.22, 0.06, 0.02)
+	for bone in skeleton.get_bone_count():
+		if _limb_kind(skeleton.get_bone_name(bone)) != "head":
+			continue
+		var head: Vector3 = (skeleton.global_transform * skeleton.get_bone_global_pose(bone)).origin
+		var down := Vector3(_rng.randf_range(-0.2, 0.2), -1.0, _rng.randf_range(-0.2, 0.2)).normalized()
+		for burst in 4:
+			_spray(head + Vector3(0, 0.08, 0), Vector3(_rng.randf_range(-1, 1), 0.6, _rng.randf_range(-1, 1)).normalized(), 60.0, color)
+		if _is_blunt(weapon_id):
+			_add_wound(skeleton, bone, head - down * 0.1, down, {"radius": 0.06, "elongation": 1.3, "depth": 0.07})
+			var breaker := _breaker_of(skeleton)
+			breaker.broken[bone] = Quaternion(Vector3.RIGHT, deg_to_rad(35.0))
+		else:
+			_sever(skeleton, _severable(skeleton, bone), down.cross(Vector3.UP).normalized() + Vector3.UP * 0.3, color)
+		return
+
+
 func _process(delta: float) -> void:
 	_update_bodies()
-	# Keep severed bones collapsed: animation tracks rewrite the pose every frame.
 	for i in range(_severed.size() - 1, -1, -1):
-		var entry: Dictionary = _severed[i]
-		var skeleton = entry["skeleton"]
-		if not is_instance_valid(skeleton):
+		if not is_instance_valid(_severed[i]["skeleton"]):
 			_severed.remove_at(i)
-			continue
-		(skeleton as Skeleton3D).set_bone_pose_scale(int(entry["bone"]), Vector3.ONE * 0.001)
 	for i in range(_pieces.size() - 1, -1, -1):
 		_pieces[i]["age"] = float(_pieces[i]["age"]) + delta
 		var body = _pieces[i]["body"]
@@ -292,7 +355,9 @@ func _sever(skeleton: Skeleton3D, bone: int, direction: Vector3, color: Color) -
 		length = maxf(length, minf(start.origin.distance_to(child_at) * 2.0, 0.85))
 	var kind: String = _limb_kind(skeleton.get_bone_name(bone))
 	_severed.append({"skeleton": skeleton, "bone": bone})
-	skeleton.set_bone_pose_scale(bone, Vector3.ONE * 0.001)
+	var breaker := _breaker_of(skeleton)
+	breaker.severed[bone] = true
+	breaker.broken.erase(bone)
 	# The stump keeps bleeding for a moment.
 	for burst in 3:
 		get_tree().create_timer(0.25 * burst).timeout.connect(func() -> void:

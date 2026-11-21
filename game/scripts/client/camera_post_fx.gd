@@ -163,7 +163,7 @@ func on_event(event: Dictionary, my_peer: int, distance: float) -> void:
 			_hurt = maxf(_hurt, hurt_intensity(damage))
 			_aberration = maxf(_aberration, hurt_intensity(damage))
 		_start_stop(hit_stop(damage, false, on_zombie and distance < 4.0))
-	elif kind == "zombie_died" or kind == "finishing_strike":
+	elif kind == "zombie_died" or kind == "finishing_strike" or kind == "ground_finisher" or kind == "knockdown":
 		_start_stop(hit_stop(damage, true, distance < 6.0))
 
 

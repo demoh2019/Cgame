@@ -4,6 +4,7 @@ extends Node3D
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const WoundFx = preload("res://scripts/client/wound_fx.gd")
+const BrawlMeter = preload("res://scripts/client/brawl_meter.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
@@ -198,10 +199,15 @@ var _hit_marker := 0.0 # Crosshair hit flash, decays.
 var _own_attack_time := -10.0 # Engine ticks (s) of your last attack, for zombie hit markers.
 var _third_person_near := 0.05
 var _fp_body_refresh := 0.0
+var _brawl_meter: Control
+var _last_charge: Dictionary = {} # peer -> charge of their latest swing (for power-hit gore).
 var _underwater_tint: ColorRect # Blue murk while the camera is below the surface.
 var _breath_label: Label # Air left while diving.
 var _dof_elapsed := 0.35 # Coalesce cinematic focus updates to ~3 Hz.
 var _attack_cooldown := 0.0
+var _charge_msec := -1 # Melee attack held since (ms); release = light swing or power blow.
+const CHARGE_START_MS := 220 # A shorter press is a quick swing.
+const CHARGE_FULL_MS := 850
 var _build_mode := false # U: a ghost wall follows the aim until it is placed or cancelled.
 var _build_yaw := 0.0
 var _build_ghost: MeshInstance3D
@@ -1046,8 +1052,16 @@ func _spawn_effects(event: Dictionary) -> void:
 			var source: Dictionary = client.players.get(by, {}) if by > 0 else client.zombies.get(-by, {})
 			if by != -1 and source.has("x"):
 				_damage_direction.on_hit(Vector3(float(source["x"]), 0.0, float(source["z"])), float(event.get("damage", 0.0)))
+	if str(event.get("type", "")) == "attack":
+		_last_charge[int(event.get("peer", -1))] = float(event.get("charge", 0.0))
 	if _wound_fx != null and str(event.get("type", "")) == "hit" and str(event.get("kind", "")) == "zombie":
 		_wound_on_zombie(event)
+	if _wound_fx != null and str(event.get("type", "")) == "ground_finisher":
+		var peer_info: Dictionary = client.players.get(int(event.get("peer", -1)), {})
+		var weapon_id: String = str(client.inventory.weapon) if int(event.get("peer", -1)) == client.peer_id else str(peer_info.get("weapon", ""))
+		_wound_fx.finisher(entities.model_of("zombie", int(event.get("zombie", -1))), weapon_id, true)
+	if str(event.get("type", "")) == "knockdown":
+		entities.play_hit("zombie", int(event.get("zombie", -1)), true)
 	physics_fx.on_event(event, at)
 	match event["type"]:
 		"hit":
@@ -1410,10 +1424,27 @@ func _physics_process(delta: float) -> void:
 	var aim := _aim_direction()
 	var yaw: float = atan2(aim.x, aim.y) if aim != Vector2.ZERO else float(client.yaw)
 	client.send_input(move, sprint, yaw, delta, crouch)
-	if alive and not _build_mode and not hud.is_menu_open() and not _access.is_open() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _attack_cooldown <= 0.0 and aim != Vector2.ZERO:
+	var can_swing: bool = alive and not _build_mode and not hud.is_menu_open() and not _access.is_open() and aim != Vector2.ZERO
+	if can_swing and _melee_equipped():
+		# Brawling: tap to swing, hold to wind up a power blow, release to strike.
+		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			if _charge_msec < 0 and _attack_cooldown <= 0.0:
+				_charge_msec = Time.get_ticks_msec()
+		elif _charge_msec >= 0:
+			var held: int = Time.get_ticks_msec() - _charge_msec
+			_charge_msec = -1
+			if held < CHARGE_START_MS:
+				client.attack(aim)
+			else:
+				client.power_attack(aim, clampf(float(held - CHARGE_START_MS) / float(CHARGE_FULL_MS - CHARGE_START_MS), 0.0, 1.0))
+			_attack_cooldown = 0.18
+			_last_attack_msec = Time.get_ticks_msec()
+	elif can_swing and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _attack_cooldown <= 0.0:
 		client.attack(aim)
 		_attack_cooldown = 0.18
 		_last_attack_msec = Time.get_ticks_msec()
+	else:
+		_charge_msec = -1
 
 
 func _process(delta: float) -> void:
@@ -1545,6 +1576,13 @@ func _process(delta: float) -> void:
 			_hit_marker = move_toward(_hit_marker, 0.0, delta * 4.0)
 			FirstPersonView.layout_crosshair(_crosshair, FirstPersonView.crosshair_spread(
 				avatar_model.speed if avatar_model != null else 0.0, _jump_time >= 0.0), _hit_marker)
+	if _brawl_meter == null and hud != null:
+		_brawl_meter = BrawlMeter.new()
+		hud.add_child(_brawl_meter)
+	if _brawl_meter != null:
+		_brawl_meter.visible = _first_person
+		_brawl_meter.update_state(charge_amount(), _charge_msec >= 0, float(client.you.get("rage", 0.0)),
+			float(client.you.get("rage_seconds", 0.0)), delta)
 	_update_underwater()
 	_tick_first_steps(delta)
 	if _demo == "sky":
@@ -2186,6 +2224,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_Q:
 				if Input.is_key_pressed(KEY_SHIFT) and not hud.is_menu_open():
 					client.loot_sweep()
+				elif _first_person and _melee_equipped() and _can_fight() and not hud.is_menu_open():
+					client.kick(_look_direction()) # First person: Q kicks; E still interacts.
 				else:
 					_interact()
 			KEY_1:
@@ -2245,6 +2285,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				elif Input.is_key_pressed(KEY_SHIFT):
 					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 						_quick_use("field_alkali_kit")
+				elif _first_person and float(client.you.get("rage", 0.0)) >= 100.0 and _can_fight():
+					client.rage()
 				else:
 					client.drink()
 			KEY_T:
@@ -2424,6 +2466,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			client.ultimate()
 			get_viewport().set_input_as_handled()
 			return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT \
+			and _first_person and _melee_equipped() and _can_fight() and not hud.is_menu_open():
+		client.parry() # First person melee: right mouse blocks, perfectly timed it parries.
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
 			_set_first_person(not _first_person)
@@ -2845,4 +2890,22 @@ func _wound_on_zombie(event: Dictionary) -> void:
 		var aim: Vector3 = chest + Vector3(randf_range(-0.25, 0.25), randf_range(-0.6, 0.45), randf_range(-0.25, 0.25))
 		direction = (aim - origin).normalized()
 	_wound_fx.on_hit(model, origin, direction, float(event.get("damage", 0.0)),
-		bool(event.get("ranged", false)), bool(event.get("fatal", false)), true, str(event.get("weapon", "")))
+		bool(event.get("ranged", false)), bool(event.get("fatal", false)), true, str(event.get("weapon", "")),
+		float(_last_charge.get(by, 0.0)))
+
+
+## How far the current melee wind-up has charged, 0..1.
+func charge_amount() -> float:
+	if _charge_msec < 0:
+		return 0.0
+	return clampf(float(Time.get_ticks_msec() - _charge_msec - CHARGE_START_MS) / float(CHARGE_FULL_MS - CHARGE_START_MS), 0.0, 1.0)
+
+
+func _melee_equipped() -> bool:
+	var weapon: String = str(client.inventory.weapon) if client != null and client.inventory != null else ""
+	return weapon == "" or str(Defs.item(weapon).get("weapon", "melee")) != "ranged"
+
+
+func _look_direction() -> Vector2:
+	var aim: Vector2 = _aim_direction()
+	return aim if aim != Vector2.ZERO else Vector2(sin(client.yaw), cos(client.yaw))

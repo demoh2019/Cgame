@@ -87,6 +87,7 @@ const BikeIntegrity = preload("res://scripts/shared/bike_integrity.gd")
 const BikeLantern = preload("res://scripts/shared/bike_lantern.gd")
 const BikeGrip = preload("res://scripts/shared/bike_grip.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
+const Brawl = preload("res://scripts/shared/brawl.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
 const ParryRiposte = preload("res://scripts/shared/parry_riposte.gd")
 const StaggerFinisher = preload("res://scripts/shared/stagger_finisher.gd")
@@ -276,6 +277,9 @@ class Player:
 	var dodge_timer: float = 0.0
 	var dodge_immunity: float = 0.0
 	var parry_cooldown: float = 0.0 # Server-owned timed melee defense.
+	var rage: float = 0.0 # Built by trading blows; spent on Rage.
+	var rage_seconds: float = 0.0 # Rage active: harder, faster, tougher, free swings.
+	var kick_cooldown: float = 0.0
 	var parry_window: float = 0.0 # First valid infected melee consumes it.
 	var edge_coating_weapon: String = "" # Nonpersistent selected melee gear.
 	var edge_coating_seconds: float = 0.0 # 120s server-owned bonus only vs infected.
@@ -384,6 +388,7 @@ var _acid_last_hit: Dictionary = {} # Peer -> last pooled acid hit time; no stac
 var _acid_wall_last_hit: Dictionary = {} # Wall id -> last corrosion time; no overlap stacking.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
 var market_orders: Dictionary = {} # id -> escrowed listing (goods held by the market).
+var downed_until: Dictionary = {} # zombie id -> server time it gets back up (knocked down).
 var market_payouts: Dictionary = {} # account -> silver owed from sales, collected at the hub.
 var market_returns: Dictionary = {} # account -> {item: count} unsold or cancelled goods.
 var market_sales: Array = [] # Bounded session-only receipts, NOT durable settlement.
@@ -4664,7 +4669,7 @@ func cmd_drink_water(peer_id: int) -> Dictionary:
 
 ## Attack in the direction the player is facing. Melee hits the closest enemy in range; a pistol
 ## shoots a ray that hits the first enemy along it.
-func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
+func cmd_attack(peer_id: int, dir_x: float, dir_z: float, charge: float = 0.0) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
@@ -4681,7 +4686,21 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	if weapon != "" and player.inventory.count(weapon) < 1:
 		weapon = ""
 	var kind: String = Defs.item(weapon).get("weapon", "melee") if weapon != "" else "melee"
-	player.attack_timer = Combat.weapon_cooldown(weapon)
+	# Melee swings cost stamina; holding the attack charges a power blow. Ranged ignores both.
+	charge = clampf(charge, 0.0, 1.0) if is_finite(charge) and kind != "ranged" else 0.0
+	var raging: bool = player.rage_seconds > 0.0
+	var exhausted := false
+	if kind != "ranged" and not raging:
+		var cost: float = Brawl.swing_cost(charge)
+		if player.survival.stamina >= cost:
+			player.survival.stamina -= cost
+		else:
+			exhausted = true
+			charge = 0.0
+			player.survival.stamina = 0.0
+		player.survival.stamina_recovery_delay = Defs.STAMINA_RECOVERY_DELAY
+	player.attack_timer = Combat.weapon_cooldown(weapon) * (
+		Brawl.cooldown_factor(charge, exhausted, raging) if kind != "ranged" else 1.0)
 	player.action = {} # Fighting interrupts gathering.
 	player.yaw = atan2(direction.x, direction.y)
 	var origin := Vector2(player.position.x, player.position.z)
@@ -4705,6 +4724,8 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		reach = Combat.ranged_range(weapon)
 	var is_ranged := kind == "ranged"
 	damage *= 1.0 + player.skills.bonus("ranged_damage" if is_ranged else "melee_damage")
+	if not is_ranged:
+		damage *= Brawl.damage_factor(charge, exhausted, raging)
 	var crit: bool = not is_ranged and rng.randf() < float(player.skills.bonus("crit_chance"))
 	if crit:
 		damage *= 1.5 + player.skills.bonus("crit_damage")
@@ -4724,7 +4745,7 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 			riposte = ParryRiposte.can_strike(player,
 				zombies.get(int(hit["id"])), weapon)
 		ParryRiposte.clear(player)
-	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": kind == "ranged", "x": player.position.x, "z": player.position.z})
+	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": kind == "ranged", "x": player.position.x, "z": player.position.z, "charge": charge})
 	if hit.is_empty():
 		var cover_hit: bool = is_ranged and _damage_ranged_cover(player,
 			origin, direction, reach, damage)
@@ -4780,8 +4801,21 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	# cooperative flank; skills, ranged fire and direct damage paths cannot.
 	var flanked: bool = not is_ranged and str(hit["kind"]) == "zombie" and \
 		PartyFlank.qualifies(player, zombies.get(int(hit["id"])), players, parties, world)
+	# Brawling: power blows stagger and floor, a downed enemy takes a ground finisher.
+	var downed_hit := false
+	if not is_ranged and str(hit["kind"]) == "zombie":
+		var struck = zombies.get(int(hit["id"]))
+		if struck != null and float(downed_until.get(struck.id, 0.0)) > time:
+			downed_hit = true
+			damage *= Brawl.GROUND_FINISHER
+			downed_until.erase(struck.id)
+			events.append({"type": "ground_finisher", "peer": peer_id, "zombie": struck.id})
+		elif struck != null and charge >= Brawl.POWER_STAGGER_CHARGE:
+			_brawl_impact(player, struck, Brawl.POWER_STAGGER_SECONDS, Brawl.POWER_KNOCKBACK)
+	player.rage = Brawl.gain_rage(player.rage, damage * Brawl.RAGE_PER_DAMAGE_DEALT) if not raging else player.rage
 	_damage_target(player, hit, damage, "ranged" if is_ranged else "melee", not is_ranged)
 	return {"ok": true, "hit": true, "target": hit["kind"], "party_flank": flanked,
+		"charge": charge, "exhausted": exhausted, "ground_finisher": downed_hit,
 		"crit": crit, "ambush": ambush, "riposte": riposte,
 		"sharpened": sharpened, "guardian_retribution": guard_counterstrike}
 
@@ -5160,6 +5194,75 @@ func cmd_stagger_finisher(peer_id: int) -> Dictionary:
 	return {"ok": true, "target": target.id, "damage": damage,
 		"killed": not target.is_alive(), "cooldown": player.finisher_cooldown,
 		"energy": player.combat_energy}
+
+
+## Stagger, shove and — if already reeling — knock the infected flat.
+func _brawl_impact(attacker: Player, zombie, stagger_seconds: float, knockback: float) -> void:
+	if downed_until.size() > 256:
+		for id in downed_until.keys():
+			if float(downed_until[id]) <= time or not zombies.has(id):
+				downed_until.erase(id)
+	var was_staggered: bool = zombie.stagger_seconds > 0.0
+	zombie.apply_knockback(world, attacker.position, knockback)
+	zombie.apply_stagger(stagger_seconds)
+	if was_staggered and not zombie.raid_boss:
+		zombie.stagger_seconds = maxf(zombie.stagger_seconds, Brawl.DOWN_SECONDS)
+		downed_until[zombie.id] = time + Brawl.DOWN_SECONDS
+		events.append({"type": "knockdown", "zombie": zombie.id, "peer": attacker.id,
+			"x": zombie.position.x, "z": zombie.position.z, "seconds": Brawl.DOWN_SECONDS})
+
+
+## Kick: cheap shove that staggers; a staggered target goes down for a ground finisher.
+func cmd_kick(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if player.kick_cooldown > 0.0 or player.attack_timer > 0.0:
+		return {"ok": false, "reason": "cooldown"}
+	var direction := Vector2(dir_x, dir_z)
+	if not direction.is_finite() or direction.length_squared() < 0.0001:
+		return {"ok": false, "reason": "no_direction"}
+	direction = direction.normalized()
+	if player.rage_seconds <= 0.0:
+		if player.survival.stamina < Brawl.KICK_STAMINA:
+			return {"ok": false, "reason": "no_stamina"}
+		player.survival.stamina -= Brawl.KICK_STAMINA
+		player.survival.stamina_recovery_delay = Defs.STAMINA_RECOVERY_DELAY
+	player.kick_cooldown = Brawl.KICK_COOLDOWN
+	player.attack_timer = maxf(player.attack_timer, 0.45)
+	player.action = {}
+	player.yaw = atan2(direction.x, direction.y)
+	player.dirty_character = true
+	events.append({"type": "kick", "peer": peer_id, "dir": direction, "x": player.position.x, "z": player.position.z})
+	var hit := _find_hit(player, Vector2(player.position.x, player.position.z), direction, Brawl.KICK_RANGE, false)
+	if hit.is_empty():
+		return {"ok": true, "hit": false}
+	if str(hit["kind"]) == "zombie":
+		var zombie = zombies.get(int(hit["id"]))
+		if zombie != null:
+			_brawl_impact(player, zombie, Brawl.KICK_STAGGER_SECONDS, Brawl.KICK_KNOCKBACK)
+	_damage_target(player, hit, Brawl.KICK_DAMAGE * (Brawl.RAGE_DAMAGE if player.rage_seconds > 0.0 else 1.0), "melee", false)
+	return {"ok": true, "hit": true, "target": hit["kind"]}
+
+
+## Rage: spend a full bar for a short frenzy.
+func cmd_rage(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.rage_seconds > 0.0:
+		return {"ok": false, "reason": "already_raging"}
+	if player.rage < Brawl.RAGE_MAX:
+		return {"ok": false, "reason": "rage_not_full", "rage": player.rage}
+	player.rage = 0.0
+	player.rage_seconds = Brawl.RAGE_SECONDS
+	player.survival.stamina = Defs.MAX_STAMINA
+	player.dirty_character = true
+	events.append({"type": "rage", "peer": peer_id, "active": true, "seconds": Brawl.RAGE_SECONDS,
+		"x": player.position.x, "z": player.position.z})
+	return {"ok": true, "seconds": Brawl.RAGE_SECONDS}
 
 
 func cmd_parry(peer_id: int) -> Dictionary:
@@ -5698,7 +5801,11 @@ func _tick_underwater(player: Player, delta: float) -> bool:
 
 func _hurt_player(victim: Player, raw_damage: float) -> float:
 	var reduced: float = raw_damage * (1.0 - victim.skills.bonus("damage_reduction"))
+	if victim.rage_seconds > 0.0:
+		reduced *= Brawl.RAGE_TAKEN
 	var applied: float = victim.survival.hurt(reduced)
+	if applied > 0.0 and victim.rage_seconds <= 0.0:
+		victim.rage = Brawl.gain_rage(victim.rage, applied * Brawl.RAGE_PER_DAMAGE_TAKEN)
 	if applied > 0.0:
 		_dismount(victim, true)
 		_cancel_recall(victim, "hurt")
@@ -6545,6 +6652,11 @@ func _tick_players(delta: float) -> void:
 		player.dodge_timer = maxf(player.dodge_timer - delta, 0.0)
 		player.dodge_immunity = maxf(player.dodge_immunity - delta, 0.0)
 		player.parry_cooldown = maxf(0.0, player.parry_cooldown - maxf(0.0, delta))
+		player.kick_cooldown = maxf(0.0, player.kick_cooldown - maxf(0.0, delta))
+		if player.rage_seconds > 0.0:
+			player.rage_seconds = maxf(0.0, player.rage_seconds - maxf(0.0, delta))
+			if player.rage_seconds <= 0.0:
+				events.append({"type": "rage", "peer": player.id, "active": false})
 		player.finisher_cooldown = maxf(0.0,
 			player.finisher_cooldown - maxf(0.0, delta))
 		player.arcane_cooldown = maxf(0.0, player.arcane_cooldown - maxf(0.0, delta))
@@ -8214,6 +8326,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"guardian_brace": player.guardian_brace,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"parry_cooldown": player.parry_cooldown, "parry_window": player.parry_window,
+			"rage": player.rage, "rage_seconds": player.rage_seconds, "kick_cooldown": player.kick_cooldown,
 			"riposte_seconds": player.riposte_seconds,
 			"finisher_cooldown": player.finisher_cooldown,
 			"arcane_cooldown": player.arcane_cooldown, "ultimate_cooldown": player.ultimate_cooldown,
