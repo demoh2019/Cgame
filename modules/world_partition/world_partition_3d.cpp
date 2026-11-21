@@ -1416,7 +1416,7 @@ void WorldPartition3D::update_streaming() {
 	for (int radius = 0; radius <= load_radius; radius++) {
 		for (int dz = -radius; dz <= radius; dz++) {
 			for (int dx = -radius; dx <= radius; dx++) {
-				if (MAX(ABS(dx), ABS(dz)) != radius) {
+				if (MAX(Math::abs(dx), Math::abs(dz)) != radius) {
 					continue;
 				}
 				const Vector2i cell = center + Vector2i(dx, dz);
@@ -1450,7 +1450,7 @@ void WorldPartition3D::update_streaming() {
 			for (int radius = 0; radius <= source->radius; radius++) {
 				for (int dz = -radius; dz <= radius; dz++) {
 					for (int dx = -radius; dx <= radius; dx++) {
-						if (MAX(ABS(dx), ABS(dz)) == radius) {
+						if (MAX(Math::abs(dx), Math::abs(dz)) == radius) {
 							_request_cell(source_center + Vector2i(dx, dz), new_requests, instances);
 						}
 					}
