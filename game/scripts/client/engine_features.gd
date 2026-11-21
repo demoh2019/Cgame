@@ -2,6 +2,10 @@ extends RefCounted
 ## Runtime detection of optional native engine classes, so scripts run on older editor binaries too.
 ## Everything touching a custom class goes through ClassDB.instantiate / set / call, so scripts parse without it.
 
+# Shared, read-only native query: avoids creating one Resource per zombie/frame.
+static var _resolve_visual_query: Object = null
+static var _resolve_query_checked := false
+
 
 static func has(engine_class: String) -> bool:
 	return ClassDB.class_exists(engine_class)
@@ -142,3 +146,24 @@ static func runtime_has(node: Node, tag: String, fallback: bool = false) -> bool
 		if container != null and container.has_method("replace_tag_branch") and container.has_method("has_tag"):
 			return bool(container.call("has_tag", StringName(tag), true))
 	return fallback
+
+
+## Native counted-tag query for the rendered Resolve state. The query is
+## constructed once per game session and reused across all infected actors.
+## Older Cgame binaries still use their native get_stack_count; stock Godot
+## falls back to the authoritative snapshot's own count.
+static func runtime_has_resolve(node: Node, fallback_stacks: int = 0) -> bool:
+	if node != null and node.has_meta("tag_stacks"):
+		var stacks: Object = node.get_meta("tag_stacks") as Object
+		if stacks != null and stacks.has_method("get_stack_count"):
+			if not _resolve_query_checked:
+				_resolve_query_checked = true
+				if has("GameplayTagQuery") and ClassDB.class_has_method("GameplayTagQuery", "matches_stacks"):
+					var query: Object = ClassDB.instantiate("GameplayTagQuery")
+					if query != null and query.has_method("set_min_stack_count"):
+						query.call("set_all_tags", PackedStringArray(["Runtime.Status.Resolve"]))
+						query.call("set_min_stack_count", 2)
+						_resolve_visual_query = query
+			if _resolve_visual_query != null:
+				return bool(_resolve_visual_query.call("matches_stacks", stacks))
+	return runtime_stack_count(node, "Runtime.Status.Resolve", fallback_stacks) >= 2

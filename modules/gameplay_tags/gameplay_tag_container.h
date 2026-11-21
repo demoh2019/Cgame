@@ -75,6 +75,8 @@ public:
  * Declarative query: every tag in `all_tags` must match, at least one of `any_tags` must match
  * (ignored when empty), and none of `none_tags` may match.
  */
+class GameplayTagStackContainer;
+
 class GameplayTagQuery : public Resource {
 	GDCLASS(GameplayTagQuery, Resource);
 
@@ -82,6 +84,7 @@ class GameplayTagQuery : public Resource {
 	PackedStringArray any_tags;
 	PackedStringArray none_tags;
 	bool exact = false;
+	int min_stack_count = 1; // Applies only to matches_stacks(), not matches().
 
 protected:
 	static void _bind_methods();
@@ -95,6 +98,11 @@ public:
 	PackedStringArray get_none_tags() const { return none_tags; }
 	void set_exact(bool p_exact) { exact = p_exact; emit_changed(); }
 	bool is_exact() const { return exact; }
+	void set_min_stack_count(int p_count);
+	int get_min_stack_count() const { return min_stack_count; }
 
 	bool matches(const Ref<GameplayTagContainer> &p_container) const;
+	// Uses the same all/any/none and hierarchy rules, requiring the configured
+	// count for each matching tag. Null behaves as an empty stack container.
+	bool matches_stacks(const Ref<GameplayTagStackContainer> &p_container) const;
 };
