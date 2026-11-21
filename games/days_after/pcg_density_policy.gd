@@ -52,11 +52,12 @@ static func _select_fallback(densities: PackedFloat32Array,
         var density: float = densities[i]
         if density == 0.0:
             continue
-        # 32-bit xorshift; identical to C++ uint32_t arithmetic.
+        # 32-bit avalanche mixing, with each multiplication masked to
+        # uint32. The largest intermediate fits safely into signed int64.
         var value: int = (int(stable_ids[i]) ^ seed ^ 0x9E3779B9) & HASH_MASK
-        value = (value ^ ((value << 13) & HASH_MASK)) & HASH_MASK
-        value = (value ^ (value >> 17)) & HASH_MASK
-        value = (value ^ ((value << 5) & HASH_MASK)) & HASH_MASK
+        value = ((value ^ (value >> 16)) * 0x45d9f3b) & HASH_MASK
+        value = ((value ^ (value >> 16)) * 0x45d9f3b) & HASH_MASK
+        value = (value ^ (value >> 16)) & HASH_MASK
         if density == 1.0 or float(value) < density * HASH_SCALE:
             result.append(i)
             if result.size() >= max_selected:
