@@ -127,6 +127,59 @@ is claimed without engine builds and gameplay profiling.
 Unreal reference:
 https://dev.epicgames.com/documentation/unreal-engine/animation-budget-allocator-in-unreal-engine
 
+## Adaptive main-thread CPU pressure controller (feedback from the rendered game)
+
+`CrowdAnimationBudgetGovernor` is a separate native `RefCounted`
+controller that adjusts the **existing cost-based optional tier-0 IK
+limit** in microseconds. Unlike the stateless tier planner, this one
+maintains only tiny bounded CPU pressure counters; it does not own
+Skeleton3D nodes, mixers, combat poses, callbacks or game logic.
+
+- Call `configure(max_budget_us, target_process_us=12500)` on quality
+  changes. Max budget is in 0..100000us, process target 1000..100000us.
+- Once each completed render frame, report the main-thread **CPU process
+  duration** in microseconds to `observe_process_time(duration_us)`,
+  which returns the adjusted optional full-pose allowance.
+- Quarter-weight integer EWMA smooths the reported process-time signal.
+  Two consecutive 12-frame windows above 95% of the process target
+  reduce the existing allowance by ~25% (floor 25% of max). Three
+  consecutive windows below 70% recover 1/8 of the maximum per step.
+  Neutral pressure resets both streak counters and leaves budget intact.
+- Zero samples are treated as unknown; negative/over-1-second samples
+  return -1 without changing pressure, and invalid configurations fail
+  atomically. An unchanged `configure` call retains evidence; quality
+  changes, `reset()`, or re-enabling after a pause clear old evidence.
+  Use `get_smoothed_process_us()`, `get_pressure_percent()`,
+  `get_current_budget_us()` and `get_frames_observed()` for diagnosis.
+- A zero maximum (Performance quality) continues to grant zero full-IK
+  slots via the existing slot policy. This is a **soft** work-unit cap,
+  not preemptive control of animation or an FPS guarantee.
+
+Albion After integrates this in the actual
+`entity_view.gd::_process` character pass using
+`Performance.get_monitor(Performance.TIME_PROCESS)`, **not**
+unrelated GPU-limited total frame delta. The real
+`CharacterAnim.apply_crowd` continues to use the same visibility-aware
+tier planner, independent full-IK/combat retention and measured
+`cap_full_pose_cost` API; only its *optional IK microsecond allowance*
+is dynamically reduced on sustained CPU frame pressure. Quality
+maximums remain **0/750/1500/2750us**. Frame-pressure target is
+12500us. When no native class is available, deterministic GDScript
+fallback runs the identical algorithm; its explicit
+`reset_adaptive_pose_budget()` is invoked when a new entity view
+enters the tree. Developer diagnostics are available via
+`CharacterAnim.adaptive_pose_budget_snapshot(quality)`.
+
+**Limitations:** CPU process time includes many client systems and can
+fluctuate for reasons unrelated to IK. The controller intentionally
+adapts only optional procedural IK rather than slowing authoritative
+combat animation. Reported pose costs are estimates from previously
+measured modifiers. No actual CPU/GPU benchmark or FPS improvement is
+claimed until native CI and in-game profiling complete.
+
+Unreal comparison:
+https://dev.epicgames.com/documentation/unreal-engine/animation-budget-allocator-in-unreal-engine
+
 ## Safety and portability
 
 - At most 16,384 actors; priority flags must match distances 1:1.

@@ -441,6 +441,103 @@ class TestCrowdPlanner(unittest.TestCase):
                 self.assertGreaterEqual(value, min(previous, sample))
                 self.assertLessEqual(value, max(previous, sample))
 
+    def test_adaptive_crowd_budget_source_contract(self):
+        module = ROOT / "modules/crowd_animation_tier_planner"
+        header = (module / "crowd_animation_budget_governor.h").read_text()
+        cpp = (module / "crowd_animation_budget_governor.cpp").read_text()
+        reg = (module / "register_types.cpp").read_text()
+        docs = ET.parse(module / "doc_classes/CrowdAnimationBudgetGovernor.xml").getroot()
+        game = GAME.read_text()
+        view = (ROOT / "game/scripts/client/entity_view.gd").read_text()
+        game_test = GAME_TEST.read_text()
+        self.assertIn("class CrowdAnimationBudgetGovernor : public RefCounted", header)
+        self.assertIn("GDREGISTER_CLASS(CrowdAnimationBudgetGovernor)", reg)
+        self.assertIn('D_METHOD("observe_process_time"', cpp)
+        self.assertIn('D_METHOD("configure"', cpp)
+        self.assertIn("smoothed_process_us = smoothed_process_us == 0 ? sample :", cpp)
+        self.assertIn("WINDOW_FRAMES = 12", header)
+        self.assertIn("high_streak >= 2", cpp)
+        self.assertIn("low_streak >= 3", cpp)
+        self.assertIn("current_budget_us = MAX(floor_us,", cpp)
+        self.assertIn("current_budget_us = MIN(max_budget_us,", cpp)
+        self.assertIn("if (!enabled || p_elapsed_us == 0 || max_budget_us == 0)", cpp)
+        self.assertIn("p_max_budget_us < 0 || p_max_budget_us > 100000", cpp)
+        self.assertTrue(any(method.get("name") == "observe_process_time"
+                            for method in docs.find("methods")))
+        self.assertIn("static func adaptive_full_pose_budget_us(", game)
+        self.assertIn("static func reset_adaptive_pose_budget()", game)
+        self.assertIn("static func adaptive_pose_budget_snapshot(", game)
+        self.assertIn("pose_budget_us: int = -1", game)
+        self.assertIn("allowance_us = mini(allowance_us, pose_budget_us)", game)
+        self.assertIn("Performance.TIME_PROCESS", view)
+        self.assertIn("CharacterAnim.adaptive_full_pose_budget_us(", view)
+        self.assertIn("CharacterAnim.reset_adaptive_pose_budget()", view)
+        self.assertIn("native and stock Godot pressure parity frame", game_test)
+
+    def test_adaptive_crowd_budget_numeric_invariants(self):
+        def observe(state, sample, maximum=1500, target=12500):
+            if sample < 0 or sample > 1000000:
+                return -1
+            if sample == 0 or maximum == 0:
+                return state["budget"]
+            old = state["ema"]
+            state["ema"] = sample if old == 0 else (3 * old + sample + 2) // 4
+            state["frames"] += 1
+            state["window"] += 1
+            if state["window"] < 12:
+                return state["budget"]
+            state["window"] = 0
+            if state["ema"] * 100 > target * 95:
+                state["high"] = min(2, state["high"] + 1)
+                state["low"] = 0
+            elif state["ema"] * 100 < target * 70:
+                state["low"] = min(3, state["low"] + 1)
+                state["high"] = 0
+            else:
+                state["high"] = state["low"] = 0
+            if state["high"] >= 2:
+                state["budget"] = max(max(1, (maximum + 3) // 4),
+                                      (state["budget"] * 3 + 2) // 4)
+                state["high"] = 0
+            elif state["low"] >= 3:
+                state["budget"] = min(maximum, state["budget"] +
+                                      max(1, maximum // 8))
+                state["low"] = 0
+            return state["budget"]
+
+        state = dict(ema=0, budget=1500, frames=0, window=0, high=0, low=0)
+        for _ in range(12):
+            observe(state, 25000)
+        self.assertEqual(state["budget"], 1500)
+        for _ in range(12):
+            observe(state, 25000)
+        self.assertEqual(state["budget"], 1125)
+        for _ in range(24):
+            observe(state, 25000)
+        self.assertEqual(state["budget"], 844)
+        for _ in range(72):
+            observe(state, 2500)
+        self.assertGreater(state["budget"], 844)
+        self.assertLess(state["budget"], 1500)
+        self.assertEqual(state["frames"], 120)
+        self.assertEqual(observe(state, 0), state["budget"])
+        self.assertEqual(observe(state, -1), -1)
+        self.assertEqual(state["frames"], 120)
+
+        for seed in range(25):
+            rng = random.Random(seed + 901122)
+            profile = rng.choice((750, 1500, 2750))
+            state = dict(ema=0, budget=profile, frames=0,
+                         window=0, high=0, low=0)
+            for _ in range(240):
+                sample = rng.choice((0, 2000, 3000, 8500, 10000,
+                                     11875, 12500, 17500, 55000))
+                value = observe(state, sample, profile)
+                self.assertGreaterEqual(value, max(1, (profile + 3) // 4))
+                self.assertLessEqual(value, profile)
+                self.assertGreaterEqual(state["frames"], 0)
+                self.assertLessEqual(state["window"], 11)
+
     def test_reject_corrupt_inputs(self):
         self.assertEqual(plan([1, 2], [1], 1, 1), [])
         self.assertEqual(plan([float("nan")], [1], 1, 1), [])

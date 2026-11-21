@@ -5,10 +5,114 @@ extends RefCounted
 const UP := Vector3.UP
 const CombatAnimationPriority = preload("res://scripts/client/combat_animation_priority.gd")
 static var _native_tier_planner: Object = null
+static var _native_budget_governor: Object = null
+static var _native_budget_quality: int = -1
+# A compact fallback state: stock Godot and old Cgame must make the same
+# admission decisions as the native governor without changing game simulation.
+static var _fallback_budget_quality: int = -1
+static var _fallback_budget_us: int = 0
+static var _fallback_process_ema_us: int = 0
+static var _fallback_window_frames: int = 0
+static var _fallback_high_windows: int = 0
+static var _fallback_low_windows: int = 0
 const NEAR_CAMERA_VISIBILITY_RADIUS := 3.0 # Matches the animation LOD close-camera safeguard.
 const IK_RETENTION_HYSTERESIS_METRES := 1.5 # Keeps a prior on-screen IK owner during small camera moves.
 # The soft CPU cap applies only to the optional script full-pose modifier.
 const FULL_POSE_CPU_BUDGET_US := [0, 750, 1500, 2750]
+const POSE_PROCESS_TARGET_US := 12500 # Main-thread process time, not FPS or GPU frame duration.
+
+## Clears CPU pressure history when the world/session or rendering policy
+## changes. This is visual-only: combat, server ticks and networking remain
+## completely outside adaptive full-pose budgeting.
+static func reset_adaptive_pose_budget() -> void:
+	_fallback_budget_quality = -1
+	_fallback_budget_us = 0
+	_fallback_process_ema_us = 0
+	_fallback_window_frames = 0
+	_fallback_high_windows = 0
+	_fallback_low_windows = 0
+	if _native_budget_governor != null and _native_budget_governor.has_method("reset"):
+		_native_budget_governor.call("reset")
+	_native_budget_quality = -1
+
+
+## A predictable native/stock-Godot CPU pressure controller. This only
+## adjusts the *optional* full-IK work-unit microsecond allowance; the
+## existing cap_full_pose_cost() still ranks actors by distance and prior
+## full-IK ownership and never reduces separately prioritized combat poses.
+## It consumes the most recently reported Godot Performance.TIME_PROCESS.
+static func adaptive_full_pose_budget_us(quality: int, frame_process_us: int,
+		prefer_native: bool = true) -> int:
+	if quality < 0 or quality > 3 or frame_process_us < 0 or frame_process_us > 1000000:
+		return -1
+	var base: int = FULL_POSE_CPU_BUDGET_US[quality]
+	if prefer_native and ClassDB.class_exists("CrowdAnimationBudgetGovernor"):
+		if _native_budget_governor == null:
+			_native_budget_governor = ClassDB.instantiate("CrowdAnimationBudgetGovernor")
+			_native_budget_quality = -1
+		if _native_budget_governor != null and _native_budget_governor.has_method(
+				"observe_process_time"):
+			if _native_budget_quality != quality:
+				if not bool(_native_budget_governor.call("configure", base, POSE_PROCESS_TARGET_US)):
+					return -1
+				_native_budget_quality = quality
+			return int(_native_budget_governor.call("observe_process_time", frame_process_us))
+	if _fallback_budget_quality != quality:
+		_fallback_budget_quality = quality
+		_fallback_budget_us = base
+		_fallback_process_ema_us = 0
+		_fallback_window_frames = 0
+		_fallback_high_windows = 0
+		_fallback_low_windows = 0
+	if frame_process_us == 0 or base == 0:
+		return _fallback_budget_us
+	_fallback_process_ema_us = frame_process_us if _fallback_process_ema_us == 0 else \
+		int((3 * _fallback_process_ema_us + frame_process_us + 2) / 4)
+	_fallback_window_frames += 1
+	if _fallback_window_frames < 12:
+		return _fallback_budget_us
+	_fallback_window_frames = 0
+	if _fallback_process_ema_us * 100 > POSE_PROCESS_TARGET_US * 95:
+		_fallback_high_windows = mini(_fallback_high_windows + 1, 2)
+		_fallback_low_windows = 0
+	elif _fallback_process_ema_us * 100 < POSE_PROCESS_TARGET_US * 70:
+		_fallback_low_windows = mini(_fallback_low_windows + 1, 3)
+		_fallback_high_windows = 0
+	else:
+		_fallback_high_windows = 0
+		_fallback_low_windows = 0
+	if _fallback_high_windows >= 2:
+		_fallback_budget_us = maxi(maxi(1, int((base + 3) / 4)),
+			int((3 * _fallback_budget_us + 2) / 4))
+		_fallback_high_windows = 0
+	elif _fallback_low_windows >= 3:
+		_fallback_budget_us = mini(base,
+			_fallback_budget_us + maxi(1, int(base / 8)))
+		_fallback_low_windows = 0
+	return _fallback_budget_us
+
+
+## On-demand diagnostics; never constructed by the per-frame crowd path.
+static func adaptive_pose_budget_snapshot(quality: int) -> Dictionary:
+	var base: int = FULL_POSE_CPU_BUDGET_US[clampi(quality, 0, 3)]
+	if _native_budget_governor != null and _native_budget_quality == quality and \
+			_native_budget_governor.has_method("get_current_budget_us"):
+		return {
+			"source": "native", "base_us": base,
+			"allowance_us": int(_native_budget_governor.call("get_current_budget_us")),
+			"process_ema_us": int(_native_budget_governor.call("get_smoothed_process_us")),
+			"pressure_percent": int(_native_budget_governor.call("get_pressure_percent")),
+			"samples": int(_native_budget_governor.call("get_frames_observed"))
+		}
+	var same_quality: bool = _fallback_budget_quality == quality
+	var process_us: int = _fallback_process_ema_us if same_quality else 0
+	return {
+		"source": "script", "base_us": base,
+		"allowance_us": _fallback_budget_us if same_quality else base,
+		"process_ema_us": process_us,
+		"pressure_percent": mini(1000, int(process_us * 100 / POSE_PROCESS_TARGET_US))
+	}
+
 
 # --- Animation LOD / crowd budget (Unreal URO / Unity Animator Culling) --------------------------------------------------
 
@@ -391,7 +495,8 @@ static func layerable(animation_name: String, moving: bool, zombie: bool) -> boo
 
 ## Once per frame over every live CharacterModel: distance LOD tiers within the crowd budget, terrain source for foot
 ## IK, and a camera look-at for the closest few. `models` are CharacterModel nodes.
-static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: Callable) -> void:
+static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: Callable,
+		pose_budget_us: int = -1) -> void:
 	if camera == null or models.is_empty():
 		return
 	var cam: Vector3 = camera.global_position
@@ -427,11 +532,13 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 		retained_combat_mask, 1.5)
 	if tiers.size() != models.size():
 		return
-	# Secondary predicted CPU gate: no change to combat-priority decisions
-	# and never a pause of game-authoritative movement or attack animation.
+	# Secondary predicted CPU gate: a caller-supplied adaptive allowance
+	# reduces only optional IK work. No change to prioritized combat poses.
+	var allowance_us: int = FULL_POSE_CPU_BUDGET_US[clampi(quality, 0, 3)]
+	if pose_budget_us >= 0:
+		allowance_us = mini(allowance_us, pose_budget_us)
 	tiers = cap_full_pose_cost(tiers, distances, retained_full_mask,
-		full_pose_cost_us, FULL_POSE_CPU_BUDGET_US[clampi(quality, 0, 3)],
-		IK_RETENTION_HYSTERESIS_METRES)
+		full_pose_cost_us, allowance_us, IK_RETENTION_HYSTERESIS_METRES)
 	if tiers.size() != models.size():
 		return
 	for i in models.size():

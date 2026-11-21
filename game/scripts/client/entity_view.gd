@@ -783,6 +783,11 @@ func _update_corpses(delta: float) -> void:
 			_corpses.remove_at(i)
 
 
+func _enter_tree() -> void:
+	# A newly opened world must not inherit CPU pressure from an old scene.
+	CharacterAnim.reset_adaptive_pose_budget()
+
+
 func _process(delta: float) -> void:
 	# Native full-rate combat slots follow the same live 4-tier graphics budget.
 	# The setter is called only on quality transitions, not each render frame.
@@ -835,9 +840,16 @@ func _process(delta: float) -> void:
 				if bike.visible:
 					bike.set_riding(true, model.speed, delta)
 	_apply_leaps(delta)
-	# Animation LOD / crowd budget, foot IK terrain source and head look-at (character_anim.gd).
+	# Only optional procedural IK follows the completed main-thread CPU
+	# process-time pressure. Do not use total frame delta (which includes
+	# GPU wait or throttled rendering) or touch combat/network scheduling.
+	var last_process_us: int = clampi(roundi(float(Performance.get_monitor(
+		Performance.TIME_PROCESS)) * 1000000.0), 0, 1000000)
+	var pose_budget_us: int = CharacterAnim.adaptive_full_pose_budget_us(
+		GraphicsQuality.level(), last_process_us)
+	# Animation LOD / crowd budget, foot IK terrain source and head look-at.
 	CharacterAnim.apply_crowd(anim_models, get_viewport().get_camera_3d(), GraphicsQuality.level(),
-		_world.height_at if _world != null else Callable())
+		_world.height_at if _world != null else Callable(), pose_budget_us)
 
 
 ## Position and facing of a moving entity at the render time, between the two samples around it; past the newest

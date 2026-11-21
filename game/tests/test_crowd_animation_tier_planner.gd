@@ -454,3 +454,95 @@ func run(t) -> void:
 	t.check(modifier_profile_source.contains(
 		'var measure_pose: bool = look_at_enabled and not use_engine_profile_timing'),
 		"native modifier stopwatch supersedes redundant script-level timing")
+
+
+	t.current = "adaptive optional IK CPU allowance is bounded and hysteretic"
+	CharacterAnim.reset_adaptive_pose_budget()
+	t.eq(CharacterAnim.adaptive_full_pose_budget_us(2, 25000, false), 1500,
+		"one overload spike does not reduce procedural IK quality")
+	for i in 23:
+		CharacterAnim.adaptive_full_pose_budget_us(2, 25000, false)
+	t.eq(CharacterAnim.adaptive_full_pose_budget_us(2, 0, false), 1125,
+		"two 12-sample high-pressure windows reduce expensive IK by 25%")
+	for i in 24:
+		CharacterAnim.adaptive_full_pose_budget_us(2, 25000, false)
+	t.eq(CharacterAnim.adaptive_full_pose_budget_us(2, 0, false), 844,
+		"another sustained overload reduces optional work without reaching zero")
+	for i in 72:
+		CharacterAnim.adaptive_full_pose_budget_us(2, 2500, false)
+	var quiet_budget: int = CharacterAnim.adaptive_full_pose_budget_us(2, 0, false)
+	t.check(quiet_budget > 844 and quiet_budget < 1500,
+		"slow recovery increases IK only after three quiet evidence windows")
+	var budget_snapshot: Dictionary = CharacterAnim.adaptive_pose_budget_snapshot(2)
+	t.eq(budget_snapshot.get("source"), "script",
+		"stock-Godot exposes on-demand frame-pressure diagnostics")
+	t.eq(budget_snapshot.get("allowance_us"), quiet_budget,
+		"diagnostics match the actual script work allowance")
+	t.check(int(budget_snapshot.get("process_ema_us")) <= 3000,
+		"fast spikes fade out of the measured CPU EMA")
+	t.eq(CharacterAnim.adaptive_full_pose_budget_us(2, -1, false), -1,
+		"invalid negative process duration fails closed")
+	t.eq(CharacterAnim.adaptive_full_pose_budget_us(2, 1000001, false), -1,
+		"invalid long process duration fails closed")
+	t.eq(CharacterAnim.adaptive_full_pose_budget_us(4, 10000, false), -1,
+		"invalid graphic preset is rejected before touching the controller")
+	t.eq(CharacterAnim.adaptive_full_pose_budget_us(2, 0, false), quiet_budget,
+		"invalid samples did not corrupt current optional pose allowance")
+	t.eq(CharacterAnim.adaptive_full_pose_budget_us(1, 25000, false), 750,
+		"graphics quality transitions atomically restore the new maximum")
+	t.eq(CharacterAnim.adaptive_full_pose_budget_us(0, 25000, false), 0,
+		"Performance preset never admits an expensive full-IK pose")
+
+	t.current = "native and older-engine animation CPU pressure parity"
+	if ClassDB.class_exists("CrowdAnimationBudgetGovernor"):
+		var native_governor: Object = ClassDB.instantiate("CrowdAnimationBudgetGovernor")
+		t.check(native_governor != null and native_governor.has_method(
+			"observe_process_time"), "new Cgame exposes the native CPU pressure governor")
+		if native_governor != null and native_governor.has_method("observe_process_time"):
+			CharacterAnim.reset_adaptive_pose_budget()
+			var sampled_quality := -1
+			for frame in 480:
+				# Separate extended hot/cold/neutral windows plus missing samples
+				# and quality transitions verify all state-machine branches.
+				var q: int = 2
+				if frame >= 460:
+					q = 0
+				elif frame >= 360:
+					q = 3
+				elif frame >= 240:
+					q = 1
+				var process_us: int = 10000
+				if frame % 120 < 54:
+					process_us = 25000
+				elif frame % 120 < 102:
+					process_us = 2500
+				if frame % 41 == 0:
+					process_us = 0
+				if q != sampled_quality:
+					t.check(bool(native_governor.call("configure",
+						CharacterAnim.FULL_POSE_CPU_BUDGET_US[q],
+						CharacterAnim.POSE_PROCESS_TARGET_US)),
+						"native governor accepted valid configured quality")
+					sampled_quality = q
+				var native_allowance: int = int(native_governor.call(
+					"observe_process_time", process_us))
+				var script_allowance: int = CharacterAnim.adaptive_full_pose_budget_us(
+					q, process_us, false)
+				t.eq(native_allowance, script_allowance,
+					"native and stock Godot pressure parity frame %d quality %d" % [frame, q])
+			t.eq(int(native_governor.call("get_current_budget_us")),
+				CharacterAnim.adaptive_full_pose_budget_us(0, 0, false),
+				"native and fallback Performance profiles finish with no optional IK")
+	CharacterAnim.reset_adaptive_pose_budget()
+	var source_governor: String = FileAccess.get_file_as_string(
+		"res://scripts/client/entity_view.gd")
+	var source_anim_budget: String = FileAccess.get_file_as_string(
+		"res://scripts/client/character_anim.gd")
+	t.check(source_governor.contains("Performance.TIME_PROCESS") and
+		source_governor.contains("CharacterAnim.adaptive_full_pose_budget_us(") and
+		source_governor.contains("CharacterAnim.reset_adaptive_pose_budget()"),
+		"real Albion entity driver uses CPU process monitor and resets session evidence")
+	t.check(source_anim_budget.contains("pose_budget_us: int = -1") and
+		source_anim_budget.contains("allowance_us = mini(allowance_us, pose_budget_us)") and
+		source_anim_budget.contains("CombatAnimationPriority.slots(quality)"),
+		"adaptive budget affects only optional tier-0 IK after combat priorities")
