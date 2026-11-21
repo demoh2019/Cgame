@@ -139,6 +139,17 @@
 				This does not change [member instance_count], [member visible_instance_count], colors, custom data, collision, or game entity IDs. One RenderingServer command is still issued per instance. For dense updates use [member buffer]; this API is not a single GPU upload.
 			</description>
 		</method>
+		<method name="set_instance_transform_color_buffer">
+			<return type="bool" />
+			<param index="0" name="transforms" type="Array" />
+			<param index="1" name="colors" type="PackedColorArray" />
+			<description>
+				Validates and uploads the complete array of 3D instance transforms and instance RGBA colors using one packed MultiMesh buffer update. This combines native packing with a single RenderingServer full-buffer upload; it does not send a separate update for every instance.
+				The MultiMesh must have [enum TRANSFORM_3D], [member use_colors] enabled and [member use_custom_data] disabled. Both arrays must have exactly [member instance_count] elements, every transform must be [Transform3D], and every transform/color component must be finite. Invalid input returns [code]false[/code] without changing the existing buffer. Zero instances with empty input is valid.
+				The method uses 16 packed float values per instance (a row-major 3x4 transform and four RGBA floats). This [b]replaces all instance transform and color values[/b], including hidden slots; [member instance_count], [member visible_instance_count] and the mesh stay unchanged. It does not update collision, navigation or game entity IDs.
+				Prefer this method when initializing an entire dense 3D batch from gameplay data. For sparse updates, use [method set_instance_transforms_batch] and [method set_instance_colors_batch] instead. Regular Godot can achieve the same buffer layout with [member buffer].
+			</description>
+		</method>
 		<method name="set_instance_transform">
 			<return type="void" />
 			<param index="0" name="instance" type="int" />

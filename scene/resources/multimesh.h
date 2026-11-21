@@ -83,6 +83,8 @@ public:
 	Vector<float> get_buffer() const;
 	// Build static 3D GPU instance records in one native pass, preserving
 	// transforms and optional tint without per-float GDScript writes.
+	// Validate and atomically upload a whole 3D transform/RGBA buffer.
+	bool set_instance_transform_color_buffer(const Array &p_transforms, const Vector<Color> &p_colors);
 	Vector<float> pack_transform_buffer(const Array &p_transforms, const Vector<Color> &p_colors) const;
 	// Union transformed mesh bounds without a script loop per instance.
 	AABB transformed_mesh_bounds(const Array &p_transforms, real_t p_margin) const;
