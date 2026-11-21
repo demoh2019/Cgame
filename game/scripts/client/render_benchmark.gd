@@ -28,13 +28,19 @@ static func summarize(samples: Array[float]) -> Dictionary:
 	for ms in cleaned:
 		total += ms
 	var p99: float = _percentile(cleaned, 0.99)
+	# Real 1%-low FPS is the mean duration of the slowest ceil(1%) frames.
+	# 1000 / p99 is not the same metric when the capture has frame spikes.
+	var tail_count: int = maxi(1, ceili(float(cleaned.size()) * 0.01))
+	var tail_sum: float = 0.0
+	for i in range(cleaned.size() - tail_count, cleaned.size()):
+		tail_sum += cleaned[i]
 	return {
 		"count": cleaned.size(),
 		"p50_ms": _percentile(cleaned, 0.50),
 		"p95_ms": _percentile(cleaned, 0.95),
 		"p99_ms": p99,
 		"mean_ms": total / float(cleaned.size()),
-		"one_percent_low_fps": 1000.0 / p99,
+		"one_percent_low_fps": 1000.0 * float(tail_count) / tail_sum,
 	}
 
 
@@ -45,3 +51,13 @@ static func describe(result: Dictionary) -> String:
 		float(result["p50_ms"]), float(result["p95_ms"]),
 		float(result["p99_ms"]), float(result["one_percent_low_fps"]),
 		int(result["count"])]
+
+
+## GPU duration comes from native viewport timestamps. It does not include
+## game CPU work, synchronization or display V-Sync time.
+static func describe_gpu(result: Dictionary) -> String:
+	if int(result.get("count", 0)) <= 0:
+		return "GPU render time: unavailable (no valid timestamp samples)"
+	return "GPU render time (viewport timestamp, not FPS): p50 %.2f ms | p95 %.2f ms | p99 %.2f ms | %d samples" % [
+		float(result["p50_ms"]), float(result["p95_ms"]),
+		float(result["p99_ms"]), int(result["count"])]

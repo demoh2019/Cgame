@@ -205,7 +205,8 @@ var _raid_telegraph: Node3D
 var _lightning_visual: Node3D
 var _screenshot_path := ""
 var _screenshot_frames := 0
-var _frame_ms: Array[float] = [] # Frame times before a demo screenshot, for the median printed with it.
+var _frame_ms: Array[float] = [] # CPU process deltas in the screenshot capture window.
+var _gpu_frame_ms: Array[float] = [] # Native viewport GPU timings, sampled independently.
 var _demo := ""
 var _frames := 0
 var _demo_frames := 0 # Frames since the first snapshot arrived.
@@ -262,6 +263,9 @@ func _ready() -> void:
 			"--connect":
 				address_edit.text = address
 		i += 1
+	# Screenshot benchmarks opt in to viewport GPU timestamps even if Auto
+	# quality is disabled; normal manual-quality runs incur no query cost.
+	_update_gpu_measurements()
 	address_edit.text = address
 	name_edit.text = player_name
 	if _demo != "" and _screenshot_path != "":
@@ -1791,7 +1795,8 @@ func _update_gpu_measurements() -> void:
 	if get_viewport() == null:
 		return
 	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(),
-		_auto_graphics and RenderingServer.get_current_rendering_method() == "forward_plus")
+		(_auto_graphics or _screenshot_path != "") and
+		RenderingServer.get_current_rendering_method() == "forward_plus")
 
 
 func _set_auto_graphics(enabled: bool) -> void:
@@ -2536,14 +2541,25 @@ func _run_demo() -> void:
 		_screenshot_frames += 1
 		if _screenshot_frames > 540:
 			_frame_ms.append(get_process_delta_time() * 1000.0)
+			if RenderingServer.get_current_rendering_method() == "forward_plus":
+				var gpu_sample: float = RenderingServer.viewport_get_measured_render_time_gpu(
+					get_viewport().get_viewport_rid())
+				if is_finite(gpu_sample) and gpu_sample > 0.0:
+					_gpu_frame_ms.append(gpu_sample)
 		if _screenshot_frames == 700:
 			# The window may be hidden behind others, in which case the last drawn frame would be stale: draw now.
 			RenderingServer.force_draw()
 			get_viewport().get_texture().get_image().save_png(_screenshot_path)
-			# Report tail-frame stutters instead of hiding them behind one median.
-			# These are CPU process deltas, NOT real GPU timer measurements.
+			# GPU timestamps can lag by a frame: compare the independent
+			# distributions, never treat sample indices as synchronized.
 			var pace: Dictionary = RenderBenchmark.summarize(_frame_ms)
+			var gpu_pace: Dictionary = RenderBenchmark.summarize(_gpu_frame_ms)
 			print(RenderBenchmark.describe(pace))
+			print(RenderBenchmark.describe_gpu(gpu_pace))
+			print("CGAME_FRAME_BENCHMARK " + JSON.stringify({
+				"render_method": RenderingServer.get_current_rendering_method(),
+				"cpu": pace, "gpu": gpu_pace
+			}))
 			print("CLIENT frame: %d fps, %d draw calls, %d primitives, %d objects" % [Engine.get_frames_per_second(),
 				Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
 				Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)])

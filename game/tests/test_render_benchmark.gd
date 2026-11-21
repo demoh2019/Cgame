@@ -18,9 +18,18 @@ func run(t) -> void:
 		"99th percentile interpolates the worst 1% correctly")
 	t.near(float(summary["mean_ms"]), 30.0, 0.00001,
 		"mean uses the full set of actual frame durations")
-	t.near(float(summary["one_percent_low_fps"]), 1000.0 / 49.6, 0.00001,
-		"1%-low FPS derives from the slowest percentile")
+	t.near(float(summary["one_percent_low_fps"]), 1000.0 / 50.0, 0.00001,
+		"1%-low FPS derives from the actual slowest frame durations")
 	t.eq(source, original, "profiling never reorders the caller's recording")
+	var long_capture: Array[float] = []
+	for i in 99:
+		long_capture.append(10.0)
+	long_capture.append(100.0)
+	var tail: Dictionary = RenderBenchmark.summarize(long_capture)
+	t.near(float(tail["p99_ms"]), 10.9, 0.0001,
+		"p99 remains interpolated and is not a 1%-low calculation")
+	t.near(float(tail["one_percent_low_fps"]), 10.0, 0.0001,
+		"one 100 ms hitch among 100 frames means a 10 FPS 1%-low")
 	var text_line: String = RenderBenchmark.describe(summary)
 	t.check(text_line.contains("p50") and text_line.contains("p95") and
 		text_line.contains("p99") and text_line.contains("CPU, not GPU"),
@@ -44,6 +53,12 @@ func run(t) -> void:
 	t.near(valid["p50_ms"], 15.0, 0.00001,
 		"bad samples never pollute comparisons across visual presets")
 
+	t.current = "GPU summaries distinguish render time from frame rate"
+	t.check(RenderBenchmark.describe_gpu(empty).contains("unavailable"),
+		"missing GPU samples are explicitly unavailable")
+	t.check(RenderBenchmark.describe_gpu(summary).contains("not FPS"),
+		"GPU render workload is not presented as display FPS")
+
 	t.current = "the real screenshot demo calls the benchmark"
 	var client_code: String = FileAccess.get_file_as_string(
 		"res://scripts/client/online_main.gd")
@@ -51,3 +66,11 @@ func run(t) -> void:
 		"online scene measures its actual scene render loop")
 	t.check(client_code.contains("RenderBenchmark.describe(pace)"),
 		"the benchmark writes the result into existing demo logs")
+	t.check(client_code.contains("_gpu_frame_ms.append(gpu_sample)"),
+		"live capture reads native GPU timestamps instead of inventing GPU data")
+	t.check(client_code.contains("RenderBenchmark.describe_gpu(gpu_pace)"),
+		"GPU render times are reported separately from CPU times")
+	t.check(client_code.contains("CGAME_FRAME_BENCHMARK "),
+		"the demo outputs a reproducible machine-readable benchmark record")
+	t.check(client_code.contains('(_auto_graphics or _screenshot_path != "")'),
+		"screenshots enable GPU timings even when automatic quality is disabled")

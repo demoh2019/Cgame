@@ -7,6 +7,8 @@ on:
       - 'game/scripts/client/**'
       - 'game/assets/shaders/**'
       - 'game/tests/**'
+      - 'tools/compare_frame_pacing.py'
+      - 'tools/tests/test_compare_frame_pacing.py'
       - 'game/project.godot'
       - 'servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.cpp'
       - 'servers/rendering/renderer_rd/effects/fsr2.cpp'
@@ -24,6 +26,8 @@ on:
       - 'game/scripts/client/**'
       - 'game/assets/shaders/**'
       - 'game/tests/**'
+      - 'tools/compare_frame_pacing.py'
+      - 'tools/tests/test_compare_frame_pacing.py'
       - 'game/project.godot'
       - 'servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.cpp'
       - 'servers/rendering/renderer_rd/effects/fsr2.cpp'
@@ -55,6 +59,7 @@ jobs:
         with:
           sparse-checkout: |
             game
+            tools
             servers/rendering/renderer_rd/shaders/effects
             servers/rendering/renderer_rd/shaders/forward_clustered
             servers/rendering/renderer_rd/forward_clustered
@@ -81,6 +86,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest tests/servers/rendering/test_fsr2_camera_history.py -v 2>&1 | tee fsr2-history-tests.log
+
+      - name: Verify reusable CPU/GPU benchmark comparison tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tools/tests -p 'test_compare_frame_pacing.py' -v 2>&1 | tee benchmark-compare-tests.log
 
       - name: Install verified official Godot 4.7.2 editor
         shell: bash
@@ -121,3 +132,4 @@ jobs:
             fsr2-history-tests.log
             pbr-reflection-tests.log
             ao-engine-tests.log
+            benchmark-compare-tests.log
