@@ -326,7 +326,7 @@ func run(t) -> void:
 	var cap_source: String = FileAccess.get_file_as_string("res://scripts/client/character_anim.gd")
 	var modifier_source: String = FileAccess.get_file_as_string(
 		"res://scripts/client/character_anim_modifier.gd")
-	t.check(cap_source.contains("tiers = cap_full_pose_cost(tiers, distances") and
+	t.check(cap_source.contains("tiers = cap_full_pose_cost_grouped(tiers, distances") and
 		cap_source.contains("retained_combat_mask, 1.5") and
 		cap_source.contains("full_pose_cost_us.append("),
 		"real game passes independent combat, live full-IK history and measured costs")
