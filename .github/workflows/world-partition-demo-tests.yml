@@ -33,6 +33,8 @@ jobs:
         run: godot --headless --path modules/world_partition/demo --script res://tests/hlod_blend_test.gd
       - name: Verify gameplay cell capture and restore callbacks
         run: godot --headless --path modules/world_partition/demo --script res://tests/cell_state_contract_test.gd
+      - name: Verify independent streamed chest, switch and gate state callbacks
+        run: godot --headless --path modules/world_partition/demo --script res://tests/stateful_interactables_test.gd
       - name: Verify streamed collision and navigation pathfinding contracts
         run: godot --headless --path modules/world_partition/demo --script res://tests/physics_navigation_lifecycle_test.gd
       - name: Verify opt-in RigidBody3D gameplay dynamics and persistence contract
