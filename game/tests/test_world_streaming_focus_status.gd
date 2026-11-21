@@ -13,7 +13,7 @@ func run(t) -> void:
 	t.eq(Policy.format_focus_streaming_status({
 		"total": 10, "completed": 6, "pending": 4, "failed": 0,
 		"progress": 0.6, "ready": false
-	}), "WORLD STREAMING: 60% (4 chunks remaining)", "partial world has a readable progress notice")
+	}), "WORLD STREAMING: 60% | pending 4", "partial world has a readable progress notice")
 	t.eq(Policy.format_focus_streaming_status({
 		"total": 10, "completed": 3, "pending": 5, "failed": 2,
 		"progress": 0.3
