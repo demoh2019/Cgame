@@ -22,6 +22,10 @@ on:
       - 'game/tests/test_world_streamer_chunk_cache.gd'
       - 'game/tests/run_chunk_cache.gd'
       - 'tests/scene/test_world_streamer_chunk_cache.cpp'
+      - 'game/scripts/client/graphics_quality.gd'
+      - 'game/tests/test_world_streamer_unload_budget.gd'
+      - 'game/tests/run_streamer_unloads.gd'
+      - 'tests/scene/test_world_streamer_unload_budget.cpp'
       - 'tests/scene/test_world_streamer_backpressure_contract.py'
       - '.github/workflows/native-world-streamer-backpressure.yml'
   push:
@@ -44,6 +48,10 @@ on:
       - 'game/tests/test_world_streamer_chunk_cache.gd'
       - 'game/tests/run_chunk_cache.gd'
       - 'tests/scene/test_world_streamer_chunk_cache.cpp'
+      - 'game/scripts/client/graphics_quality.gd'
+      - 'game/tests/test_world_streamer_unload_budget.gd'
+      - 'game/tests/run_streamer_unloads.gd'
+      - 'tests/scene/test_world_streamer_unload_budget.cpp'
       - 'tests/scene/test_world_streamer_backpressure_contract.py'
       - '.github/workflows/native-world-streamer-backpressure.yml'
 
@@ -129,6 +137,26 @@ jobs:
           timeout 300s "$BIN" --headless --path game --script res://tests/run_chunk_cache.gd 2>&1 | tee chunk-cache.log
           grep -E '^CHUNK CACHE TOTAL: [0-9]+ checks, 0 failures$' chunk-cache.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' chunk-cache.log; then exit 1; fi
+      - name: Budgeted visual chunk unloads and quality presets
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_streamer_unloads.gd 2>&1 | tee streamer-unloads.log
+          grep -E '^STREAM UNLOADS TOTAL: [0-9]+ checks, 0 failures        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adaptive-streamer-regression
+          if-no-files-found: ignore
+          path: |
+            streamer-native.log
+            streamer-import.log
+            streamer-game.log
+            simulation-tier.log
+            auxiliary-readiness.log
+            chunk-cache.log
+ streamer-unloads.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' streamer-unloads.log; then exit 1; fi
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -141,4 +169,5 @@ jobs:
             streamer-game.log
             simulation-tier.log
             auxiliary-readiness.log
+            streamer-unloads.log
             chunk-cache.log

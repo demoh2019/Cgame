@@ -91,6 +91,11 @@ private:
 	Vector3 last_queued_view_direction;
 	int max_concurrent_loads = 4;
 	int max_instantiations_per_frame = 1;
+	// Opt-in bounded per-refresh unloads. Zero preserves historical immediate
+	// release of every distant cell; positive counts defer the rest.
+	int max_unloads_per_update = 0;
+	int last_unload_count = 0;
+	int last_deferred_unload_count = 0;
 	// Soft main-thread time slice for procedural generation or scene
 	// activation (0 = count-only). Each individual chunk is indivisible.
 	int max_chunk_work_usec = 0;
@@ -233,6 +238,10 @@ public:
 	void set_max_concurrent_loads(int p_count);
 	int get_max_concurrent_loads() const { return max_concurrent_loads; }
 	void set_max_instantiations_per_frame(int p_count);
+	void set_max_unloads_per_update(int p_count);
+	int get_max_unloads_per_update() const { return max_unloads_per_update; }
+	int get_last_unload_count() const { return last_unload_count; }
+	int get_last_deferred_unload_count() const { return last_deferred_unload_count; }
 	int get_max_instantiations_per_frame() const { return max_instantiations_per_frame; }
 	void set_max_chunk_work_usec(int p_usec);
 	void set_simulation_radius(real_t p_radius);

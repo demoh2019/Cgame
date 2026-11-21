@@ -153,6 +153,14 @@
 				Returns the cells whose chunks are currently loaded.
 			</description>
 		</method>
+		<method name="get_last_unload_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of distant cells actually unloaded during the last streaming refresh. Zero when none were eligible or immediately after [method unload_all]. This count is independent of scene creation and native simulation LOD transitions.</description>
+		</method>
+		<method name="get_last_deferred_unload_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of out-of-range resident cells whose unload was deferred by the last refresh's [member max_unloads_per_update] budget. Each refresh recomputes eligibility from the current focus, so returning toward the old location cancels stale cleanup. This snapshot may become outdated before the next refresh.</description>
+		</method>
 		<method name="get_loaded_count" qualifiers="const">
 			<return type="int" />
 			<description>
@@ -242,7 +250,7 @@
 		<method name="unload_all">
 			<return type="void" />
 			<description>
-				Frees every loaded chunk and all detached cache entries. They are loaded again at the next update while the focus is nearby.
+				Frees every loaded chunk and all detached cache entries immediately, even when [member max_unloads_per_update] is set. They are loaded again at the next update while the focus is nearby.
 			</description>
 		</method>
 		<method name="world_to_cell" qualifiers="const">
@@ -313,6 +321,9 @@
 		</member>
 		<member name="max_chunk_work_usec" type="int" setter="set_max_chunk_work_usec" getter="get_max_chunk_work_usec" default="0">
 			Soft CPU-time budget, in microseconds, shared across finished-scene activation and procedural chunk generation during one streaming update. Both paths use the same frame start timestamp. Once at least one chunk has been processed, no more chunks are integrated after the budget expires. A single chunk cannot be interrupted and may take longer than the budget. Enable [member adaptive_chunk_budget_enabled] to temporarily reduce effective limits during sustained slow frames; call [method get_effective_chunk_work_usec] for the resulting cap. The value is clamped to [code]0[/code] through [code]1000000[/code]; [code]0[/code] disables time slicing while keeping [member max_instantiations_per_frame] active. Also works with [method refresh].
+		</member>
+		<member name="max_unloads_per_update" type="int" setter="set_max_unloads_per_update" getter="get_max_unloads_per_update" default="0">
+			Optional maximum number of far-away chunk roots unloaded per streaming refresh. Zero preserves the original unlimited teardown behavior; positive values are clamped to 1–64. On teleport or a rapidly moving observer, the streamer unloads farthest expired cells first (stable coordinate ties) and leaves other expired cells resident temporarily, re-evaluating them on the next refresh. Nearby auxiliary streaming sources still protect their cells. Does not limit [method unload_all], scene-tree teardown, or grid configuration resets. Only enable for chunk scene roots whose gameplay/physics state is safe to retain temporarily; delayed cleanup increases peak memory residency.
 		</member>
 		<member name="max_instantiations_per_frame" type="int" setter="set_max_instantiations_per_frame" getter="get_max_instantiations_per_frame" default="1">
 			Maximum number of chunks activated during one native streaming update, counting both finished background scene loads and procedural generator calls against the same budget. Once the limit is reached, remaining cells stay queued for a later update. A generator that returns [code]null[/code] or fails still consumes a slot, since the callback may already have done expensive CPU work. Combine with [member max_chunk_work_usec] to load several cheap chunks without scheduling more work after a costly chunk.
