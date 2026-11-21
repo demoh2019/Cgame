@@ -92,7 +92,8 @@ TEST_CASE("[AIBehaviorTrace] Bounded record budget reports truncation") {
 	CHECK(int(snap["truncated"]) == 1);
 	const Array steps = snap["steps"];
 	CHECK(steps.size() == 2);
-	CHECK(int(steps[0]["status"]) == BehaviorTreeTask::RUNNING);
+	const Dictionary recorded_root = steps[0];
+	CHECK(int(recorded_root["status"]) == BehaviorTreeTask::RUNNING);
 }
 
 TEST_CASE("[AIBehaviorTrace] Tick lifecycle clears only prior events") {
