@@ -36,7 +36,7 @@ func run(t) -> void:
 		t.eq(int(status.get("pending", -1)), 1, "unloaded primary cell is pending")
 		t.check(not bool(status.get("ready", true)), "unloaded cell is never ready")
 		t.eq(Policy.focus_loading_notice(streamer),
-			"WORLD STREAMING: 0% (1 chunks remaining)", "client uses the real native snapshot")
+			"WORLD STREAMING: 0% | pending 1", "client uses the real native snapshot")
 		streamer.enabled = false
 		t.eq(Policy.focus_loading_notice(streamer), "", "disabled streamer hides readiness")
 	else:
