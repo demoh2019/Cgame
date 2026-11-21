@@ -211,6 +211,7 @@ const SUITES := [
 	"res://tests/test_black_zone.gd",
 	"res://tests/test_farming.gd",
 	"res://tests/test_guild_bank.gd",
+	"res://tests/test_guild_alliances.gd",
 	"res://tests/test_progression.gd",
 	"res://tests/test_skills.gd",
 	"res://tests/test_json_numbers.gd",

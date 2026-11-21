@@ -506,6 +506,13 @@ func c_repair_gear() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_alliance(action: String, target_peer: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "alliance", sim.cmd_alliance(peer, str(action), target_peer))
+
+
+@rpc("any_peer", "reliable")
 func c_guild_bank(action: String, item_id: String, quantity: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

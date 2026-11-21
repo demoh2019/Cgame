@@ -1254,6 +1254,23 @@ func _build() -> void:
 			var listing_id: int = int(_market_select.get_item_metadata(_market_select.selected))
 			client.market_cancel(listing_id))
 	market_row.add_child(cancel_market)
+	# Albion-style alliances (guild leaders, hub): invite the leader picked in the barter target list.
+	var alliance_row := HBoxContainer.new()
+	inventory_box.add_child(alliance_row)
+	var ally_invite := Button.new()
+	ally_invite.text = "Alliance invite"
+	ally_invite.tooltip_text = "Guild leaders at the hub: invite the guild of the survivor chosen as barter target."
+	ally_invite.pressed.connect(func() -> void:
+		if _trade_target.selected < 0:
+			say("Alliance: choose a survivor in the barter target list.")
+		else:
+			client.alliance("invite", _trade_target.get_item_id(_trade_target.selected)))
+	alliance_row.add_child(ally_invite)
+	for ally_action in ["accept", "leave", "status"]:
+		var ally_button := Button.new()
+		ally_button.text = "Alliance %s" % ally_action
+		ally_button.pressed.connect(func() -> void: client.alliance(ally_action))
+		alliance_row.add_child(ally_button)
 	# Albion-style guild bank (hub): members deposit, officers withdraw.
 	_guild_vault_select = OptionButton.new()
 	_guild_vault_select.custom_minimum_size.x = 320.0
@@ -2716,6 +2733,17 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "alliance":
+		if bool(data.get("ok", false)):
+			var allies: Array = data.get("allied_guilds", [])
+			var pending: String = str(data.get("invite_from", ""))
+			say("Alliance: %s%s" % ["allied with " + ", ".join(allies) if not allies.is_empty() else "no alliance",
+				(" | invite pending from %s" % pending) if pending != "" else ""])
+		else:
+			say("Alliance: %s" % {"no_guild": "join a guild first", "leaders_only": "only guild leaders manage alliances", "no_station": "visit the hub",
+				"target_not_leader": "that survivor does not lead a guild", "target_allied": "their guild is already allied", "alliance_full": "alliances hold up to 4 guilds",
+				"no_invite": "no pending invitation", "invalid_target": "choose a leader of another guild"}.get(str(data.get("reason", "")), str(data.get("reason", "rejected"))))
+		return
 	if kind == "guild_bank":
 		if bool(data.get("ok", false)):
 			var vault: Dictionary = data.get("vault", {})

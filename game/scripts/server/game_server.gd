@@ -110,6 +110,7 @@ const MarketBids = preload("res://scripts/shared/market_bids.gd")
 const Factions = preload("res://scripts/shared/factions.gd")
 const Farming = preload("res://scripts/shared/farming.gd")
 const GuildBank = preload("res://scripts/shared/guild_bank.gd")
+const GuildAlliances = preload("res://scripts/shared/guild_alliances.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
 const WoundSealant = preload("res://scripts/shared/wound_sealant.gd")
@@ -426,6 +427,9 @@ var market_bids: Dictionary = {} # id -> Albion-style buy order with escrowed si
 var farm_plots: Dictionary = {} # id -> homestead crop plot (persisted with the world).
 var guild_banks: Dictionary = {} # guild id -> {item id: count} (persisted with the world).
 var guild_ledgers: Dictionary = {} # guild id -> recent [{who, action, item, count, at}].
+var guild_alliances: Dictionary = {} # alliance id -> {"guilds": {guild id: guild name}} (persisted).
+var guild_to_alliance: Dictionary = {} # guild id -> alliance id (derived from guild_alliances).
+var alliance_invites: Dictionary = {} # invited guild id -> {"from": guild id, "from_name", "expires"}.
 var market_returns: Dictionary = {} # account -> {item: count} unsold or cancelled goods.
 var market_sales: Array = [] # Bounded session-only receipts, NOT durable settlement.
 # Atomic two-account settlement. When the network layer has a persistent backend it sets pair_persistence; every
@@ -2852,6 +2856,87 @@ func cmd_market_list(peer_id: int) -> Dictionary:
 	return {"ok": true, "action": "list", "orders": public_orders, "bids": public_bids,
 		"collected_silver": int(collected.get("silver", 0)), "collected_items": int(collected.get("items", 0)),
 		"pending_silver": int(market_payouts.get(account, 0))}
+
+
+## Albion-style alliances (hub, guild leaders): "invite" a leader by peer id, "accept", "leave", "status".
+func cmd_alliance(peer_id: int, action: String, target_peer: int = -1) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.guild_id.is_empty():
+		return {"ok": false, "reason": "no_guild"}
+	var mine: String = player.guild_id
+	match action:
+		"status":
+			pass
+		"invite":
+			if not GuildAlliances.is_leader(player.guild_rank):
+				return {"ok": false, "reason": "leaders_only"}
+			if not _market_at_hub(player):
+				return {"ok": false, "reason": "no_station"}
+			var other: Player = players.get(target_peer)
+			if other == null or other.guild_id.is_empty() or other.guild_id == mine:
+				return {"ok": false, "reason": "invalid_target"}
+			if not GuildAlliances.is_leader(other.guild_rank):
+				return {"ok": false, "reason": "target_not_leader"}
+			if guild_to_alliance.has(other.guild_id):
+				return {"ok": false, "reason": "target_allied"}
+			var alliance_id: int = int(guild_to_alliance.get(mine, -1))
+			if alliance_id >= 0 and (guild_alliances[alliance_id]["guilds"] as Dictionary).size() >= GuildAlliances.MAX_GUILDS:
+				return {"ok": false, "reason": "alliance_full"}
+			alliance_invites[other.guild_id] = {"from": mine, "from_name": player.guild_name, "expires": time + GuildAlliances.INVITE_SECONDS}
+			events.append({"type": "alliance_invite", "peer": other.id, "from": player.guild_name})
+		"accept":
+			if not GuildAlliances.is_leader(player.guild_rank):
+				return {"ok": false, "reason": "leaders_only"}
+			var invite: Dictionary = alliance_invites.get(mine, {})
+			if invite.is_empty() or time > float(invite["expires"]):
+				alliance_invites.erase(mine)
+				return {"ok": false, "reason": "no_invite"}
+			if guild_to_alliance.has(mine):
+				return {"ok": false, "reason": "already_allied"}
+			var host: String = str(invite["from"])
+			var alliance_id: int = int(guild_to_alliance.get(host, -1))
+			if alliance_id < 0:
+				alliance_id = new_id()
+				guild_alliances[alliance_id] = {"guilds": {host: str(invite["from_name"])}}
+			if (guild_alliances[alliance_id]["guilds"] as Dictionary).size() >= GuildAlliances.MAX_GUILDS:
+				return {"ok": false, "reason": "alliance_full"}
+			guild_alliances[alliance_id]["guilds"][mine] = player.guild_name
+			alliance_invites.erase(mine)
+			_rebuild_alliance_index()
+		"leave":
+			if not GuildAlliances.is_leader(player.guild_rank):
+				return {"ok": false, "reason": "leaders_only"}
+			var alliance_id: int = int(guild_to_alliance.get(mine, -1))
+			if alliance_id < 0:
+				return {"ok": false, "reason": "not_allied"}
+			(guild_alliances[alliance_id]["guilds"] as Dictionary).erase(mine)
+			if (guild_alliances[alliance_id]["guilds"] as Dictionary).size() < 2:
+				guild_alliances.erase(alliance_id) # A lone guild is not an alliance.
+			_rebuild_alliance_index()
+		_:
+			return {"ok": false, "reason": "unknown_action"}
+	var current: int = int(guild_to_alliance.get(mine, -1))
+	var members: Array = []
+	if current >= 0:
+		members = (guild_alliances[current]["guilds"] as Dictionary).values()
+	return {"ok": true, "action": action, "allied_guilds": members,
+		"invite_from": str(alliance_invites.get(mine, {}).get("from_name", ""))}
+
+
+func _rebuild_alliance_index() -> void:
+	guild_to_alliance.clear()
+	for alliance_id in guild_alliances:
+		for guild in guild_alliances[alliance_id]["guilds"]:
+			guild_to_alliance[str(guild)] = int(alliance_id)
+
+
+## Same verified guild or an allied guild: never friendly fire.
+func _guild_friendly(a: Player, b: Player) -> bool:
+	if a == null or b == null or a.user_id.is_empty() or b.user_id.is_empty():
+		return false
+	return GuildAlliances.friendly(a.guild_id, b.guild_id, guild_to_alliance)
 
 
 ## Albion-style guild bank at the hub: "list", "deposit" (any member), "withdraw" (officers).
@@ -6466,7 +6551,7 @@ func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: flo
 			var group_id: int = parties.group_of(attacker.id)
 			if not training and group_id != 0 and parties.group_of(other.id) == group_id:
 				continue
-			if not training and GuildIdentity.same_guild(attacker, other):
+			if not training and _guild_friendly(attacker, other):
 				continue # Verified guildmates cannot intercept PvP attacks.
 			if not training and not ZoneRisk.can_pvp(attacker_zone, world.zone_at(other.position.x, other.position.z)) \
 					and not _faction_enemies(attacker, other):
@@ -6604,7 +6689,7 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 		var attacker_party: int = parties.group_of(attacker.id)
 		if attacker_party != 0 and attacker_party == parties.group_of(victim.id):
 			return
-		if GuildIdentity.same_guild(attacker, victim):
+		if _guild_friendly(attacker, victim):
 			return # Direct damage paths also obey guild alliances.
 		var faction_fight: bool = _faction_enemies(attacker, victim)
 		if not ZoneRisk.can_pvp(world.zone_at(attacker.position.x, attacker.position.z),
