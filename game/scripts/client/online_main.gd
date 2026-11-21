@@ -1339,6 +1339,13 @@ func _on_welcomed() -> void:
 	streamer.load_radius = 150.0
 	streamer.unload_radius = 220.0
 	streamer.update_interval = 0.15
+	# Unreal-style independent simulation tier: keep far terrain and props
+	# loaded, but pause ChunkView's grass/decor/shadow/windmill CPU updates.
+	# Only client cosmetics opt in; networking and collision stay untouched.
+	if "simulation_radius" in streamer:
+		streamer.simulation_radius = 110.0
+		streamer.simulation_hysteresis = 20.0
+		streamer.max_simulation_transitions_per_update = 4
 	# Recover from transient generator/resource failures without an unbounded retry loop.
 	# A null chunk remains an intentionally empty world cell.
 	# Older engine builds lack the retry API; skip it instead of erroring.
@@ -1374,6 +1381,12 @@ func _on_welcomed() -> void:
 			if not Performance.has_custom_monitor(monitor_name):
 				Performance.add_custom_monitor(monitor_name, monitor[1])
 				_ambient_monitors.append(monitor_name)
+	if streamer.has_method("get_simulation_active_count"):
+		var simulation_monitor: StringName = &"Albion/StreamSimulationActive"
+		if not Performance.has_custom_monitor(simulation_monitor):
+			Performance.add_custom_monitor(simulation_monitor,
+				Callable(streamer, "get_simulation_active_count"))
+			_ambient_monitors.append(simulation_monitor)
 	_access.set_world_streamer(streamer)
 	# Streamer is created after the initial renderer setup; apply its draw-distance budget now.
 	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,

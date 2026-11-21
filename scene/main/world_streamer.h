@@ -84,6 +84,11 @@ private:
 	// Soft main-thread time slice for procedural generation or scene
 	// activation (0 = count-only). Each individual chunk is indivisible.
 	int max_chunk_work_usec = 0;
+	// Opt-in simulation LOD: loaded scenery remains visible while a chunk's
+	// cosmetic script updates can be paused through its own callback.
+	real_t simulation_radius = -1.0; // Negative preserves legacy full simulation.
+	real_t simulation_hysteresis = 16.0;
+	int max_simulation_transitions_per_update = 4;
 	// Opt-in adaptive backpressure. Defaults off to preserve existing games.
 	bool adaptive_chunk_budget_enabled = false;
 	double streaming_frame_pressure = 0.0;
@@ -105,6 +110,8 @@ private:
 	bool enabled = true;
 
 	HashMap<Vector3i, ObjectID> loaded;
+	HashMap<Vector3i, bool> simulation_active_cells;
+	int simulation_inactive_count = 0;
 	// Optional cosmetic work is tracked separately from playable chunk residency.
 	HashSet<Vector3i> pending_visual_details;
 	HashMap<Vector3i, String> loading;
@@ -133,6 +140,8 @@ private:
 	Node *_get_parent_for_chunks() const;
 	void _forget_dead_chunks();
 	void _update_streaming();
+	void _update_simulation(const Vector3 &p_focus);
+	void _set_chunk_simulation_active(const Vector3i &p_cell, bool p_active);
 	void _poll_loading(int &r_instantiation_budget, uint64_t p_frame_started_usec);
 	bool _finalize_chunk(const Vector3i &p_cell, const String &p_path);
 	bool _adopt_chunk(const Vector3i &p_cell, Node *p_chunk);
@@ -191,6 +200,14 @@ public:
 	void set_max_instantiations_per_frame(int p_count);
 	int get_max_instantiations_per_frame() const { return max_instantiations_per_frame; }
 	void set_max_chunk_work_usec(int p_usec);
+	void set_simulation_radius(real_t p_radius);
+	real_t get_simulation_radius() const { return simulation_radius; }
+	void set_simulation_hysteresis(real_t p_radius);
+	real_t get_simulation_hysteresis() const { return simulation_hysteresis; }
+	void set_max_simulation_transitions_per_update(int p_count);
+	int get_max_simulation_transitions_per_update() const { return max_simulation_transitions_per_update; }
+	bool is_cell_simulation_active(const Vector3i &p_cell) const;
+	int get_simulation_active_count() const;
 	int get_max_chunk_work_usec() const { return max_chunk_work_usec; }
 	void set_adaptive_chunk_budget_enabled(bool p_enabled);
 	bool is_adaptive_chunk_budget_enabled() const { return adaptive_chunk_budget_enabled; }

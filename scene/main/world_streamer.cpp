@@ -32,6 +32,7 @@
 
 #include "core/config/engine.h"
 #include "core/io/resource_loader.h"
+#include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "scene/2d/node_2d.h"
@@ -213,6 +214,11 @@ void WorldStreamer::_forget_dead_chunks() {
 	}
 	for (const Vector3i &cell : dead) {
 		loaded.erase(cell);
+		const bool *active = simulation_active_cells.getptr(cell);
+		if (active != nullptr && !*active) {
+			--simulation_inactive_count;
+		}
+		simulation_active_cells.erase(cell);
 		pending_visual_details.erase(cell);
 		emit_signal(SNAME("chunk_unloaded"), cell);
 	}
@@ -225,6 +231,11 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell) {
 	}
 	Node *chunk = Object::cast_to<Node>(ObjectDB::get_instance(it->value));
 	loaded.remove(it);
+	const bool *active = simulation_active_cells.getptr(p_cell);
+	if (active != nullptr && !*active) {
+		--simulation_inactive_count;
+	}
+	simulation_active_cells.erase(p_cell);
 	pending_visual_details.erase(p_cell);
 	if (chunk) {
 		if (chunk->get_parent()) {
@@ -233,6 +244,66 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell) {
 		chunk->queue_free();
 	}
 	emit_signal(SNAME("chunk_unloaded"), p_cell);
+}
+
+void WorldStreamer::_set_chunk_simulation_active(const Vector3i &p_cell, bool p_active) {
+	Node *chunk = get_chunk(p_cell);
+	if (chunk == nullptr) {
+		return;
+	}
+	const bool *previous = simulation_active_cells.getptr(p_cell);
+	if (previous != nullptr && *previous == p_active) {
+		return;
+	}
+	simulation_active_cells[p_cell] = p_active;
+	simulation_inactive_count += p_active ? -1 : 1;
+	// The scene explicitly owns what "simulation" means; do not toggle
+	// process modes or physics on arbitrary descendants from the engine.
+	if (chunk->has_method(SNAME("set_streaming_simulation_active"))) {
+		chunk->call(SNAME("set_streaming_simulation_active"), p_active);
+	}
+	emit_signal(SNAME("chunk_simulation_changed"), p_cell, p_active);
+}
+
+void WorldStreamer::_update_simulation(const Vector3 &p_focus) {
+	if (simulation_radius < real_t(0.0) && simulation_inactive_count == 0) {
+		return; // No per-cell scan or callbacks for legacy worlds.
+	}
+	int remaining = max_simulation_transitions_per_update;
+	// Activate nearest chunks first so a player entering a region does not
+	// compete with distant cosmetic shutdowns. Deterministic tie breaking
+	// keeps the outcome stable even if the hash map iteration order changes.
+	for (int pass = 0; pass < 2 && remaining > 0; ++pass) {
+		const bool activating = pass == 0;
+		while (remaining > 0) {
+			bool found = false;
+			Vector3i best;
+			real_t best_distance = 0.0;
+			for (const KeyValue<Vector3i, ObjectID> &entry : loaded) {
+				const bool *active_ptr = simulation_active_cells.getptr(entry.key);
+				const bool active = active_ptr == nullptr || *active_ptr;
+				const real_t distance = WorldStreamingGrid::distance_to_cell(p_focus, entry.key, cell_size, _grid_axes());
+				const bool desired = simulation_radius < real_t(0.0) ||
+						distance <= simulation_radius + (active ? simulation_hysteresis : real_t(0.0));
+				if (active == desired || desired != activating) {
+					continue;
+				}
+				const Vector3i &cell = entry.key;
+				if (!found || (activating ? distance < best_distance : distance > best_distance) ||
+						(distance == best_distance && (cell.x < best.x ||
+								(cell.x == best.x && (cell.y < best.y || (cell.y == best.y && cell.z < best.z)))))) {
+					best = cell;
+					best_distance = distance;
+					found = true;
+				}
+			}
+			if (!found) {
+				break;
+			}
+			_set_chunk_simulation_active(best, activating);
+			--remaining;
+		}
+	}
 }
 
 bool WorldStreamer::_adopt_chunk(const Vector3i &p_cell, Node *p_chunk) {
@@ -248,9 +319,24 @@ bool WorldStreamer::_adopt_chunk(const Vector3i &p_cell, Node *p_chunk) {
 			chunk_2d->set_position(Vector2(origin.x, origin.y));
 		}
 	}
+	// Set the initial tier before _ready() without consuming a transition:
+	// the chunk instantiation itself is already covered by the work budget.
+	Vector3 simulation_focus;
+	const bool simulation_active = simulation_radius < real_t(0.0) ||
+			!_get_focus_position(simulation_focus) ||
+			WorldStreamingGrid::distance_to_cell(simulation_focus, p_cell, cell_size, _grid_axes()) <= simulation_radius;
+	if (simulation_radius >= real_t(0.0) && p_chunk->has_method(SNAME("set_streaming_simulation_active"))) {
+		p_chunk->call(SNAME("set_streaming_simulation_active"), simulation_active);
+	}
 	Node *parent = _get_parent_for_chunks();
 	parent->add_child(p_chunk);
 	loaded[p_cell] = p_chunk->get_instance_id();
+	if (simulation_radius >= real_t(0.0)) {
+		simulation_active_cells[p_cell] = simulation_active;
+		if (!simulation_active) {
+			++simulation_inactive_count;
+		}
+	}
 	retry_states.erase(p_cell);
 	failed.erase(p_cell);
 	// Track optional visual continuation without delaying authoritative world
@@ -520,6 +606,7 @@ void WorldStreamer::_update_streaming() {
 		}
 		_unload_cell(cell);
 	}
+	_update_simulation(position);
 
 	LocalVector<Vector3i> wanted;
 	bool truncated = false;
@@ -669,6 +756,8 @@ void WorldStreamer::_reset_state() {
 	retry_states.clear();
 	generate_queue.clear();
 	pending_visual_details.clear();
+	simulation_active_cells.clear();
+	simulation_inactive_count = 0;
 	last_queued_view_direction = Vector3();
 	truncated_warned = false;
 	streaming_frame_pressure = 0.0;
@@ -693,6 +782,8 @@ void WorldStreamer::_notification(int p_what) {
 			if (chunk_parent.is_empty()) {
 				// Chunks are our children and go away with us; just forget them.
 				loaded.clear();
+				simulation_active_cells.clear();
+				simulation_inactive_count = 0;
 				pending_visual_details.clear();
 			} else {
 				_reset_state();
@@ -951,6 +1042,34 @@ void WorldStreamer::set_chunk_parent(const NodePath &p_parent) {
 	chunk_parent = p_parent;
 }
 
+void WorldStreamer::set_simulation_radius(real_t p_radius) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_radius), "Simulation radius must be finite.");
+	simulation_radius = p_radius < real_t(0.0) ? real_t(-1.0) : MIN(p_radius, real_t(100000.0));
+	time_since_update = 1e9;
+}
+
+void WorldStreamer::set_simulation_hysteresis(real_t p_radius) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_radius), "Simulation hysteresis must be finite.");
+	simulation_hysteresis = CLAMP(p_radius, real_t(0.0), real_t(1000.0));
+	time_since_update = 1e9;
+}
+
+void WorldStreamer::set_max_simulation_transitions_per_update(int p_count) {
+	max_simulation_transitions_per_update = CLAMP(p_count, 1, 64);
+}
+
+bool WorldStreamer::is_cell_simulation_active(const Vector3i &p_cell) const {
+	if (!loaded.has(p_cell)) {
+		return false;
+	}
+	const bool *active = simulation_active_cells.getptr(p_cell);
+	return active == nullptr || *active;
+}
+
+int WorldStreamer::get_simulation_active_count() const {
+	return int(loaded.size()) - simulation_inactive_count;
+}
+
 void WorldStreamer::set_enabled(bool p_enabled) {
 	enabled = p_enabled;
 }
@@ -1041,6 +1160,14 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_max_instantiations_per_frame", "count"), &WorldStreamer::set_max_instantiations_per_frame);
 	ClassDB::bind_method(D_METHOD("get_max_instantiations_per_frame"), &WorldStreamer::get_max_instantiations_per_frame);
 	ClassDB::bind_method(D_METHOD("set_max_chunk_work_usec", "microseconds"), &WorldStreamer::set_max_chunk_work_usec);
+	ClassDB::bind_method(D_METHOD("set_simulation_radius", "radius"), &WorldStreamer::set_simulation_radius);
+	ClassDB::bind_method(D_METHOD("get_simulation_radius"), &WorldStreamer::get_simulation_radius);
+	ClassDB::bind_method(D_METHOD("set_simulation_hysteresis", "radius"), &WorldStreamer::set_simulation_hysteresis);
+	ClassDB::bind_method(D_METHOD("get_simulation_hysteresis"), &WorldStreamer::get_simulation_hysteresis);
+	ClassDB::bind_method(D_METHOD("set_max_simulation_transitions_per_update", "count"), &WorldStreamer::set_max_simulation_transitions_per_update);
+	ClassDB::bind_method(D_METHOD("get_max_simulation_transitions_per_update"), &WorldStreamer::get_max_simulation_transitions_per_update);
+	ClassDB::bind_method(D_METHOD("is_cell_simulation_active", "cell"), &WorldStreamer::is_cell_simulation_active);
+	ClassDB::bind_method(D_METHOD("get_simulation_active_count"), &WorldStreamer::get_simulation_active_count);
 	ClassDB::bind_method(D_METHOD("get_max_chunk_work_usec"), &WorldStreamer::get_max_chunk_work_usec);
 	ClassDB::bind_method(D_METHOD("set_adaptive_chunk_budget_enabled", "enabled"), &WorldStreamer::set_adaptive_chunk_budget_enabled);
 	ClassDB::bind_method(D_METHOD("is_adaptive_chunk_budget_enabled"), &WorldStreamer::is_adaptive_chunk_budget_enabled);
@@ -1103,6 +1230,10 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "chunk_path_template", PROPERTY_HINT_NONE, ""), "set_chunk_path_template", "get_chunk_path_template");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "chunk_parent", PROPERTY_HINT_NONE, ""), "set_chunk_parent", "get_chunk_parent");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "position_chunks"), "set_position_chunks", "get_position_chunks");
+	ADD_GROUP("Simulation", "");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "simulation_radius", PROPERTY_HINT_RANGE, "-1,100000,0.1,suffix:m"), "set_simulation_radius", "get_simulation_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "simulation_hysteresis", PROPERTY_HINT_RANGE, "0,1000,0.1,suffix:m"), "set_simulation_hysteresis", "get_simulation_hysteresis");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_simulation_transitions_per_update", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_simulation_transitions_per_update", "get_max_simulation_transitions_per_update");
 	ADD_GROUP("Budget", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_concurrent_loads", PROPERTY_HINT_RANGE, "1,64,1,or_greater"), "set_max_concurrent_loads", "get_max_concurrent_loads");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_instantiations_per_frame", PROPERTY_HINT_RANGE, "1,16,1,or_greater"), "set_max_instantiations_per_frame", "get_max_instantiations_per_frame");
@@ -1116,6 +1247,7 @@ void WorldStreamer::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("chunk_loaded", PropertyInfo(Variant::VECTOR3I, "cell"), PropertyInfo(Variant::OBJECT, "chunk", PROPERTY_HINT_RESOURCE_TYPE, "Node")));
 	ADD_SIGNAL(MethodInfo("chunk_visual_details_ready", PropertyInfo(Variant::VECTOR3I, "cell")));
 	ADD_SIGNAL(MethodInfo("chunk_unloaded", PropertyInfo(Variant::VECTOR3I, "cell")));
+	ADD_SIGNAL(MethodInfo("chunk_simulation_changed", PropertyInfo(Variant::VECTOR3I, "cell"), PropertyInfo(Variant::BOOL, "active")));
 	ADD_SIGNAL(MethodInfo("chunk_load_failed", PropertyInfo(Variant::VECTOR3I, "cell"), PropertyInfo(Variant::STRING, "path")));
 
 	BIND_ENUM_CONSTANT(AXES_XZ);
