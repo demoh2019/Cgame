@@ -170,6 +170,37 @@ TEST_CASE("[FastNoiseLite] Getter and setter") {
 	CHECK(noise.get_domain_warp_fractal_gain() == doctest::Approx(0.123));
 }
 
+TEST_CASE("[FastNoiseLite] Point cloud sampling matches scalar noise") {
+	FastNoiseLite noise;
+	noise.set_seed(812);
+	noise.set_frequency(0.014);
+	noise.set_fractal_type(FastNoiseLite::FRACTAL_FBM);
+	noise.set_domain_warp_enabled(true);
+	PackedVector2Array points2;
+	points2.push_back(Vector2(-901.25, 120.5));
+	points2.push_back(Vector2(0.0, 0.0));
+	points2.push_back(Vector2(40.0, -71.75));
+	points2.push_back(points2[0]); // Preserve duplicates and input ordering.
+	PackedFloat64Array values2 = noise.get_noise_2dv_batch(points2);
+	REQUIRE(values2.size() == points2.size());
+	for (int i = 0; i < points2.size(); i++) {
+		CHECK(values2[i] == doctest::Approx(noise.get_noise_2dv(points2[i])));
+	}
+	CHECK(values2[0] == values2[3]);
+	CHECK(noise.get_noise_2dv_batch(PackedVector2Array()).is_empty());
+
+	PackedVector3Array points3;
+	points3.push_back(Vector3(-19.75, 10, 30.5));
+	points3.push_back(Vector3(0, 0, 0));
+	points3.push_back(Vector3(12.5, -8.75, 90));
+	PackedFloat64Array values3 = noise.get_noise_3dv_batch(points3);
+	REQUIRE(values3.size() == points3.size());
+	for (int i = 0; i < points3.size(); i++) {
+		CHECK(values3[i] == doctest::Approx(noise.get_noise_3dv(points3[i])));
+	}
+	CHECK(noise.get_noise_3dv_batch(PackedVector3Array()).is_empty());
+}
+
 TEST_CASE("[FastNoiseLite] Basic noise generation") {
 	FastNoiseLite noise;
 	noise.set_noise_type(FastNoiseLite::NoiseType::TYPE_SIMPLEX);

@@ -32,6 +32,7 @@
 
 #include "core/io/image.h"
 #include "core/variant/typed_array.h"
+#include "core/variant/variant.h"
 
 class Noise : public Resource {
 	GDCLASS(Noise, Resource);
@@ -288,6 +289,10 @@ public:
 
 	virtual real_t get_noise_3dv(Vector3 p_v) const = 0;
 	virtual real_t get_noise_3d(real_t p_x, real_t p_y, real_t p_z) const = 0;
+
+	// Same scalar sampling semantics, with one GDScript/native boundary crossing for a point cloud.
+	PackedFloat64Array get_noise_2dv_batch(const PackedVector2Array &p_points) const;
+	PackedFloat64Array get_noise_3dv_batch(const PackedVector3Array &p_points) const;
 
 	Vector<Ref<Image>> _get_image(int p_width, int p_height, int p_depth, bool p_invert = false, bool p_in_3d_space = false, bool p_normalize = true) const;
 	virtual Ref<Image> get_image(int p_width, int p_height, bool p_invert = false, bool p_in_3d_space = false, bool p_normalize = true) const;

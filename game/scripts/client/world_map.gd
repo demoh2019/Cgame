@@ -222,13 +222,22 @@ func _process(delta: float) -> void:
 	var rows := SAMPLE_ROWS_PER_FRAME
 	while rows > 0 and _sampled_rows < PIXELS:
 		var row := _sampled_rows
+		var row_points := PackedVector2Array()
+		var row_heights := PackedFloat64Array()
+		row_points.resize(PIXELS)
+		row_heights.resize(PIXELS)
 		for column in PIXELS:
 			var x: float = -SPAN * 0.5 + (float(column) + 0.5) * step
 			var z: float = -SPAN * 0.5 + (float(row) + 0.5) * step
 			var index := row * PIXELS + column
-			_heights[index] = world.height_at(x, z)
-			_biomes[index] = int(BIOME_IDS.get(world.biome_at(x, z), 2))
+			var height: float = world.height_at(x, z)
+			row_points[column] = Vector2(x, z)
+			row_heights[column] = height
+			_heights[index] = height
 			_lush[index] = GrassField.lushness(x, z)
+		var row_biomes: PackedStringArray = world.biomes_at_points(row_points, row_heights)
+		for column in PIXELS:
+			_biomes[row * PIXELS + column] = int(BIOME_IDS.get(row_biomes[column], 2))
 		_sampled_rows += 1
 		rows -= 1
 	if _sampled_rows == PIXELS and _painted_rows < PIXELS:
