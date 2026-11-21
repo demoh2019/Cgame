@@ -199,5 +199,5 @@ func _smoke() -> void:
     game.queue_free()
     await process_frame
     if ok:
-        print("PASS: scene, bounded visual LOD, stable PCG biome density, exclusion-safe PCG foliage, scavenging, gathering, XP, crafting, gear, combat and survival")
+        print("PASS: scene, bounded visual LOD, exclusion-safe PCG foliage, stable PCG biome density, scavenging, gathering, XP, crafting, gear, combat and survival")
     quit(0 if ok else 1)
