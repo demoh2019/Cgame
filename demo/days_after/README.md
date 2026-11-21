@@ -59,8 +59,7 @@ fixed character class. Additional wood and stone T2 nodes support future gear.
 Current enemy pursuit uses direct movement and can get stuck at obstacles.
 
 These are original classless survival/RPG mechanics, not copied assets,
-economy data or gameplay code from existing games. No MMO networking, PvP,
-save/load, durability or player economy is claimed yet.
+economy data or gameplay code from existing games. No MMO networking, PvP, durability or player economy is claimed yet.
 
 ## Smoke test
 
@@ -95,15 +94,33 @@ for compatibility; use compiled Cgame for engine-specific integration testing.
 
 This is a foundation for iteration, **not** a complete survival game.
 
-## Survivor persistence
+## Offline full-session persistence (F5/F9)
 
-Press **F5** to save survivor state to `user://days_after_player.json`, and
-**F9** to load it. The schema is versioned and validates health, hunger,
-thirst, item stacks, professions, equipment and the player position before
-applying any changes. Invalid or outdated saves are rejected without changing
-the live survivor. This is a **local offline snapshot** only — enemy respawn,
-world containers, crafting cooldowns and multiplayer state are not persisted.
+The **same game** now saves survivor progression **and** the scavenging world
+together in one versioned file: `user://days_after_session.json`.
+
+- **F5:** save health, hunger, thirst, inventory, equipment, profession/combat
+  XP, position, each one-time supply crate, and each resource deposit's
+  remaining respawn timer.
+- **F9:** load the same snapshot, restoring previously consumed crates as
+  unavailable and depleted resources as depleted. An earlier save also
+  restores previously uncollected loot when explicitly loaded.
+- All survivor and world fields are validated **before either changes**.
+  Missing/unknown world IDs, invalid item stacks, negative timers, damaged
+  JSON and unsupported versions are rejected.
+- The save is written to a sibling temporary file and renamed only after
+  a successful flush, avoiding partially written JSON being published.
+- Existing `save_state.gd` remains available as the *standalone*
+  survivor snapshot validator; old `days_after_player.json` saves are not
+  automatically imported into the new combined format.
 
 ```sh
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_saves.gd
+./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_session.gd
 ```
+
+**Current limits:** local/offline only; no authoritative server or synchronized
+multiplayer persistence. Timers resume from the saved remainder (no offline
+regeneration). Defeated enemies, temporary AI state, placed structures, world
+streaming and trades are not part of this world snapshot. Server-authoritative
+persisted zones and inventories are required before multiplayer release.
