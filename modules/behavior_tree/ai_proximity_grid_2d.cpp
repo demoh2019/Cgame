@@ -283,7 +283,18 @@ PackedVector2Array AIProximityGrid2D::query_predictive_separation_batch(
 				}
 			} else {
 				const real_t weight = real_t(1.0) - distance / real_t(p_radius);
-				separation += (delta / distance) * weight;
+				const Vector2 current_delta = p_positions[source_index] - p_positions[neighbor_index];
+				const Vector2 relative = p_velocities[source_index] - p_velocities[neighbor_index];
+				// For a near head-on miss, steering backwards is counterproductive.
+				// Use a reproducible tangent only when the two agents are closing
+				// mostly along their shared line; other pairs keep normal repulsion.
+				if (current_delta.length_squared() > real_t(0.00000001) &&
+						relative.length_squared() > real_t(0.00000001) &&
+						current_delta.normalized().dot(relative.normalized()) < real_t(-0.75)) {
+					separation += Vector2(-relative.y, relative.x).normalized() * weight;
+				} else {
+					separation += (delta / distance) * weight;
+				}
 			}
 		}
 		if (separation.length_squared() > real_t(1.0)) {
