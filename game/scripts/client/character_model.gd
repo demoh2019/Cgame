@@ -551,7 +551,7 @@ func set_anim_lod(tier: int) -> void:
 	# when crowd budgeting has already demoted this actor.
 	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier):
 		var full_native_ik: bool = tier == 0 and not _dead
-		_native_foot_modifier.set("active", full_native_ik)
+		_native_foot_modifier.set("active", tier == 0 and not _dead)
 		if _native_foot_modifier.has_method("set_modifier_profiling_enabled"):
 			_native_foot_modifier.call("set_modifier_profiling_enabled", full_native_ik)
 	if _procedural != null:
