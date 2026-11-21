@@ -83,6 +83,9 @@ public:
 	Dictionary get_best(int p_sense) const;
 	// Newest events first. A detached Array of plain-data Dictionaries.
 	Array get_recent(int p_limit = 8) const;
+	// Highest decayed confidence first; stable source-id/position ties.
+	// Results are detached snapshots, not mutable views into agent memory.
+	Array get_ranked(int p_sense, int p_limit = 8) const;
 	void reset();
 };
 

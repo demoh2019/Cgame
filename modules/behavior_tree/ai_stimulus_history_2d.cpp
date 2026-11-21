@@ -133,6 +133,52 @@ Array AIStimulusHistory2D::get_recent(int p_limit) const {
 	return results;
 }
 
+Array AIStimulusHistory2D::get_ranked(int p_sense, int p_limit) const {
+	Array result;
+	ERR_FAIL_COND_V_MSG(p_sense < SIGHT || p_sense > DAMAGE, result, "Unknown stimulus sense.");
+	ERR_FAIL_COND_V_MSG(p_limit < 0 || p_limit > 64, result, "Ranked stimulus limit must be between 0 and 64.");
+	if (p_limit == 0) {
+		return result;
+	}
+	// A per-agent history has at most 64 entries. Use a bounded sorted
+	// top-K of indices instead of allocating mutable snapshots for all events.
+	Vector<int> best;
+	for (int i = 0; i < events.size(); i++) {
+		const Stimulus &candidate = events[i];
+		if (candidate.sense != p_sense) {
+			continue;
+		}
+		const real_t candidate_score = candidate.strength * (candidate.remaining / candidate.ttl);
+		int insert_at = 0;
+		while (insert_at < best.size()) {
+			const Stimulus &previous = events[best[insert_at]];
+			const real_t previous_score = previous.strength * (previous.remaining / previous.ttl);
+			const bool preferred = candidate_score > previous_score ||
+					(candidate_score == previous_score &&
+						(candidate.source_id < previous.source_id ||
+							(candidate.source_id == previous.source_id &&
+								(candidate.position.x < previous.position.x ||
+									(candidate.position.x == previous.position.x &&
+										candidate.position.y < previous.position.y)))));
+			if (preferred) {
+				break;
+			}
+			insert_at++;
+		}
+		if (insert_at >= p_limit) {
+			continue;
+		}
+		best.insert(insert_at, i);
+		if (best.size() > p_limit) {
+			best.resize(p_limit);
+		}
+	}
+	for (int i = 0; i < best.size(); i++) {
+		result.push_back(make_snapshot(events[best[i]]));
+	}
+	return result;
+}
+
 void AIStimulusHistory2D::reset() {
 	events.clear();
 }
@@ -145,6 +191,7 @@ void AIStimulusHistory2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_event_count"), &AIStimulusHistory2D::get_event_count);
 	ClassDB::bind_method(D_METHOD("get_best", "sense"), &AIStimulusHistory2D::get_best);
 	ClassDB::bind_method(D_METHOD("get_recent", "limit"), &AIStimulusHistory2D::get_recent, DEFVAL(8));
+	ClassDB::bind_method(D_METHOD("get_ranked", "sense", "limit"), &AIStimulusHistory2D::get_ranked, DEFVAL(8));
 	ClassDB::bind_method(D_METHOD("reset"), &AIStimulusHistory2D::reset);
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "capacity", PROPERTY_HINT_RANGE, "1,64,1"), "set_capacity", "get_capacity");
