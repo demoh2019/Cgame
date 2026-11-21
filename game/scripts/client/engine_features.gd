@@ -2,10 +2,6 @@ extends RefCounted
 ## Runtime detection of optional native engine classes, so scripts run on older editor binaries too.
 ## Everything touching a custom class goes through ClassDB.instantiate / set / call, so scripts parse without it.
 
-# Shared, read-only native query: avoids creating one Resource per zombie/frame.
-static var _resolve_visual_query: Object = null
-static var _resolve_query_checked := false
-
 
 static func has(engine_class: String) -> bool:
 	return ClassDB.class_exists(engine_class)
@@ -13,16 +9,19 @@ static func has(engine_class: String) -> bool:
 
 ## Tags a node with Gameplay Tags (meta "tags") when the engine provides GameplayTagContainer; a no-op otherwise.
 static func tag_node(node: Node, tags: Array) -> void:
-	if node == null or not has("GameplayTagContainer"):
+	if node == null:
 		return
-	var container = ClassDB.instantiate("GameplayTagContainer")
-	for tag in tags:
-		container.add_tag(StringName(str(tag)))
-	node.set_meta("tags", container)
+	if has("GameplayTagContainer"):
+		var container = ClassDB.instantiate("GameplayTagContainer")
+		for tag in tags:
+			container.add_tag(StringName(str(tag)))
+		node.set_meta("tags", container)
 	# Counted status effects are separate from boolean identity tags.
 	# Neither class is required by stock Godot binaries.
 	if has("GameplayTagStackContainer"):
 		node.set_meta("tag_stacks", ClassDB.instantiate("GameplayTagStackContainer"))
+	if has("GameplayEffectTimeline"):
+		node.set_meta("effect_timeline", ClassDB.instantiate("GameplayEffectTimeline"))
 
 
 ## Creates an engine class by name and applies properties; returns null when the binary lacks it.
@@ -107,9 +106,9 @@ static func runtime_tags(kind: String, state: Dictionary) -> PackedStringArray:
 ## Replaces one namespace atomically, preserving static Enemy/Player identity.
 ## Old engine binaries simply retain the established rendering paths.
 static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) -> void:
-	if node == null or not node.has_meta("tags"):
+	if node == null:
 		return
-	var container: Object = node.get_meta("tags") as Object
+	var container: Object = node.get_meta("tags", null) as Object
 	if container != null and container.has_method("replace_tag_branch"):
 		container.call("replace_tag_branch", StringName("Runtime"), runtime_tags(kind, snapshot))
 	# A complete, validated snapshot prevents stale effect stacks after expiry.
@@ -128,10 +127,56 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 				stack_container.call("replace_stack_branch", StringName("Runtime"), counts)
 			else:
 				stack_container.call("replace_stacks", counts)
+	# Render-only native timers are independent from counted tag branches.
+	var timeline: Object = node.get_meta("effect_timeline", null) as Object
+	if timeline != null and timeline.has_method("replace_snapshot"):
+		timeline.call("replace_snapshot", runtime_effect_snapshot(kind, snapshot))
 
 
 ## Presentation-only stack counts. The server remains authoritative for combat.
 ## Falls back to the validated snapshot on stock Godot/older engine builds.
+## Render-side durations from the authoritative zombie snapshot.
+static func runtime_effect_snapshot(kind: String, snapshot: Dictionary) -> Dictionary:
+	var effects: Dictionary = {}
+	if kind != "zombie":
+		return effects
+	for pair in [
+		["stagger_seconds", "Runtime.Status.Staggered"],
+		["snared_seconds", "Runtime.Status.Snared"],
+		["sunder_seconds", "Runtime.Status.Sundered"],
+		["resolve_seconds", "Runtime.Status.Resolve"],
+	]:
+		var remaining: float = float(snapshot.get(pair[0], 0.0))
+		if not is_finite(remaining) or remaining <= 0.0:
+			continue
+		var stacks: int = 1
+		if pair[0] == "resolve_seconds":
+			stacks = int(snapshot.get("resolve_stacks", 0))
+			if stacks < 2:
+				continue
+		effects[StringName(pair[1])] = {
+			"remaining": minf(remaining, 604800.0), "stacks": clampi(stacks, 1, 65535)
+		}
+	return effects
+
+
+static func tick_runtime_effects(node: Node, delta: float) -> void:
+	if node == null or not is_finite(delta) or delta <= 0.0:
+		return
+	var timeline: Object = node.get_meta("effect_timeline", null) as Object
+	if timeline != null and timeline.has_method("tick"):
+		timeline.call("tick", delta)
+
+
+static func runtime_effect_remaining(node: Node, tag: String, fallback: float = 0.0) -> float:
+	var timeline: Object = null
+	if node != null:
+		timeline = node.get_meta("effect_timeline", null) as Object
+	if timeline != null and timeline.has_method("get_remaining"):
+		return maxf(0.0, float(timeline.call("get_remaining", StringName(tag))))
+	return maxf(0.0, fallback) if is_finite(fallback) else 0.0
+
+
 static func runtime_stack_count(node: Node, tag: String, fallback: int = 0) -> int:
 	if node != null and node.has_meta("tag_stacks"):
 		var stack_container: Object = node.get_meta("tag_stacks") as Object
@@ -146,24 +191,3 @@ static func runtime_has(node: Node, tag: String, fallback: bool = false) -> bool
 		if container != null and container.has_method("replace_tag_branch") and container.has_method("has_tag"):
 			return bool(container.call("has_tag", StringName(tag), true))
 	return fallback
-
-
-## Native counted-tag query for the rendered Resolve state. The query is
-## constructed once per game session and reused across all infected actors.
-## Older Cgame binaries still use their native get_stack_count; stock Godot
-## falls back to the authoritative snapshot's own count.
-static func runtime_has_resolve(node: Node, fallback_stacks: int = 0) -> bool:
-	if node != null and node.has_meta("tag_stacks"):
-		var stacks: Object = node.get_meta("tag_stacks") as Object
-		if stacks != null and stacks.has_method("get_stack_count"):
-			if not _resolve_query_checked:
-				_resolve_query_checked = true
-				if has("GameplayTagQuery") and ClassDB.class_has_method("GameplayTagQuery", "matches_stacks"):
-					var query: Object = ClassDB.instantiate("GameplayTagQuery")
-					if query != null and query.has_method("set_min_stack_count"):
-						query.call("set_all_tags", PackedStringArray(["Runtime.Status.Resolve"]))
-						query.call("set_min_stack_count", 2)
-						_resolve_visual_query = query
-			if _resolve_visual_query != null:
-				return bool(_resolve_visual_query.call("matches_stacks", stacks))
-	return runtime_stack_count(node, "Runtime.Status.Resolve", fallback_stacks) >= 2

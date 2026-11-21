@@ -289,13 +289,17 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		var blocked: bool = bool(entity.get("melee_blocked", false))
 		# The native tag store is now the source for this visual cue when available.
 		# The snapshot fallback keeps stock Godot clients fully compatible.
-		var staggered: bool = EngineFeatures.runtime_has(_nodes[key], "Runtime.Status.Staggered",
-			float(entity.get("stagger_seconds", 0.0)) > 0.0)
-		var pinned: bool = float(entity.get("snared_seconds", 0.0)) > 0.0
-		var exposed: bool = float(entity.get("sunder_seconds", 0.0)) > 0.0
+		var staggered: bool = EngineFeatures.runtime_effect_remaining(_nodes[key],
+			"Runtime.Status.Staggered", float(entity.get("stagger_seconds", 0.0))) > 0.0
+		var pinned: bool = EngineFeatures.runtime_effect_remaining(_nodes[key],
+			"Runtime.Status.Snared", float(entity.get("snared_seconds", 0.0))) > 0.0
+		var exposed: bool = EngineFeatures.runtime_effect_remaining(_nodes[key],
+			"Runtime.Status.Sundered", float(entity.get("sunder_seconds", 0.0))) > 0.0
 		var wound_phase: String = str(entity.get("wound_phase", ""))
 		var fallback_resolve: int = int(entity.get("resolve_stacks", 0)) if float(entity.get("resolve_seconds", 0.0)) > 0.0 else 0
-		var resolve: bool = EngineFeatures.runtime_has_resolve(_nodes[key], fallback_resolve)
+		var resolve: bool = EngineFeatures.runtime_stack_count(_nodes[key],
+			"Runtime.Status.Resolve", fallback_resolve) >= 2 and EngineFeatures.runtime_effect_remaining(
+			_nodes[key], "Runtime.Status.Resolve", float(entity.get("resolve_seconds", 0.0))) > 0.0
 		var tint: Color = base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base
 		if wound_phase == "limping":
 			tint = base.lerp(Color(0.54, 0.52, 0.66), 0.65)
@@ -755,6 +759,8 @@ func _process(delta: float) -> void:
 	var anim_models: Array = []
 	for key in _nodes:
 		var node: Node3D = _nodes[key]
+		if key.begins_with("zombie:") or key.begins_with("player:"):
+			EngineFeatures.tick_runtime_effects(node, delta)
 		var target: Dictionary = _targets[key]
 		var sampled: Array = _sample(key)
 		if sampled.is_empty():

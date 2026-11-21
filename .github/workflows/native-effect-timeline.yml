@@ -1,0 +1,68 @@
+name: Native gameplay effect timeline and Albion status parity
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/**'
+      - 'game/scripts/client/engine_features.gd'
+      - 'game/scripts/client/entity_view.gd'
+      - 'game/tests/test_runtime_effect_timeline.gd'
+      - 'game/tests/run_effect_timeline.gd'
+      - '.github/workflows/native-effect-timeline.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/**'
+      - 'game/scripts/client/engine_features.gd'
+      - 'game/scripts/client/entity_view.gd'
+      - 'game/tests/test_runtime_effect_timeline.gd'
+      - 'game/tests/run_effect_timeline.gd'
+      - '.github/workflows/native-effect-timeline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  effects:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: C++ effect timing regression
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*timeline*" 2>&1 | tee native-effects.log
+      - name: Import Albion After scripts
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee effects-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' effects-import.log; then exit 1; fi
+      - name: Run effect visual bridge parity
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_effect_timeline.gd 2>&1 | tee effects-game.log
+          grep -E '^EFFECT TIMELINE TOTAL: [0-9]+ checks, 0 failures$' effects-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' effects-game.log; then exit 1; fi
+      - name: Attach diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: effect-timeline-logs
+          if-no-files-found: ignore
+          path: |
+            native-effects.log
+            effects-import.log
+            effects-game.log

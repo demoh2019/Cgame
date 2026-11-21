@@ -29,6 +29,7 @@
 /**************************************************************************/
 #pragma once
 
+#include "../gameplay_effect_timeline.h"
 #include "../radial_force_field_3d.h"
 #include "../sound_concurrency.h"
 
@@ -170,4 +171,60 @@ TEST_CASE("[GameplayFX] RadialForceField3D shielding and mass-independent veloci
 	memdelete(field);
 }
 
+TEST_CASE("[GameplayFX] timeline reapply, explicit tick and expiry") {
+	Ref<GameplayEffectTimeline> timeline;
+	timeline.instantiate();
+	CHECK(timeline->set_effect("Status.Stagger", 2.0));
+	CHECK(timeline->apply_effect("Status.Poison", 5.0, 2, 4));
+	CHECK(timeline->apply_effect("Status.Poison", 3.0, 2, 4, GameplayEffectTimeline::REAPPLY_EXTEND));
+	CHECK(timeline->get_stacks("Status.Poison") == 4);
+	CHECK(timeline->get_remaining("Status.Poison") == doctest::Approx(8.0));
+	CHECK(timeline->apply_effect("Status.Poison", 1.0, 3, 4, GameplayEffectTimeline::REAPPLY_KEEP));
+	CHECK(timeline->get_remaining("Status.Poison") == doctest::Approx(8.0));
+	CHECK(timeline->apply_effect("Status.Poison", 4.0, 1, 4, GameplayEffectTimeline::REAPPLY_REFRESH));
+	CHECK(timeline->get_remaining("Status.Poison") == doctest::Approx(4.0));
+	CHECK(timeline->tick(1.5).is_empty());
+	CHECK(timeline->get_remaining("Status.Stagger") == doctest::Approx(0.5));
+	PackedStringArray expired = timeline->tick(1.0);
+	REQUIRE(expired.size() == 1);
+	CHECK(expired[0] == "Status.Stagger");
+	CHECK(timeline->tick(1.5).size() == 1);
+	CHECK(timeline->is_empty());
+}
+TEST_CASE("[GameplayFX] timeline atomic snapshot rollback and validation") {
+	Ref<GameplayEffectTimeline> timeline;
+	timeline.instantiate();
+	Dictionary state;
+	state["remaining"] = 3.0;
+	state["stacks"] = 2;
+	Dictionary snapshot;
+	snapshot["Status.Resolve"] = state;
+	CHECK(timeline->replace_snapshot(snapshot));
+	state["stacks"] = 9;
+	CHECK(timeline->get_stacks("Status.Resolve") == 2);
+	Dictionary copy = timeline->get_snapshot();
+	Dictionary copied_state = copy[StringName("Status.Resolve")];
+	copied_state["stacks"] = 10;
+	CHECK(timeline->get_stacks("Status.Resolve") == 2);
+	CHECK_FALSE(timeline->set_effect("Status.Bad", Math::NaN));
+	CHECK_FALSE(timeline->apply_effect("Status.Bad", 1.0, -1));
+	CHECK(timeline->tick(-5.0).is_empty());
+	CHECK(timeline->tick(Math::INF).is_empty());
+	Dictionary invalid;
+	invalid["Status.Bad"] = copy;
+	CHECK_FALSE(timeline->replace_snapshot(invalid));
+	Dictionary bad_state;
+	bad_state["remaining"] = 2.0;
+	bad_state["stacks"] = -1;
+	invalid["Status.Bad"] = bad_state;
+	CHECK_FALSE(timeline->replace_snapshot(invalid));
+	CHECK(timeline->get_stacks("Status.Resolve") == 2);
+	Dictionary zero;
+	zero["remaining"] = 0.0;
+	zero["stacks"] = 1;
+	Dictionary cleared;
+	cleared["Status.Resolve"] = zero;
+	CHECK(timeline->replace_snapshot(cleared));
+	CHECK(timeline->is_empty());
+}
 } // namespace TestGameplayFX
