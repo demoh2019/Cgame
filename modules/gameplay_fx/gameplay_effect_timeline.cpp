@@ -9,6 +9,8 @@
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
 
+#include <cmath>
+
 int GameplayEffectTimeline::_find(const StringName &p_tag) const {
 	for (int i = 0; i < effects.size(); ++i) {
 		if (effects[i].tag == p_tag) {
@@ -70,6 +72,9 @@ bool GameplayEffectTimeline::apply_effect(const StringName &p_tag, double p_seco
 		return false; // A smaller limit must never silently remove established stacks.
 	}
 	effect.stacks = int(MIN(int64_t(effect.stacks) + p_stacks, int64_t(p_stack_limit)));
+	if (effect.period > 0.0 && effect.reset_on_reapply) {
+		effect.next_period = effect.period;
+	}
 	switch (p_policy) {
 		case REAPPLY_REFRESH: {
 			effect.remaining = p_seconds;
@@ -83,17 +88,45 @@ bool GameplayEffectTimeline::apply_effect(const StringName &p_tag, double p_seco
 	return true;
 }
 
+bool GameplayEffectTimeline::set_periodic(const StringName &p_tag, double p_period, bool p_reset_on_reapply) {
+	const int index = _find(p_tag);
+	if (index < 0 || !Math::is_finite(p_period) || p_period < 0.0 ||
+			(p_period != 0.0 && p_period < MIN_PERIOD) || p_period > MAX_DURATION) {
+		return false;
+	}
+	Effect &effect = effects.write[index];
+	if (effect.period != p_period) {
+		effect.next_period = p_period;
+	}
+	effect.period = p_period;
+	effect.reset_on_reapply = p_reset_on_reapply;
+	return true;
+}
+
+double GameplayEffectTimeline::get_periodic(const StringName &p_tag) const {
+	const int index = _find(p_tag);
+	return index < 0 ? 0.0 : effects[index].period;
+}
+
+Dictionary GameplayEffectTimeline::take_periodic_pulses() {
+	Dictionary result = pending_pulses;
+	pending_pulses = Dictionary();
+	return result;
+}
+
 bool GameplayEffectTimeline::remove_effect(const StringName &p_tag) {
 	const int index = _find(p_tag);
 	if (index < 0) {
 		return false;
 	}
 	effects.remove_at(index);
+	pending_pulses.erase(p_tag);
 	return true;
 }
 
 void GameplayEffectTimeline::clear() {
 	effects.clear();
+	pending_pulses.clear();
 }
 
 bool GameplayEffectTimeline::replace_snapshot(const Dictionary &p_effects) {
@@ -138,11 +171,56 @@ bool GameplayEffectTimeline::replace_snapshot(const Dictionary &p_effects) {
 			effect.tag = tag;
 			effect.remaining = remaining;
 			effect.stacks = int(stacks);
+			// A bare authoritative timer update preserves local periodic phase.
+			// Explicit periodic fields allow complete snapshot round-tripping.
+			const int prior = _find(tag);
+			if (prior >= 0) {
+				effect.period = effects[prior].period;
+				effect.next_period = effects[prior].next_period;
+				effect.reset_on_reapply = effects[prior].reset_on_reapply;
+			}
+			if (state.has("period")) {
+				const Variant raw_period = state["period"];
+				if (raw_period.get_type() != Variant::INT && raw_period.get_type() != Variant::FLOAT) {
+					return false;
+				}
+				const double period = double(raw_period);
+				if (!Math::is_finite(period) || period < 0.0 ||
+						(period != 0.0 && period < MIN_PERIOD) || period > MAX_DURATION) {
+					return false;
+				}
+				if (period != effect.period) {
+					effect.next_period = period;
+				}
+				effect.period = period;
+				if (state.has("reset_on_reapply")) {
+					const Variant raw_reset = state["reset_on_reapply"];
+					if (raw_reset.get_type() != Variant::BOOL) {
+						return false;
+					}
+					effect.reset_on_reapply = bool(raw_reset);
+				}
+				if (state.has("next_period")) {
+					const Variant raw_phase = state["next_period"];
+					if ((raw_phase.get_type() != Variant::INT && raw_phase.get_type() != Variant::FLOAT) ||
+							period <= 0.0 || !Math::is_finite(double(raw_phase)) ||
+							double(raw_phase) <= 0.0 || double(raw_phase) > period) {
+						return false;
+					}
+					effect.next_period = double(raw_phase);
+				}
+			} else if (state.has("next_period") || state.has("reset_on_reapply")) {
+				return false; // Phase and policy require an explicit period.
+			}
 			validated.push_back(effect);
+		} else if (state.has("period") || state.has("next_period") || state.has("reset_on_reapply")) {
+			// Expired effects cannot carry a hidden periodic configuration.
+			return false;
 		}
 	}
 	// Transaction commit: invalid entries never partially remove prior effects.
 	effects = validated;
+	pending_pulses.clear(); // Drop pulses superseded by an authoritative snapshot.
 	return true;
 }
 
@@ -152,6 +230,11 @@ Dictionary GameplayEffectTimeline::get_snapshot() const {
 		Dictionary state;
 		state["remaining"] = effect.remaining;
 		state["stacks"] = effect.stacks;
+		if (effect.period > 0.0) {
+			state["period"] = effect.period;
+			state["next_period"] = effect.next_period;
+			state["reset_on_reapply"] = effect.reset_on_reapply;
+		}
 		result[effect.tag] = state;
 	}
 	return result;
@@ -165,6 +248,19 @@ PackedStringArray GameplayEffectTimeline::tick(double p_delta) {
 	int i = 0;
 	while (i < effects.size()) {
 		Effect &effect = effects.write[i];
+		const double elapsed = MIN(p_delta, effect.remaining);
+		if (effect.period > 0.0 && elapsed + 1e-9 >= effect.next_period) {
+			// Aggregate all due periods in constant time, even after a long pause.
+			// Only active-time (up to expiry) can generate a pulse.
+			const double after_first = MAX(0.0, elapsed - effect.next_period);
+			const int64_t count = 1 + int64_t(std::floor((after_first + 1e-9) / effect.period));
+			const int pending = pending_pulses.get(effect.tag, 0);
+			pending_pulses[effect.tag] = int(MIN(int64_t(MAX_PENDING_PULSES), int64_t(pending) + count));
+			const double remainder = std::fmod(after_first, effect.period);
+			effect.next_period = remainder < 1e-9 || effect.period - remainder < 1e-9 ? effect.period : effect.period - remainder;
+		} else if (effect.period > 0.0) {
+			effect.next_period -= elapsed;
+		}
 		if (p_delta >= effect.remaining) {
 			expired.push_back(String(effect.tag));
 			effects.remove_at(i);
@@ -193,6 +289,9 @@ bool GameplayEffectTimeline::has_effect(const StringName &p_tag) const {
 void GameplayEffectTimeline::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_effect", "tag", "seconds", "stacks"), &GameplayEffectTimeline::set_effect, DEFVAL(1));
 	ClassDB::bind_method(D_METHOD("apply_effect", "tag", "seconds", "stacks", "stack_limit", "policy"), &GameplayEffectTimeline::apply_effect, DEFVAL(1), DEFVAL(MAX_STACKS), DEFVAL(REAPPLY_REFRESH));
+	ClassDB::bind_method(D_METHOD("set_periodic", "tag", "period", "reset_on_reapply"), &GameplayEffectTimeline::set_periodic, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("get_periodic", "tag"), &GameplayEffectTimeline::get_periodic);
+	ClassDB::bind_method(D_METHOD("take_periodic_pulses"), &GameplayEffectTimeline::take_periodic_pulses);
 	ClassDB::bind_method(D_METHOD("remove_effect", "tag"), &GameplayEffectTimeline::remove_effect);
 	ClassDB::bind_method(D_METHOD("clear"), &GameplayEffectTimeline::clear);
 	ClassDB::bind_method(D_METHOD("replace_snapshot", "effects"), &GameplayEffectTimeline::replace_snapshot);

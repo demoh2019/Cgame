@@ -766,8 +766,9 @@ func _process(delta: float) -> void:
 	var anim_models: Array = []
 	for key in _nodes:
 		var node: Node3D = _nodes[key]
+		var periodic_pulses: Dictionary = {}
 		if key.begins_with("zombie:") or key.begins_with("player:"):
-			EngineFeatures.tick_runtime_effects(node, delta)
+			periodic_pulses = EngineFeatures.tick_runtime_effects(node, delta)
 		var target: Dictionary = _targets[key]
 		var sampled: Array = _sample(key)
 		if sampled.is_empty():
@@ -781,6 +782,14 @@ func _process(delta: float) -> void:
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			var model: Node3D = node.get_node("Model")
 			model.update_motion(delta)
+			# Periodic visual feedback is coalesced by the native effect timeline:
+			# no damage, attack, RPC or client-authoritative state transition.
+			if key.begins_with("zombie:") and not periodic_pulses.is_empty() and GraphicsQuality.level() >= 2:
+				if model.has_method("status_pulse"):
+					var pulse_color := Color(0.70, 0.38, 1.0)
+					if periodic_pulses.has(StringName("Runtime.Status.Sundered")):
+						pulse_color = Color(1.0, 0.43, 0.15)
+					model.call("status_pulse", pulse_color)
 			anim_models.append(model)
 			if key.begins_with("player:"):
 				var bike = node.get_node("TrailBike")
