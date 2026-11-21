@@ -402,6 +402,9 @@ var last_population_query_stats: Dictionary = {} # Last once-per-second maintena
 # Standalone snapshot_for callers retain the exact non-indexed behavior.
 var _snapshot_players_grid: Variant = null
 var _snapshot_zombies_grid: Variant = null
+# Reusable on-demand nearest-K native index; rebuilt every cast.
+var _ultimate_spatial_grid: Variant = null
+var last_ultimate_spatial_stats: Dictionary = {"native": false}
 var _snapshot_interest_prepared: bool = false
 var _snapshot_interest_tick: int = -1
 # Precomputed once per 10 Hz broadcast; never sent to clients or saved.
@@ -6016,14 +6019,44 @@ func cmd_ultimate(peer_id: int) -> Dictionary:
 	player.dirty_character = true
 	var center := Vector2(player.position.x, player.position.z)
 	var targets: Array = []
-	for zombie in zombies.values():
-		if not zombie.is_alive():
-			continue
-		var distance: float = center.distance_to(Vector2(zombie.position.x, zombie.position.z))
-		if distance <= ArcaneAbilities.ULTIMATE_RADIUS:
-			targets.append({"zombie": zombie, "distance": distance})
-	targets.sort_custom(func(a, b): return float(a["distance"]) < float(b["distance"]) \
-		if float(a["distance"]) != float(b["distance"]) else int(a["zombie"].id) < int(b["zombie"].id))
+	var native_selection := false
+	if _ultimate_spatial_grid == null and ClassDB.class_exists("SpatialRelevancyGrid2D"):
+		_ultimate_spatial_grid = ClassDB.instantiate("SpatialRelevancyGrid2D")
+	# Choose at most K authoritative living targets in native C++ and avoid
+	# a large GDScript distance-sort of the whole infected crowd.
+	# Rebuild for each rare cast to avoid stale/dead target positions.
+	if _ultimate_spatial_grid != null and _ultimate_spatial_grid.has_method("query_nearest_ids"):
+		var ids := PackedInt64Array()
+		var positions := PackedVector2Array()
+		for zombie in zombies.values():
+			if not zombie.is_alive() or not zombie.position.is_finite():
+				continue
+			ids.append(zombie.id)
+			positions.append(Vector2(zombie.position.x, zombie.position.z))
+		if _ultimate_spatial_grid.rebuild(ids, positions):
+			var selected: PackedInt64Array = _ultimate_spatial_grid.query_nearest_ids(
+				center, ArcaneAbilities.ULTIMATE_RADIUS, ArcaneAbilities.ULTIMATE_MAX_TARGETS)
+			for id in selected:
+				var zombie = zombies.get(id)
+				if zombie != null and zombie.is_alive():
+					targets.append({"zombie": zombie,
+						"distance": center.distance_to(Vector2(zombie.position.x, zombie.position.z))})
+			native_selection = true
+			last_ultimate_spatial_stats = {"native": true, "candidates": ids.size(),
+				"selected": targets.size(), "grid": _ultimate_spatial_grid.get_stats()}
+	# Vanilla Godot, older Cgame versions and malformed/oversized indices
+	# retain the original exact authoritative radius/ID ordering policy.
+	if not native_selection:
+		for zombie in zombies.values():
+			if not zombie.is_alive():
+				continue
+			var distance: float = center.distance_to(Vector2(zombie.position.x, zombie.position.z))
+			if distance <= ArcaneAbilities.ULTIMATE_RADIUS:
+				targets.append({"zombie": zombie, "distance": distance})
+		targets.sort_custom(func(a, b): return float(a["distance"]) < float(b["distance"]) \
+			if float(a["distance"]) != float(b["distance"]) else int(a["zombie"].id) < int(b["zombie"].id))
+		last_ultimate_spatial_stats = {"native": false, "candidates": zombies.size(),
+			"selected": mini(targets.size(), ArcaneAbilities.ULTIMATE_MAX_TARGETS)}
 	var melee_bonus: float = player.skills.bonus("melee_damage")
 	var hits := 0
 	var kills := 0
