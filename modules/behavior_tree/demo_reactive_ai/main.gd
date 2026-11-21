@@ -28,6 +28,7 @@ var last_profile_snapshot: Dictionary = {}
 var brain := BehaviorTreeRunner.new()
 var sensor := AIVisualSensor2D.new()
 var hearing := AIHearingSensor2D.new()
+var stimulus_history := AIStimulusHistory2D.new()
 var navigation := AStarGrid2D.new()
 var update_scheduler := AIUpdateScheduler.new()
 var navigation_profiler := AIExecutionProfiler.new()
@@ -151,7 +152,12 @@ func _physics_process(delta: float) -> void:
         ai_tick_index += 1
         # World physics determines LOS; the reusable C++ sensor evaluates the
         # current FOV, range hysteresis, and last-known-position memory.
+        stimulus_history.advance_time(AI_TICK_SECONDS)
         sensor.observe(enemy_position, enemy_forward, player_position, _has_line_of_sight(), AI_TICK_SECONDS)
+        if sensor.is_target_visible():
+            # Record a source only after native FOV, range and physics LOS.
+            stimulus_history.record_stimulus(AIStimulusHistory2D.SIGHT,
+                player_position, 1.0, sensor.memory_duration, 1)
         hearing.advance_time(AI_TICK_SECONDS)
         # A completed runner is explicitly restarted: resource-based runners
         # cache SUCCESS/FAILURE until reset, unlike the previous Dict runtime.
@@ -283,6 +289,9 @@ func _report_player_noise(loudness: float) -> bool:
     # the signal; a separate AIHearingSensor2D handles distance and memory.
     var attenuation := 0.8 if not _has_line_of_sight() else 1.0
     var heard: bool = hearing.report_noise(enemy_position, player_position, loudness, attenuation)
+    if heard:
+        stimulus_history.record_stimulus(AIStimulusHistory2D.SOUND,
+            player_position, clampf(loudness, 0.01, 1.0), hearing.memory_duration, 1)
     last_noise_position = player_position
     noise_visual_timer = 0.6
     return heard
@@ -341,6 +350,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
         ai_timer = 0.0
         sensor.reset()
         hearing.reset()
+        stimulus_history.reset()
         brain.reset()
         brain.set_blackboard({})
         navigation_path = PackedVector2Array()
@@ -371,6 +381,7 @@ func _update_hud() -> void:
     ]
     var path_rows: Dictionary = last_navigation_profile.get("categories", {})
     var path_cost: Dictionary = path_rows.get("navigation_repath", {})
+    hud.text += "\nRemembered sights/sounds: %d | Multi-source history bounded to %d" % [stimulus_history.get_event_count(), stimulus_history.capacity]
     hud.text += "\nScheduled A* repaths: %d | Mean path query: %.1f us | Next slot in %d ticks" % [
         int(path_cost.get("count", 0)),
         float(path_cost.get("mean_usec", 0.0)),
