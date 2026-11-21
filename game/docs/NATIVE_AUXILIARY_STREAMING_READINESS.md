@@ -21,7 +21,7 @@ These APIs are **diagnostics only**. They never allocate scene nodes, retry fail
 
 ## Albion After integration
 
-The client assigns its existing `WorldStreamer` to its `WorldMap` after construction. On the expedition map, when a nearby personal waypoint matches the **active auxiliary source**, a small line displays `Scenery prefetch: N%`, `ready`, or `retrying`. The indicator uses full visual readiness and only queries while the map is drawn. It never exposes private markers to the network and is hidden for out-of-range/stale waypoints or older binaries without the API.
+The client assigns its existing `WorldStreamer` to its `WorldMap` after construction. On the expedition map, when a nearby personal waypoint matches the **active auxiliary source**, a small line displays `Scenery prefetch: N%`, `ready`, `retrying`, or `Terrain ready; details finish on approach` when the scene is loaded but staged cosmetics are deferred by simulation LOD. The indicator uses full visual readiness and only queries while the map is drawn. It never exposes private markers to the network and is hidden for out-of-range/stale waypoints or older binaries without the API.
 
 ## Tests
 
