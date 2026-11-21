@@ -61,6 +61,8 @@ public:
 	bool remove_effect(const StringName &p_tag);
 	void clear();
 	bool replace_snapshot(const Dictionary &p_effects);
+	// Atomically refresh one authoritative tag namespace; preserve other timers and pulses.
+	bool replace_effect_branch(const StringName &p_branch, const Dictionary &p_effects);
 	Dictionary get_snapshot() const;
 	PackedStringArray tick(double p_delta);
 	double get_remaining(const StringName &p_tag) const;
