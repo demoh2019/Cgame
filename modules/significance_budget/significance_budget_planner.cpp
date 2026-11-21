@@ -211,6 +211,65 @@ PackedInt32Array SignificanceBudgetPlanner::select_effects_visible(
 	return output;
 }
 
+PackedInt32Array SignificanceBudgetPlanner::select_effects_visible_ranged(
+		const PackedFloat64Array &p_distances, const PackedByteArray &p_priorities,
+		const PackedByteArray &p_categories, const PackedByteArray &p_visible,
+		const PackedInt32Array &p_category_caps, const PackedFloat64Array &p_category_ranges,
+		int p_budget) const {
+	PackedInt32Array empty;
+	const int count = p_distances.size();
+	ERR_FAIL_COND_V_MSG(count != p_priorities.size() || count != p_categories.size() ||
+			count != p_visible.size() || count > MAX_CANDIDATES ||
+			p_category_caps.size() != 4 || p_category_ranges.size() != 4 ||
+			!valid_budget(p_budget), empty, "Invalid ranged-effect significance arrays or budget.");
+	for (int group = 0; group < 4; ++group) {
+		ERR_FAIL_COND_V_MSG(p_category_caps[group] < 0 || p_category_caps[group] > MAX_BUDGET ||
+				!Math::is_finite(p_category_ranges[group]) || p_category_ranges[group] < 0.0 ||
+				p_category_ranges[group] > MAX_RANGE, empty,
+				"Effect category caps must be 0..128 and ranges finite within 0..1,000,000.");
+	}
+	for (int i = 0; i < count; ++i) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(p_distances[i]) || p_distances[i] < 0.0 ||
+				!valid_priority(p_priorities[i]) || p_categories[i] > 3 ||
+				p_visible[i] > 1, empty, "Invalid ranged-effect distance, priority, group or visibility.");
+	}
+	if (p_budget == 0) {
+		return empty;
+	}
+
+	// Category distance culling before selection prevents far-away dust from
+	// competing for scarce cosmetic slots. Pure and bounded O(N * budget).
+	Vector<Candidate> by_category[4];
+	for (int i = 0; i < count; ++i) {
+		const int group = p_categories[i];
+		if (p_distances[i] <= p_category_ranges[group]) {
+			insert_best(by_category[group],
+					{ p_priorities[i], p_distances[i], i, p_visible[i] },
+					MIN(p_budget, p_category_caps[group]));
+		}
+	}
+	int cursors[4] = { 0, 0, 0, 0 };
+	PackedInt32Array output;
+	while (output.size() < p_budget) {
+		int winner = -1;
+		for (int group = 0; group < 4; ++group) {
+			if (cursors[group] >= by_category[group].size()) {
+				continue;
+			}
+			if (winner < 0 || better(by_category[group][cursors[group]],
+						by_category[winner][cursors[winner]])) {
+				winner = group;
+			}
+		}
+		if (winner < 0) {
+			break;
+		}
+		output.push_back(by_category[winner][cursors[winner]].index);
+		++cursors[winner];
+	}
+	return output;
+}
+
 PackedInt32Array SignificanceBudgetPlanner::select_world(const PackedVector3Array &p_positions,
 		const PackedVector3Array &p_viewers, const PackedByteArray &p_priorities,
 		int p_budget, double p_max_distance) const {
@@ -587,6 +646,8 @@ void SignificanceBudgetPlanner::_bind_methods() {
 			&SignificanceBudgetPlanner::select_effects);
 	ClassDB::bind_method(D_METHOD("select_effects_visible", "distances", "priorities", "categories", "visible", "category_caps", "budget", "max_distance"),
 			&SignificanceBudgetPlanner::select_effects_visible);
+	ClassDB::bind_method(D_METHOD("select_effects_visible_ranged", "distances", "priorities", "categories", "visible", "category_caps", "category_ranges", "budget"),
+			&SignificanceBudgetPlanner::select_effects_visible_ranged);
 	ClassDB::bind_method(D_METHOD("select_top_priority_stable", "distances", "priorities", "ids", "retained_ids", "budget", "max_distance", "hysteresis"),
 			&SignificanceBudgetPlanner::select_top_priority_stable, DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("select_top_stable", "distances", "ids", "retained_ids", "budget", "max_distance", "hysteresis"),
