@@ -13,6 +13,8 @@ const StreamingInspector = preload("res://addons/visual_quality/world_streaming_
 const CharacterController = preload("res://addons/visual_quality/character_controller.gd")
 const ExplorationQuest = preload("res://addons/visual_quality/exploration_quest.gd")
 const InteractionRouter = preload("res://addons/visual_quality/world_interaction_router.gd")
+const Inventory = preload("res://addons/visual_quality/inventory_component.gd")
+const ItemCatalog = preload("res://addons/visual_quality/item_catalog.gd")
 
 var controller: AdaptiveResolution3D
 var manager: VisualQualityManager
@@ -30,6 +32,10 @@ var last_export_result: String = ""
 var player_character: VisualLabCharacter3D
 var movement_label: Label
 var quest: ExplorationQuest3D
+var inventory: WorldInventory3D
+var inventory_panel: PanelContainer
+var inventory_label: Label
+var inventory_feedback: Label
 var interaction_router: WorldInteractionRouter3D
 var interaction_label: Label
 var interaction_result_label: Label
@@ -49,6 +55,11 @@ var cloud_elapsed: float = 0.0
 
 func _ready() -> void:
 	_build_world()
+	inventory = Inventory.new()
+	inventory.name = "WorldInventory3D"
+	inventory.world_id = "visual_quality_lab_forest_20261120"
+	inventory.inventory_changed.connect(_update_inventory_ui)
+	add_child(inventory)
 	controller = ResolutionController.new()
 	controller.name = "AdaptiveResolution3D"
 	controller.enable_gpu_frame_measurement = true
@@ -77,6 +88,13 @@ func _ready() -> void:
 	world_state.state_saved.connect(_on_world_state_saved)
 	# The store subscribes before the first scene is streamed.
 	add_child(world_state)
+	# Upgrade old saves with already activated beacons. Unique source IDs
+	# make this migration safe after recipes consume some essence.
+	for z in range(-3, 4):
+		for x in range(-3, 4):
+			var coord: Vector2i = Vector2i(x, z)
+			if world_state.get_saved_state(coord).get("activated", false) == true:
+				inventory.grant_once("beacon:%d:%d" % [x, z], "forest_essence", 1)
 	add_child(streamer)
 	streamer.streaming_enabled = true
 	streamer.set_quality_profile(manager.current_profile)
@@ -121,7 +139,11 @@ func _ready() -> void:
 	quest.progress_changed.connect(_on_quest_progress)
 	quest.pickup_hint_changed.connect(_on_quest_hint)
 	quest.quest_finished.connect(_on_quest_finished)
+	quest.shard_collected.connect(_on_shard_collected)
 	add_child(quest)
+	# Migrate quest saves from earlier versions once. Stable source IDs mean
+	# crafting and quest replay cannot mint duplicate shard rewards.
+	inventory.import_quest_history(quest.world_seed, quest.collected_ids)
 	_build_quest_ui()
 	_build_movement_ui()
 	_build_world_state_ui()
@@ -136,6 +158,7 @@ func _ready() -> void:
 	interaction_router.interaction_completed.connect(_on_interaction_completed)
 	add_child(interaction_router)
 	_build_interaction_ui()
+	_build_inventory_ui()
 	_on_quest_progress(quest.collected_count(), quest.positions.size())
 	_on_quest_hint(quest.current_hint())
 
@@ -157,6 +180,8 @@ func _on_streamed_cell_loaded(_coord: Vector2i, cell: Node3D) -> void:
 		cell.call("set_quality", manager.current_profile)
 	if cell.has_method("set_ai_enabled"):
 		cell.call("set_ai_enabled", ai_simulation_enabled)
+	if cell.has_signal("resource_awarded"):
+		cell.connect("resource_awarded", _on_world_resource_awarded)
 
 
 func _process(delta: float) -> void:
@@ -207,6 +232,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				streaming_inspector.toggle_visible()
 			KEY_L:
 				_export_cell_hotspots()
+			KEY_I:
+				_toggle_inventory_ui()
+			KEY_C:
+				_craft_inventory_item("spark_core")
+			KEY_J:
+				_craft_inventory_item("forest_lantern")
 
 
 func _build_graphics_ui() -> void:
@@ -507,6 +538,75 @@ func _on_interaction_completed(_stable_id: String, success: bool, message: Strin
 	if is_instance_valid(interaction_result_label):
 		interaction_result_label.text = message if success else "Действие недоступно"
 	_update_world_state_ui()
+
+
+func _on_shard_collected(index: int) -> void:
+	inventory.grant_once("quest:%d:%d" % [quest.world_seed, index], "light_shard", 1)
+
+
+func _on_world_resource_awarded(item_id: String, source_uid: String) -> void:
+	inventory.grant_once(source_uid, item_id, 1)
+
+
+func _build_inventory_ui() -> void:
+	var ui: CanvasLayer = get_node("VisualQualityUI") as CanvasLayer
+	inventory_panel = PanelContainer.new()
+	inventory_panel.name = "WorldInventoryPanel"
+	inventory_panel.anchor_left = 0.5
+	inventory_panel.anchor_right = 0.5
+	inventory_panel.anchor_top = 0.5
+	inventory_panel.anchor_bottom = 0.5
+	inventory_panel.offset_left = -190.0
+	inventory_panel.offset_right = 190.0
+	inventory_panel.offset_top = -145.0
+	inventory_panel.offset_bottom = 145.0
+	ui.add_child(inventory_panel)
+	var column: VBoxContainer = VBoxContainer.new()
+	inventory_panel.add_child(column)
+	var heading: Label = Label.new()
+	heading.text = "ИНВЕНТАРЬ  |  I закрыть"
+	column.add_child(heading)
+	inventory_label = Label.new()
+	column.add_child(inventory_label)
+	var craft_core: Button = Button.new()
+	craft_core.text = "C: 2 осколка → искровое ядро"
+	craft_core.pressed.connect(_craft_inventory_item.bind("spark_core"))
+	column.add_child(craft_core)
+	var craft_lantern: Button = Button.new()
+	craft_lantern.text = "J: ядро + 2 эссенции → лесной фонарь"
+	craft_lantern.pressed.connect(_craft_inventory_item.bind("forest_lantern"))
+	column.add_child(craft_lantern)
+	inventory_feedback = Label.new()
+	column.add_child(inventory_feedback)
+	inventory_panel.visible = false
+	_update_inventory_ui("", 0)
+
+
+func _update_inventory_ui(_item_id: String = "", _new_count: int = 0) -> void:
+	if not is_instance_valid(inventory_label) or not is_instance_valid(inventory):
+		return
+	var lines: PackedStringArray = PackedStringArray()
+	for item_id in ItemCatalog.all_item_ids():
+		lines.append("%s: %d / %d" % [ItemCatalog.item_name(item_id),
+			inventory.get_count(item_id), ItemCatalog.max_stack(item_id)])
+	inventory_label.text = "\n".join(lines)
+
+
+func _toggle_inventory_ui() -> void:
+	if is_instance_valid(inventory_panel):
+		inventory_panel.visible = not inventory_panel.visible
+		if inventory_panel.visible:
+			_update_inventory_ui()
+
+
+func _craft_inventory_item(recipe_id: String) -> void:
+	if not is_instance_valid(inventory):
+		return
+	var succeeded: bool = inventory.craft(recipe_id)
+	if is_instance_valid(inventory_feedback):
+		inventory_feedback.text = ("Создано: %s" % ItemCatalog.item_name(recipe_id)
+			if succeeded else "Не хватает материалов или места")
+	_update_inventory_ui()
 
 
 func _build_world() -> void:
