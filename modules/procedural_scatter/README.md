@@ -36,7 +36,7 @@ var indices := filter.filter_indices_excluding(
 
 `games/days_after/foliage_scatter.gd` generates candidate grass positions on
 a shuffled deterministic grid, reserves spherical areas around player spawn,
-ruins, resources and barricades, and draws up to 160 instances in one MultiMesh
+ruins, resources and barricades, and draws up to 160 instances in bounded MultiMesh batches
 batch. On Cgame, it calls the native API; on stock Godot, it follows the same
 ordering in a GDScript fallback. The smoke test checks that no grass overlaps
 reserved areas, spacing remains valid, and native/fallback output is identical.
@@ -169,7 +169,7 @@ var selected_indices := pcg.filter_indices_density(
 The game uses stable IDs tied to 25×25 grid cells, with probabilities
 from 0.13 on worn approaches to 0.94 in denser outskirts. The engine
 samples points before mixed-volume rejection and spatial thinning.
-Up to 160 collision-free grass blades render in one `MultiMesh` batch;
+Up to 160 collision-free grass blades render in at most three `MultiMesh` batches;
 stock Godot can run an independent GDScript fallback. The smoke checks
 the patchy density distribution, exclusion and spacing constraints,
 regeneration, and native/fallback parity.
@@ -254,9 +254,47 @@ var variants := selector.choose_variants(
   invalid input, zero weights and parity.
 
 The Days After game uses weights 6:3:1 for green, autumn and dry blades,
-tinting and scaling each instance within a **single MultiMesh**.
-No per-frame point sampling or extra per-variant draw calls are introduced.
-This is variation of *instance attributes* rather than allocation of three
-separate mesh resources.
+tinting and scaling each instance using mesh-specific GPU batches.
+No per-frame point sampling or per-plant scene objects are introduced.
+Each distinct mesh is grouped into one instancing component rather than
+mixing incompatible geometry into a single MultiMesh.
 
 Reference: [Unreal PCG weighted mesh selectors](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).
+
+
+## PCG weighted mesh attribute batching
+
+`PCGWeightedVariantSelector.partition_indices(variants, variant_count)`
+adds the missing stage between the weighted selector and GPU instancing:
+
+```gdscript
+var selector := PCGWeightedVariantSelector.new()
+var variants := selector.choose_variants(
+    PackedInt64Array([101, 102, 103, 104]),
+    PackedFloat32Array([6, 3, 1]), 81419)
+var mesh_buckets := selector.partition_indices(variants, 3)
+# Exactly three PackedInt32Array groups, including empty variants.
+# Every original source point index occurs once in its selected group.
+```
+
+The native method is O(point count + variant count), supports at most
+16,384 indices across 1–32 variants, and returns exactly one ordered
+source-index group per variant (even if that geometry is absent).
+Any invalid/negative/out-of-range index, invalid variant count or input
+exceeding the limit returns an empty Array **without partially dropping
+instances**. Valid empty inputs yield the requested number of empty groups.
+It never touches meshes, materials, scene nodes, physics or renderer state,
+so engine users can separately build their own per-mesh MultiMeshes.
+
+`games/days_after/pcg_weighted_variants.gd` provides an independent
+stock-Godot fallback. Existing `choose_variants()` remains unchanged.
+The playable Days After scene takes each group's original source indices,
+creates a distinct primitive mesh for each of the three variant types,
+and updates only three reused GPU-instanced components. Neither physical
+placement nor gameplay interactables are modified.
+
+Unreal's [Instanced Static Mesh component](https://dev.epicgames.com/documentation/en-us/unreal-engine/instanced-static-mesh-component-in-unreal-engine)
+uses the same grouping principle: identical geometry is instanced together.
+Three different source meshes cost up to three draw batches here, rather than
+the former one draw batch, but avoid per-plant draw calls and node overhead.
+No unmeasured FPS gain is claimed.
