@@ -13,6 +13,7 @@ const MIN_BETWEEN_ADDS := 5.0
 const RADII := [9.0, 12.0, 15.0]
 const ANGLES := 16
 const MAX_THREAT_CONTEXTS := 32
+const MAX_OCCUPANCY_CONTEXTS := 128
 const QUERY_MAX_DISTANCE := 64.0
 
 
@@ -88,10 +89,12 @@ static func rank_sites(candidates: Array[Vector2], threats: Array[Vector2],
 ## result identical on stock Godot and older Cgame binaries.
 static func spread_sites(candidates: Array[Vector2], threats: Array[Vector2],
 		center: Vector2, count: int, min_separation: float,
-		prefer_native: bool = true) -> Array[Vector2]:
+		prefer_native: bool = true, occupied: Array[Vector2] = [],
+		clearance: float = 0.0) -> Array[Vector2]:
 	var selected: Array[Vector2] = []
 	if not center.is_finite() or count <= 0 or count > 64 \
-			or not is_finite(min_separation) or min_separation < 0.0:
+			or not is_finite(min_separation) or min_separation < 0.0 \
+			or not is_finite(clearance) or clearance < 0.0:
 		return selected
 	var vetted: Array[Vector2] = []
 	for point in candidates:
@@ -105,14 +108,22 @@ static func spread_sites(candidates: Array[Vector2], threats: Array[Vector2],
 		if threat.is_finite():
 			valid_threats.append(threat)
 
+	var occupied_finite: Array[Vector2] = []
+	if clearance > 0.0:
+		for point in occupied:
+			if point.is_finite():
+				occupied_finite.append(point)
+
 	# On native binaries we score and choose separated sites in one query,
 	# scanning beyond near-duplicate top candidates rather than truncating first.
 	if prefer_native and not valid_threats.is_empty() \
 			and valid_threats.size() <= MAX_THREAT_CONTEXTS \
+			and occupied_finite.size() <= MAX_OCCUPANCY_CONTEXTS \
 			and ClassDB.class_exists("EnvironmentQuery3D"):
 		var query: Object = ClassDB.instantiate("EnvironmentQuery3D")
 		if query != null and query.has_method("query_spread_positions") \
-				and query.has_method("set_threat_positions"):
+				and query.has_method("set_threat_positions") \
+				and (occupied_finite.is_empty() or query.has_method("query_spread_positions_avoiding")):
 			var positions := PackedVector3Array()
 			for point in vetted:
 				positions.append(Vector3(point.x, 0.0, point.y))
@@ -127,14 +138,30 @@ static func spread_sites(candidates: Array[Vector2], threats: Array[Vector2],
 			query.set("safety_weight", 1.0)
 			query.set("use_threat", true)
 			query.set("threat_positions", contexts)
-			var native_points: PackedVector3Array = query.call(
-				"query_spread_positions", count, min_separation)
+			var native_points := PackedVector3Array()
+			if occupied_finite.is_empty():
+				native_points = query.call("query_spread_positions", count, min_separation)
+			else:
+				var occupied_positions := PackedVector3Array()
+				for occupied_point in occupied_finite:
+					occupied_positions.append(Vector3(occupied_point.x, 0.0, occupied_point.y))
+				native_points = query.call("query_spread_positions_avoiding",
+					count, min_separation, occupied_positions, clearance)
 			for point in native_points:
 				selected.append(Vector2(point.x, point.z))
 			return selected
 
 	# Exact stable ranking and >= threshold match the C++ implementation.
-	for point in rank_sites(vetted, valid_threats, center, prefer_native):
+	var free_sites: Array[Vector2] = []
+	for point in vetted:
+		var blocked := false
+		for occupied_point in occupied_finite:
+			if point.distance_to(occupied_point) < clearance:
+				blocked = true
+				break
+		if not blocked:
+			free_sites.append(point)
+	for point in rank_sites(free_sites, valid_threats, center, prefer_native):
 		var clear := true
 		for other in selected:
 			if point.distance_to(other) < min_separation:
@@ -176,8 +203,12 @@ static func sites(world, players: Dictionary, zombies: Dictionary,
 	var zone: int = world.zone_at(origin.x, origin.y)
 	if zone < 2 or world.is_safe(origin.x, origin.y):
 		return found
-	# Preserve all authoritative terrain, zone, player distance and
-	# existing-infected exclusions *before* native or script ranking.
+	# Snapshot occupied positions once; native EQS filters them directly,
+	# while the stock Godot fallback performs exactly the same check.
+	var occupied: Array[Vector2] = []
+	for enemy in zombies.values():
+		if enemy.is_alive() and enemy.position.is_finite():
+			occupied.append(Vector2(enemy.position.x, enemy.position.z))
 	var candidates: Array[Vector2] = []
 	for radius in RADII:
 		for index in ANGLES:
@@ -194,10 +225,6 @@ static func sites(world, players: Dictionary, zombies: Dictionary,
 					break
 			if not clear:
 				continue
-			for enemy in zombies.values():
-				if enemy.is_alive() and point.distance_to(Vector2(enemy.position.x, enemy.position.z)) < MIN_INFECTED_DISTANCE:
-					clear = false
-					break
 			if clear:
 				candidates.append(point)
 
@@ -220,4 +247,5 @@ static func sites(world, players: Dictionary, zombies: Dictionary,
 	var threats: Array[Vector2] = []
 	for i in mini(nearby.size(), MAX_THREAT_CONTEXTS):
 		threats.append(nearby[i]["position"])
-	return spread_sites(candidates, threats, origin, mini(count, MAX_WAVE), MIN_BETWEEN_ADDS)
+	return spread_sites(candidates, threats, origin, mini(count, MAX_WAVE),
+		MIN_BETWEEN_ADDS, true, occupied, MIN_INFECTED_DISTANCE)
