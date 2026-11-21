@@ -37,6 +37,7 @@ const SUITES := [
 	"res://tests/test_engine_parity_fx.gd",
 	"res://tests/test_engine_runtime_tags.gd",
 	"res://tests/test_runtime_effect_timeline.gd",
+	"res://tests/test_gameplay_attributes.gd",
 	"res://tests/test_ambient_tick_budget.gd",
 	"res://tests/test_ragdoll.gd",
 	"res://tests/test_anim_lod.gd",

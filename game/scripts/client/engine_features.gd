@@ -22,6 +22,8 @@ static func tag_node(node: Node, tags: Array) -> void:
 		node.set_meta("tag_stacks", ClassDB.instantiate("GameplayTagStackContainer"))
 	if has("GameplayEffectTimeline"):
 		node.set_meta("effect_timeline", ClassDB.instantiate("GameplayEffectTimeline"))
+	if has("GameplayAttributeSet"):
+		node.set_meta("attributes", ClassDB.instantiate("GameplayAttributeSet"))
 
 
 ## Creates an engine class by name and applies properties; returns null when the binary lacks it.
@@ -127,6 +129,10 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 				stack_container.call("replace_stack_branch", StringName("Runtime"), counts)
 			else:
 				stack_container.call("replace_stacks", counts)
+	# Attribute snapshots are read-only presentation mirrors, never combat authority.
+	var attrs: Object = node.get_meta("attributes", null) as Object
+	if attrs != null and attrs.has_method("replace_snapshot"):
+		attrs.call("replace_snapshot", runtime_attribute_snapshot(kind, snapshot))
 	# Render-only native timers are independent from counted tag branches.
 	var timeline: Object = node.get_meta("effect_timeline", null) as Object
 	if timeline != null:
@@ -192,6 +198,56 @@ static func runtime_effect_remaining(node: Node, tag: String, fallback: float = 
 	return maxf(0.0, fallback) if is_finite(fallback) else 0.0
 
 
+## Derive read-only client attributes from the server-owned actor snapshot.
+## Effect sources are replaced atomically, so expired modifiers cannot persist.
+static func runtime_attribute_snapshot(kind: String, state: Dictionary) -> Dictionary:
+	var result: Dictionary = {"attributes": {}, "modifiers": []}
+	if kind != "zombie" and kind != "player":
+		return result
+	var health: float = float(state.get("hp", 0.0))
+	if not is_finite(health):
+		health = 0.0
+	var maximum: float = float(state.get("max_hp", maxf(1.0, health)))
+	if not is_finite(maximum):
+		maximum = 1.0
+	maximum = clampf(maximum, 1.0, 1000000000.0)
+	health = clampf(health, 0.0, maximum)
+	var attributes: Dictionary = {
+		StringName("Vital.Health"): {"base": health, "min": 0.0, "max": maximum},
+		StringName("Vital.MaxHealth"): {"base": maximum, "min": 1.0, "max": 1000000000.0},
+		StringName("Visual.HitResponse"): {"base": 1.0, "min": 0.5, "max": 1.75}
+	}
+	result["attributes"] = attributes
+	var modifiers: Array = []
+	if kind == "zombie":
+		var visual_bonuses: Dictionary = {
+			"Rank.Elite": 0.2 if bool(state.get("elite", false)) else 0.0,
+			"Rank.Boss": 0.15 if bool(state.get("raid_boss", false)) else 0.0,
+			"Status.Sundered": 0.25 if float(state.get("sunder_seconds", 0.0)) > 0.0 else 0.0,
+			"Status.Resolve": -0.15 if int(state.get("resolve_stacks", 0)) >= 2 and
+				float(state.get("resolve_seconds", 0.0)) > 0.0 else 0.0
+		}
+		for source in visual_bonuses:
+			var additive: float = float(visual_bonuses[source])
+			if additive != 0.0:
+				modifiers.append({
+					"source": StringName(source),
+					"attribute": StringName("Visual.HitResponse"),
+					"additive": additive, "percent": 0.0
+				})
+	result["modifiers"] = modifiers
+	return result
+
+
+static func runtime_attribute_value(node: Node, name: String, fallback: float = 0.0) -> float:
+	if node != null:
+		var attribute_set: Object = node.get_meta("attributes", null) as Object
+		if attribute_set != null and attribute_set.has_method("has_attribute") and
+				bool(attribute_set.call("has_attribute", StringName(name))):
+			return float(attribute_set.call("get_value", StringName(name)))
+	return fallback if is_finite(fallback) else 0.0
+
+
 static func runtime_stack_count(node: Node, tag: String, fallback: int = 0) -> int:
 	if node != null and node.has_meta("tag_stacks"):
 		var stack_container: Object = node.get_meta("tag_stacks") as Object
@@ -234,6 +290,7 @@ static func runtime_has_resolve(node: Node, fallback_stacks: int = 0) -> bool:
 static func hit_feedback_strength(node: Node, base_strength: float) -> float:
 	if not is_finite(base_strength) or base_strength <= 0.0:
 		return 0.0
+	var scale: float = runtime_attribute_value(node, "Visual.HitResponse", 1.0)
 	var timeline: Object = null
 	if node != null:
 		timeline = node.get_meta("effect_timeline", null) as Object
@@ -241,5 +298,5 @@ static func hit_feedback_strength(node: Node, base_strength: float) -> float:
 		var tag := StringName("Local.Visual.RecentHit")
 		if bool(timeline.call("apply_effect", tag, 0.22, 1, 4, 0)):
 			var hits: int = int(timeline.call("get_stacks", tag))
-			return base_strength * (1.0 + 0.12 * float(clampi(hits, 1, 4) - 1))
-	return base_strength
+			return base_strength * scale * (1.0 + 0.12 * float(clampi(hits, 1, 4) - 1))
+	return base_strength * scale
