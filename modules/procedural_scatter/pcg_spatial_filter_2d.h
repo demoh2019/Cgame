@@ -28,4 +28,12 @@ public:
 	// Invalid/oversized inputs are rejected atomically (empty result).
 	PackedInt32Array filter_indices(const PackedVector2Array &p_candidates,
 			double p_min_spacing, int p_max_selected = MAX_SELECTED) const;
+
+	// Variable-footprint PCG self-pruning. Scales must be in [0.5, 2.0];
+	// conflicts occur when distance < spacing * (scale_a + scale_b) / 2.
+	// Larger points take precedence by default, ties by input index.
+	// Results are always returned in original index order.
+	PackedInt32Array filter_indices_scaled(const PackedVector2Array &p_candidates,
+			const PackedFloat32Array &p_scales, double p_min_spacing,
+			int p_max_selected = MAX_SELECTED, bool p_largest_first = true) const;
 };
