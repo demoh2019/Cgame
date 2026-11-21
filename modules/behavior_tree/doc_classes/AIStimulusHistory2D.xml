@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AIStimulusHistory2D" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Bounded, source-aware, time-limited memory for confirmed 2D AI perception events.</brief_description>
+	<description>
+		Stores events that the game already considers audible, visible, or caused by real combat. Every event has a sense, optional source ID, 2D position, strength, and lifetime. No world queries or automatic detections occur here. The caller must enforce safe zones, visibility, occlusion, factions, and authoritative target selection before recording.
+		Events are kept oldest to newest. For nonnegative source IDs, a repeated event of the same sense refreshes the existing entry rather than accumulating duplicates. Anonymous source ID -1 keeps independent events. When the maximum capacity is reached, the oldest event is discarded. Expired events are removed by [method advance_time].
+		[method get_best] ranks live events of one sense by [code]strength * remaining_seconds / ttl_seconds[/code], preferring a lower source ID and then a lexicographically lower position when scores match. This is a memory-priority score, not measured loudness, and it never implies that a player is currently visible. The source identity and coordinates are server-sensitive: do not replicate debug snapshots to ordinary clients.
+	</description>
+	<methods>
+		<method name="set_capacity"><return type="void" /><param index="0" name="capacity" type="int" /><description>Set a per-instance capacity between 1 and 64. Shrinking discards the oldest entries first.</description></method>
+		<method name="get_capacity" qualifiers="const"><return type="int" /><description>Returns the capacity, initially 16.</description></method>
+		<method name="record_stimulus"><return type="bool" /><param index="0" name="sense" type="int" enum="AIStimulusHistory2D.Sense" /><param index="1" name="position" type="Vector2" /><param index="2" name="strength" type="float" /><param index="3" name="ttl_seconds" type="float" /><param index="4" name="source_id" type="int" default="-1" /><description>Record one already-authorized event. Requires finite position, strength in (0, 1], lifetime in (0, 60], and source ID -1 or nonnegative. Returns false without mutation for invalid inputs. Repeated known-source events replace the previous matching-sense event.</description></method>
+		<method name="advance_time"><return type="void" /><param index="0" name="delta" type="float" /><description>Decrements remaining lifetimes using nonnegative finite elapsed seconds, removing expired records.</description></method>
+		<method name="get_event_count" qualifiers="const"><return type="int" /><description>Returns the number of active records.</description></method>
+		<method name="get_best" qualifiers="const"><return type="Dictionary" /><param index="0" name="sense" type="int" enum="AIStimulusHistory2D.Sense" /><description>Return a detached Dictionary for the highest-scored active event in the requested sense, or an empty Dictionary. Fields: [code]sense[/code], [code]source_id[/code], [code]position[/code], [code]strength[/code], [code]ttl_seconds[/code], [code]remaining_seconds[/code], [code]age_seconds[/code], [code]score[/code].</description></method>
+		<method name="get_recent" qualifiers="const"><return type="Array" /><param index="0" name="limit" type="int" default="8" /><description>Returns up to [param limit] detached event Dictionaries newest first. Valid limit is 0 to 64. Intended for server diagnostics and decision-making; no shared mutable state is exposed.</description></method>
+		<method name="reset"><return type="void" /><description>Clears all events, preserving the configured capacity.</description></method>
+	</methods>
+	<members>
+		<member name="capacity" type="int" default="16">Maximum number of simultaneously remembered events (1 to 64).</member>
+	</members>
+	<constants>
+		<constant name="SIGHT" value="0" enum="Sense">A previously confirmed visual observation.</constant>
+		<constant name="SOUND" value="1" enum="Sense">A previously confirmed audible event.</constant>
+		<constant name="DAMAGE" value="2" enum="Sense">An authoritative combat stimulus, supplied explicitly by the game.</constant>
+	</constants>
+</class>
