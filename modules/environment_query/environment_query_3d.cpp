@@ -203,6 +203,7 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query_spread_positions", "count", "min_separation"), &EnvironmentQuery3D::query_spread_positions);
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_ring", "center", "radius", "count", "phase"), &EnvironmentQuery3D::sample_ring, DEFVAL(0.0));
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_donut", "center", "inner_radius", "outer_radius", "ring_count", "points_per_ring", "phase", "spiral"), &EnvironmentQuery3D::sample_donut, DEFVAL(0.0), DEFVAL(false));
+	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_cone", "center", "direction", "inner_radius", "outer_radius", "ring_count", "points_per_ring", "cone_degrees", "include_center"), &EnvironmentQuery3D::sample_cone, DEFVAL(90.0), DEFVAL(false));
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_grid", "center", "half_extents", "spacing", "max_points"), &EnvironmentQuery3D::sample_grid, DEFVAL(4096));
 
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "candidates"), "set_candidates", "get_candidates");
@@ -517,6 +518,46 @@ PackedVector3Array EnvironmentQuery3D::sample_donut(const Vector3 &p_center, dou
 			const Vector3 point = p_center + Vector3(Math::cos(angle) * radius, 0.0, Math::sin(angle) * radius);
 			ERR_FAIL_COND_V_MSG(!point.is_finite(), PackedVector3Array(), "Donut sample coordinates must be finite.");
 			ptr[ring * p_points_per_ring + index] = point;
+		}
+	}
+	return output;
+}
+
+// Geometry-only counterpart to Unreal EQS Points: Cone. Every candidate
+// remains untrusted until gameplay validates terrain, navigation and blockers.
+PackedVector3Array EnvironmentQuery3D::sample_cone(const Vector3 &p_center, const Vector3 &p_direction, double p_inner_radius, double p_outer_radius, int p_ring_count, int p_points_per_ring, double p_cone_degrees, bool p_include_center) {
+	PackedVector3Array output;
+	ERR_FAIL_COND_V_MSG(!p_center.is_finite() || !p_direction.is_finite() ||
+			!Math::is_finite(p_inner_radius) || !Math::is_finite(p_outer_radius) ||
+			p_inner_radius < 0.0 || p_outer_radius < p_inner_radius, output,
+			"Cone coordinates and radii must be finite and satisfy 0 <= inner_radius <= outer_radius.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_cone_degrees) || p_cone_degrees < 0.0 || p_cone_degrees > 360.0,
+			output, "Cone aperture must be finite and within 0..360 degrees.");
+	ERR_FAIL_COND_V_MSG(p_ring_count < 1 || p_ring_count > 256 ||
+			p_points_per_ring < 1 || p_points_per_ring > 4096,
+			output, "Cone ring count must be 1..256 and points per ring 1..4096.");
+	const int64_t count = int64_t(p_ring_count) * p_points_per_ring + (p_include_center ? 1 : 0);
+	ERR_FAIL_COND_V_MSG(count > 65536, output, "Cone sample budget is limited to 65536 points.");
+	const double axis_length = Math::sqrt(double(p_direction.x) * p_direction.x + double(p_direction.z) * p_direction.z);
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(axis_length) || axis_length <= CMP_EPSILON,
+			output, "Cone direction must have a finite nonzero XZ projection.");
+	const double center_angle = Math::atan2(double(p_direction.z) / axis_length, double(p_direction.x) / axis_length);
+	const double aperture = Math::deg_to_rad(p_cone_degrees);
+	output.resize(int(count));
+	Vector3 *ptr = output.ptrw();
+	const int offset = p_include_center ? 1 : 0;
+	if (p_include_center) {
+		ptr[0] = p_center;
+	}
+	for (int ring = 0; ring < p_ring_count; ring++) {
+		const double radius = p_ring_count == 1 ? p_outer_radius :
+				p_inner_radius + (p_outer_radius - p_inner_radius) * double(ring) / double(p_ring_count - 1);
+		for (int ray = 0; ray < p_points_per_ring; ray++) {
+			const double fraction = p_points_per_ring == 1 ? 0.5 : double(ray) / double(p_points_per_ring - 1);
+			const double angle = center_angle + aperture * (fraction - 0.5);
+			const Vector3 point = p_center + Vector3(Math::cos(angle) * radius, 0.0, Math::sin(angle) * radius);
+			ERR_FAIL_COND_V_MSG(!point.is_finite(), PackedVector3Array(), "Cone sample coordinates must be finite.");
+			ptr[offset + ring * p_points_per_ring + ray] = point;
 		}
 	}
 	return output;
