@@ -113,6 +113,12 @@ real_t AIVisualSensor2D::get_memory_remaining() const {
 	return memory_remaining;
 }
 
+void AIVisualSensor2D::advance_time(real_t p_delta) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_delta) || p_delta < 0.0, "Perception delta must be nonnegative and finite.");
+	target_visible = false;
+	memory_remaining = MAX(real_t(0.0), memory_remaining - p_delta);
+}
+
 void AIVisualSensor2D::reset() {
 	target_visible = false;
 	memory_remaining = 0.0;
@@ -133,6 +139,7 @@ void AIVisualSensor2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_target_memory"), &AIVisualSensor2D::has_target_memory);
 	ClassDB::bind_method(D_METHOD("get_last_known_position"), &AIVisualSensor2D::get_last_known_position);
 	ClassDB::bind_method(D_METHOD("get_memory_remaining"), &AIVisualSensor2D::get_memory_remaining);
+	ClassDB::bind_method(D_METHOD("advance_time", "delta"), &AIVisualSensor2D::advance_time);
 	ClassDB::bind_method(D_METHOD("reset"), &AIVisualSensor2D::reset);
 
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "sight_radius", PROPERTY_HINT_RANGE, "0.1,20000,0.1,or_greater"), "set_sight_radius", "get_sight_radius");
