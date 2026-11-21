@@ -76,6 +76,16 @@
 				When the order of instances is coherent, the simpler alternative of setting [member buffer] can still be used with interpolation.
 			</description>
 		</method>
+		<method name="set_instance_colors_batch">
+			<return type="bool" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<param index="1" name="colors" type="PackedColorArray" />
+			<description>
+				Updates per-instance vertex colors for the specified indices of a [MultiMesh] with a single scripting call. Requires [member use_colors] to be enabled. [param indices] and [param colors] must have equal lengths; indices must be unique and within [member instance_count], and all four color channels must be finite.
+				The input is fully validated before any update, so invalid input returns [code]false[/code] without modifying the buffer. Indices may be unsorted and may reference hidden slots. An empty pair is valid if colors are enabled. Neither [member instance_count] nor [member visible_instance_count] is affected.
+				Useful for color-coded instanced cargo, entity status, damage highlighting and batch visualization. This helper reduces script-to-engine calls; internally it still sends a separate RenderingServer update for every index. For full-buffer updates use [method set_buffer] instead. The vertex material must enable vertex colors (or the shader use [code]COLOR[/code]) for visible color changes.
+			</description>
+		</method>
 		<method name="set_instance_color">
 			<return type="void" />
 			<param index="0" name="instance" type="int" />

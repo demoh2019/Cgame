@@ -30,6 +30,8 @@
 
 #include "multimesh.h"
 
+#include "core/math/math_funcs.h"
+
 #include "core/object/class_db.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -280,6 +282,33 @@ Transform2D MultiMesh::get_instance_transform_2d(int p_instance) const {
 	return RenderingServer::get_singleton()->multimesh_instance_get_transform_2d(multimesh, p_instance);
 }
 
+bool MultiMesh::set_instance_colors_batch(const PackedInt32Array &p_indices, const PackedColorArray &p_colors) {
+	ERR_FAIL_COND_V_MSG(!use_colors, false, "Enable use_colors before updating per-instance colors.");
+	ERR_FAIL_COND_V_MSG(p_indices.size() != p_colors.size(), false, "Indices and colors arrays must have the same length.");
+	if (p_indices.is_empty()) {
+		return true;
+	}
+
+	PackedInt32Array sorted = p_indices;
+	sorted.sort();
+	for (int i = 0; i < sorted.size(); i++) {
+		ERR_FAIL_INDEX_V_MSG(sorted[i], instance_count, false, "Batch color index out of bounds.");
+		if (i > 0) {
+			ERR_FAIL_COND_V_MSG(sorted[i] == sorted[i - 1], false, "Batch color indices must be unique.");
+		}
+	}
+	for (int i = 0; i < p_colors.size(); i++) {
+		const Color &value = p_colors[i];
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(value.r) || !Math::is_finite(value.g) || !Math::is_finite(value.b) || !Math::is_finite(value.a), false, "Instance colors must be finite.");
+	}
+	// This groups script-to-engine dispatch only. RenderingServer receives one
+	// update per selected slot, including hidden slots.
+	for (int i = 0; i < p_indices.size(); i++) {
+		RenderingServer::get_singleton()->multimesh_instance_set_color(multimesh, p_indices[i], p_colors[i]);
+	}
+	return true;
+}
+
 void MultiMesh::set_instance_color(int p_instance, const Color &p_color) {
 	ERR_FAIL_INDEX_MSG(p_instance, instance_count, "Instance index out of bounds. Instance index must be less than `instance_count` and greater than or equal to zero.");
 	ERR_FAIL_COND_MSG(!use_colors, "Can't set instance color on a Multimesh that isn't using colors. Ensure that you have `use_colors` property of this Multimesh set to `true`.");
@@ -383,6 +412,7 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_instance_transform", "instance"), &MultiMesh::get_instance_transform);
 	ClassDB::bind_method(D_METHOD("get_instance_transform_2d", "instance"), &MultiMesh::get_instance_transform_2d);
 	ClassDB::bind_method(D_METHOD("set_instance_color", "instance", "color"), &MultiMesh::set_instance_color);
+	ClassDB::bind_method(D_METHOD("set_instance_colors_batch", "indices", "colors"), &MultiMesh::set_instance_colors_batch);
 	ClassDB::bind_method(D_METHOD("get_instance_color", "instance"), &MultiMesh::get_instance_color);
 	ClassDB::bind_method(D_METHOD("set_instance_custom_data", "instance", "custom_data"), &MultiMesh::set_instance_custom_data);
 	ClassDB::bind_method(D_METHOD("get_instance_custom_data", "instance"), &MultiMesh::get_instance_custom_data);
