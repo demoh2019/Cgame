@@ -69,6 +69,10 @@
 				Returns the corner with the lowest coordinates of [param cell], in the local space of the chunk parent.
 			</description>
 		</method>
+		<method name="clear_cached_chunks">
+			<return type="void" />
+			<description>Frees all detached, explicitly cached procedural scene roots, and resets cache hit/eviction diagnostics. Does not unload resident chunks or change the configured [member max_cached_chunks] cap.</description>
+		</method>
 		<method name="clear_auxiliary_source">
 			<return type="void" />
 			<description>
@@ -118,6 +122,18 @@
 			<description>
 				Returns the loaded chunk of [param cell], or [code]null[/code] if that cell is not loaded.
 			</description>
+		</method>
+		<method name="get_cached_chunk_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of detached, cached procedural scene roots. These do not count toward [method get_loaded_count] and cannot be returned by [method get_chunk].</description>
+		</method>
+		<method name="get_chunk_cache_hit_count" qualifiers="const">
+			<return type="int" />
+			<description>Count of cached scene roots successfully reattached instead of recreated by the procedural generator. A cache hit still uses a normal main-thread integration slot.</description>
+		</method>
+		<method name="get_chunk_cache_eviction_count" qualifiers="const">
+			<return type="int" />
+			<description>Count of oldest cached roots removed because the configured cap was exceeded. Does not include explicit cache clearing.</description>
 		</method>
 		<method name="get_chunk_generator" qualifiers="const">
 			<return type="Callable" />
@@ -226,7 +242,7 @@
 		<method name="unload_all">
 			<return type="void" />
 			<description>
-				Frees every loaded chunk. They are loaded again at the next update while the focus is nearby.
+				Frees every loaded chunk and all detached cache entries. They are loaded again at the next update while the focus is nearby.
 			</description>
 		</method>
 		<method name="world_to_cell" qualifiers="const">
@@ -291,6 +307,9 @@
 		</member>
 		<member name="max_concurrent_loads" type="int" setter="set_max_concurrent_loads" getter="get_max_concurrent_loads" default="4">
 			Maximum number of chunks loading in the background at the same time.
+		</member>
+		<member name="max_cached_chunks" type="int" setter="set_max_cached_chunks" getter="get_max_cached_chunks" default="0">
+			Opt-in bounded cache for unloaded, procedural Node roots that implement [code]can_cache_streaming_chunk() -&gt; bool[/code] and explicitly return [code]true[/code]. Zero preserves normal unload-and-free behavior; values are clamped to 0–16 complete scene roots. Cached roots are detached and do not render or simulate, but still retain memory. Returning to the exact cell reattaches through the ordinary budgeted load path and optionally invokes [code]on_streaming_cache_restored()[/code] after adoption. Cached roots are cleared on grid/parent/generator changes, manual unload and destruction; only immutable client visuals should opt in. Not for authoritative entities, physics, quest state, or network-owned objects.
 		</member>
 		<member name="max_chunk_work_usec" type="int" setter="set_max_chunk_work_usec" getter="get_max_chunk_work_usec" default="0">
 			Soft CPU-time budget, in microseconds, shared across finished-scene activation and procedural chunk generation during one streaming update. Both paths use the same frame start timestamp. Once at least one chunk has been processed, no more chunks are integrated after the budget expires. A single chunk cannot be interrupted and may take longer than the budget. Enable [member adaptive_chunk_budget_enabled] to temporarily reduce effective limits during sustained slow frames; call [method get_effective_chunk_work_usec] for the resulting cap. The value is clamped to [code]0[/code] through [code]1000000[/code]; [code]0[/code] disables time slicing while keeping [member max_instantiations_per_frame] active. Also works with [method refresh].
