@@ -62,6 +62,8 @@ var _gear_shown: Dictionary = {} # Gear slot -> item id currently drawn on the b
 func setup(tint: Color, scale_factor: float, walk_speed: float = 1.0, model_name: String = "", zombie: bool = false, look_seed: int = 0) -> void:
 	_walk_speed = walk_speed
 	_zombie = zombie
+	# A pooled/reconfigured model must never inherit its predecessor's IK slot.
+	set_meta("aa_full_ik_retained", false)
 	# One GPU batch provides soft floor contact where real shadows are disabled.
 	# Register the actual live actor model, never model-template resources.
 	add_to_group("aa_grounded_characters")
