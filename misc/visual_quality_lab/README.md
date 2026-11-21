@@ -716,3 +716,69 @@ godot --headless --path . --script res://tests/test_inventory_gameplay.gd
 ```
 
 References: [Godot save-game guidance](https://docs.godotengine.org/en/4.6/tutorials/io/saving_games.html), [ConfigFile](https://docs.godotengine.org/en/4.6/classes/class_configfile.html), [OmniLight3D](https://docs.godotengine.org/en/4.6/classes/class_omnilight3d.html).
+
+
+## Visual Quality Lab v16 — attributes, equipment and timed abilities
+
+This version extends the reusable **GDScript engine addon** and immediately
+connects it to the playable open-world demo. Two new components are inspired by
+the concepts of Unreal Gameplay Ability System (GAS), not GAS itself:
+
+- `addons/visual_quality/attribute_component.gd` (`WorldAttributes3D`):
+  four stats (max health, max stamina, movement multiplier, stamina regeneration),
+  equipment and timed modifiers, finite-value validation, capped vitals, effect
+  expiry and signals. Sprint now spends stamina only while moving; stamina
+  regenerates after a configurable delay since its last consumption.
+- `addons/visual_quality/ability_component.gd` (`WorldAbilitySystem3D`):
+  reusable action definitions with stamina costs, cooldowns and timed effects.
+  **X Dash** adds +0.85 movement multiplier for 0.65 seconds, costs 30 stamina,
+  and has a three-second cooldown. **Z Focus** adds +25 stamina regeneration
+  for five seconds, costs 10 stamina and has a 12-second cooldown. The ability
+  cannot activate if dead, on cooldown, or low on stamina.
+
+### Equipment and game integration
+
+The existing `WorldInventory3D` now saves equipped slots within the **same
+version-1 ConfigFile** as the inventory and one-time reward claims. It validates
+item ownership and slot identity during load; absent `equipped` (older v15
+saves) is treated as an empty equipment set. Removal or crafting that consumes
+an equipped item automatically clears the slot. Failed saves roll back in
+memory, including equipment choices.
+
+The **forest lantern** now fills the utility slot and grants **+20 max
+stamina** when equipped, alongside its existing warm light. **T** equips and
+toggles the light. The new **trail boots** fill the feet slot and increase
+movement speed by **25%**. Craft boots using **1 light shard and 2 forest
+essences** with **U**, and equip/unequip with **Y**. Inventory buttons also
+provide these actions. **I** opens the inventory. The live HUD now shows HP,
+stamina, movement multiplier, Dash cooldown and Focus cooldown.
+
+Previous demo features (streamed 49-cell world, persistent beacons, patrol NPCs,
+quest rewards, H interactions, day/night/weather, graphics tiers, CPU governor,
+world profiling) are retained.
+
+### Validation and limitations
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+godot --headless --path . --script res://tests/test_attributes.gd
+godot --headless --path . --script res://tests/test_abilities.gd
+godot --headless --path . --script res://tests/test_equipment.gd
+godot --headless --path . --script res://tests/test_equipment_persistence.gd
+```
+
+**41/41 Python static/package checks pass locally.** The four new Godot
+headless test suites (attributes/effects/stamina; ability costs/cooldowns;
+equipment ownership and auto-unequip; persistence and v15 compatibility)
+are included in CI but **have not run in Godot locally** because no executable
+is installed and CI has not yet completed. Apple Silicon/Metal performance
+remains unverified.
+
+This change is a **portable GDScript engine extension and playable demo** inside
+`misc/visual_quality_lab`. It does not modify the Godot C++ engine core, nor
+the separate inaccessible local game. It does not provide multiplayer authority,
+prediction, animation tasks or attribute replication.
+
+Documentation:
+- https://docs.godotengine.org/en/4.6/classes/class_characterbody3d.html
+- https://dev.epicgames.com/documentation/en-us/unreal-engine/gameplay-ability-system-for-unreal-engine
