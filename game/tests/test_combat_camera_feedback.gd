@@ -77,7 +77,8 @@ func run(t) -> void:
 		Vector3(1, 0, 0), Vector3.ZERO, 0.5)
 	t.check(float(directed_camera.call("get_trauma")) > 0.0,
 		"barricade destruction uses directional impact with accessibility scaling")
-	t.check((directed_camera.call("get_shake_direction_impulse") as Vector3).x > 0.0,
+	var barricade_direction: Vector3 = directed_camera.call("get_shake_direction_impulse")
+	t.check(barricade_direction.x > 0.0,
 		"barricade break points the camera toward the destruction")
 	directed_camera.call("set_trauma", 0.0)
 	Feedback.apply(directed_camera, "knockback", Vector3.ZERO, Vector3.ZERO, 0.0)
