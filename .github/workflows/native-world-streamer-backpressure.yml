@@ -18,6 +18,10 @@ on:
       - 'game/tests/test_auxiliary_streaming_readiness.gd'
       - 'game/tests/run_auxiliary_readiness.gd'
       - 'tests/scene/test_world_streamer_auxiliary_readiness.cpp'
+      - 'game/scripts/client/chunk_view.gd'
+      - 'game/tests/test_world_streamer_chunk_cache.gd'
+      - 'game/tests/run_chunk_cache.gd'
+      - 'tests/scene/test_world_streamer_chunk_cache.cpp'
       - 'tests/scene/test_world_streamer_backpressure_contract.py'
       - '.github/workflows/native-world-streamer-backpressure.yml'
   push:
@@ -36,6 +40,10 @@ on:
       - 'game/tests/test_auxiliary_streaming_readiness.gd'
       - 'game/tests/run_auxiliary_readiness.gd'
       - 'tests/scene/test_world_streamer_auxiliary_readiness.cpp'
+      - 'game/scripts/client/chunk_view.gd'
+      - 'game/tests/test_world_streamer_chunk_cache.gd'
+      - 'game/tests/run_chunk_cache.gd'
+      - 'tests/scene/test_world_streamer_chunk_cache.cpp'
       - 'tests/scene/test_world_streamer_backpressure_contract.py'
       - '.github/workflows/native-world-streamer-backpressure.yml'
 
@@ -113,6 +121,14 @@ jobs:
           timeout 300s "$BIN" --headless --path game --script res://tests/run_auxiliary_readiness.gd 2>&1 | tee auxiliary-readiness.log
           grep -E '^AUXILIARY READINESS TOTAL: [0-9]+ checks, 0 failures$' auxiliary-readiness.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' auxiliary-readiness.log; then exit 1; fi
+      - name: Cached procedural chunk and Albion scene reuse regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_chunk_cache.gd 2>&1 | tee chunk-cache.log
+          grep -E '^CHUNK CACHE TOTAL: [0-9]+ checks, 0 failures$' chunk-cache.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' chunk-cache.log; then exit 1; fi
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -125,3 +141,4 @@ jobs:
             streamer-game.log
             simulation-tier.log
             auxiliary-readiness.log
+            chunk-cache.log
