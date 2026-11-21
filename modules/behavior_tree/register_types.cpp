@@ -43,6 +43,7 @@
 #ifdef TESTS_ENABLED
 #include "tests/test_ai_visual_sensor_2d.h"
 #include "tests/test_ai_hearing_sensor_2d.h"
+#include "tests/test_ai_stimulus_history_2d.h"
 #include "tests/test_reactive_behavior_tree.h"
 #include "tests/test_blackboard_compare.h"
 #include "tests/test_ai_execution_profiler.h"
