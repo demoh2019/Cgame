@@ -214,8 +214,89 @@ PackedVector2Array AIProximityGrid2D::query_separation_batch(const PackedVector2
 	return result;
 }
 
+// Cross-set hashed broadphase for e.g. NPCs versus world traps.
+// Outputs only candidate indices; gameplay must still validate current
+// entities, expiry, allegiance and exact trigger collision after this call.
+Array AIProximityGrid2D::query_cross_radius_batch(const PackedVector2Array &p_sources,
+		const PackedVector2Array &p_targets, double p_radius, double p_cell_size) const {
+	Array result;
+	constexpr int MAX_CROSS_SOURCES = 4096;
+	constexpr int MAX_CROSS_HITS = 32768;
+	if (p_sources.is_empty() || p_targets.is_empty() ||
+			p_sources.size() > MAX_CROSS_SOURCES || p_targets.size() > MAX_POINTS ||
+			!Math::is_finite(p_radius) || p_radius < 0.0 || p_radius > MAX_QUERY_RADIUS ||
+			!Math::is_finite(p_cell_size) || p_cell_size < 1.0 ||
+			p_cell_size > MAX_QUERY_RADIUS || p_cell_size < p_radius) {
+		return result;
+	}
+	// Validate the complete request before constructing the grid; no partial
+	// matches or incorrect negative-cell indexing may escape on bad inputs.
+	for (int i = 0; i < p_sources.size(); i++) {
+		const Vector2 point = p_sources[i];
+		if (!point.is_finite() || Math::abs(point.x) > MAX_POSITION_ABS ||
+				Math::abs(point.y) > MAX_POSITION_ABS) {
+			return Array();
+		}
+	}
+	for (int i = 0; i < p_targets.size(); i++) {
+		const Vector2 point = p_targets[i];
+		if (!point.is_finite() || Math::abs(point.x) > MAX_POSITION_ABS ||
+				Math::abs(point.y) > MAX_POSITION_ABS) {
+			return Array();
+		}
+	}
+	HashMap<Vector2i, Vector<int>> cells;
+	for (int i = 0; i < p_targets.size(); i++) {
+		const Vector2 point = p_targets[i];
+		const Vector2i cell(int(Math::floor(point.x / p_cell_size)),
+				int(Math::floor(point.y / p_cell_size)));
+		Vector<int> *bucket = cells.getptr(cell);
+		if (bucket != nullptr) {
+			bucket->push_back(i);
+		} else {
+			Vector<int> first;
+			first.push_back(i);
+			cells.insert(cell, first);
+		}
+	}
+	const double squared_radius = p_radius * p_radius;
+	int total_hits = 0;
+	for (int i = 0; i < p_sources.size(); i++) {
+		const Vector2 center = p_sources[i];
+		const Vector2i origin(int(Math::floor(center.x / p_cell_size)),
+				int(Math::floor(center.y / p_cell_size)));
+		Vector<int> hit_indices;
+		for (int x = -1; x <= 1; x++) {
+			for (int y = -1; y <= 1; y++) {
+				const Vector<int> *bucket = cells.getptr(origin + Vector2i(x, y));
+				if (bucket == nullptr) {
+					continue;
+				}
+				for (int j = 0; j < bucket->size(); j++) {
+					const int target_index = (*bucket)[j];
+					if (center.distance_squared_to(p_targets[target_index]) <= squared_radius) {
+						hit_indices.push_back(target_index);
+						if (++total_hits > MAX_CROSS_HITS) {
+							return Array(); // Caller must fall back to exhaustive checks.
+						}
+					}
+				}
+			}
+		}
+		hit_indices.sort(); // Keep original, deterministic trap priority.
+		PackedInt32Array hits;
+		hits.resize(hit_indices.size());
+		for (int j = 0; j < hit_indices.size(); j++) {
+			hits.set(j, hit_indices[j]);
+		}
+		result.push_back(hits);
+	}
+	return result;
+}
+
 void AIProximityGrid2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query_radius_batch", "positions", "source_indices", "radius", "cell_size"), &AIProximityGrid2D::query_radius_batch);
 	ClassDB::bind_method(D_METHOD("query_nearest_batch", "positions", "source_indices", "radius", "cell_size", "max_neighbors"), &AIProximityGrid2D::query_nearest_batch);
 	ClassDB::bind_method(D_METHOD("query_separation_batch", "positions", "source_indices", "radius", "cell_size", "max_neighbors"), &AIProximityGrid2D::query_separation_batch);
+	ClassDB::bind_method(D_METHOD("query_cross_radius_batch", "sources", "targets", "radius", "cell_size"), &AIProximityGrid2D::query_cross_radius_batch);
 }
