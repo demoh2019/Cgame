@@ -275,3 +275,86 @@ func run(t) -> void:
 					"plan_visible_tiers_temporal", d, p, v, f, c, 8, 4, 1.5, 1.5)
 				t.eq(native_tiers, fallback,
 					"native/script dual retention parity sample %d" % trial)
+
+
+	t.current = "optional measured IK CPU cap composes with two independent pose budgets"
+	var cap_distances := PackedFloat64Array([5.6, 5.4, 60.5, 60.3])
+	var cap_priority := PackedByteArray([0, 0, 1, 1])
+	var cap_visible := PackedByteArray([1, 1, 1, 1])
+	var cap_full_retained := PackedByteArray([1, 0, 0, 0])
+	var cap_combat_retained := PackedByteArray([0, 0, 1, 0])
+	var cap_tiers := CharacterAnim.plan_crowd_tiers(
+		cap_distances, cap_priority, 1, 1, false, cap_visible, cap_full_retained,
+		1.5, cap_combat_retained, 1.0)
+	var cap_expected := PackedInt32Array([1, 1, 1, 3])
+	t.eq(CharacterAnim.cap_full_pose_cost(cap_tiers, cap_distances,
+		cap_full_retained, PackedInt32Array([800, 90, 0, 0]), 100, 1.5, false),
+		cap_expected, "expensive optional IK drops, but retained visible combat pose remains")
+	t.eq(cap_tiers, PackedInt32Array([0, 1, 1, 3]),
+		"CPU admission never mutates the original animation policy")
+	t.eq(CharacterAnim.cap_full_pose_cost(cap_tiers, cap_distances,
+		cap_full_retained, PackedInt32Array([800, 90, 0, 0]), 0, 1.5, false),
+		cap_tiers, "a zero CPU budget disables the extra limit")
+	var cheap_tiers := PackedInt32Array([0, 0, 0, 1, 2])
+	var cheap_distances := PackedFloat64Array([2.0, 4.0, 10.0, 18.0, 55.0])
+	var cheap_retained := PackedByteArray([0, 0, 0, 0, 0])
+	var cheap_costs := PackedInt32Array([500, 100, 100, 100, 0])
+	t.eq(CharacterAnim.cap_full_pose_cost(cheap_tiers, cheap_distances,
+		cheap_retained, cheap_costs, 250, 1.5, false),
+		PackedInt32Array([1, 0, 0, 1, 2]),
+		"nearest expensive pose skips IK while two cheaper poses fit")
+	t.eq(CharacterAnim.cap_full_pose_cost(PackedInt32Array([0, 0, 1]),
+		PackedFloat64Array([10.0, 10.4, 80.0]),
+		PackedByteArray([0, 1, 0]), PackedInt32Array([0, 0, 0]),
+		100, 1.5, false), PackedInt32Array([1, 0, 1]),
+		"unmeasured models start at 100us and retained owner wins")
+	t.eq(CharacterAnim.cap_full_pose_cost(cheap_tiers, cheap_distances,
+		cheap_retained, PackedInt32Array([0]), 250, 1.5, false).size(),
+		0, "cost samples must match all actors")
+	t.eq(CharacterAnim.cap_full_pose_cost(cheap_tiers, cheap_distances,
+		cheap_retained, PackedInt32Array([0, 0, -1, 0, 0]),
+		250, 1.5, false).size(), 0, "invalid late cost fails atomically")
+	t.eq(CharacterAnim.cap_full_pose_cost(cheap_tiers, cheap_distances,
+		cheap_retained, cheap_costs, 1000001, 1.5, false).size(),
+		0, "CPU budget over one second is invalid")
+	t.eq(CharacterAnim.cap_full_pose_cost(cheap_tiers, cheap_distances,
+		cheap_retained, cheap_costs, 250, NAN, false).size(),
+		0, "NaN hysteresis fails atomically")
+	t.current = "real Albion After procedural cost samples and native/script parity"
+	var cap_source: String = FileAccess.get_file_as_string("res://scripts/client/character_anim.gd")
+	var modifier_source: String = FileAccess.get_file_as_string(
+		"res://scripts/client/character_anim_modifier.gd")
+	t.check(cap_source.contains("tiers = cap_full_pose_cost(tiers, distances") and
+		cap_source.contains("retained_combat_mask, 1.5") and
+		cap_source.contains("full_pose_cost_us.append("),
+		"real game passes independent combat, live full-IK history and measured costs")
+	t.check(modifier_source.contains("Time.get_ticks_usec()") and
+		modifier_source.contains("estimated_full_pose_us"),
+		"procedural modifier measures bounded CPU work with a smoothed estimate")
+	t.eq(CharacterAnim.cap_full_pose_cost(cap_tiers, cap_distances,
+		cap_full_retained, PackedInt32Array([800, 90, 0, 0]), 100),
+		cap_expected, "native-first dispatch or older-engine fallback returns expected tiers")
+	if ClassDB.class_exists("CrowdAnimationTierPlanner"):
+		var native_cap: Object = ClassDB.instantiate("CrowdAnimationTierPlanner")
+		if native_cap != null and native_cap.has_method("cap_full_pose_cost"):
+			var rng_cap := RandomNumberGenerator.new()
+			rng_cap.seed = 127399
+			for sample in 16:
+				var sampled_tiers := PackedInt32Array()
+				var sampled_distances := PackedFloat64Array()
+				var sampled_retained := PackedByteArray()
+				var sampled_costs := PackedInt32Array()
+				for i in 120:
+					sampled_tiers.append(0 if i % 5 == 0 else i % 4 + 1)
+					sampled_distances.append(float(rng_cap.randi_range(0, 1100)) * 0.1)
+					sampled_retained.append(1 if rng_cap.randi_range(0, 3) == 0 else 0)
+					sampled_costs.append(rng_cap.randi_range(0, 800))
+				for cost_limit in [0, 100, 750, 2000]:
+					var fallback_cap: PackedInt32Array = CharacterAnim.cap_full_pose_cost(
+						sampled_tiers, sampled_distances, sampled_retained,
+						sampled_costs, cost_limit, 1.5, false)
+					var native_result: PackedInt32Array = native_cap.call(
+						"cap_full_pose_cost", sampled_tiers, sampled_distances,
+						sampled_retained, sampled_costs, cost_limit, 1.5)
+					t.eq(native_result, fallback_cap, "native/script work cap parity %d/%d" % [
+						sample, cost_limit])
