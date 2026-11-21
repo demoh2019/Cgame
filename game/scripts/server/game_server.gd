@@ -347,6 +347,12 @@ class Player:
 
 var players: Dictionary = {} # peer id -> Player
 var zombies: Dictionary = {} # zombie id -> Zombie
+# Optional native phase-based staggering for very dense encounters.
+# Under this population threshold, every NPC retains previous scan timings.
+const AI_STAGGER_MIN_POPULATION := 128
+const AI_STAGGER_SLOTS := 4
+var _ai_update_scheduler: Variant = null
+var last_ai_schedule_stats: Dictionary = {"enabled": false, "population": 0, "phase_due": 0, "phase_deferred": 0}
 var last_population_query_stats: Dictionary = {} # Last once-per-second maintenance broadphase counters.
 var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
@@ -7549,6 +7555,11 @@ func _visual_signature_for(player: Player) -> float:
 		player.noise_timer, _alive(player))
 
 
+func get_ai_schedule_stats() -> Dictionary:
+	# Server-side only; useful when tuning large encounter performance.
+	return last_ai_schedule_stats.duplicate(true)
+
+
 func _tick_zombies(delta: float) -> void:
 	var info: Dictionary = {}
 	for player in players.values():
@@ -7571,6 +7582,14 @@ func _tick_zombies(delta: float) -> void:
 	# Activate spawns near players and put far-away zombies to sleep.
 	if tick_count % 20 == 1:
 		_manage_zombie_population()
+	var stagger_decisions: bool = zombies.size() >= AI_STAGGER_MIN_POPULATION
+	if stagger_decisions and _ai_update_scheduler == null and ClassDB.class_exists("AIUpdateScheduler"):
+		_ai_update_scheduler = ClassDB.instantiate("AIUpdateScheduler")
+		if _ai_update_scheduler != null:
+			_ai_update_scheduler.set_slots_per_cycle(AI_STAGGER_SLOTS)
+	stagger_decisions = stagger_decisions and _ai_update_scheduler != null
+	var phase_due := 0
+	var phase_deferred := 0
 	# Every fourth of a second alert only idle, non-raid infected within
 	# hearing range. Active chases and combat threat always take priority.
 	if tick_count % 5 == 0 and not decoys.is_empty():
@@ -7592,6 +7611,16 @@ func _tick_zombies(delta: float) -> void:
 		if pounces.has(zombie.id) or _maybe_start_pounce(zombie, delta):
 			_tick_pounce(zombie, delta)
 			continue
+		# Only the optional expensive target scan is staggered. Zombie.think()
+		# still runs every frame: pursuit, attacks, status effects and timers
+		# cannot be postponed by this optimization.
+		zombie.ai_selection_allowed = true
+		if stagger_decisions and zombie.think_timer <= delta:
+			zombie.ai_selection_allowed = _ai_update_scheduler.is_due(zombie.id, tick_count)
+			if zombie.ai_selection_allowed:
+				phase_due += 1
+			else:
+				phase_deferred += 1
 		var result: Dictionary = zombie.think(world, info, delta, rng)
 		if zombie.consume_howl():
 			_howl(zombie, info)
@@ -7704,6 +7733,13 @@ func _tick_zombies(delta: float) -> void:
 				events.append({"type": "hit", "kind": "player", "id": victim.id, "damage": damage, "by": -zombie.id})
 				if not _alive(victim):
 					_on_player_death(victim, -zombie.id)
+	last_ai_schedule_stats = {
+		"enabled": stagger_decisions,
+		"population": zombies.size(),
+		"slots": AI_STAGGER_SLOTS if stagger_decisions else 1,
+		"phase_due": phase_due,
+		"phase_deferred": phase_deferred,
+	}
 	# Real survivors are considered before idle infected investigate remains.
 	# Reuse existing investigate_decoy: never replace combat targets or spawn mobs.
 	if tick_count % 5 == 0 and not bags.is_empty():
