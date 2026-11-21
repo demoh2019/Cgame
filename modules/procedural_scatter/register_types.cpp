@@ -6,6 +6,7 @@
 #include "register_types.h"
 
 #include "pcg_instance_cluster_3d.h"
+#include "pcg_foliage_scalability_3d.h"
 #include "pcg_weighted_variant_selector.h"
 #include "pcg_path_falloff_3d.h"
 #include "pcg_polyline_sampler_3d.h"
@@ -16,6 +17,7 @@
 
 #ifdef TESTS_ENABLED
 #include "tests/test_pcg_instance_cluster_3d.h"
+#include "tests/test_pcg_foliage_scalability_3d.h"
 #include "tests/test_pcg_path_falloff_3d.h"
 #include "tests/test_pcg_polyline_sampler_3d.h"
 #include "tests/test_pcg_spatial_filter_2d.h"
@@ -29,6 +31,7 @@ void initialize_procedural_scatter_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 	GDREGISTER_CLASS(PCGInstanceCluster3D);
+	GDREGISTER_CLASS(PCGFoliageScalability3D);
 	GDREGISTER_CLASS(PCGPathFalloff3D);
 	GDREGISTER_CLASS(PCGPolylineSampler3D);
 	GDREGISTER_CLASS(PCGSpatialFilter2D);
