@@ -152,9 +152,8 @@ PackedInt32Array PCGPathFalloff3D::filter_indices_outside_segments(
 			if (x < seg.min_x || x > seg.max_x || z < seg.min_z || z > seg.max_z) {
 				continue;
 			}
-			const double along = seg.length_squared > 0.0 ?
-					Math::clamp(((x - seg.ax) * seg.dx + (z - seg.az) * seg.dz) /
-							seg.length_squared, 0.0, 1.0) : 0.0;
+			const double along = Math::clamp(((x - seg.ax) * seg.dx + (z - seg.az) * seg.dz) /
+					MAX(seg.length_squared, 0.0001), 0.0, 1.0);
 			const double ox = x - (seg.ax + along * seg.dx);
 			const double oz = z - (seg.az + along * seg.dz);
 			// Legacy Albion _on_road uses < radius: points exactly on the
