@@ -143,6 +143,10 @@ func run(t) -> void:
 	t.eq(config.max_unloads_per_update, 64, "native budget never exceeds 64 cells")
 	config.max_unloads_per_update = 3
 	t.eq(config.max_unloads_per_update, 3, "valid custom count is preserved")
+	if config.has_method("get_effective_unloads_per_update"):
+		t.eq(config.get_effective_unloads_per_update(), 3, "unpressured unload limit matches preset")
+		config.adaptive_chunk_budget_enabled = true
+		t.eq(config.get_effective_unloads_per_update(), 3, "adaptive mode starts without reducing throughput")
 	t.eq(config.get_last_unload_count(), 0,
 		"configuration does not fabricate unloaded work")
 	config.free()

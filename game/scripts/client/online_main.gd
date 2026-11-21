@@ -1418,6 +1418,13 @@ func _on_welcomed() -> void:
 			if not Performance.has_custom_monitor(monitor_name):
 				Performance.add_custom_monitor(monitor_name, monitor[1])
 				_ambient_monitors.append(monitor_name)
+	# Engine-driven effective visual cleanup budget, exposed in the game profiler.
+	if streamer.has_method("get_effective_unloads_per_update"):
+		var unload_monitor: StringName = &"Albion/StreamEffectiveUnloads"
+		if not Performance.has_custom_monitor(unload_monitor):
+			Performance.add_custom_monitor(unload_monitor,
+				Callable(streamer, "get_effective_unloads_per_update"))
+			_ambient_monitors.append(unload_monitor)
 	_access.set_world_streamer(streamer)
 	# Streamer is created after the initial renderer setup; apply its draw-distance budget now.
 	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,

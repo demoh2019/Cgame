@@ -143,19 +143,7 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 300s "$BIN" --headless --path game --script res://tests/run_streamer_unloads.gd 2>&1 | tee streamer-unloads.log
-          grep -E '^STREAM UNLOADS TOTAL: [0-9]+ checks, 0 failures        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: adaptive-streamer-regression
-          if-no-files-found: ignore
-          path: |
-            streamer-native.log
-            streamer-import.log
-            streamer-game.log
-            simulation-tier.log
-            auxiliary-readiness.log
-            chunk-cache.log
- streamer-unloads.log
+          grep -E '^STREAM UNLOADS TOTAL: [0-9]+ checks, 0 failures$' streamer-unloads.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' streamer-unloads.log; then exit 1; fi
       - name: Upload diagnostics
         if: always()

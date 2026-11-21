@@ -259,6 +259,9 @@ public:
 	// raises pressure; stable fast frames recover it gradually.
 	static double advance_chunk_pressure(double p_pressure, double p_frame_delta);
 	static int calculate_adaptive_instantiation_slots(int p_configured, double p_pressure);
+	// Zero preserves unlimited cleanup; positive limits adapt to frame pressure.
+	static int calculate_adaptive_unload_slots(int p_configured, double p_pressure);
+	int get_effective_unloads_per_update() const;
 	static int calculate_adaptive_chunk_work_usec(int p_configured, double p_pressure);
 	int get_effective_chunk_work_usec() const;
 	int get_effective_instantiations_per_frame() const;
