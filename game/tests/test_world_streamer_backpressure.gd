@@ -5,6 +5,11 @@ extends RefCounted
 const OnlineMain = preload("res://scripts/client/online_main.gd")
 
 
+func _make_chunk(_cell: Vector3i) -> Node3D:
+	return Node3D.new()
+
+
+
 func run(t) -> void:
 	t.current = "streaming adaptive budget is opt-in and safe for older binaries"
 	var streamer := WorldStreamer.new()
@@ -27,6 +32,27 @@ func run(t) -> void:
 		streamer.set_adaptive_chunk_budget_enabled(false)
 		t.eq(streamer.get_streaming_frame_pressure_percent(), 0.0,
 			"disabling adaptivity clears previous pressure")
+		# Detached refresh exercises the actual native procedural generator,
+		# per-frame work bookkeeping and the same one-count safety limit.
+		streamer.axes = WorldStreamer.AXES_XZ
+		streamer.cell_size = 16.0
+		streamer.focus_position = Vector3(8, 0, 8)
+		streamer.load_radius = 0.0
+		streamer.unload_radius = 32.0
+		streamer.max_instantiations_per_frame = 1
+		streamer.set_chunk_generator(Callable(self, "_make_chunk"))
+		streamer.set_adaptive_chunk_budget_enabled(true)
+		streamer.refresh()
+		t.eq(streamer.get_loaded_count(), 1,
+			"adaptive mode still creates its minimum one chunk")
+		t.eq(streamer.get_last_frame_chunk_attempt_count(), 1,
+			"successful procedural creation is measured once")
+		t.check(streamer.get_last_frame_chunk_work_usec() >= 0,
+			"CPU telemetry always reports nonnegative microseconds")
+		streamer.refresh()
+		t.eq(streamer.get_last_frame_chunk_attempt_count(), 0,
+			"empty work frame resets the previous attempt count")
+
 	else:
 		t.check(true, "older Godot fork safely keeps fixed streaming budgets")
 	streamer.free()
