@@ -89,6 +89,40 @@ func _run_checks() -> void:
         _fail("Reset must clear perception memory")
         return
 
+    # The native timeout decorator must abort a running child, without
+    # leaking its execution memory or blocking subsequent behavior trees.
+    var timeout := BehaviorTreeTimeout.new()
+    timeout.duration = 0.4
+    var long_action := BehaviorTreeWait.new()
+    long_action.duration = 3.0
+    timeout.task = long_action
+    var timed_runner := BehaviorTreeRunner.new()
+    timed_runner.root_task = timeout
+    root.add_child(timed_runner)
+    if timed_runner.tick(0.2) != BehaviorTreeTask.RUNNING:
+        _fail("Timed AI child should initially remain running")
+        return
+    if timed_runner.tick(0.2) != BehaviorTreeTask.FAILURE:
+        _fail("Time limit must abort a long-running child at its deadline")
+        return
+    if not timed_runner.get_debug_snapshot().get("execution_memory", {}).is_empty():
+        _fail("Timeout must clear the cancelled subtree's execution memory")
+        return
+    timed_runner.queue_free()
+
+    # The same simulation-time cooldown ledger also drives pack howls in
+    # the canonical server and voice events in this playable sandbox.
+    if not demo.player_action_cooldowns.try_trigger(&"smoke_shout", 0.8):
+        _fail("Native player ability must start ready")
+        return
+    if demo.player_action_cooldowns.try_trigger(&"smoke_shout", 0.8):
+        _fail("Cooldown must reject repeated immediate shouts")
+        return
+    demo.player_action_cooldowns.advance_time(0.8)
+    if not demo.player_action_cooldowns.try_trigger(&"smoke_shout", 0.8):
+        _fail("Cooldown must recover after simulation time has elapsed")
+        return
+
     print("PASS: AI perception, wall LOS, memory, reactive priorities and reset")
     quit(0)
 
