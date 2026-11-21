@@ -75,6 +75,8 @@ void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 	physics_enabled_frames.erase(p_cell);
 	active_navigation_cells.erase(p_cell);
 	navigation_enabled_frames.erase(p_cell);
+	navigation_dirty_cells.erase(p_cell);
+	navigation_mesh_revisions.erase(p_cell);
 	emit_signal(SNAME("cell_unloaded"), p_cell);
 }
 
@@ -194,6 +196,7 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 	// tier is active, with no momentary server registration in a dormant cell.
 	const bool navigation_active = observer_cell_valid ? _cell_navigation_active(p_cell, observer_cell) : true;
 	active_navigation_cells.insert(p_cell, navigation_active);
+	navigation_mesh_revisions.insert(p_cell, 0);
 	if (navigation_active) {
 		navigation_enabled_frames.insert(p_cell, Engine::get_singleton()->get_physics_frames());
 	}
@@ -223,6 +226,7 @@ void WorldPartition3D::_notification(int p_what) {
 		observer_cell_valid = false;
 		predicted_cell_valid = false;
 		navigation_schedule_valid = false;
+		last_navigation_rebuild_frame = UINT64_MAX;
 		navigation_selected.clear();
 		navigation_consumed.clear();
 	}
@@ -684,8 +688,8 @@ int WorldPartition3D::get_navigation_active_cell_count() const {
 }
 
 bool WorldPartition3D::is_cell_navigation_ready(const Vector2i &p_cell) const {
-	if (!is_cell_navigation_active(p_cell)) {
-		return false;
+	if (!is_cell_navigation_active(p_cell) || navigation_dirty_cells.has(p_cell)) {
+		return false; // Dirty tile is not safe for path reuse or fast travel.
 	}
 	const uint64_t *enabled_frame = navigation_enabled_frames.getptr(p_cell);
 	if (enabled_frame == nullptr) {
@@ -724,6 +728,93 @@ bool WorldPartition3D::is_streaming_source_navigation_ready(const String &p_name
 		}
 	}
 	return true;
+}
+
+void WorldPartition3D::set_max_navigation_rebuilds_per_physics_frame(int p_count) {
+	ERR_FAIL_COND_MSG(p_count < 1 || p_count > 16, "WorldPartition3D navigation mesh rebuild budget must be 1 to 16.");
+	max_navigation_rebuilds_per_physics_frame = p_count;
+}
+
+int WorldPartition3D::get_max_navigation_rebuilds_per_physics_frame() const {
+	return max_navigation_rebuilds_per_physics_frame;
+}
+
+bool WorldPartition3D::mark_cell_navigation_dirty(const Vector2i &p_cell) {
+	Node3D *root = get_cell_instance(p_cell);
+	if (!streaming_enabled || root == nullptr || !root->has_method(SNAME("rebuild_streaming_navigation_mesh"))) {
+		return false; // Opt-in scenes only; do not queue unloaded/stale regions.
+	}
+	if (navigation_dirty_cells.has(p_cell)) {
+		return true; // Coalesce repeated changes to the same navigation tile.
+	}
+	if (navigation_dirty_cells.size() >= MAX_DIRTY_NAVIGATION_CELLS) {
+		return false;
+	}
+	navigation_dirty_cells.insert(p_cell);
+	return true;
+}
+
+int WorldPartition3D::get_navigation_dirty_cell_count() const {
+	return navigation_dirty_cells.size();
+}
+
+int WorldPartition3D::get_cell_navigation_revision(const Vector2i &p_cell) const {
+	const int *revision = navigation_mesh_revisions.getptr(p_cell);
+	return revision != nullptr && get_cell_instance(p_cell) != nullptr ? *revision : -1;
+}
+
+void WorldPartition3D::_refresh_dirty_navigation_cells(const Vector2i &p_center) {
+	if (navigation_dirty_cells.is_empty()) {
+		return;
+	}
+	const uint64_t frame = Engine::get_singleton()->get_physics_frames();
+	if (last_navigation_rebuild_frame == frame) {
+		return; // Re-entrant update_streaming() calls cannot bypass the budget.
+	}
+	last_navigation_rebuild_frame = frame;
+	HashSet<Vector2i> attempted;
+	for (int attempt = 0; attempt < max_navigation_rebuilds_per_physics_frame; attempt++) {
+		bool found = false;
+		Vector2i best;
+		uint64_t best_distance = UINT64_MAX;
+		for (const Vector2i &cell : navigation_dirty_cells) {
+			if (attempted.has(cell) || !is_cell_navigation_active(cell)) {
+				continue;
+			}
+			Node3D *root = get_cell_instance(cell);
+			if (root == nullptr || !root->has_method(SNAME("rebuild_streaming_navigation_mesh"))) {
+				continue;
+			}
+			const int64_t dx = int64_t(cell.x) - int64_t(p_center.x);
+			const int64_t dz = int64_t(cell.y) - int64_t(p_center.y);
+			const uint64_t distance = uint64_t(dx < 0 ? -dx : dx) + uint64_t(dz < 0 ? -dz : dz);
+			if (!found || distance < best_distance ||
+					(distance == best_distance && (cell.x < best.x || (cell.x == best.x && cell.y < best.y)))) {
+				found = true;
+				best = cell;
+				best_distance = distance;
+			}
+		}
+		if (!found) {
+			return;
+		}
+		attempted.insert(best);
+		Node3D *root = get_cell_instance(best);
+		if (root == nullptr) {
+			continue;
+		}
+		const Variant result = root->call(SNAME("rebuild_streaming_navigation_mesh"));
+		if (result.get_type() != Variant::BOOL || !bool(result)) {
+			continue; // Keep dirty; retry next physics frame, always fail closed.
+		}
+		navigation_dirty_cells.erase(best);
+		navigation_enabled_frames.insert(best, frame);
+		int *revision = navigation_mesh_revisions.getptr(best);
+		if (revision != nullptr && *revision < INT32_MAX) {
+			(*revision)++;
+			emit_signal(SNAME("cell_navigation_mesh_rebuilt"), best, *revision);
+		}
+	}
 }
 
 void WorldPartition3D::set_max_navigation_updates_per_physics_frame(int p_count) {
@@ -1561,6 +1652,7 @@ void WorldPartition3D::update_streaming() {
 	_refresh_cell_simulation(center);
 	_refresh_cell_physics(center);
 	_refresh_cell_navigation(center);
+	_refresh_dirty_navigation_cells(center);
 	_purge_unused_ready_scenes();
 	if (observer_cell_changed) {
 		emit_signal(SNAME("observer_cell_changed"), observer_cell);
@@ -1687,6 +1779,11 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_navigation_active_cell_count"), &WorldPartition3D::get_navigation_active_cell_count);
 	ClassDB::bind_method(D_METHOD("is_cell_navigation_ready", "cell"), &WorldPartition3D::is_cell_navigation_ready);
 	ClassDB::bind_method(D_METHOD("is_streaming_source_navigation_ready", "name"), &WorldPartition3D::is_streaming_source_navigation_ready);
+	ClassDB::bind_method(D_METHOD("set_max_navigation_rebuilds_per_physics_frame", "count"), &WorldPartition3D::set_max_navigation_rebuilds_per_physics_frame);
+	ClassDB::bind_method(D_METHOD("get_max_navigation_rebuilds_per_physics_frame"), &WorldPartition3D::get_max_navigation_rebuilds_per_physics_frame);
+	ClassDB::bind_method(D_METHOD("mark_cell_navigation_dirty", "cell"), &WorldPartition3D::mark_cell_navigation_dirty);
+	ClassDB::bind_method(D_METHOD("get_navigation_dirty_cell_count"), &WorldPartition3D::get_navigation_dirty_cell_count);
+	ClassDB::bind_method(D_METHOD("get_cell_navigation_revision", "cell"), &WorldPartition3D::get_cell_navigation_revision);
 	ClassDB::bind_method(D_METHOD("set_max_navigation_updates_per_physics_frame", "count"), &WorldPartition3D::set_max_navigation_updates_per_physics_frame);
 	ClassDB::bind_method(D_METHOD("get_max_navigation_updates_per_physics_frame"), &WorldPartition3D::get_max_navigation_updates_per_physics_frame);
 	ClassDB::bind_method(D_METHOD("register_navigation_agent", "name", "agent", "priority"), &WorldPartition3D::register_navigation_agent, DEFVAL(1));
@@ -1785,6 +1882,7 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "navigation_radius", PROPERTY_HINT_RANGE, "-1,32,1"), "set_navigation_radius", "get_navigation_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "navigation_hysteresis_cells", PROPERTY_HINT_RANGE, "0,8,1"), "set_navigation_hysteresis_cells", "get_navigation_hysteresis_cells");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_navigation_transitions_per_frame", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_navigation_transitions_per_frame", "get_max_navigation_transitions_per_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_navigation_rebuilds_per_physics_frame", PROPERTY_HINT_RANGE, "1,16,1"), "set_max_navigation_rebuilds_per_physics_frame", "get_max_navigation_rebuilds_per_physics_frame");
 	ADD_GROUP("Navigation Scheduling", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_navigation_updates_per_physics_frame", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_navigation_updates_per_physics_frame", "get_max_navigation_updates_per_physics_frame");
 	ADD_GROUP("Cell Activation", "");
@@ -1797,6 +1895,7 @@ void WorldPartition3D::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("cell_simulation_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::BOOL, "active")));
 	ADD_SIGNAL(MethodInfo("cell_physics_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::BOOL, "active")));
 	ADD_SIGNAL(MethodInfo("cell_navigation_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::BOOL, "active")));
+	ADD_SIGNAL(MethodInfo("cell_navigation_mesh_rebuilt", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::INT, "revision")));
 }
 
 WorldPartition3D::~WorldPartition3D() {
@@ -1815,6 +1914,8 @@ WorldPartition3D::~WorldPartition3D() {
 	physics_enabled_frames.clear();
 	active_navigation_cells.clear();
 	navigation_enabled_frames.clear();
+	navigation_dirty_cells.clear();
+	navigation_mesh_revisions.clear();
 	pending_cells.clear();
 	ready_scenes.clear();
 	pinned_cells.clear();
