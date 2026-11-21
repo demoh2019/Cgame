@@ -1,0 +1,41 @@
+name: Native frame budget source contracts
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/frame_update_budget/**'
+      - 'game/scripts/client/ambient_tick_budget.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/tests/test_ambient_tick_budget.gd'
+      - 'tests/scene/test_frame_update_budget_contract.py'
+      - '.github/workflows/frame-update-budget-contract.yml'
+  pull_request:
+    paths:
+      - 'modules/frame_update_budget/**'
+      - 'game/scripts/client/ambient_tick_budget.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/tests/test_ambient_tick_budget.gd'
+      - 'tests/scene/test_frame_update_budget_contract.py'
+      - '.github/workflows/frame-update-budget-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            modules/frame_update_budget
+            game/scripts/client/online_main.gd
+            game/scripts/client/ambient_tick_budget.gd
+            game/tests/test_ambient_tick_budget.gd
+            game/tests/run_all.gd
+            tests/scene/test_frame_update_budget_contract.py
+          sparse-checkout-cone-mode: false
+      - name: Validate native and gameplay integration
+        run: python3 -m unittest tests/scene/test_frame_update_budget_contract.py -v
