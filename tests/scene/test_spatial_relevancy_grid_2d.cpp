@@ -154,6 +154,17 @@ TEST_CASE("[SpatialRelevancyGrid2D] Batched viewers preserve scalar sets and inp
 	oversized.resize(4097);
 	CHECK(grid->query_many(oversized, 90.0).is_empty());
 	CHECK(int(grid->get_stats()["batch_calls"]) == 3);
+	PackedInt64Array many_ids;
+	PackedVector2Array many_actors;
+	for (int i = 0; i < 1024; i++) {
+		many_ids.push_back(i + 1);
+		many_actors.push_back(Vector2(i, i));
+	}
+	REQUIRE(grid->rebuild(many_ids, many_actors));
+	PackedVector2Array expensive_viewers;
+	expensive_viewers.resize(2050);
+	CHECK(grid->query_many(expensive_viewers, 90.0).is_empty());
+	CHECK(int(grid->get_stats()["batch_calls"]) == 0); // Guard before work.
 	grid->clear();
 	CHECK(int(grid->get_stats()["batch_calls"]) == 0);
 	CHECK(int(grid->get_stats()["batch_viewers"]) == 0);

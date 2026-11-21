@@ -159,7 +159,8 @@ Array SpatialRelevancyGrid2D::query_many(const PackedVector2Array &p_centers, do
 	// Defensively cap the number of per-connection arrays allocated in one
 	// call. An empty result signals failure to the caller, which must use
 	// the existing full-scan fallback rather than omit replicated actors.
-	if (p_centers.size() > 4096) {
+	if (p_centers.size() > 4096 ||
+			int64_t(p_centers.size()) * int64_t(entries.size()) > 2097152) {
 		return Array();
 	}
 	batch_calls++;

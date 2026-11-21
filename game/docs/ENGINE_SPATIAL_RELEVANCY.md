@@ -69,8 +69,10 @@ on `SpatialRelevancyGrid2D` collects one **source-order-preserving**
 `PackedInt64Array` per viewer with a single script/native call. It reuses
 the existing exact `query_ids` path for safe cell bounds, inclusive 90 m
 distance checks, negative coordinates and oversized radii. Up to 4,096
-viewers may be queried in one call; an oversized batch returns an empty
-array, allowing game code to fall back rather than silently hide actors.
+viewers may be queried in one call. An additional 2,097,152
+viewer×entity upper bound limits worst-case allocation and CPU work.
+An oversized batch returns an empty array, allowing game code to fall
+back rather than silently hide actors.
 Empty and invalid individual viewer coordinates behave like scalar calls.
 
 The engine's `get_stats()` now includes `batch_calls` and
