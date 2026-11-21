@@ -136,6 +136,61 @@ bool GameplayCooldownTracker::replace_snapshot(const Dictionary &p_snapshot) {
 	return true;
 }
 
+
+bool GameplayCooldownTracker::replace_cooldown_branch(const StringName &p_branch, const Dictionary &p_snapshot) {
+	if (!_valid_tag(p_branch) || p_snapshot.size() > MAX_COOLDOWNS) {
+		return false;
+	}
+	const String branch = p_branch;
+	const String prefix = branch + ".";
+
+	// Validate the *entire* incoming branch before touching live cooldowns.
+	// Both String and StringName keys are accepted, but may not alias.
+	Vector<StringName> seen;
+	Vector<Cooldown> replacement;
+	for (const Variant &key : p_snapshot) {
+		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
+			return false;
+		}
+		const StringName tag = key;
+		const String name = tag;
+		if (!_valid_tag(tag) || (name != branch && !name.begins_with(prefix)) || seen.has(tag)) {
+			return false; // No parent/sibling subtree pollution or alias keys.
+		}
+		seen.push_back(tag);
+		const Variant raw = p_snapshot[key];
+		if (raw.get_type() != Variant::FLOAT && raw.get_type() != Variant::INT) {
+			return false;
+		}
+		const double seconds = double(raw);
+		if (!_valid_duration(seconds)) {
+			return false;
+		}
+		if (seconds > 0.0) {
+			Cooldown item;
+			item.tag = tag;
+			item.remaining = seconds;
+			replacement.push_back(item);
+		}
+	}
+
+	Vector<Cooldown> keep;
+	for (const Cooldown &existing : cooldowns) {
+		const String name = existing.tag;
+		if (name != branch && !name.begins_with(prefix)) {
+			keep.push_back(existing);
+		}
+	}
+	if (keep.size() + replacement.size() > MAX_COOLDOWNS) {
+		return false; // Capacity failure is a transaction rollback too.
+	}
+	for (const Cooldown &incoming : replacement) {
+		keep.push_back(incoming);
+	}
+	cooldowns = keep;
+	return true;
+}
+
 Dictionary GameplayCooldownTracker::get_snapshot() const {
 	Dictionary snapshot;
 	for (const Cooldown &entry : cooldowns) {
@@ -188,6 +243,7 @@ void GameplayCooldownTracker::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remove_cooldown", "tag"), &GameplayCooldownTracker::remove_cooldown);
 	ClassDB::bind_method(D_METHOD("clear"), &GameplayCooldownTracker::clear);
 	ClassDB::bind_method(D_METHOD("replace_snapshot", "snapshot"), &GameplayCooldownTracker::replace_snapshot);
+	ClassDB::bind_method(D_METHOD("replace_cooldown_branch", "branch", "snapshot"), &GameplayCooldownTracker::replace_cooldown_branch);
 	ClassDB::bind_method(D_METHOD("get_snapshot"), &GameplayCooldownTracker::get_snapshot);
 	ClassDB::bind_method(D_METHOD("tick", "delta"), &GameplayCooldownTracker::tick);
 	ClassDB::bind_method(D_METHOD("get_remaining", "tag"), &GameplayCooldownTracker::get_remaining);
