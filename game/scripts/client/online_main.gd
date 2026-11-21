@@ -30,6 +30,7 @@ const FirstSteps = preload("res://scripts/client/first_steps.gd")
 const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const FirstPersonView = preload("res://scripts/client/first_person_view.gd")
 const FirstPersonViewmodel = preload("res://scripts/client/first_person_viewmodel.gd")
+const NetTimeouts = preload("res://scripts/shared/net_timeouts.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
 const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
 const AmbientBirds = preload("res://scripts/client/ambient_birds.gd")
@@ -751,6 +752,7 @@ func _connect() -> void:
 		get_tree().root.add_child.call_deferred(net) # RPC paths must match the server: /root/Net.
 		client = GameClient.new(net)
 		multiplayer.connected_to_server.connect(func() -> void:
+			NetTimeouts.apply(peer, 1) # Loading the world must not time the link out.
 			status_label.text = "Joining..."
 			client.join(name_edit.text, account.get("token", ""), account.get("refresh", "")))
 		multiplayer.connection_failed.connect(_on_connection_failed)
@@ -1595,7 +1597,7 @@ func _process(delta: float) -> void:
 		if _land_time >= 0.35:
 			_land_time = -1.0
 	if _crosshair != null:
-		_crosshair.visible = _first_person and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+		_crosshair.visible = _first_person and (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED or _screenshot_path != "")
 		if _crosshair.visible:
 			_hit_marker = move_toward(_hit_marker, 0.0, delta * 4.0)
 			FirstPersonView.layout_crosshair(_crosshair, FirstPersonView.crosshair_spread(
@@ -2575,7 +2577,14 @@ func _run_demo() -> void:
 	_demo_frames += 1
 	var net_ref = net
 	match _demo:
-		"ruins":
+		"first_person":
+			# Held weapon, crosshair and a swing caught mid-motion (use with --first-person --screenshot).
+			if _demo_frames == 30:
+				net_ref.c_debug.rpc_id(1, "give", {"item": "machete_2", "count": 1})
+			if _demo_frames == 60:
+				_cycle_weapon() # Same as pressing 4: equips the next owned weapon.
+			if _demo_frames == 300 or _demo_frames == 694:
+				client.attack(FirstPersonView.forward(_fp_yaw))
 			if _demo_frames == 40:
 				var site := _find_ruin()
 				net_ref.c_debug.rpc_id(1, "teleport", {"x": site.x - 16.0, "z": site.y + 10.0})

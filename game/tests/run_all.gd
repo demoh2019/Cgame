@@ -148,6 +148,7 @@ const SUITES := [
 	"res://tests/test_foliage_wind_weather.gd",
 	"res://tests/test_vegetation_wind.gd",
 	"res://tests/test_first_person_view.gd",
+	"res://tests/test_net_timeouts.gd",
 	"res://tests/test_arcane_abilities.gd",
 	"res://tests/test_swimming.gd",
 	"res://tests/test_infected_temperaments.gd",

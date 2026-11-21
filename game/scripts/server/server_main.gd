@@ -4,6 +4,7 @@ extends SceneTree
 ## Add --debug-commands to allow the test hooks.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const NetTimeouts = preload("res://scripts/shared/net_timeouts.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const ServerTickGovernor = preload("res://scripts/server/server_tick_governor.gd")
@@ -187,7 +188,9 @@ func _initialize() -> void:
 	get_multiplayer().peer_disconnected.connect(func(id: int) -> void:
 		net.leave(id)
 		print("SERVER peer %d left (%d players)" % [id, sim.players.size()]))
-	get_multiplayer().peer_connected.connect(func(id: int) -> void: print("SERVER peer %d connected" % id))
+	get_multiplayer().peer_connected.connect(func(id: int) -> void:
+		NetTimeouts.apply(peer, id) # Survive a client's first-launch shader/world stall.
+		print("SERVER peer %d connected" % id))
 	print("SERVER listening on %d, seed %d, %d ticks/s%s, accounts: %s" % [port, world_seed, Defs.TICK_RATE, ", debug commands on" if net.allow_debug else "", nakama_address if nakama_address != "" else "offline"])
 
 
