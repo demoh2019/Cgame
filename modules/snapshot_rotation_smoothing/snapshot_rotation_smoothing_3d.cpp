@@ -26,7 +26,7 @@ double SnapshotRotationSmoothing3D::interpolate_yaw(double p_from_yaw,
 		double p_to_yaw, double p_from_angular_velocity,
 		double p_to_angular_velocity, double p_snapshot_span,
 		double p_fraction) const {
-	// Broken snapshots must not poison Node3D transforms. For a missing
+	// Broken snapshots must not poison visual transforms. For a missing
 	// target use the last valid authoritative angle, otherwise zero.
 	if (!Math::is_finite(p_from_yaw) || Math::abs(p_from_yaw) > MAX_YAW_ABS) {
 		return Math::is_finite(p_to_yaw) && Math::abs(p_to_yaw) <= MAX_YAW_ABS ?
