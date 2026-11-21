@@ -103,6 +103,26 @@ func run(t) -> void:
 	t.eq(streamer.get_loaded_count(), 0, "manual unload_all releases active chunk")
 	streamer.free()
 
+	t.current = "one-slot backtrack protects a newly requested cached destination"
+	generated.clear()
+	var one := _streamer("_make_cacheable")
+	one.max_cached_chunks = 1
+	one.refresh()
+	var first := one.get_chunk(Vector3i.ZERO)
+	one.focus_position = Vector3(40, 0, 8)
+	one.refresh()
+	one.focus_position = Vector3(8, 0, 8)
+	one.refresh()
+	t.check(one.get_chunk(Vector3i.ZERO) == first,
+		"current requested old cell is preserved during the new chunk's unload")
+	t.eq(generated.count(Vector3i.ZERO), 1,
+		"one-slot cache avoids terrain rebuild on immediate reverse motion")
+	t.eq(one.get_chunk_cache_hit_count(), 1,
+		"one-slot return counts a genuine reuse hit")
+	t.check(one.get_cached_chunk_count() <= 1,
+		"requested-cell protection still respects the strict cache cap")
+	one.free()
+
 	t.current = "least recently unloaded chunks are evicted at a strict cap"
 	generated.clear()
 	var lru := _streamer("_make_cacheable")
