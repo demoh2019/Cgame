@@ -1202,8 +1202,8 @@ func _build_objects(data: Dictionary) -> void:
 			if node.has("id"):
 				index[node["id"]] = i
 			transforms.append(transform)
-		# Native CGame uses two calls for a populated batch instead of two
-		# per resource. The legacy Godot path preserves identical rendering.
+		# Dense groups upload one complete GPU-ready buffer; tiny batches
+		# retain the original per-instance calls. Both preserve tier tints.
 		if not ResourceInstanceInitializer.initialize(multimesh, transforms, tints):
 			push_error("Invalid resource MultiMesh initialization: %s" % str(batch_id))
 			continue
