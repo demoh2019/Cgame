@@ -80,6 +80,21 @@ func last_heard_position() -> Vector2:
     return Vector2.ZERO
 
 
+func get_debug_snapshot() -> Dictionary:
+    # An on-demand diagnostic view. Do not replicate to ordinary clients:
+    # target-memory positions belong to the authoritative server.
+    return {
+        "native_vision": has_native_vision(),
+        "native_hearing": has_native_hearing(),
+        "remembers_sight": remembers_sight(),
+        "remembers_sound": remembers_sound(),
+        "last_seen_position": last_seen_position(),
+        "last_heard_position": last_heard_position(),
+        "sight_memory_seconds": float(_vision.get_memory_remaining()) if _vision != null else 0.0,
+        "sound_memory_seconds": float(_hearing.get_memory_remaining()) if _hearing != null else 0.0,
+    }
+
+
 func reset() -> void:
     if _vision != null:
         _vision.reset()
