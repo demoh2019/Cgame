@@ -108,7 +108,7 @@ func run(t) -> void:
 	t.current = "Albion streamed cosmetic foliage is wired to density planner"
 	var chunk_code := FileAccess.get_file_as_string(
 		"res://scripts/client/chunk_view.gd")
-	t.check(chunk_code.contains("SceneryDensityLod.update_instances("),
+	t.check(chunk_code.contains("SceneryDensityLod.update_instances_projected("),
 		"streaming chunks refresh GPU visible counts with native batch query")
 	t.check(chunk_code.contains("DENSITY_LOD_INTERVAL := 0.6"),
 		"visibility refresh is throttled independently of the render loop")
