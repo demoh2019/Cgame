@@ -656,6 +656,8 @@ var _flank_goal_cached := Vector2.ZERO
 var _flank_here_cached := Vector2.INF
 var _flank_target_cached := Vector2.INF
 var _flank_replan_remaining := 0.0
+var _flank_target_id_cached: int = -1
+var flank_reservations: Variant = null # Shared server-owned smart-object lease pool.
 
 
 ## Where a chasing infected heads: a pack surrounds its prey instead of queueing behind one another. The engine's
@@ -668,14 +670,16 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 			or not ClassDB.class_exists("EnvironmentQuery3D"):
 		return target
 	# Tactical decisions cost more than movement; cache only while valid.
-	if _flank_replan_remaining > 0.0 and \
+	# Invalidate cached ring claims when the authoritative target changes.
+	if _flank_replan_remaining > 0.0 and _flank_target_id_cached == target_id and \
 			here.distance_squared_to(_flank_here_cached) <= 3.24 and \
 			target.distance_squared_to(_flank_target_cached) <= 1.0:
 		return _flank_goal_cached
 	if _flank_query == null:
 		_flank_query = ClassDB.instantiate("EnvironmentQuery3D")
 		_flank_query.set("horizontal_only", true)
-		_flank_query.set("max_results", 3)
+	var use_smart_slots: bool = flank_reservations != null and target_id > 0 and target_id < (1 << 40)
+	_flank_query.set("max_results", 8 if use_smart_slots else 3)
 	_flank_query.set("origin", Vector3(here.x, 0.0, here.y))
 	# UE-style directional EQS context: select the sides or far side of
 	# the target instead of wasting a flank slot on its near-side approach.
@@ -685,16 +689,40 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 		_flank_query.set("direction_axis", Vector3(target.x - here.x, 0.0, target.y - here.y))
 		_flank_query.set("min_direction_dot", -0.25)
 		_flank_query.set("use_direction", true)
-	_flank_query.set("candidates", EnvironmentQuery3D.sample_ring(
-		Vector3(target.x, 0.0, target.y), FLANK_RING, 8, float(posmod(id, 8)) * 0.4))
-	# No full sort or per-candidate dictionaries: the native bound is 3.
-	var ranked: PackedVector3Array = _flank_query.call("query_top_positions", 3)
+	# Every agent targeting the same survivor now sees the SAME eight ring
+	# slots. The server leases distinct slots; old builds without a shared pool
+	# retain the original per-agent phase-shifted EQS behavior.
+	var ring: PackedVector3Array = EnvironmentQuery3D.sample_ring(
+		Vector3(target.x, 0.0, target.y), FLANK_RING, 8,
+		0.0 if use_smart_slots else float(posmod(id, 8)) * 0.4)
+	_flank_query.set("candidates", ring)
+	var ranked: PackedVector3Array = _flank_query.call(
+		"query_top_positions", 8 if use_smart_slots else 3)
 	if ranked.is_empty():
 		return target
 	var spot: Vector3 = ranked[posmod(id, ranked.size())]
+	if use_smart_slots:
+		var slot_ids := PackedInt64Array()
+		for candidate in ranked:
+			for slot_index in ring.size():
+				if ring[slot_index].distance_squared_to(candidate) < 0.0001:
+					# Exclusive server slot ID, keyed by player target and ring
+					# index, not an ephemeral ranked-array position.
+					slot_ids.append(target_id * 16 + slot_index + 1)
+					break
+		if slot_ids.is_empty():
+			return target
+		var claimed: int = int(flank_reservations.try_claim_first(slot_ids, id, 1.5))
+		if claimed <= 0:
+			return target # An overcrowded pack still pursues normally.
+		var claimed_index: int = (claimed - target_id * 16 - 1)
+		if claimed_index < 0 or claimed_index >= ring.size():
+			return target
+		spot = ring[claimed_index]
 	_flank_goal_cached = Vector2(spot.x, spot.z)
 	_flank_here_cached = here
 	_flank_target_cached = target
+	_flank_target_id_cached = target_id
 	_flank_replan_remaining = FLANK_REPLAN_SECONDS
 	return _flank_goal_cached
 
