@@ -142,6 +142,7 @@ func enable_ai_trace(enabled: bool) -> bool:
 	if not enabled:
 		if _ai_trace != null:
 			_ai_trace.reset()
+			_ai_trace = null
 		return true
 	if _ai_trace == null:
 		if not ClassDB.class_exists("AIBehaviorTrace"):
