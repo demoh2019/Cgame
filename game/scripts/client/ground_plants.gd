@@ -21,8 +21,8 @@ static var density_scale: float = 1.0
 const SPECIES := {
 	# Lush green carpet: crossed photo cards of the dense tufts photographed in the grass_medium_01 atlas.
 	# ~16 triangles a tuft, so thousands per tile; this is what covers the terrain.
-	"lush_grass": {"cards": true, "biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 1600, "scale": [0.7, 1.9],
-		"big": 0.12, "cluster": false, "variants": 5, "distance": 72.0},
+	"lush_grass": {"cards": true, "biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 1600, "scale": [0.6, 1.5],
+		"big": 0.1, "cluster": false, "variants": 5, "distance": 72.0},
 	# The grass carpet itself: the most common, everywhere, many variants, every size from short tufts to big clumps.
 	"grass_medium_01": {"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 260, "scale": [1.2, 4.4], "big": 0.2,
 		"cluster": false, "variants": 6, "distance": 60.0},
@@ -65,10 +65,11 @@ static func variants(species: String) -> Array:
 
 
 ## Pixel regions (x, y, w, h) of dense grass tufts in the 1024 px grass_medium_01 atlas.
-const CARD_ATLAS := "res://assets/models/polyhaven/grass_medium_01/textures/grass_medium_01_diff_alpha.png"
+# Cleaned atlas (only the tuft itself, built from those regions): five 512x256 rows stacked vertically.
+const CARD_ATLAS := "res://assets/models/polyhaven/grass_medium_01/textures/grass_tufts_atlas.png"
 const CARD_REGIONS := [Rect2(210, 790, 290, 112), Rect2(620, 784, 220, 106), Rect2(30, 900, 170, 124),
 	Rect2(256, 900, 260, 110), Rect2(580, 890, 240, 130)]
-const CARD_HEIGHT := 0.55
+const CARD_HEIGHT := 0.5
 static var _card_material: StandardMaterial3D
 
 
@@ -91,8 +92,9 @@ static func card_material() -> StandardMaterial3D:
 ## light like a soft mass of grass instead of showing their flat sides.
 static func card_mesh(region_index: int) -> Mesh:
 	var region: Rect2 = CARD_REGIONS[region_index]
-	var uv0 := region.position / 1024.0
-	var uv1 := (region.position + region.size) / 1024.0
+	var row := 1.0 / float(CARD_REGIONS.size())
+	var uv0 := Vector2(0.0, row * float(region_index))
+	var uv1 := Vector2(1.0, row * float(region_index + 1))
 	var height := CARD_HEIGHT
 	var half_width := height * region.size.x / region.size.y * 0.5
 	var surface := SurfaceTool.new()
