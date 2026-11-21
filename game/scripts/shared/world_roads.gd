@@ -136,7 +136,9 @@ func _add_piece(p: Vector2, q: Vector2) -> void:
 ## Endpoint coordinates are world x/z; pixel centers are at local (+0.5, +0.5).
 static func rasterize_mask(pieces: Array, origin: Vector2, size: int, half: float = HALF_WIDTH,
 		soft: float = 1.2, force_scalar: bool = false) -> PackedByteArray:
-	if size < 1 or size > 2048 or not origin.is_finite() or not is_finite(half) or half < 0.0 or 			not is_finite(soft) or soft <= 0.0:
+	if size < 1 or size > 2048 or not origin.is_finite() or not is_finite(half) or half < 0.0:
+		return PackedByteArray()
+	if not is_finite(soft) or soft <= 0.0:
 		return PackedByteArray()
 	if not force_scalar and Geometry2D.has_method("rasterize_segments_mask"):
 		var endpoints := PackedVector2Array()
