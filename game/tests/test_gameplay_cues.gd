@@ -168,3 +168,69 @@ func run(t) -> void:
 		"real infected status renderer batches native cues")
 	t.check(source.contains('cues.call("emit_cue", pulse["tag"], pulse["magnitude"], pulse["priority"])'),
 		"older forks retain identical per-cue fallback")
+
+
+	t.current = "server-owned cue branch preserves independent local gameplay presentation"
+	var scoped_actor := Node3D.new()
+	CueBridge.attach(scoped_actor)
+	var scoped_queue: Object = scoped_actor.get_meta("gameplay_cues", null) as Object
+	if scoped_queue != null and scoped_queue.has_method("replace_active_branch"):
+		t.check(bool(scoped_queue.call("set_active", &"GameplayCue.Local.Visual.Shelter", 1)),
+			"game client can retain an independent visual cue")
+		t.check(bool(scoped_queue.call("set_active", &"GameplayCue.StatusExtra.Unrelated", 2)),
+			"dot-boundary sibling remains independent of status namespace")
+		var first_state := {
+			"sunder_seconds": 1.0, "resolve_seconds": 3.0, "resolve_stacks": 3
+		}
+		CueBridge.sync(scoped_actor, "zombie", first_state)
+		t.eq(int(scoped_queue.call("get_active_count")), 4,
+			"server statuses add two cues without erasing independent local/sibling cues")
+		t.eq(CueBridge.frame_events(scoped_actor, {}).size(), 4,
+			"two status and two local cues each start exactly once")
+		CueBridge.sync(scoped_actor, "zombie", first_state)
+		t.eq(CueBridge.frame_events(scoped_actor, {}).size(), 0,
+			"identical replicated status snapshot emits no redundant lifecycle")
+		scoped_queue.call("emit_cue", &"GameplayCue.Local.Visual.Pulse", 1.0, 1)
+		CueBridge.sync(scoped_actor, "zombie", first_state)
+		t.eq(int(scoped_queue.call("get_pending_count")), 1,
+			"unchanged status branch leaves unrelated pending transient pulses intact")
+		var local_pulses: Array = CueBridge.frame_events(scoped_actor, {})
+		t.eq(str(local_pulses[0].get("tag", "")), "GameplayCue.Local.Visual.Pulse",
+			"unrelated transient event was not cleared by authoritative reconciliation")
+		first_state["resolve_stacks"] = 4
+		first_state["sunder_seconds"] = 0.0
+		CueBridge.sync(scoped_actor, "zombie", first_state)
+		var changes: Array = CueBridge.frame_events(scoped_actor, {})
+		t.eq(changes.size(), 2, "server status expiry and update emit two lifecycle cues")
+		t.eq(str(changes[0].get("event", "")), "stopped", "expired status stops")
+		t.eq(str(changes[1].get("event", "")), "updated", "changed Resolve stacks update")
+		t.eq(int(scoped_queue.call("get_active_stacks", &"GameplayCue.Local.Visual.Shelter")),
+			1, "local shelter presentation remains active")
+		t.eq(int(scoped_queue.call("get_active_stacks", &"GameplayCue.StatusExtra.Unrelated")),
+			2, "sibling namespace remains active")
+		CueBridge.sync(scoped_actor, "zombie", {})
+		t.eq(int(scoped_queue.call("get_active_stacks", &"GameplayCue.Status.Resolve")),
+			0, "missing authoritative status no longer persists")
+		t.eq(int(scoped_queue.call("get_active_stacks", &"GameplayCue.Local.Visual.Shelter")),
+			1, "empty authoritative state only clears Status branch")
+		var invalid: Dictionary = {
+			"GameplayCue.Status.Resolve": 2,
+			"GameplayCue.Local.Visual.Shelter": 0
+		}
+		var baseline: Dictionary = scoped_queue.call("get_active_snapshot")
+		t.check(not bool(scoped_queue.call("replace_active_branch",
+			&"GameplayCue.Status", invalid, 2)),
+			"cross-namespace replicated snapshot is rejected atomically")
+		t.eq(scoped_queue.call("get_active_snapshot"), baseline,
+			"invalid scoped update preserves all existing cues")
+	else:
+		t.check(scoped_queue == null or not scoped_queue.has_method("replace_active_branch"),
+			"older Cgame or stock Godot runs original status cue path")
+	scoped_actor.free()
+
+	t.current = "infected game adapter actually uses scoped native snapshot"
+	var adapter_source: String = (CueBridge as Script).source_code
+	t.check(adapter_source.contains('cues.call("replace_active_branch"') and
+		adapter_source.contains('&"GameplayCue.Status"') and
+		adapter_source.contains('cues.call("replace_active", server_status, 2)'),
+		"live game uses scoped native reconciliation and older-engine fallback")

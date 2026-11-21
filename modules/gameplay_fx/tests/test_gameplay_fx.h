@@ -784,6 +784,105 @@ TEST_CASE("[GameplayFX] CueQueue batch significance evictions commit together or
 	CHECK(String(first[1]["tag"]) == "GameplayCue.Status.Sundered");
 }
 
+TEST_CASE("[GameplayFX] CueQueue scoped status replication preserves independent active effects") {
+	Ref<GameplayCueQueue> cue;
+	cue.instantiate();
+	CHECK(cue->set_active("GameplayCue.Local.Visual.Glow", 2, 1));
+	CHECK(cue->set_active("GameplayCue.StatusExtra.Unrelated", 1, 1));
+	Dictionary status;
+	status["GameplayCue.Status.Resolve"] = 3;
+	status[StringName("GameplayCue.Status.Staggered")] = 1;
+	CHECK(cue->replace_active_branch("GameplayCue.Status", status, 2));
+	CHECK(cue->get_active_count() == 4);
+	CHECK(cue->get_active_stacks("GameplayCue.Local.Visual.Glow") == 2);
+	CHECK(cue->get_active_stacks("GameplayCue.StatusExtra.Unrelated") == 1);
+	CHECK(cue->get_active_stacks("GameplayCue.Status.Resolve") == 3);
+	CHECK(cue->take_events().size() == 4);
+	CHECK(cue->get_pending_count() == 0);
+	// An identical network snapshot must not allocate or re-emit cues.
+	CHECK(cue->replace_active_branch("GameplayCue.Status", status, 2));
+	CHECK(cue->get_pending_count() == 0);
+	status.erase(StringName("GameplayCue.Status.Staggered"));
+	status["GameplayCue.Status.Resolve"] = 4;
+	CHECK(cue->replace_active_branch("GameplayCue.Status", status, 2));
+	CHECK(cue->get_active_count() == 3);
+	CHECK(cue->get_active_stacks("GameplayCue.Local.Visual.Glow") == 2);
+	CHECK(cue->get_active_stacks("GameplayCue.StatusExtra.Unrelated") == 1);
+	Array events = cue->take_events();
+	REQUIRE(events.size() == 2);
+	CHECK(String(events[0]["tag"]) == "GameplayCue.Status.Staggered");
+	CHECK(String(events[0]["event"]) == "stopped");
+	CHECK(String(events[1]["tag"]) == "GameplayCue.Status.Resolve");
+	CHECK(String(events[1]["event"]) == "updated");
+	CHECK(int(events[1]["stacks"]) == 4);
+	CHECK(cue->replace_active_branch("GameplayCue.Status", Dictionary(), 2));
+	CHECK(cue->get_active_count() == 2);
+	CHECK(cue->get_active_stacks("GameplayCue.Status.Resolve") == 0);
+	CHECK(cue->get_active_stacks("GameplayCue.Local.Visual.Glow") == 2);
+	CHECK(cue->take_events().size() == 1);
+}
+
+TEST_CASE("[GameplayFX] CueQueue scoped snapshots reject polluted or aliased input atomically") {
+	Ref<GameplayCueQueue> cue;
+	cue.instantiate();
+	CHECK(cue->set_active("GameplayCue.Local.Visual.Glow", 2));
+	CHECK(cue->set_active("GameplayCue.Status.Resolve", 3));
+	const Dictionary baseline = cue->get_active_snapshot();
+	const int pending_before = cue->get_pending_count();
+	Dictionary invalid;
+	invalid["GameplayCue.Status.Resolve"] = 1;
+	invalid["GameplayCue.StatusExtra.Mimic"] = 1;
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", invalid));
+	invalid.erase("GameplayCue.StatusExtra.Mimic");
+	invalid["GameplayCue.Local.Visual.Glow"] = 3;
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", invalid));
+	invalid.erase("GameplayCue.Local.Visual.Glow");
+	invalid["GameplayCue.Status.Resolve"] = -1;
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", invalid));
+	invalid["GameplayCue.Status.Resolve"] = 1.5;
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", invalid));
+	invalid["GameplayCue.Status.Resolve"] = 65536;
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", invalid));
+	invalid["GameplayCue.Status.Resolve"] = 1;
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.", invalid));
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", invalid, 8));
+	invalid[StringName("GameplayCue.Status.Resolve")] = 2;
+	// Different Godot Variant key implementations may coalesce String and
+	// StringName keys. Assert alias rejection when the dictionary carries both.
+	if (invalid.size() > 1) {
+		CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", invalid));
+	}
+	CHECK(cue->get_active_snapshot() == baseline);
+	CHECK(cue->get_pending_count() == pending_before);
+	CHECK(cue->get_evicted_transient_count() == 0);
+}
+
+TEST_CASE("[GameplayFX] CueQueue scoped replication rolls back under lifecycle backlog pressure") {
+	Ref<GameplayCueQueue> cue;
+	cue.instantiate();
+	CHECK(cue->set_active("GameplayCue.Local.Persist", 1));
+	CHECK(cue->take_events().size() == 1);
+	for (int i = 0; i < GameplayCueQueue::MAX_PENDING; ++i) {
+		CHECK(cue->emit_cue(StringName(String("GameplayCue.Ambient.") + itos(i)), 1.0, 1));
+	}
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	Dictionary incoming;
+	incoming["GameplayCue.Status.Sundered"] = 2;
+	const Dictionary before = cue->get_active_snapshot();
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", incoming, 3));
+	CHECK(cue->get_active_snapshot() == before);
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(cue->get_evicted_transient_count() == 0);
+	CHECK(cue->get_rejected_transient_count() == 0);
+	// A no-op scoped update is still valid even with a saturated visual queue.
+	CHECK(cue->replace_active_branch("GameplayCue.Status", Dictionary(), 3));
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(cue->take_events(32).size() == 32);
+	CHECK(cue->replace_active_branch("GameplayCue.Status", incoming, 3));
+	CHECK(cue->get_active_stacks("GameplayCue.Status.Sundered") == 2);
+	CHECK(cue->get_active_stacks("GameplayCue.Local.Persist") == 1);
+}
+
 TEST_CASE("[GameplayFX] CueQueue active lifecycle, priorities and deduplication") {
 	Ref<GameplayCueQueue> cue;
 	cue.instantiate();

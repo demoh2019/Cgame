@@ -76,6 +76,10 @@ public:
 	// Replace the active set transactionally, emitting started/updated/stopped
 	// events only for changed tags. Invalid input preserves state and events.
 	bool replace_active(const Dictionary &p_snapshot, int p_priority = 0);
+	// Update only exact/dotted descendants of a replicated cue namespace.
+	// Preserve active local/FX cues and their pending lifecycle. Validate first,
+	// skip identical snapshots, and roll back if event capacity is exhausted.
+	bool replace_active_branch(const StringName &p_branch, const Dictionary &p_snapshot, int p_priority = 0);
 	Dictionary get_active_snapshot() const;
 	int get_active_stacks(const StringName &p_tag) const;
 	bool is_active(const StringName &p_tag) const { return get_active_stacks(p_tag) > 0; }
