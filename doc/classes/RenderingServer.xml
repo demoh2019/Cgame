@@ -4370,6 +4370,14 @@
 				Sets the viewport's environment mode which allows enabling or disabling rendering of 3D environment over 2D canvas. When disabled, 2D will not be affected by the environment. When enabled, 2D will be affected by the environment if the environment background mode is [constant ENV_BG_CANVAS]. The default behavior is to inherit the setting from the viewport's parent. If the topmost parent is also set to [constant VIEWPORT_ENVIRONMENT_INHERIT], then the behavior will be the same as if it was set to [constant VIEWPORT_ENVIRONMENT_ENABLED].
 			</description>
 		</method>
+		<method name="viewport_set_frame_generation_enabled">
+			<return type="void" />
+			<param index="0" name="viewport" type="RID" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				If [code]true[/code], enables frame generation (motion-vector based frame interpolation) for the viewport. Equivalent to [member Viewport.frame_generation_enabled] or [member ProjectSettings.rendering/frame_generation/enabled]. Only supported in Forward+.
+			</description>
+		</method>
 		<method name="viewport_set_fsr_sharpness">
 			<return type="void" />
 			<param index="0" name="viewport" type="RID" />

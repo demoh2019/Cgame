@@ -2176,6 +2176,9 @@ SceneTree::SceneTree() {
 	const bool use_debanding = GLOBAL_GET("rendering/anti_aliasing/quality/use_debanding");
 	root->set_use_debanding(use_debanding);
 
+	const bool frame_generation = GLOBAL_DEF("rendering/frame_generation/enabled", false);
+	root->set_frame_generation_enabled(frame_generation);
+
 	const bool use_occlusion_culling = GLOBAL_DEF("rendering/occlusion_culling/use_occlusion_culling", false);
 	root->set_use_occlusion_culling(use_occlusion_culling);
 

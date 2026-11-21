@@ -282,6 +282,11 @@ Comment: etcpak
 Copyright: 2013-2026, Bartosz Taudul
 License: BSD-3-clause
 
+Files: thirdparty/fidelityfx_fg/*
+Comment: AMD FidelityFX SDK (frame generation design reference)
+Copyright: 2023-2024, Advanced Micro Devices, Inc.
+License: Expat
+
 Files: thirdparty/fonts/DroidSans*.woff2
 Comment: DroidSans font
 Copyright: 2008, The Android Open Source Project

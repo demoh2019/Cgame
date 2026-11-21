@@ -3056,6 +3056,11 @@
 		<member name="rendering/environment/volumetric_fog/volume_size" type="int" setter="" getter="" default="64">
 			Base size used to determine size of froxel buffer in the camera X-axis and Y-axis. The final size is scaled by the aspect ratio of the screen, so actual values may differ from what is set. Set a larger size for more detailed fog, set a smaller size for better performance.
 		</member>
+		<member name="rendering/frame_generation/enabled" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], enables motion-vector based frame generation (frame interpolation) for the default screen [Viewport]. See [member Viewport.frame_generation_enabled] for details and limitations.
+			[b]Note:[/b] Frame generation is only supported in the Forward+ rendering method.
+			[b]Note:[/b] This property is only read when the project starts. To change it at runtime, set [member Viewport.frame_generation_enabled] on the root [Viewport] instead, or use [method RenderingServer.viewport_set_frame_generation_enabled].
+		</member>
 		<member name="rendering/gl_compatibility/driver" type="String" setter="" getter="" default="&quot;opengl3&quot;">
 			Sets the driver to be used by the renderer when using the Compatibility renderer. Editing this property has no effect in the default configuration, as first-party platforms each have platform-specific overrides. Use those overrides to configure the driver for each platform.
 			This can be overridden using the [code]--rendering-driver &lt;driver&gt;[/code] command line argument.

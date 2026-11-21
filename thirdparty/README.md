@@ -282,6 +282,19 @@ Patches:
 - `0001-remove-bc7enc.patch` ([GH-101362](https://github.com/godotengine/godot/pull/101362))
 
 
+## fidelityfx_fg
+
+- Upstream: https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK
+- Version: n/a (design reference only; FSR 3 frame interpolation / optical flow)
+- License: MIT
+
+Only `LICENSE.txt` is kept here. The compute shaders in
+`servers/rendering/renderer_rd/shaders/effects/frame_generation_*.glsl` are an
+independent, simplified implementation of the same technique (motion-vector
+guided interpolation, block-matching optical-flow refinement, depth-based
+disocclusion handling, UI excluded by working on the 3D buffer) and do not
+contain copied SDK source. The MIT notice is retained as attribution.
+
 ## fonts
 
 - `DroidSansFallback.woff2`:

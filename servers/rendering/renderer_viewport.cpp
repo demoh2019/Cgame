@@ -306,6 +306,7 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 			rb_config.set_anisotropic_filtering_level(p_viewport->anisotropic_filtering_level);
 			rb_config.set_use_taa(use_taa);
 			rb_config.set_use_debanding(p_viewport->use_debanding);
+			rb_config.set_use_frame_generation(p_viewport->use_frame_generation);
 
 			p_viewport->render_buffers->configure(&rb_config);
 		}
@@ -1152,7 +1153,7 @@ void RendererViewport::_viewport_set_size(Viewport *p_viewport, int p_width, int
 bool RendererViewport::_viewport_requires_motion_vectors(Viewport *p_viewport) {
 	return p_viewport->use_taa ||
 			RSE::scaling_3d_mode_type(p_viewport->scaling_3d_mode) == RSE::VIEWPORT_SCALING_3D_TYPE_TEMPORAL ||
-			p_viewport->debug_draw == RSE::VIEWPORT_DEBUG_DRAW_MOTION_VECTORS || p_viewport->force_motion_vectors;
+			p_viewport->debug_draw == RSE::VIEWPORT_DEBUG_DRAW_MOTION_VECTORS || p_viewport->force_motion_vectors || p_viewport->use_frame_generation;
 }
 
 void RendererViewport::viewport_set_active(RID p_viewport, bool p_active) {
@@ -1506,6 +1507,29 @@ void RendererViewport::viewport_set_use_debanding(RID p_viewport, bool p_use_deb
 	}
 	viewport->use_debanding = p_use_debanding;
 	RSG::texture_storage->render_target_set_use_debanding(viewport->render_target, p_use_debanding);
+	_configure_3d_render_buffers(viewport);
+}
+
+void RendererViewport::viewport_set_frame_generation_enabled(RID p_viewport, bool p_enabled) {
+	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	ERR_FAIL_NULL(viewport);
+	if (OS::get_singleton()->get_current_rendering_method() != "forward_plus") {
+		WARN_PRINT_ONCE_ED("Frame generation is only available when using the Forward+ renderer.");
+		return;
+	}
+
+	if (viewport->use_frame_generation == p_enabled) {
+		return;
+	}
+
+	bool motion_vectors_before = _viewport_requires_motion_vectors(viewport);
+	viewport->use_frame_generation = p_enabled;
+
+	bool motion_vectors_after = _viewport_requires_motion_vectors(viewport);
+	if (motion_vectors_before != motion_vectors_after) {
+		num_viewports_with_motion_vectors += motion_vectors_after ? 1 : -1;
+	}
+
 	_configure_3d_render_buffers(viewport);
 }
 

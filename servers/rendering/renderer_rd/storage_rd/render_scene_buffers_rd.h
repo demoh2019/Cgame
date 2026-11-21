@@ -96,6 +96,7 @@ private:
 	RSE::ViewportScreenSpaceAA screen_space_aa = RSE::VIEWPORT_SCREEN_SPACE_AA_DISABLED;
 	bool use_taa = false;
 	bool use_debanding = false;
+	bool use_frame_generation = false;
 	RD::TextureSamples texture_samples = RD::TEXTURE_SAMPLES_1;
 
 	// Named Textures
@@ -247,6 +248,7 @@ public:
 	_FORCE_INLINE_ RD::TextureSamples get_texture_samples() const { return texture_samples; }
 	_FORCE_INLINE_ RSE::ViewportScreenSpaceAA get_screen_space_aa() const { return screen_space_aa; }
 	_FORCE_INLINE_ bool get_use_taa() const { return use_taa; }
+	_FORCE_INLINE_ bool get_use_frame_generation() const { return use_frame_generation; }
 	_FORCE_INLINE_ bool get_use_debanding() const { return use_debanding; }
 
 	uint64_t get_auto_exposure_version() const { return auto_exposure_version; }

@@ -51,6 +51,7 @@ private:
 	float fsr_sharpness = 0.0;
 	float texture_mipmap_bias = 0.0;
 	bool use_taa = false;
+	bool use_frame_generation = false;
 	bool use_debanding = false;
 
 protected:
@@ -92,6 +93,9 @@ public:
 
 	bool get_use_debanding() const { return use_debanding; }
 	void set_use_debanding(bool p_use_debanding) { use_debanding = p_use_debanding; }
+
+	bool get_use_frame_generation() const { return use_frame_generation; }
+	void set_use_frame_generation(bool p_use_frame_generation) { use_frame_generation = p_use_frame_generation; }
 
 	RenderSceneBuffersConfiguration() {}
 	virtual ~RenderSceneBuffersConfiguration() {}

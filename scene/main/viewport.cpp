@@ -3912,6 +3912,20 @@ bool Viewport::is_using_debanding() const {
 	return use_debanding;
 }
 
+void Viewport::set_frame_generation_enabled(bool p_enabled) {
+	ERR_MAIN_THREAD_GUARD;
+	if (frame_generation_enabled == p_enabled) {
+		return;
+	}
+	frame_generation_enabled = p_enabled;
+	RS::get_singleton()->viewport_set_frame_generation_enabled(viewport, p_enabled);
+}
+
+bool Viewport::is_frame_generation_enabled() const {
+	ERR_READ_THREAD_GUARD_V(false);
+	return frame_generation_enabled;
+}
+
 void Viewport::set_mesh_lod_threshold(float p_pixels) {
 	ERR_MAIN_THREAD_GUARD;
 	// GPU LOD selection must never receive an invalid or negative screen
@@ -5281,6 +5295,8 @@ void Viewport::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_use_debanding", "enable"), &Viewport::set_use_debanding);
 	ClassDB::bind_method(D_METHOD("is_using_debanding"), &Viewport::is_using_debanding);
+	ClassDB::bind_method(D_METHOD("set_frame_generation_enabled", "enabled"), &Viewport::set_frame_generation_enabled);
+	ClassDB::bind_method(D_METHOD("is_frame_generation_enabled"), &Viewport::is_frame_generation_enabled);
 
 	ClassDB::bind_method(D_METHOD("set_use_occlusion_culling", "enable"), &Viewport::set_use_occlusion_culling);
 	ClassDB::bind_method(D_METHOD("is_using_occlusion_culling"), &Viewport::is_using_occlusion_culling);
@@ -5464,6 +5480,7 @@ void Viewport::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "screen_space_aa", PROPERTY_HINT_ENUM, "Disabled (Fastest),FXAA (Fast),SMAA (Average)"), "set_screen_space_aa", "get_screen_space_aa");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_taa"), "set_use_taa", "is_using_taa");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_debanding"), "set_use_debanding", "is_using_debanding");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "frame_generation_enabled"), "set_frame_generation_enabled", "is_frame_generation_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_occlusion_culling"), "set_use_occlusion_culling", "is_using_occlusion_culling");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mesh_lod_threshold", PROPERTY_HINT_RANGE, "0,1024,0.1"), "set_mesh_lod_threshold", "get_mesh_lod_threshold");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_draw", PROPERTY_HINT_ENUM, "Disabled,Unshaded,Lighting,Overdraw,Wireframe,Normal Buffer,VoxelGI Albedo,VoxelGI Lighting,VoxelGI Emission,Shadow Atlas,Directional Shadow Map,Scene Luminance,SSAO,SSIL,Directional Shadow Splits,Decal Atlas,SDFGI Cascades,SDFGI Probes,VoxelGI/SDFGI Buffer,Disable Mesh LOD,OmniLight3D Cluster,SpotLight3D Cluster,Decal Cluster,ReflectionProbe Cluster,Occlusion Culling Buffer,Motion Vectors,Internal Buffer,AreaLight3D Cluster,AreaLight3D Atlas"), "set_debug_draw", "get_debug_draw");

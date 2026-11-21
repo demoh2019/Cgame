@@ -1872,6 +1872,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	bool using_debug_mvs = get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_MOTION_VECTORS;
 	bool using_taa = rb->get_use_taa();
+	bool using_frame_generation = rb->get_use_frame_generation();
 
 	enum {
 		SCALE_NONE,
@@ -1903,6 +1904,8 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	} else if (ce_needs_motion_vectors || using_motion_blur) {
 		motion_vectors_required = true;
 	} else if (!is_reflection_probe && using_taa) {
+		motion_vectors_required = true;
+	} else if (!is_reflection_probe && using_frame_generation) {
 		motion_vectors_required = true;
 	} else if (!is_reflection_probe && using_upscaling) {
 		motion_vectors_required = true;
@@ -2555,8 +2558,8 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 		bool compositor_needs_resolved_depth = _compositor_effects_has_flag(p_render_data, RSE::COMPOSITOR_EFFECT_FLAG_ACCESS_RESOLVED_DEPTH, RSE::CompositorEffectCallbackType::COMPOSITOR_EFFECT_CALLBACK_TYPE_POST_TRANSPARENT);
 		bool using_dof = RSG::camera_attributes->camera_attributes_uses_dof(p_render_data->camera_attributes);
-		bool resolve_transparent_depth = (using_taa || using_upscaling || using_dof || compositor_needs_resolved_depth);
-		bool resolve_velocity_buffer = (using_taa || using_upscaling || ce_needs_motion_vectors || using_motion_blur) && rb->has_velocity_buffer(true);
+		bool resolve_transparent_depth = (using_taa || using_upscaling || using_frame_generation || using_dof || compositor_needs_resolved_depth);
+		bool resolve_velocity_buffer = (using_taa || using_upscaling || using_frame_generation || ce_needs_motion_vectors || using_motion_blur) && rb->has_velocity_buffer(true);
 
 		RENDER_TIMESTAMP("Resolve Color");
 		for (uint32_t v = 0; v < rb->get_view_count(); v++) {
@@ -2700,6 +2703,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		RENDER_TIMESTAMP("Tonemap");
 
 		_render_buffers_post_process_and_tonemap(p_render_data);
+		_render_buffers_frame_generation(p_render_data);
 	}
 
 	if (rb_data.is_valid()) {

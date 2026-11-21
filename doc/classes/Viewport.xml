@@ -344,6 +344,13 @@
 		<member name="disable_3d" type="bool" setter="set_disable_3d" getter="is_3d_disabled" default="false">
 			Disable 3D rendering (but keep 2D rendering).
 		</member>
+		<member name="frame_generation_enabled" type="bool" setter="set_frame_generation_enabled" getter="is_frame_generation_enabled" default="false">
+			If [code]true[/code], the Forward+ renderer produces an interpolated in-between frame for each rendered frame, using the engine's motion vectors, a lightweight block-matching optical flow refinement and depth-based disocclusion handling (inspired by AMD FSR 3 frame generation). Interpolation is applied to the 3D image only, before 2D canvas items are drawn, so UI is never interpolated.
+			The interpolated image is stored in the viewport's [RenderSceneBuffersRD] under the texture context [code]"frame_generation"[/code] and name [code]"interpolated"[/code] (RGBA16F, target size), and can be accessed from a [CompositorEffect] with [method RenderSceneBuffersRD.get_texture]. It is only valid from the second rendered frame onward.
+			[b]Note:[/b] Presenting the interpolated frame at half-frame intervals to the display is not implemented yet, as the display server presents a single swapchain image per rendered frame. Enabling this property currently forces motion vector rendering and produces the interpolated image, but does not by itself increase the displayed frame rate.
+			[b]Note:[/b] Only supported in the Forward+ rendering method and not in multiview (XR) viewports.
+			See also [member ProjectSettings.rendering/frame_generation/enabled] and [method RenderingServer.viewport_set_frame_generation_enabled].
+		</member>
 		<member name="fsr_sharpness" type="float" setter="set_fsr_sharpness" getter="get_fsr_sharpness" default="0.2">
 			Determines how sharp the upscaled image will be when using the FSR upscaling mode. Sharpness halves with every whole number. Values go from 0.0 (sharpest) to 2.0. Values outside this range are clamped, and non-finite values fall back to 0.2.
 			To control this property on the root viewport, set the [member ProjectSettings.rendering/scaling_3d/fsr_sharpness] project setting.

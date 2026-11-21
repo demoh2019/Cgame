@@ -909,6 +909,22 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 	texture_storage->render_target_disable_clear_request(render_target);
 }
 
+void RendererSceneRenderRD::_render_buffers_frame_generation(const RenderDataRD *p_render_data) {
+	ERR_FAIL_NULL(p_render_data);
+	Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
+	if (rb.is_null() || !rb->get_use_frame_generation() || frame_generation == nullptr || p_render_data->reflection_probe.is_valid()) {
+		return;
+	}
+
+	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
+	RID color = texture_storage->render_target_get_rd_texture(rb->get_render_target());
+
+	RENDER_TIMESTAMP("Frame Generation");
+
+	// This runs before 2D canvas items are drawn into the render target, so the UI is excluded from interpolation.
+	frame_generation->process(rb, color, RendererRD::FrameGeneration::Settings());
+}
+
 void RendererSceneRenderRD::_post_process_subpass(RID p_source_texture, RID p_framebuffer, const RenderDataRD *p_render_data) {
 	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
 	RD::get_singleton()->draw_command_begin_label("Post Process Subpass");
@@ -1909,6 +1925,9 @@ void RendererSceneRenderRD::init() {
 #ifdef METAL_ENABLED
 	mfx_spatial = memnew(RendererRD::MFXSpatialEffect);
 #endif
+	if (can_use_storage) {
+		frame_generation = memnew(RendererRD::FrameGeneration);
+	}
 	resolve_effects = memnew(RendererRD::Resolve(!can_use_storage));
 }
 
@@ -1923,6 +1942,7 @@ RendererSceneRenderRD::~RendererSceneRenderRD() {
 	memdelete(tone_mapper);
 	memdelete(vrs);
 	memdelete(fsr);
+	memdelete(frame_generation);
 #ifdef METAL_ENABLED
 	memdelete(mfx_spatial);
 #endif
