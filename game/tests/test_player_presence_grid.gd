@@ -102,3 +102,39 @@ func run(t) -> void:
 	t.check(not server.zombies.has(near.id), "next pass reflects player relocation")
 	t.eq(server.last_population_query_stats["alive_players"], 1,
 		"player position is not cached between population maintenance passes")
+
+	# Native Cgame does all broadphase math in C++ while stock Godot keeps
+	# the authoritative script implementation. Both must agree bit for bit.
+	if ClassDB.class_exists("SpatialPointGrid2D"):
+		t.current = "native SpatialPointGrid2D: server semantics and GDScript parity"
+		var native = ClassDB.instantiate("SpatialPointGrid2D")
+		t.check(native != null, "native broadphase class instantiates")
+		native.rebuild(single)
+		t.eq(native.snapshot()["alive_players"], 1, "native solo count")
+		t.check(not native.snapshot()["indexed_mode"], "native solo scans directly")
+		t.check(native.any_within(Vector2(-52.0, -1.0), 12.0), "native inclusive boundary")
+		t.check(not native.any_within(Vector2(-52.0, -1.0), 12.0, false),
+			"native strict anti-spawn boundary")
+		t.check(not native.any_within(Vector2(NAN, 0.0), 12.0), "native nonfinite query rejected")
+		native.rebuild(many)
+		t.eq(native.snapshot()["alive_players"], 40, "native rejects nonfinite positions")
+		t.check(native.snapshot()["indexed_mode"], "native large server uses buckets")
+		var random_parity := RandomNumberGenerator.new()
+		random_parity.seed = 448411
+		for index in range(90):
+			var point := Vector2(random_parity.randf_range(-1800.0, 1800.0),
+				random_parity.randf_range(-1800.0, 1800.0))
+			for radius in [0.0, 12.0, 64.0, 130.0, 256.0]:
+				for inclusive in [true, false]:
+					t.eq(native.any_within(point, radius, inclusive),
+						_brute(valid_points, point, radius, inclusive),
+						"native broadphase agrees with brute force at case %d" % index)
+		t.check(native.snapshot()["bucket_lookups"] > 0, "native indexed lookups counted")
+		var old_buckets: int = native.snapshot()["bucket_lookups"]
+		t.check(native.any_within(Vector2.ZERO, 1000000.0), "native large radius exact fallback")
+		t.eq(native.snapshot()["bucket_lookups"], old_buckets,
+			"native oversized query does not expand a huge bucket square")
+		t.check(server.last_population_query_stats.get("native_backend", false),
+			"the real GameServer uses the C++ broadphase under Cgame")
+		native.clear()
+		t.eq(native.snapshot()["queries"], 0, "native clear resets diagnostics")

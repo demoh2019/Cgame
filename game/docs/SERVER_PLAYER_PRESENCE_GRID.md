@@ -85,3 +85,38 @@ Godot's PhysicsServer, Unreal Mass Entity or Unity DOTS.
 References:
 - https://docs.godotengine.org/en/4.6/tutorials/performance/cpu_optimization.html
 - https://dev.epicgames.com/documentation/unreal-engine/overview-of-mass-gameplay-in-unreal-engine
+
+## Native Cgame broadphase (optional acceleration)
+
+The Cgame engine now also offers `SpatialPointGrid2D` in
+`scene/main/spatial_point_grid_2d.{h,cpp}`, a reusable RefCounted container
+for exact 2D point-radius queries without physics colliders or scene nodes.
+It implements `rebuild(positions: Array[Vector2])`,
+`any_within(point: Vector2, radius: float, inclusive=true)`, `snapshot()`,
+`clear()`, and configuration for cell size, direct-scan threshold and maximum
+indexed radius. It has no gameplay dependencies and can serve AI perception,
+population management, entity proximity or point-of-interest lookup.
+
+The canonical `GameServer._manage_zombie_population()` chooses the native
+class when running a custom Cgame binary; stock Godot continues using the
+existing `PlayerPresenceGrid` GDScript implementation. Both preserve:
+exact strict 12 m anti-spawn, inclusive 130 m infected retention, 64 m cells,
+direct scan for <=8 living survivors and direct fallback above 512 m.
+The grid is rebuilt every pass, and the diagnostic keys remain identical.
+A new `native_backend` boolean in native snapshots allows backend diagnostics.
+
+Extreme finite world coordinates outside safe 32-bit cell range trigger a
+direct scan rather than overflowing the cell index. Nonfinite coordinates are
+ignored on rebuild or rejected at query time. This is **not** the physics
+broadphase and does not change the authoritative server or network contract.
+
+Tests: `tests/scene/test_spatial_point_grid_2d.cpp` (native doctest),
+`game/tests/test_player_presence_grid.gd` (native/script parity and live
+GameServer fixture), and dedicated
+`.github/workflows/native-spatial-point-grid.yml` for build/import/tests.
+
+Benchmark claims: none until the custom engine and game tests complete.
+The approach follows the spatial query/broadphase concepts in Unity Physics
+and cell-based world organization in Unreal Engine:
+https://docs.unity.cn/Packages/com.unity.physics@1.0/manual/collision-queries.html
+https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine
