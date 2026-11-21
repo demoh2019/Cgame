@@ -41,4 +41,13 @@ public:
 			const PackedByteArray &p_priority_flags, const PackedByteArray &p_visible_flags,
 			const PackedByteArray &p_retained_full_flags, int p_full_budget,
 			int p_priority_budget, double p_hysteresis = 1.5) const;
+
+	// Independent retention for IK and on-screen combat-critical full-rate
+	// poses. Neither budget nor the 22/90m hard radius is relaxed.
+	PackedInt32Array plan_visible_tiers_temporal(const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_priority_flags, const PackedByteArray &p_visible_flags,
+			const PackedByteArray &p_retained_full_flags,
+			const PackedByteArray &p_retained_priority_flags, int p_full_budget,
+			int p_priority_budget, double p_full_hysteresis,
+			double p_priority_hysteresis) const;
 };

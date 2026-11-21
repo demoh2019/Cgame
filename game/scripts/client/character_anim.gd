@@ -64,13 +64,17 @@ static func plan_crowd_tiers(distances: PackedFloat64Array, priority_flags: Pack
 		full_slots: int, priority_slots: int, prefer_native: bool = true,
 		visible_flags: PackedByteArray = PackedByteArray(),
 		retained_full_flags: PackedByteArray = PackedByteArray(),
-		full_hysteresis: float = 0.0) -> PackedInt32Array:
+		full_hysteresis: float = 0.0,
+		retained_combat_flags: PackedByteArray = PackedByteArray(),
+		combat_hysteresis: float = 0.0) -> PackedInt32Array:
 	var count: int = distances.size()
 	if count != priority_flags.size() or count > 16384 or full_slots < 0 or full_slots > 256 \
 			or priority_slots < 0 or priority_slots > 256 or \
 			(not visible_flags.is_empty() and visible_flags.size() != count) or \
 			(not retained_full_flags.is_empty() and retained_full_flags.size() != count) or \
-			not is_finite(full_hysteresis) or full_hysteresis < 0.0 or full_hysteresis > 8.0:
+			(not retained_combat_flags.is_empty() and retained_combat_flags.size() != count) or \
+			not is_finite(full_hysteresis) or full_hysteresis < 0.0 or full_hysteresis > 8.0 or \
+			not is_finite(combat_hysteresis) or combat_hysteresis < 0.0 or combat_hysteresis > 4.0:
 		return PackedInt32Array()
 	for distance in distances:
 		if not is_finite(distance) or distance < 0.0:
@@ -79,6 +83,20 @@ static func plan_crowd_tiers(distances: PackedFloat64Array, priority_flags: Pack
 		if _native_tier_planner == null:
 			_native_tier_planner = ClassDB.instantiate("CrowdAnimationTierPlanner")
 		if _native_tier_planner != null:
+			# A newer native API preserves BOTH independent budgets, without
+			# replacing older engines' full-IK-only retention semantics.
+			if combat_hysteresis > 0.0 and not retained_combat_flags.is_empty():
+				if not retained_full_flags.is_empty() and not visible_flags.is_empty() and \
+						_native_tier_planner.has_method("plan_visible_tiers_temporal"):
+					var temporal_tiers: PackedInt32Array = _native_tier_planner.call(
+						"plan_visible_tiers_temporal", distances, priority_flags, visible_flags,
+						retained_full_flags, retained_combat_flags, full_slots, priority_slots,
+						full_hysteresis, combat_hysteresis)
+					if temporal_tiers.size() == count:
+						return temporal_tiers
+				return _plan_crowd_tiers_fallback(distances, priority_flags,
+					full_slots, priority_slots, visible_flags, retained_full_flags,
+					full_hysteresis, retained_combat_flags, combat_hysteresis)
 			if not retained_full_flags.is_empty() and full_hysteresis > 0.0 and \
 					not visible_flags.is_empty() and \
 					_native_tier_planner.has_method("plan_visible_tiers_stable"):
@@ -107,14 +125,16 @@ static func plan_crowd_tiers(distances: PackedFloat64Array, priority_flags: Pack
 				if native_tiers.size() == count:
 					return native_tiers
 	return _plan_crowd_tiers_fallback(distances, priority_flags, full_slots,
-		priority_slots, visible_flags, retained_full_flags, full_hysteresis)
+		priority_slots, visible_flags, retained_full_flags, full_hysteresis,
+		retained_combat_flags, combat_hysteresis)
 
 
 ## Script-only parity for older Cgame builds and stock Godot.
 static func _plan_crowd_tiers_fallback(distances: PackedFloat64Array,
 		priority_flags: PackedByteArray, full_slots: int, priority_slots: int,
 		visible_flags: PackedByteArray, retained_full_flags: PackedByteArray,
-		full_hysteresis: float) -> PackedInt32Array:
+		full_hysteresis: float, retained_combat_flags: PackedByteArray = PackedByteArray(),
+		combat_hysteresis: float = 0.0) -> PackedInt32Array:
 	var count: int = distances.size()
 	var order: Array[int] = []
 	var eligible_full: Array[int] = []
@@ -145,8 +165,18 @@ static func _plan_crowd_tiers_fallback(distances: PackedFloat64Array,
 		)
 	for i in mini(full_slots, eligible_full.size()):
 		tiers[eligible_full[i]] = 0
+	# Keep the combat pose queue stable independently of procedural IK.
+	var combat_order: Array[int] = order.duplicate()
+	if combat_hysteresis > 0.0 and not retained_combat_flags.is_empty():
+		combat_order.sort_custom(func(a: int, b: int) -> bool:
+			var a_score: float = maxf(0.0, distances[a] -
+				(combat_hysteresis if retained_combat_flags[a] != 0 else 0.0))
+			var b_score: float = maxf(0.0, distances[b] -
+				(combat_hysteresis if retained_combat_flags[b] != 0 else 0.0))
+			return a_score < b_score if a_score != b_score else a < b
+		)
 	var granted_priority: int = 0
-	for index in order:
+	for index in combat_order:
 		if granted_priority >= priority_slots:
 			break
 		if (not visible_flags.is_empty() and visible_flags[index] == 0) or \
@@ -307,6 +337,7 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 	var priority_mask := PackedByteArray()
 	var visible_mask := PackedByteArray()
 	var retained_full_mask := PackedByteArray()
+	var retained_combat_mask := PackedByteArray()
 	for model in models:
 		var distance: float = model.global_position.distance_to(cam)
 		distances.append(distance)
@@ -316,6 +347,7 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 			camera.is_position_in_frustum(model.global_position + Vector3.UP))
 		visible_mask.append(1 if visible else 0)
 		retained_full_mask.append(1 if bool(model.get_meta("aa_full_ik_retained", false)) else 0)
+		retained_combat_mask.append(1 if bool(model.get_meta("aa_combat_pose_retained", false)) else 0)
 		# Combat urgency is visual-only, and the native mixer controller
 		# already handles critical poses when external_anim_lod is enabled.
 		var critical: bool = not bool(model.get("external_anim_lod")) \
@@ -324,7 +356,8 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 		priority_mask.append(1 if critical else 0)
 	var tiers: PackedInt32Array = plan_crowd_tiers(distances, priority_mask,
 		full_budget(quality), CombatAnimationPriority.slots(quality), true, visible_mask,
-		retained_full_mask, IK_RETENTION_HYSTERESIS_METRES)
+		retained_full_mask, IK_RETENTION_HYSTERESIS_METRES,
+		retained_combat_mask, 1.5)
 	if tiers.size() != models.size():
 		return
 	for i in models.size():
@@ -335,4 +368,8 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 		var full_ik_now: bool = tiers[i] == 0
 		if bool(model.get_meta("aa_full_ik_retained", false)) != full_ik_now:
 			model.set_meta("aa_full_ik_retained", full_ik_now)
+		# Only count poses promoted above their natural distance tier.
+		var combat_promoted: bool = priority_mask[i] != 0 and tiers[i] == 1 and distances[i] >= 38.0
+		if bool(model.get_meta("aa_combat_pose_retained", false)) != combat_promoted:
+			model.set_meta("aa_combat_pose_retained", combat_promoted)
 		model.set_look_point(cam if tiers[i] == 0 and distances[i] < 12.0 else Vector3.INF)

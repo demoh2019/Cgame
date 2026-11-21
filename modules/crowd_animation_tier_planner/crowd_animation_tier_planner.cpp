@@ -67,6 +67,8 @@ void CrowdAnimationTierPlanner::_bind_methods() {
 			&CrowdAnimationTierPlanner::plan_visible_tiers);
 	ClassDB::bind_method(D_METHOD("plan_visible_tiers_stable", "distances", "priority_flags", "visible_flags", "retained_full_flags", "full_budget", "priority_budget", "hysteresis"),
 			&CrowdAnimationTierPlanner::plan_visible_tiers_stable, DEFVAL(1.5));
+	ClassDB::bind_method(D_METHOD("plan_visible_tiers_temporal", "distances", "priority_flags", "visible_flags", "retained_full_flags", "retained_priority_flags", "full_budget", "priority_budget", "full_hysteresis", "priority_hysteresis"),
+			&CrowdAnimationTierPlanner::plan_visible_tiers_temporal);
 }
 
 // Shared budget planner: no second sorting pass and no additional per-actor
@@ -74,7 +76,8 @@ void CrowdAnimationTierPlanner::_bind_methods() {
 static PackedInt32Array plan_tiers_internal(
 		const PackedFloat64Array &p_distances, const PackedByteArray &p_priority_flags,
 		const PackedByteArray *p_visible_flags, const PackedByteArray *p_retained_full_flags,
-		int p_full_budget, int p_priority_budget, double p_hysteresis) {
+		int p_full_budget, int p_priority_budget, double p_hysteresis,
+		const PackedByteArray *p_retained_priority_flags, double p_priority_hysteresis) {
 	PackedInt32Array output;
 	const int count = p_distances.size();
 	ERR_FAIL_COND_V_MSG(count != p_priority_flags.size(), output, "Distance and priority arrays must match.");
@@ -82,8 +85,13 @@ static PackedInt32Array plan_tiers_internal(
 			"Visibility flags must match crowd distances.");
 	ERR_FAIL_COND_V_MSG(p_retained_full_flags != nullptr && p_retained_full_flags->size() != count, output,
 			"Retained full-IK flags must match crowd distances.");
+	ERR_FAIL_COND_V_MSG(p_retained_priority_flags != nullptr && p_retained_priority_flags->size() != count, output,
+			"Retained combat-priority flags must match crowd distances.");
 	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_hysteresis) || p_hysteresis < 0.0 || p_hysteresis > 8.0, output,
 			"Full-IK retention hysteresis must be finite and within 0..8 metres.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_priority_hysteresis) ||
+			p_priority_hysteresis < 0.0 || p_priority_hysteresis > 4.0, output,
+			"Combat animation retention must be finite and within 0..4 metres.");
 	ERR_FAIL_COND_V_MSG(count > 16384, output, "Crowd tier planning is limited to 16384 actors.");
 	ERR_FAIL_COND_V_MSG(p_full_budget < 0 || p_full_budget > 256 ||
 					p_priority_budget < 0 || p_priority_budget > 256,
@@ -107,7 +115,6 @@ static PackedInt32Array plan_tiers_internal(
 		if (!visible) {
 			continue;
 		}
-		const RankedCandidate candidate = { distance, i };
 		if (tier == 0) {
 			// Only within the original 22m threshold: retention never makes
 			// hidden or out-of-range characters eligible for expensive IK.
@@ -116,7 +123,15 @@ static PackedInt32Array plan_tiers_internal(
 			insert_top(nearest_full, ik_candidate, p_full_budget);
 		}
 		if (p_priority_flags[i] != 0 && distance < 90.0) {
-			insert_top(nearest_critical, candidate, p_priority_budget);
+			// Only the combat queue receives this secondary retention hint.
+			// Eligibility and actual camera distance remain unchanged; IK
+			// and combat budgets have independent deterministic rankings.
+			const bool retained_priority = p_retained_priority_flags != nullptr &&
+					(*p_retained_priority_flags)[i] != 0;
+			const RankedCandidate combat_candidate = {
+				MAX(0.0, distance - (retained_priority ? p_priority_hysteresis : 0.0)), i
+			};
+			insert_top(nearest_critical, combat_candidate, p_priority_budget);
 		}
 	}
 	for (int i = 0; i < nearest_full.size(); i++) {
@@ -133,13 +148,13 @@ static PackedInt32Array plan_tiers_internal(
 PackedInt32Array CrowdAnimationTierPlanner::plan_tiers(
 		const PackedFloat64Array &p_distances, const PackedByteArray &p_priority_flags,
 		int p_full_budget, int p_priority_budget) const {
-	return plan_tiers_internal(p_distances, p_priority_flags, nullptr, nullptr, p_full_budget, p_priority_budget, 0.0);
+	return plan_tiers_internal(p_distances, p_priority_flags, nullptr, nullptr, p_full_budget, p_priority_budget, 0.0, nullptr, 0.0);
 }
 
 PackedInt32Array CrowdAnimationTierPlanner::plan_visible_tiers(
 		const PackedFloat64Array &p_distances, const PackedByteArray &p_priority_flags,
 		const PackedByteArray &p_visible_flags, int p_full_budget, int p_priority_budget) const {
-	return plan_tiers_internal(p_distances, p_priority_flags, &p_visible_flags, nullptr, p_full_budget, p_priority_budget, 0.0);
+	return plan_tiers_internal(p_distances, p_priority_flags, &p_visible_flags, nullptr, p_full_budget, p_priority_budget, 0.0, nullptr, 0.0);
 }
 
 PackedInt32Array CrowdAnimationTierPlanner::plan_visible_tiers_stable(
@@ -147,5 +162,15 @@ PackedInt32Array CrowdAnimationTierPlanner::plan_visible_tiers_stable(
 		const PackedByteArray &p_visible_flags, const PackedByteArray &p_retained_full_flags,
 		int p_full_budget, int p_priority_budget, double p_hysteresis) const {
 	return plan_tiers_internal(p_distances, p_priority_flags, &p_visible_flags, &p_retained_full_flags,
-			p_full_budget, p_priority_budget, p_hysteresis);
+			p_full_budget, p_priority_budget, p_hysteresis, nullptr, 0.0);
+}
+
+PackedInt32Array CrowdAnimationTierPlanner::plan_visible_tiers_temporal(
+		const PackedFloat64Array &p_distances, const PackedByteArray &p_priority_flags,
+		const PackedByteArray &p_visible_flags, const PackedByteArray &p_retained_full_flags,
+		const PackedByteArray &p_retained_priority_flags, int p_full_budget,
+		int p_priority_budget, double p_full_hysteresis, double p_priority_hysteresis) const {
+	return plan_tiers_internal(p_distances, p_priority_flags, &p_visible_flags,
+			&p_retained_full_flags, p_full_budget, p_priority_budget, p_full_hysteresis,
+			&p_retained_priority_flags, p_priority_hysteresis);
 }

@@ -199,3 +199,79 @@ func run(t) -> void:
 						t.eq(native_tiers, script_tiers,
 							"stable native/script parity sample %d slots %d bonus %.1f" % [
 								sample, budget, hysteresis])
+
+
+	t.current = "independent combat animation retention on top of existing IK hysteresis"
+	var combat_d := PackedFloat64Array([5.6, 5.4, 60.5, 60.3])
+	var combat_p := PackedByteArray([0, 0, 1, 1])
+	var combat_v := PackedByteArray([1, 1, 1, 1])
+	var full_old := PackedByteArray([1, 0, 0, 0])
+	var combat_old := PackedByteArray([0, 0, 1, 0])
+	var dual: PackedInt32Array = CharacterAnim.plan_crowd_tiers(
+		combat_d, combat_p, 1, 1, false, combat_v, full_old, 1.5,
+		combat_old, 1.0)
+	t.eq(dual, PackedInt32Array([0, 1, 1, 3]),
+		"two independent budgets retain near IK and distant combat animation")
+	t.eq(CharacterAnim.plan_crowd_tiers(combat_d, combat_p, 1, 1,
+		false, combat_v, full_old, 1.5, combat_old, 0.0),
+		PackedInt32Array([0, 1, 3, 1]),
+		"zero combat bonus preserves previously merged full-IK-only ranking")
+	t.eq(CharacterAnim.plan_crowd_tiers(
+		PackedFloat64Array([7.0, 5.4, 62.0, 60.3]), combat_p, 1, 1,
+		false, combat_v, full_old, 1.0, combat_old, 1.0),
+		PackedInt32Array([1, 0, 3, 1]),
+		"large distance changes release retained combat and IK slots")
+
+	t.current = "retained combat does not exceed visibility or the 90m radius"
+	t.eq(CharacterAnim.plan_crowd_tiers(
+		PackedFloat64Array([21.9, 22.1, 89.9, 90.1, 3.0]),
+		PackedByteArray([0, 0, 1, 1, 1]), 1, 1, false,
+		PackedByteArray([1, 1, 1, 1, 0]), PackedByteArray([1, 1, 0, 0, 1]),
+		4.0, PackedByteArray([0, 0, 1, 1, 1]), 4.0),
+		PackedInt32Array([0, 1, 1, 4, 2]),
+		"retention cannot keep an offscreen attack, out-of-range warning or excess IK")
+	t.eq(CharacterAnim.plan_crowd_tiers(combat_d, combat_p, 1, 1,
+		false, combat_v, full_old, 1.5, PackedByteArray([1]), 1.0).size(), 0,
+		"invalid history size is rejected")
+	t.eq(CharacterAnim.plan_crowd_tiers(combat_d, combat_p, 1, 1,
+		false, combat_v, full_old, 1.5, combat_old, NAN).size(), 0,
+		"NaN combat retention is rejected")
+	t.eq(CharacterAnim.plan_crowd_tiers(combat_d, combat_p, 1, 1,
+		false, combat_v, full_old, 1.5, combat_old, 4.1).size(), 0,
+		"combat retention is limited to four metres")
+
+	t.current = "real Albion crowd pass stores combat priority per model"
+	var updated_source: String = (CharacterAnim as Script).source_code
+	t.check(updated_source.contains('model.get_meta("aa_combat_pose_retained", false)') and
+		updated_source.contains('model.set_meta("aa_combat_pose_retained", combat_promoted)'),
+		"client animation stores each actor's combat-pose retention without index leak")
+	var model_script: String = FileAccess.get_file_as_string("res://scripts/client/character_model.gd")
+	t.check(model_script.contains('set_meta("aa_combat_pose_retained", false)'),
+		"reused character models discard previous combat budget ownership")
+	t.eq(CharacterAnim.plan_crowd_tiers(combat_d, combat_p, 1, 1,
+		true, combat_v, full_old, 1.5, combat_old, 1.0), dual,
+		"new native method or older engine fallback preserves the same selection")
+	if ClassDB.class_exists("CrowdAnimationTierPlanner"):
+		var dual_native: Object = ClassDB.instantiate("CrowdAnimationTierPlanner")
+		if dual_native != null and dual_native.has_method("plan_visible_tiers_temporal"):
+			t.eq(dual_native.call("plan_visible_tiers_temporal", combat_d, combat_p,
+				combat_v, full_old, combat_old, 1, 1, 1.5, 1.0),
+				dual, "native independent combat and IK retention parity")
+			for trial in 10:
+				var d := PackedFloat64Array()
+				var p := PackedByteArray()
+				var v := PackedByteArray()
+				var f := PackedByteArray()
+				var c := PackedByteArray()
+				for i in 120:
+					d.append(float((i * 13 + trial * 7) % 110) + float(i % 5) * 0.2)
+					p.append(1 if i % 3 == 0 else 0)
+					v.append(1 if i % 7 != 0 else 0)
+					f.append(1 if i % 9 == 0 else 0)
+					c.append(1 if i % 4 == 0 else 0)
+				var fallback: PackedInt32Array = CharacterAnim.plan_crowd_tiers(
+					d, p, 8, 4, false, v, f, 1.5, c, 1.5)
+				var native_tiers: PackedInt32Array = dual_native.call(
+					"plan_visible_tiers_temporal", d, p, v, f, c, 8, 4, 1.5, 1.5)
+				t.eq(native_tiers, fallback,
+					"native/script dual retention parity sample %d" % trial)

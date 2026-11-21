@@ -113,3 +113,35 @@ scons platform=linuxbsd target=editor tests=yes module_crowd_animation_tier_plan
 bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[CrowdAnimationTierPlanner]*"
 bin/godot.linuxbsd.editor.x86_64 --headless --path game --script res://tests/run_all.gd
 ```
+
+## Independent combat-pose retention
+
+The IK-only `plan_visible_tiers_stable` API remains unchanged. The new
+`plan_visible_tiers_temporal(distances, priority_flags, visible_flags,
+retained_full_flags, retained_priority_flags, full_budget, priority_budget,
+full_hysteresis, priority_hysteresis)` adds **independent temporal significance
+for combat-critical full-rate poses**, inspired by Unreal Engine's Animation
+Budget Allocator. The planner accepts separate previous-frame ownership masks,
+then gives each eligible owner a small *ranking* distance discount, not a
+longer range or another budget slot.
+
+- Full IK retains its existing 0–8m bonus and strict visible / 22m gate.
+- Combat pose priority has its own 0–4m bonus, strict visibility / 90m
+  gate, and unchanged `priority_budget` cap.
+- Different actors may retain IK and combat slots. Ties are deterministic
+  and the native implementation uses bounded top-K queues.
+- Invalid, mismatched or non-finite inputs fail atomically to an empty batch;
+  priority retention 0 preserves the exact existing IK-only output.
+
+Albion After now stores a per-character `aa_combat_pose_retained` hint,
+separate from its pre-existing `aa_full_ik_retained` hint. Only a visible,
+combat-flagged character promoted from the naturally slower tier (distance
+>=38m) may carry the priority hint to the next frame. Pooled models reset
+both flags. Stock Godot and older Cgame builds fall back to matching
+GDScript ranking without losing the new behavior. This never modifies
+damage, server AI, physics, or networking.
+
+The engine exposes an *additional* method rather than changing the existing
+stable planner's signature, so scripts compiled against prior Cgame releases
+continue to work. This is stability of presentation scheduling, **not**
+a measured FPS improvement or a full Unreal animation framework.
