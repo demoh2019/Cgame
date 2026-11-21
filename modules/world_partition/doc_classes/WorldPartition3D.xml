@@ -94,6 +94,14 @@
 				Releases all runtime cell pins. Cells outside every observer's unload radius become eligible for normal budgeted unloading at the next update.
 			</description>
 		</method>
+		<method name="clear_route_connection_link">
+			<return type="void" />
+			<param index="0" name="from_cell" type="Vector2i" />
+			<param index="1" name="to_cell" type="Vector2i" />
+			<description>
+				Removes an explicit link requirement registered by set_route_connection_link for the exact directed pair, without altering the NavigationLink3D node, its saved enabled state or any outstanding cell leases.
+			</description>
+		</method>
 		<method name="erase_cell_state">
 			<return type="void" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -221,6 +229,12 @@
 				Returns the number of distinct cells currently disabled for navigation, regardless of whether they have a loaded scene or existing route lease. Only explicit false entries are stored.
 			</description>
 		</method>
+		<method name="get_disabled_navigation_link_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the total number of disabled navigation link paths in all cells, regardless of whether their scenes are currently loaded.
+			</description>
+		</method>
 		<method name="get_layer_states" qualifiers="const">
 			<return type="Dictionary" />
 			<description>
@@ -251,6 +265,12 @@
 				Returns a defensive copy of the navigation gate state map (Vector2i to false). Cells missing from the map are enabled by default. Store this dictionary in a game checkpoint if gates must survive a save/load.
 			</description>
 		</method>
+		<method name="get_navigation_link_states" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns a defensive deep copy of the saved navigation link state map. Only disabled links are stored, and link paths are relative to the authored cell scene root. Save this alongside interactive-object states in checkpoints.
+			</description>
+		</method>
 		<method name="get_pinned_cell_count" qualifiers="const">
 			<return type="int" />
 			<description>
@@ -261,6 +281,14 @@
 			<return type="Array" />
 			<description>
 				Returns a new array of the pinned [Vector2i] coordinates in insertion order. No more than 128 cells may be pinned at once.
+			</description>
+		</method>
+		<method name="get_route_connection_link" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="from_cell" type="Vector2i" />
+			<param index="1" name="to_cell" type="Vector2i" />
+			<description>
+				Returns the registered scene-relative link path belonging to from_cell for the exact directed edge from_cell to to_cell, or an empty String if the edge has no explicit link requirement. Reverse-direction route acquisition automatically checks this registered edge as well.
 			</description>
 		</method>
 		<method name="has_cell_state" qualifiers="const">
@@ -289,6 +317,14 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Returns whether a cell's navigation regions are enabled. Missing entries default to true. A disabled cell remains in the scene and retains its physics, graphics and existing leases, but new acquire_cell_route requests passing through it are rejected.
+			</description>
+		</method>
+		<method name="is_cell_navigation_link_enabled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="link_path" type="String" />
+			<description>
+				Returns the persisted logical availability of an authored NavigationLink3D by cell-relative path. Paths missing from the map are enabled by default. This can be queried even when the cell scene has not loaded.
 			</description>
 		</method>
 		<method name="is_cell_pinned" qualifiers="const">
@@ -403,6 +439,15 @@
 				Enables or disables every NavigationRegion3D descendant of the loaded scene for a given cell, without unloading it. Removes the map entry when enabled is true. Emits cell_navigation_state_changed only for effective transitions. A disabled gate blocks new acquire_cell_route reservations; existing lease owners keep their tokens. The NavigationServer3D synchronizes topology changes on the following physics frame.
 			</description>
 		</method>
+		<method name="set_cell_navigation_link_enabled">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="link_path" type="String" />
+			<param index="2" name="enabled" type="bool" />
+			<description>
+				Switches one NavigationLink3D child under the loaded scene at cell without disabling its NavigationRegion3D nodes. The link_path is a safe relative NodePath from that cell root, at most 256 characters long. Disabled paths are stored for unloaded cells, reinstated after scene activation, and included in get_navigation_link_states(). Emits cell_navigation_link_state_changed only for effective transitions.
+			</description>
+		</method>
 		<method name="set_cell_scene">
 			<return type="void" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -441,6 +486,13 @@
 				Replaces the current cell navigation gate map with validated Vector2i-to-bool entries (only false entries are stored). Immediately applies changes to loaded NavigationRegion3D descendants, and emits cell_navigation_state_changed per effective transition, including reopening gates removed by a bulk checkpoint import. Cells missing from the dictionary are enabled by default.
 			</description>
 		</method>
+		<method name="set_navigation_link_states">
+			<return type="void" />
+			<param index="0" name="states" type="Dictionary" />
+			<description>
+				Replaces the saved per-link gate state, validated as Vector2i cell to Dictionary of safe relative String paths to false values. Accepts at most 4096 cells and 128 disabled links per cell. Applies changes to loaded NavigationLink3D nodes and emits link-state signals only for effective changes, including reopening links removed from a save. Link topology updates are synchronized by NavigationServer3D on later physics frames.
+			</description>
+		</method>
 		<method name="set_persist_rigid_bodies">
 			<return type="void" />
 			<param index="0" name="enabled" type="bool" />
@@ -460,6 +512,15 @@
 			<param index="0" name="cells" type="Array" />
 			<description>
 				Replaces the pinned cell coordinates, preserving the first occurrence of each [Vector2i]. Unsupported array entries are skipped. Arrays with more than 128 entries are rejected without changing existing pins. The normalized result is returned by [method get_pinned_cells].
+			</description>
+		</method>
+		<method name="set_route_connection_link">
+			<return type="void" />
+			<param index="0" name="from_cell" type="Vector2i" />
+			<param index="1" name="to_cell" type="Vector2i" />
+			<param index="2" name="link_path" type="String" />
+			<description>
+				Registers one explicitly authored NavigationLink3D (under from_cell) as the required connection to an orthogonally adjacent to_cell. During acquire_cell_route(), both travel directions check the saved link availability before allocating any token leases. Does not create the scene node or pathfinding geometry; authors must place the link inside the source cell. Static route registrations are runtime configuration and are not included in navigation_link_states saves.
 			</description>
 		</method>
 		<method name="snapshot_cell_object_states">
@@ -528,6 +589,9 @@
 		<member name="navigation_cell_states" type="Dictionary" setter="set_navigation_cell_states" getter="get_navigation_cell_states" default="{}">
 			Per-cell dynamic navigation gates, mapping [Vector2i] to [code]false[/code]. All unlisted cells default to enabled. Disabled cells have their loaded NavigationRegion3D descendants disabled, do not admit new route leases through [method acquire_cell_route], but preserve existing leases and other scene components. Regions resynchronize on the next physics frame.
 		</member>
+		<member name="navigation_link_states" type="Dictionary" setter="set_navigation_link_states" getter="get_navigation_link_states" default="{}">
+			Per-cell NavigationLink3D enable overrides indexed by a Vector2i coordinate and then a scene-relative String NodePath. Only explicitly disabled paths are stored. Unlike navigation_cell_states, closing a link leaves the parent NavigationRegion3D nodes enabled. Author its geometry and register required intercell edges with set_route_connection_link().
+		</member>
 		<member name="observer_path" type="NodePath" setter="set_observer_path" getter="get_observer_path" default="NodePath(&quot;&quot;)">
 			Path relative to this node pointing to a [Node3D] observer, such as a player or camera.
 		</member>
@@ -564,6 +628,14 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Emitted after a [PackedScene] is instantiated as a child of this node.
+			</description>
+		</signal>
+		<signal name="cell_navigation_link_state_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="link_path" type="String" />
+			<param index="2" name="enabled" type="bool" />
+			<description>
+				Emitted when one authored NavigationLink3D logical state changes, including changes made by bulk checkpoint restoration. AI owners can release route leases and replan through NavigationServer3D after its next physics synchronization. Repeated idempotent changes do not re-emit this signal.
 			</description>
 		</signal>
 		<signal name="cell_navigation_state_changed">
