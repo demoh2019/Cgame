@@ -1,0 +1,100 @@
+/**************************************************************************/
+/*  test_pcg_surface_filter_3d.h                                            */
+/*                         This file is part of: GODOT ENGINE              */
+/* SPDX-License-Identifier: MIT                                            */
+/**************************************************************************/
+#pragma once
+
+#include "../pcg_surface_filter_3d.h"
+#include "core/math/math_funcs.h"
+#include "tests/test_macros.h"
+
+namespace TestPCGSurfaceFilter3D {
+
+TEST_CASE("[PCGSurfaceFilter3D] slope and height selection preserves input indices") {
+	Ref<PCGSurfaceFilter3D> filter;
+	filter.instantiate();
+	PackedVector3Array positions;
+	PackedVector3Array normals;
+	positions.push_back(Vector3(0, 10, 0));
+	normals.push_back(Vector3(0, 1, 0)); // flat.
+	positions.push_back(Vector3(2, 20, 0));
+	normals.push_back(Vector3(0, 0.8660254, 0.5)); // 30 degrees.
+	positions.push_back(Vector3(4, 30, 0));
+	normals.push_back(Vector3(0, 0.5, 0.8660254)); // 60 degrees.
+	positions.push_back(Vector3(6, 40, 0));
+	normals.push_back(Vector3(1, 0, 0)); // vertical.
+	positions.push_back(Vector3(8, 50, 0));
+	normals.push_back(Vector3(0, -1, 0)); // down-facing.
+	const PackedVector3Array untouched = positions;
+	const PackedInt32Array flat = filter->filter_indices(positions, normals, 0.0, 35.0);
+	REQUIRE(flat.size() == 2);
+	CHECK(flat[0] == 0);
+	CHECK(flat[1] == 1);
+	const PackedInt32Array cliffs = filter->filter_indices(positions, normals, 45.0, 90.0, 25.0, 45.0);
+	REQUIRE(cliffs.size() == 2);
+	CHECK(cliffs[0] == 2);
+	CHECK(cliffs[1] == 3);
+	CHECK(filter->filter_indices(positions, normals, 0.0, 90.0).size() == 4);
+	CHECK(filter->filter_indices(positions, normals, 0.0, 35.0, 20.0, 20.0).size() == 1);
+	CHECK(filter->filter_indices(positions, normals, 0.0, 35.0, 20.0, 20.0, 0).is_empty());
+	CHECK(positions == untouched);
+	CHECK(filter->filter_indices(positions, normals, 0.0, 35.0) == flat);
+}
+
+TEST_CASE("[PCGSurfaceFilter3D] invalid inputs fail atomically") {
+	Ref<PCGSurfaceFilter3D> filter;
+	filter.instantiate();
+	PackedVector3Array positions;
+	positions.push_back(Vector3(0, 0, 0));
+	positions.push_back(Vector3(1, 1, 1));
+	PackedVector3Array normals;
+	normals.push_back(Vector3.UP);
+	normals.push_back(Vector3.UP);
+	CHECK(filter->filter_indices(positions, PackedVector3Array()).is_empty());
+	CHECK(filter->filter_indices(positions, normals, -1.0).is_empty());
+	CHECK(filter->filter_indices(positions, normals, 0.0, 91.0).is_empty());
+	CHECK(filter->filter_indices(positions, normals, 40.0, 30.0).is_empty());
+	CHECK(filter->filter_indices(positions, normals, Math::NaN).is_empty());
+	CHECK(filter->filter_indices(positions, normals, 0.0, Math::INF).is_empty());
+	CHECK(filter->filter_indices(positions, normals, 0.0, 90.0, 2.0, 1.0).is_empty());
+	CHECK(filter->filter_indices(positions, normals, 0.0, 90.0, -10000001).is_empty());
+	CHECK(filter->filter_indices(positions, normals, 0.0, 90.0, -10000000, 10000001).is_empty());
+	CHECK(filter->filter_indices(positions, normals, 0.0, 90.0, -10000000, 10000000, -1).is_empty());
+	CHECK(filter->filter_indices(positions, normals, 0.0, 90.0, -10000000, 10000000, 4097).is_empty());
+	normals.set(1, Vector3());
+	CHECK(filter->filter_indices(positions, normals).is_empty());
+	normals.set(1, Vector3(0, Math::NaN, 0));
+	CHECK(filter->filter_indices(positions, normals).is_empty());
+	normals.set(1, Vector3.UP);
+	positions.set(1, Vector3(Math::INF, 1, 1));
+	CHECK(filter->filter_indices(positions, normals).is_empty());
+	positions.set(1, Vector3(10000001, 1, 1));
+	CHECK(filter->filter_indices(positions, normals).is_empty());
+	positions.resize(16385);
+	normals.resize(16385);
+	CHECK(filter->filter_indices(positions, normals).is_empty());
+}
+
+TEST_CASE("[PCGSurfaceFilter3D] bounded output and normal scale invariance") {
+	Ref<PCGSurfaceFilter3D> filter;
+	filter.instantiate();
+	PackedVector3Array positions;
+	PackedVector3Array normals;
+	for (int i = 0; i < 4097; ++i) {
+		positions.push_back(Vector3(i, 0, 0));
+		normals.push_back(Vector3(0, i % 2 == 0 ? 2 : 0.5, 0));
+	}
+	const PackedInt32Array all = filter->filter_indices(positions, normals);
+	REQUIRE(all.size() == 4096);
+	CHECK(all[0] == 0);
+	CHECK(all[4095] == 4095);
+	const PackedInt32Array limited = filter->filter_indices(positions, normals, 0.0, 45.0,
+			-10000000.0, 10000000.0, 3);
+	REQUIRE(limited.size() == 3);
+	CHECK(limited[0] == 0);
+	CHECK(limited[1] == 1);
+	CHECK(limited[2] == 2);
+}
+
+} // namespace TestPCGSurfaceFilter3D
