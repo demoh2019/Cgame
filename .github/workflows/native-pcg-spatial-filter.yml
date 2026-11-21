@@ -1,0 +1,68 @@
+name: Native PCG spatial filter and Albion scenery parity
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/procedural_scatter/**'
+      - 'game/scripts/client/scenery_batches.gd'
+      - 'game/scripts/client/chunk_view.gd'
+      - 'game/tests/test_pcg_scenery_spacing.gd'
+      - 'game/tests/run_pcg_scenery_spacing.gd'
+      - '.github/workflows/native-pcg-spatial-filter.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/procedural_scatter/**'
+      - 'game/scripts/client/scenery_batches.gd'
+      - 'game/scripts/client/chunk_view.gd'
+      - 'game/tests/test_pcg_scenery_spacing.gd'
+      - 'game/tests/run_pcg_scenery_spacing.gd'
+      - '.github/workflows/native-pcg-spatial-filter.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-pcg:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native PCG spatial tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*PCGSpatialFilter2D*" --no-colors 2>&1 | tee pcg-native.log
+      - name: Import Albion After game
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee pcg-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' pcg-import.log; then exit 1; fi
+      - name: Game native/fallback scenery parity
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_pcg_scenery_spacing.gd 2>&1 | tee pcg-game.log
+          grep -E '^PCG SCENERY TOTAL: [0-9]+ checks, 0 failures$' pcg-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-game.log; then exit 1; fi
+      - name: Upload PCG logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-pcg-spatial-filter
+          if-no-files-found: ignore
+          path: |
+            pcg-native.log
+            pcg-import.log
+            pcg-game.log
