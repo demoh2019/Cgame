@@ -18,7 +18,101 @@ func _origin(world) -> Vector3:
 	return Vector3.ZERO
 
 
+## A real GameServer owns all cues and infected. Only the optional native
+## query implementation changes; the authoritative investigation rules do not.
+static func _dense_sensory_cues(force_fallback: bool) -> Dictionary:
+	var sim := GameServer.new(WorldGen.new(745), 745)
+	sim.time = 10.0
+	if force_fallback:
+		# Emulates a stock / older engine that lacks the nearest batch method.
+		sim._pack_spatial_grid = RefCounted.new()
+	for i in range(32):
+		var point := Vector2.ZERO if i == 0 or i == 3 or i == 4 else (
+			Vector2(20, 0) if i == 1 else (
+			Vector2(1000, 1000) if i == 2 else Vector2(1000 + i * 40, 1000)))
+		var infected := Zombie.new(75000 + i, "walker",
+			Vector3(point.x, WorldGen.HUB_HEIGHT, point.y))
+		if i == 3:
+			infected.state = Zombie.State.CHASE
+			infected.target_id = 999
+		if i == 4:
+			infected.raid_boss = true
+		sim.zombies[infected.id] = infected
+	var anchors: Array = [
+		{"id": 101, "x": 10.0, "z": 0.0},
+		{"id": 99, "x": -10.0, "z": 0.0},
+		{"id": 102, "x": 30.0, "z": 0.0},
+		{"id": 103, "x": 400.0, "z": 0.0}]
+	for cue in anchors:
+		var value: Dictionary = cue.duplicate(true)
+		value["expires"] = 100.0
+		value["corpse_scent_until"] = 100.0
+		sim.decoys[int(value["id"])] = value.duplicate(true)
+		sim.bags[int(value["id"])] = value.duplicate(true)
+		sim.campfires[int(value["id"])] = value.duplicate(true)
+	var snapshots: Dictionary = {}
+	var metadata: Dictionary = {}
+	for channel in ["noise", "corpse", "campfire"]:
+		for npc in sim.zombies.values():
+			if not npc.raid_boss:
+				npc.state = Zombie.State.IDLE
+			npc.target_id = -1
+			npc.last_known_target = Vector2.ZERO
+			npc.investigate_time = 0.0
+		var combat = sim.zombies[75003]
+		combat.state = Zombie.State.CHASE
+		combat.target_id = 999
+		match channel:
+			"noise":
+				sim._alert_noise_decoys()
+			"corpse":
+				sim._alert_corpse_scents()
+			"campfire":
+				sim._alert_campfire_lights()
+		var state_rows: Array = []
+		for i in range(32):
+			var npc = sim.zombies[75000 + i]
+			state_rows.append({"state": int(npc.state),
+				"target": int(npc.target_id), "location": npc.last_known_target})
+		snapshots[channel] = state_rows
+		metadata[channel] = sim.get_ai_cue_query_stats()
+	return {"states": snapshots, "stats": metadata}
+
+
 func run(t) -> void:
+	t.current = "Native EQS nearest cue queries preserve all three sensory channels"
+	var reference: Dictionary = _dense_sensory_cues(true)
+	var accelerated: Dictionary = _dense_sensory_cues(false)
+	var native_cues: bool = ClassDB.class_exists("AIProximityGrid2D") \
+		and ClassDB.class_has_method("AIProximityGrid2D", "query_cross_nearest_batch")
+	for channel in ["noise", "corpse", "campfire"]:
+		var before: Array = reference["states"][channel]
+		var after: Array = accelerated["states"][channel]
+		t.eq(after, before,
+			"native %s sensing selects exactly the same infected, location and combat target" % channel)
+		t.eq(bool(accelerated["stats"][channel].get("native", false)), native_cues,
+			"authoritative %s hearing uses native nearest when available" % channel)
+		t.eq(bool(reference["stats"][channel].get("native", false)), false,
+			"legacy fallback does not report native selection")
+		t.eq(after[0]["location"], Vector2(-10, 0),
+			"persistent world ID resolves equal-distance candidate ties")
+		t.eq(after[1]["location"], Vector2(10, 0),
+			"another infected independently selects its closest confirmed cue")
+		t.eq(after[2]["state"], int(Zombie.State.IDLE),
+			"distant agent cannot invent an out-of-range stimulus")
+		t.eq(after[3]["state"], int(Zombie.State.CHASE),
+			"active combat ignores passive investigation even when the cue is near")
+		t.eq(after[3]["target"], 999,
+			"native sensing cannot change authoritative combat targets")
+		t.eq(after[4]["state"], int(Zombie.State.IDLE),
+			"raid bosses never react to civilian lure candidates")
+		if native_cues:
+			t.eq(int(accelerated["stats"][channel]["sources"]), 31,
+				"native C++ batch only includes living non-boss infected")
+			t.eq(int(accelerated["stats"][channel]["cues"]), 4,
+				"native C++ batch uses four world-owned confirmed cue positions")
+
+
 	t.current = "crafted item and server-computed world landing"
 	t.eq(str(Defs.item("noise_decoy").get("kind", "")), "decoy",
 			"noise maker is a legitimate item")
