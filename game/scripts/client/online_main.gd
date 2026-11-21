@@ -86,8 +86,10 @@ const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.
 const GraphicsVramBudget = preload("res://scripts/client/graphics_vram_budget.gd")
 const ShaderWarmup = preload("res://scripts/client/shader_warmup.gd")
 const FrameHitchAnalyzer = preload("res://scripts/client/frame_hitch_analyzer.gd")
+const TraceCapture = preload("res://scripts/shared/trace_capture.gd")
 const SeaFftDetail = preload("res://scripts/client/sea_fft_detail.gd")
 const BarricadeDebris = preload("res://scripts/client/barricade_debris.gd")
+const VfxPresets = preload("res://scripts/client/vfx_presets.gd")
 const GraphicsDynamicResolution = preload("res://scripts/client/graphics_dynamic_resolution.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
 const WorldMap = preload("res://scripts/client/world_map.gd")
@@ -181,6 +183,8 @@ var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every 
 var _auto_quality := GraphicsAutoQuality.new()
 var _vram_budget := GraphicsVramBudget.new()
 var _hitch_analyzer := FrameHitchAnalyzer.new()
+var _trace := TraceCapture.new()
+var _trace_path := ""
 var _adaptive_resolution := GraphicsDynamicResolution.new()
 var _auto_graphics := true
 var _quality_picker: OptionButton
@@ -264,6 +268,8 @@ var _demo_frames := 0 # Frames since the first snapshot arrived.
 
 
 func _exit_tree() -> void:
+	if _trace.enabled and _trace_path != "":
+		_trace.save(_trace_path)
 	for monitor_name in _ambient_monitors:
 		Performance.remove_custom_monitor(monitor_name)
 	_ambient_monitors.clear()
@@ -354,6 +360,11 @@ func _ready() -> void:
 			"--name":
 				i += 1
 				player_name = args[i]
+			"--trace":
+				# Insights-style capture; open the JSON in chrome://tracing or ui.perfetto.dev.
+				i += 1
+				_trace_path = args[i]
+				_trace.enabled = true
 			"--screenshot":
 				i += 1
 				_screenshot_path = args[i]
@@ -1122,6 +1133,11 @@ func _spawn_effects(event: Dictionary) -> void:
 		_damage_numbers.on_event(event, at, client.peer_id)
 	if _ambient_birds != null and str(event.get("type", "")) in ["flash_thrown", "barricade_broken", "lightning_struck", "ember_thrown"]:
 		_ambient_birds.startle(at) # RDR2-style: loud events flush the birds overhead.
+	# VFX-graph sparks bounce off the ground and leave embers where they land.
+	if str(event.get("type", "")) == "lightning_struck":
+		var strike := Vector3(float(event.get("x", 0.0)), 0.0, float(event.get("z", 0.0)))
+		strike.y = client.world.height_at(strike.x, strike.z)
+		VfxPresets.spawn(self, VfxPresets.lightning_sparks(GraphicsQuality.level()), strike, int(strike.x * 31.0 + strike.z))
 	if _blood_decals != null and str(event.get("type", "")) == "lightning_struck" \
 			and BloodDecals.enabled(GraphicsQuality.level(), str(RenderingServer.get_current_rendering_method())):
 		_blood_decals.scorch(client.world, float(event.get("x", 0.0)), float(event.get("z", 0.0)), float(event.get("radius", 3.0)))
@@ -1762,6 +1778,13 @@ func _process(delta: float) -> void:
 	# Attribute frame hitches to shader compiles, streaming or VRAM growth.
 	var hitch: Dictionary = _hitch_analyzer.sample(delta, FrameHitchAnalyzer.read_counters(
 		streamer.get_loaded_count() if streamer != null else 0), Time.get_ticks_msec() / 1000.0)
+	if _trace.enabled:
+		_trace.frame_marker(_frames)
+		_trace.counter("frame_ms", delta * 1000.0)
+		_trace.counter("draw_calls", Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
+		_trace.counter("pipeline_compiles", float(int(FrameHitchAnalyzer.read_counters().get("compiles", 0))))
+		if not hitch.is_empty():
+			_trace.instant("hitch", hitch)
 	if not hitch.is_empty():
 		print_verbose("CLIENT hitch %.0f ms (median %.1f ms): %s" % [hitch["ms"], hitch["median_ms"], hitch["cause"]])
 	# Resize only the Forward+ 3D target before changing costly world LOD.
