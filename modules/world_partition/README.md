@@ -13,6 +13,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
 - **Deterministic bounded cross-cell routing:** `find_cell_path(from, to, loaded_only=false)` returns the shortest cardinal corridor of registered `Vector2i` world cells, respecting missing topology and optionally restricting the route to already-instantiated scene roots. Synchronous breadth-first expansion is capped at 512 visited cells (overflow-safe 32-bit coordinates) to prevent runaway CPU. This complements, but does not replace, a baked navigation mesh or obstacle-safe surface paths.
+- **Native slope- and obstacle-aware navigation tile generation:** `build_navigation_tile(vertices, resolution, blockers, agent_radius, max_slope_degrees)` builds deterministic walkable NavigationMesh triangles from sampled terrain, rejects excessive slopes and intersects full triangles against circular obstacle footprints expanded by NPC radius. Hard limits: 2..32 cells per tile axis, at most 256 blockers, 2048 triangles, finite positions, validated radii and slope. No Recast bake or implicit physics-server mutation.
 - **Independent streamed NavigationRegion3D tier:** `navigation_radius` (-1 all loaded active/default, 0–32 near observer), `navigation_hysteresis_cells` (0–8), `max_navigation_transitions_per_frame` (1–64), native `cell_navigation_changed` signal, ready and count APIs. Pinned hubs and important/urgent sources can activate navigation outside player radius. Optional scene callback `set_streaming_navigation_active(active)` enables actual authored NavigationRegion3D tiles; `is_streaming_navigation_ready()` reports their state after two physics-frame sync ticks.
 - **Native fixed-physics-frame navigation scheduler:** register up to 128 live Node3D agents, give them priority 0–3, and cap costly path/steering **recalculations** at `max_navigation_updates_per_physics_frame` (1–64, default 2). The engine chooses winners deterministically by priority, least recent update, then agent name, avoiding starvation among equally important active NPCs. Only loaded simulation-active physics-active cells qualify. Grants are consumed once per agent per physics tick and weak ObjectIDs protect against deleted agents; owner-safe unregister prevents stale NPC replacement bugs. Aurora Forest uses these grants to schedule real obstacle raycasts; this is not navmesh baking.
 - **Independent native physics streaming tier:** per-cell `physics_radius` (-1 all-loaded legacy), `physics_hysteresis_cells` (0–8) and `max_physics_transitions_per_frame` (1–64). Loaded visuals and AI simulation stay separate. An opt-in root `set_streaming_physics_active(active)` filters its authored colliders; `cell_physics_changed`, `is_cell_physics_active()`, `get_physics_active_cell_count()` expose state. Important/urgent streaming sources and pinned hubs force destination cells to full visual LOD and active physics, while background quest preload remains cheap. `is_streaming_source_physics_ready(name)` requires an additional physics tick and optional scene predicate before travel.
@@ -81,6 +82,26 @@ The search checks only registered scene paths, **not** terrain collisions, slope
 
 The Aurora Forest quest compass uses this native topological path to point toward intermediate registered cells for distant relics rather than blindly pointing through gaps. `smoke_cell_routes.gd` and the native Doctest verify gaps, shortcuts, disconnected regions and the loaded-only option. A full hierarchy/portal graph and true navigation mesh corridor are separate future capabilities.
 
+## Native obstacle-clearance and slope-aware terrain tiles
+
+Use `WorldPartition3D.build_navigation_tile(vertices, resolution, blockers, agent_radius=0.45, max_slope_degrees=45.0)` for deterministic, bounded **native C++ triangle filtering** before publishing a NavMesh to NavigationServer3D:
+
+```gdscript
+# Sample a (resolution+1) x (resolution+1) regular terrain grid in cell-local
+# space, with X as the fastest-changing coordinate.
+# Each blocker packs Vector3(local_x, local_z, obstacle_radius).
+var navmesh: NavigationMesh = world.build_navigation_tile(
+    sampled_vertices, 16, tree_and_rock_footprints, 0.45, 42.0)
+if navmesh != null:
+    $NavigationRegion3D.navigation_mesh = navmesh
+```
+
+Each terrain quad is split into up to two +Y-facing triangles. A triangle with an upward slope beyond the threshold is discarded. A candidate triangle is also discarded when its XZ footprint **intersects any obstacle circle expanded by the NPC radius**; the calculation uses planar triangle/segment distances, so large triangles cannot incorrectly remain walkable just because their centroids miss a blocker.
+
+Inputs are capped: resolution **2–32** (max 2048 triangles), **256 blockers** (Vector3(x, local_z, obstacle_radius), obstacle radius 0–16), agent radius **0–8**, slope **0–89 degrees**. All sampled vertices and blockers must be finite. Invalid data returns a null resource with an error. The procedure runs **synchronously on the caller thread** and performs up to O(resolution² × blocker_count) tests; callers should generate once per streamed cell, cache the result, and use navigation-region streaming budgets to amortize work.
+
+This is a small deterministic grid-based NavMesh filter, **not Recast baking**. It models circular horizontal obstacles (including a conservative circumscribed radius for rocks), but not vertical clearance, moving obstructions, jump links, precise polygon clipping, or dynamic NavMesh rebuilding. It intentionally deletes entire triangles instead of cutting holes. Avoid creating overly dense meshes or excessive footprints; and keep shared tile seams and guaranteed walkable border strips, otherwise filtering may disconnect cells. Native Doctest covers increasing agent radius, slope limits, invalid inputs and bounds. `smoke_navigation_clearance.gd` checks a real game's collision footprints and generated NavMesh; these tests require a compiled Cgame runtime.
+
 ## Streaming actual NavigationMesh regions
 
 `WorldPartition3D` can now manage a fourth independent runtime tier: **navigation regions**. It is separate from what is visually loaded, how many physics obstacles participate in collisions, and which AI scripts run. The default `navigation_radius = -1` preserves the native policy's all-loaded-active behavior. The Aurora Forest demo opts into `navigation_radius = 1`, one-ring hysteresis and no more than two live-cell region transitions per frame.
@@ -92,7 +113,7 @@ world.max_navigation_transitions_per_frame = 2
 world.cell_navigation_changed.connect(_on_cell_navigation_changed)
 ```
 
-A scene root opts into `set_streaming_navigation_active(active)`, called once before `_ready()` and on subsequent budgeted state transitions. In the demo, each near-detail cell creates a real `NavigationRegion3D` holding a deterministic 8×8-grid `NavigationMesh` (128 triangles) from the same analytic terrain height function used by the ground mesh. Adjacent tiles share height and edge coordinates, so Godot's `NavigationServer3D` can connect their boundaries after its physics synchronization. Distant or nav-dormant cells do not generate an active region. Navmesh resources are cached per live cell; they are freed when the cell scene unloads.
+A scene root opts into `set_streaming_navigation_active(active)`, called once before `_ready()` and on subsequent budgeted state transitions. In the demo, each near-detail cell creates a real `NavigationRegion3D` holding a deterministic 16×16-grid obstacle-filtered `NavigationMesh` (up to 512 triangles) from the same analytic terrain height function used by the ground mesh. Adjacent tiles share height and edge coordinates, so Godot's `NavigationServer3D` can connect their boundaries after its physics synchronization. Distant or nav-dormant cells do not generate an active region. Navmesh resources are cached per live cell; they are freed when the cell scene unloads.
 
 ```gdscript
 func set_streaming_navigation_active(active: bool) -> void:
@@ -106,7 +127,7 @@ func is_streaming_navigation_ready() -> bool:
 
 The engine adds a **two-physics-frame activation fence** before `is_cell_navigation_ready(cell)` succeeds, optionally checking the scene callback. `is_streaming_source_navigation_ready(name)` waits for all registered source cells; urgent/important priority 2/3 sources and pinned hubs request near nav regions even if far from the observer. Neither native flag nor time delay by itself guarantees a NavigationServer3D map connection, navigation mesh quality or safe agent radius. **Avoid force-syncing the server**: navigation map changes normally propagate on the physics loop.
 
-Stalkers query actual `NavigationServer3D.map_get_path()` only under existing native CPU permits (`max_navigation_updates_per_physics_frame`), throttled again to a new route at most every 12 physics ticks unless their destination moves more than 4 m. They use cached waypoints between queries and preserve their up-to-three-ray local collision avoidance as a fallback. **Important limitation:** the generated terrain mesh does not yet carve out tree/rock obstacles, shrink the surface for NPC radius, or validate slopes. It provides real cross-tile *terrain* navigation, but not complete collision-safe navigation. Baking/clipping obstacles and hierarchical path caching remain future work.
+Stalkers query actual `NavigationServer3D.map_get_path()` only under existing native CPU permits (`max_navigation_updates_per_physics_frame`), throttled again to a new route at most every 12 physics ticks unless their destination moves more than 4 m. They use cached waypoints between queries and preserve their up-to-three-ray local collision avoidance as a fallback. **Important limitation:** native triangle filtering now excludes steep slopes and conservative tree/rock discs expanded by agent radius, but does not perform exact polygon carving or fully validate walkability, capsule height or dynamic obstacles. The physics-ray steering fallback remains important. Recast-based carving and hierarchical path caching remain future work.
 
 Validation: new `smoke_navmesh_streaming.gd` exercises live nav region polygons, real NavigationServer path across adjacent cells, priorities, pin/unpin, dormant regions, and reactivation. Running it requires a compiled Cgame executable; it has not been executed in this authoring environment.
 
@@ -310,7 +331,7 @@ These counters describe the current state, not a prediction of future memory or 
 
 ## Tests
 
-The module includes 70 Doctest cases across `test_world_partition_3d.h` (34) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 71 Doctest cases across `test_world_partition_3d.h` (35) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
@@ -321,7 +342,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 
 ## Non-goals and limitations
 
-- **Runtime terrain NavigationMesh is coarse and does not carve collision.** Generated per-cell 128-triangle tiles describe the analytic terrain surface; no agent-radius clearance, obstacle carving or slope walkability is guaranteed. Server map changes synchronize over later physics frames, and readiness callback success is not proof of connected global NavMesh.
+- **Native terrain tile filtering is conservative, not full Recast baking.** Per-cell 16×16 tiles reject steep triangles and obstacles approximated as expanded discs; hole cutting is coarse (whole triangles), there is no vertical clearance, off-mesh linkage or automatic dynamic obstacle rebake. Terrain-tile seam connectivity still depends on authored free corridors and Godot physics-server synchronization.
 - **Cell routing is topological, not physical.** `find_cell_path` is a bounded shortest 4-neighbor route of registered PackedScene cells; it does not confirm walkability across individual objects or NavMesh edges, and an empty result can also mean the 512-cell search limit was reached.
 - **Navigation scheduler supplies permits, not pathfinding or a navmesh.** The engine keeps physics, navigation map synchronization and actual movement separate. It limits how often expensive query results can be recomputed, but doesn't guarantee path quality or modify the cost per permitted calculation. Persistent high-priority agents can starve lower priorities; same-priority agents rotate fairly. Registration is bounded at 128 names and invalid/old nodes are weakly tracked.
 - **Independent collision filtering is opt-in.** Only scene roots implementing `set_streaming_physics_active(active)` actually change collision properties. The engine's state does not automatically remove shapes from broadphase or reduce shape memory. Urgent sources can temporarily force near LOD and more expensive colliders even far from the observer, within existing transition budgets.

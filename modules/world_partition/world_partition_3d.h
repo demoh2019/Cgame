@@ -34,6 +34,7 @@
 #include "core/templates/hash_set.h"
 #include "scene/3d/node_3d.h"
 #include "scene/resources/packed_scene.h"
+#include "scene/resources/navigation_mesh.h"
 
 #include <cstdint>
 
@@ -117,6 +118,8 @@ class WorldPartition3D : public Node3D {
 	HashMap<String, NavigationAgentEntry> navigation_agents;
 	static constexpr int MAX_NAVIGATION_AGENTS = 128;
 	static constexpr int MAX_PATH_SEARCH_CELLS = 512; // Bound synchronous grid route queries.
+	static constexpr int MAX_NAVMESH_TILE_RESOLUTION = 32;
+	static constexpr int MAX_NAVMESH_TILE_BLOCKERS = 256;
 	uint64_t navigation_schedule_frame = 0;
 	bool navigation_schedule_valid = false;
 	HashSet<String> navigation_selected; // Winners chosen at physics-frame start.
@@ -246,6 +249,9 @@ public:
 	// Deterministic shortest cardinal route through registered cell scenes.
 	// When p_loaded_only is true, every path cell must be instantiated.
 	Array find_cell_path(const Vector2i &p_from, const Vector2i &p_to, bool p_loaded_only = false) const;
+	// Build a bounded terrain NavMesh tile from row-major sampled local vertices.
+	// Each blocker stores local (X, Z, radius) in Vector3(x, y, z).
+	Ref<NavigationMesh> build_navigation_tile(const PackedVector3Array &p_vertices, int p_resolution, const PackedVector3Array &p_blockers, real_t p_agent_radius = 0.45, real_t p_max_slope_degrees = 45.0) const;
 
 	bool pin_cell(const Vector2i &p_cell);
 	void unpin_cell(const Vector2i &p_cell);

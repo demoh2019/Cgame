@@ -950,6 +950,101 @@ Vector2i WorldPartition3D::get_observer_cell() const {
 	return observer_cell_valid ? observer_cell : Vector2i();
 }
 
+// Exact planar triangle-vs-disc distance: obstacle clearance must account
+// for triangle edges, not merely triangle centers (which can miss collision).
+static real_t _world_partition_point_segment_distance_squared(const Vector2 &p, const Vector2 &a, const Vector2 &b) {
+	const Vector2 edge = b - a;
+	const real_t length_squared = edge.length_squared();
+	if (length_squared <= CMP_EPSILON) {
+		return p.distance_squared_to(a);
+	}
+	const real_t fraction = CLAMP((p - a).dot(edge) / length_squared, (real_t)0.0, (real_t)1.0);
+	return p.distance_squared_to(a + edge * fraction);
+}
+
+static bool _world_partition_triangle_overlaps_disc(const Vector2 &a, const Vector2 &b, const Vector2 &c, const Vector2 &center, real_t p_radius) {
+	const real_t signed_ab = (b - a).cross(center - a);
+	const real_t signed_bc = (c - b).cross(center - b);
+	const real_t signed_ca = (a - c).cross(center - c);
+	// Conservatively include boundary points regardless of triangle winding.
+	const bool inside = (signed_ab >= 0.0 && signed_bc >= 0.0 && signed_ca >= 0.0) ||
+			(signed_ab <= 0.0 && signed_bc <= 0.0 && signed_ca <= 0.0);
+	if (inside) {
+		return true;
+	}
+	const real_t radius_squared = p_radius * p_radius;
+	return _world_partition_point_segment_distance_squared(center, a, b) <= radius_squared ||
+			_world_partition_point_segment_distance_squared(center, b, c) <= radius_squared ||
+			_world_partition_point_segment_distance_squared(center, c, a) <= radius_squared;
+}
+
+Ref<NavigationMesh> WorldPartition3D::build_navigation_tile(const PackedVector3Array &p_vertices, int p_resolution, const PackedVector3Array &p_blockers, real_t p_agent_radius, real_t p_max_slope_degrees) const {
+	ERR_FAIL_COND_V_MSG(p_resolution < 2 || p_resolution > MAX_NAVMESH_TILE_RESOLUTION, Ref<NavigationMesh>(), "Navigation tile resolution must be 2 to 32.");
+	const int stride = p_resolution + 1;
+	ERR_FAIL_COND_V_MSG(p_vertices.size() != stride * stride, Ref<NavigationMesh>(), "Navigation tile vertices must contain (resolution+1)^2 samples in Z-major, then X-major order.");
+	ERR_FAIL_COND_V_MSG(p_blockers.size() > MAX_NAVMESH_TILE_BLOCKERS, Ref<NavigationMesh>(), "Navigation tile supports up to 256 circular blockers.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_agent_radius) || p_agent_radius < 0.0 || p_agent_radius > 8.0, Ref<NavigationMesh>(), "Navigation agent clearance radius must be 0 to 8.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_max_slope_degrees) || p_max_slope_degrees < 0.0 || p_max_slope_degrees > 89.0, Ref<NavigationMesh>(), "Maximum navigation slope must be 0 to 89 degrees.");
+	for (int i = 0; i < p_vertices.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!p_vertices[i].is_finite(), Ref<NavigationMesh>(), "Non-finite sampled navigation vertex.");
+	}
+	for (int i = 0; i < p_blockers.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!p_blockers[i].is_finite() || p_blockers[i].z < 0.0 || p_blockers[i].z > 16.0, Ref<NavigationMesh>(), "Circular blocker must be finite and have a radius of 0 to 16.");
+	}
+	Ref<NavigationMesh> navigation_mesh;
+	navigation_mesh.instantiate();
+	navigation_mesh->set_vertices(p_vertices);
+	const real_t minimum_up = Math::cos(Math::deg_to_rad(p_max_slope_degrees));
+	for (int z = 0; z < p_resolution; z++) {
+		for (int x = 0; x < p_resolution; x++) {
+			const int a = z * stride + x;
+			const int b = a + 1;
+			const int c = a + stride;
+			const int d = c + 1;
+			const int triangles[2][3] = { { a, c, b }, { b, c, d } };
+			for (int triangle_index = 0; triangle_index < 2; triangle_index++) {
+				const int *indexes = triangles[triangle_index];
+				const Vector3 &v0 = p_vertices[indexes[0]];
+				const Vector3 &v1 = p_vertices[indexes[1]];
+				const Vector3 &v2 = p_vertices[indexes[2]];
+				const Vector3 normal = (v1 - v0).cross(v2 - v0);
+				const real_t length = normal.length();
+				if (length <= CMP_EPSILON || normal.y < length * minimum_up) {
+					continue; // Degenerate, upside-down or too steep.
+				}
+				const Vector2 p0(v0.x, v0.z);
+				const Vector2 p1(v1.x, v1.z);
+				const Vector2 p2(v2.x, v2.z);
+				const real_t min_x = MIN(p0.x, MIN(p1.x, p2.x));
+				const real_t max_x = MAX(p0.x, MAX(p1.x, p2.x));
+				const real_t min_z = MIN(p0.y, MIN(p1.y, p2.y));
+				const real_t max_z = MAX(p0.y, MAX(p1.y, p2.y));
+				bool blocked = false;
+				for (int i = 0; i < p_blockers.size(); i++) {
+					const Vector3 &blocker = p_blockers[i];
+					const real_t radius = blocker.z + p_agent_radius;
+					if (blocker.x < min_x - radius || blocker.x > max_x + radius || blocker.y < min_z - radius || blocker.y > max_z + radius) {
+						continue;
+					}
+					const Vector2 center(blocker.x, blocker.y);
+					if (_world_partition_triangle_overlaps_disc(p0, p1, p2, center, radius)) {
+						blocked = true;
+						break;
+					}
+				}
+				if (!blocked) {
+					Vector<int> polygon;
+					polygon.push_back(indexes[0]);
+					polygon.push_back(indexes[1]);
+					polygon.push_back(indexes[2]);
+					navigation_mesh->add_polygon(polygon);
+				}
+			}
+		}
+	}
+	return navigation_mesh;
+}
+
 Array WorldPartition3D::find_cell_path(const Vector2i &p_from, const Vector2i &p_to, bool p_loaded_only) const {
 	Array result;
 	// A valid route must begin and end on registered cells, including singleton
@@ -1623,6 +1718,7 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_cell_scenes"), &WorldPartition3D::clear_cell_scenes);
 	ClassDB::bind_method(D_METHOD("get_configured_cell_count"), &WorldPartition3D::get_configured_cell_count);
 	ClassDB::bind_method(D_METHOD("find_cell_path", "from", "to", "loaded_only"), &WorldPartition3D::find_cell_path, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("build_navigation_tile", "vertices", "resolution", "blockers", "agent_radius", "max_slope_degrees"), &WorldPartition3D::build_navigation_tile, DEFVAL(0.45), DEFVAL(45.0));
 	ClassDB::bind_method(D_METHOD("pin_cell", "cell"), &WorldPartition3D::pin_cell);
 	ClassDB::bind_method(D_METHOD("unpin_cell", "cell"), &WorldPartition3D::unpin_cell);
 	ClassDB::bind_method(D_METHOD("is_cell_pinned", "cell"), &WorldPartition3D::is_cell_pinned);
