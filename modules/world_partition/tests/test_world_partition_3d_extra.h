@@ -38,6 +38,7 @@
 #include "core/os/os.h"
 #include "scene/main/scene_tree.h"
 #include "scene/3d/physics/rigid_body_3d.h"
+#include "scene/3d/navigation/navigation_region_3d.h"
 #include "scene/main/window.h"
 #include "tests/test_macros.h"
 
@@ -259,6 +260,96 @@ TEST_CASE("[SceneTree][WorldPartition3D] Bulk physics snapshot applies to loaded
 		CHECK(body->is_sleeping());
 		Dictionary saved = fixture.world->get_cell_physics_state(cell);
 		CHECK(saved.size() == 1);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[WorldPartition3D] Navigation gates default to enabled and normalize saved state") {
+	WorldPartition3D world;
+	CHECK(world.is_cell_navigation_enabled(Vector2i(4, 1)));
+	world.set_cell_navigation_enabled(Vector2i(4, 1), true);
+	CHECK(world.get_disabled_navigation_cell_count() == 0);
+	world.set_cell_navigation_enabled(Vector2i(4, 1), false);
+	CHECK_FALSE(world.is_cell_navigation_enabled(Vector2i(4, 1)));
+	CHECK(world.get_disabled_navigation_cell_count() == 1);
+	Dictionary input;
+	input[Vector2i(1, 0)] = false;
+	input[Vector2i(2, 0)] = true;
+	input[Vector2i(3, 0)] = "not a bool";
+	input["not a cell"] = false;
+	world.set_navigation_cell_states(input);
+	CHECK(world.get_disabled_navigation_cell_count() == 1);
+	CHECK_FALSE(world.is_cell_navigation_enabled(Vector2i(1, 0)));
+	CHECK(world.is_cell_navigation_enabled(Vector2i(4, 1)));
+	CHECK(world.is_cell_navigation_enabled(Vector2i(2, 0)));
+	Dictionary isolated = world.get_navigation_cell_states();
+	isolated[Vector2i(1, 0)] = true;
+	CHECK_FALSE(world.is_cell_navigation_enabled(Vector2i(1, 0)));
+	world.set_navigation_cell_states(Dictionary());
+	CHECK(world.is_cell_navigation_enabled(Vector2i(1, 0)));
+	CHECK(world.get_disabled_navigation_cell_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Navigation gates prevent atomic route reservations") {
+	WorldPartition3D world;
+	world.set_cell_navigation_enabled(Vector2i(1, 0), false);
+	const Array path = world.get_cell_route(Vector2i(0, 0), Vector2i(2, 0));
+	CHECK(path.size() == 3); // Map geometry is still inspectable.
+	CHECK(world.acquire_cell_route(Vector2i(0, 0), Vector2i(2, 0)).is_empty());
+	CHECK(world.get_cell_lease_count_total() == 0);
+	world.set_cell_navigation_enabled(Vector2i(1, 0), true);
+	const Array tokens = world.acquire_cell_route(Vector2i(0, 0), Vector2i(2, 0));
+	REQUIRE(tokens.size() == 3);
+	world.set_cell_navigation_enabled(Vector2i(1, 0), false);
+	CHECK(world.get_cell_lease_count_total() == 3); // Existing owners stay valid.
+	CHECK(world.release_cell_route(tokens) == 3);
+	CHECK(world.get_cell_lease_count_total() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Navigation gate signal exists and bulk import keeps defaults") {
+	WorldPartition3D world;
+	CHECK(world.has_signal(SNAME("cell_navigation_state_changed")));
+	CHECK(world.is_cell_navigation_enabled(Vector2i(-2, -1)));
+	Dictionary stored;
+	stored[Vector2i(-2, -1)] = false;
+	world.set_navigation_cell_states(stored);
+	CHECK_FALSE(world.is_cell_navigation_enabled(Vector2i(-2, -1)));
+	world.set_cell_navigation_enabled(Vector2i(-2, -1), false);
+	CHECK(world.get_navigation_cell_states().size() == 1);
+	world.set_cell_navigation_enabled(Vector2i(-2, -1), true);
+	CHECK(world.get_navigation_cell_states().is_empty());
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Navigation gate disables loaded region and survives reload") {
+	const String path = make_nav_gate_cell_scene("region_toggle");
+	{
+		WorldFixture fixture;
+		const Vector2i cell(0, 0);
+		fixture.world->set_cell_scene(cell, path);
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		Node3D *root = fixture.world->get_cell_instance(cell);
+		REQUIRE(root != nullptr);
+		NavigationRegion3D *region = Object::cast_to<NavigationRegion3D>(root->get_node_or_null(NodePath("WalkableRegion")));
+		REQUIRE(region != nullptr);
+		CHECK(region->is_enabled());
+		fixture.world->set_cell_navigation_enabled(cell, false);
+		CHECK_FALSE(region->is_enabled());
+		fixture.observer->set_position(Vector3(1280, 0, 0));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(cell));
+		fixture.observer->set_position(Vector3(0, 0, 0));
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		Node3D *reloaded = fixture.world->get_cell_instance(cell);
+		REQUIRE(reloaded != nullptr);
+		NavigationRegion3D *region_again = Object::cast_to<NavigationRegion3D>(reloaded->get_node_or_null(NodePath("WalkableRegion")));
+		REQUIRE(region_again != nullptr);
+		CHECK_FALSE(region_again->is_enabled());
+		Dictionary imported;
+		imported[cell] = false;
+		fixture.world->set_navigation_cell_states(imported);
+		CHECK_FALSE(region_again->is_enabled());
+		fixture.world->set_navigation_cell_states(Dictionary());
+		CHECK(region_again->is_enabled());
 	}
 	CHECK(DirAccess::remove_absolute(path) == OK);
 }
@@ -865,6 +956,22 @@ static String make_cell_scene(const String &p_id, const Vector3 &p_authored_offs
 	const String file_name = "user://partition_extra_" + p_id + "_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
 	CHECK(ResourceSaver::save(packed, file_name) == OK);
 	return file_name;
+}
+
+static String make_nav_gate_cell_scene(const String &p_id) {
+	Node3D *root = memnew(Node3D);
+	root->set_name("NavigationCell");
+	NavigationRegion3D *region = memnew(NavigationRegion3D);
+	region->set_name("WalkableRegion");
+	root->add_child(region);
+	region->set_owner(root);
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	CHECK(packed->pack(root) == OK);
+	memdelete(root);
+	const String path = "user://partition_navigation_gate_" + p_id + "_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	CHECK(ResourceSaver::save(packed, path) == OK);
+	return path;
 }
 
 static String make_physics_cell_scene(const String &p_id) {
