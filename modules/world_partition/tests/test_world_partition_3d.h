@@ -913,4 +913,70 @@ TEST_CASE("[WorldPartition3D] Streamed navigation regions validate budgets and m
 	memdelete(world);
 }
 
+
+TEST_CASE("[WorldPartition3D] Native navigation tiles filter slopes and radius-aware obstacle footprints") {
+	WorldPartition3D *world = memnew(WorldPartition3D);
+	PackedVector3Array flat;
+	for (int z = 0; z <= 4; z++) {
+		for (int x = 0; x <= 4; x++) {
+			flat.push_back(Vector3(x, 0, z));
+		}
+	}
+	const PackedVector3Array no_blockers;
+	Ref<NavigationMesh> complete = world->build_navigation_tile(flat, 4, no_blockers, 0.0, 45.0);
+	REQUIRE(complete.is_valid());
+	CHECK(complete->get_polygon_count() == 32); // 4x4 terrain quads, two triangles each.
+	CHECK(complete->get_vertices().size() == 25);
+
+	PackedVector3Array blockers;
+	blockers.push_back(Vector3(2.0, 2.0, 0.1)); // Vector3(local_x, local_z, obstacle radius).
+	Ref<NavigationMesh> narrow = world->build_navigation_tile(flat, 4, blockers, 0.0, 45.0);
+	Ref<NavigationMesh> broad = world->build_navigation_tile(flat, 4, blockers, 0.75, 45.0);
+	REQUIRE(narrow.is_valid());
+	REQUIRE(broad.is_valid());
+	CHECK(narrow->get_polygon_count() < complete->get_polygon_count());
+	CHECK(broad->get_polygon_count() < narrow->get_polygon_count());
+	CHECK(broad->get_polygon_count() > 0); // Distant terrain remains navigable.
+
+	PackedVector3Array far_blocker;
+	far_blocker.push_back(Vector3(50.0, 50.0, 1.0));
+	Ref<NavigationMesh> untouched = world->build_navigation_tile(flat, 4, far_blocker, 0.45, 45.0);
+	REQUIRE(untouched.is_valid());
+	CHECK(untouched->get_polygon_count() == 32);
+
+	PackedVector3Array slopes;
+	for (int z = 0; z <= 4; z++) {
+		for (int x = 0; x <= 4; x++) {
+			slopes.push_back(Vector3(x, x * 0.7, z)); // ~35 degree incline.
+		}
+	}
+	Ref<NavigationMesh> low_limit = world->build_navigation_tile(slopes, 4, no_blockers, 0.45, 20.0);
+	Ref<NavigationMesh> high_limit = world->build_navigation_tile(slopes, 4, no_blockers, 0.45, 45.0);
+	REQUIRE(low_limit.is_valid());
+	REQUIRE(high_limit.is_valid());
+	CHECK(low_limit->get_polygon_count() == 0);
+	CHECK(high_limit->get_polygon_count() == 32);
+
+	PackedVector3Array non_finite = flat;
+	non_finite.set(0, Vector3(Math::INF, 0, 0));
+	PackedVector3Array bad_blocker;
+	bad_blocker.push_back(Vector3(1.0, 1.0, -1.0));
+	PackedVector3Array too_many_blockers;
+	for (int i = 0; i < 257; i++) {
+		too_many_blockers.push_back(Vector3(100.0 + i, 100.0, 0.5));
+	}
+	ERR_PRINT_OFF;
+	CHECK(world->build_navigation_tile(flat, 1, no_blockers).is_null());
+	CHECK(world->build_navigation_tile(flat, 33, no_blockers).is_null());
+	CHECK(world->build_navigation_tile(flat, 5, no_blockers).is_null());
+	CHECK(world->build_navigation_tile(flat, 4, bad_blocker).is_null());
+	CHECK(world->build_navigation_tile(flat, 4, too_many_blockers).is_null());
+	CHECK(world->build_navigation_tile(non_finite, 4, no_blockers).is_null());
+	CHECK(world->build_navigation_tile(flat, 4, no_blockers, -0.1).is_null());
+	CHECK(world->build_navigation_tile(flat, 4, no_blockers, 9.0).is_null());
+	CHECK(world->build_navigation_tile(flat, 4, no_blockers, 0.45, 90.0).is_null());
+	ERR_PRINT_ON;
+	memdelete(world);
+}
+
 } // namespace TestWorldPartition3D
