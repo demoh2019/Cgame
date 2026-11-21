@@ -27,6 +27,10 @@ var _anim_lod: Node = null # Native AnimationLODController when the engine has i
 var _priority_quality: int = -1
 var _world = null
 var _corpses: Array[Dictionary] = []
+var _leaps: Dictionary = {} # "zombie:id" -> {"from": Vector3, "to": Vector3, "t": float}
+const LEAP_SECONDS := 0.55
+const CORPSE_MAX_SECONDS := 900.0 # A looted-out or abandoned body still goes eventually.
+const LOOT_GLOW_SHADER := preload("res://shaders/loot_glow.gdshader")
 
 const ZOMBIE_LOOK := {
 	"walker": {"tint": Color(0.62, 0.85, 0.55), "scale": 2.0, "walk": 0.8, "model": "Orc_Male"},
@@ -680,7 +684,11 @@ func _unregister_anim_lod(node: Node) -> void:
 
 ## A zombie that just left the snapshot (killed) falls as a ragdoll instead of vanishing, within the tier budget.
 func _try_ragdoll(node: Node3D) -> bool:
-	if _world == null or _corpses.size() >= Ragdoll.budget(GraphicsQuality.level()):
+	var fresh := 0
+	for corpse in _corpses:
+		if float(corpse["age"]) < Ragdoll.SETTLE_SECONDS:
+			fresh += 1
+	if _world == null or fresh >= Ragdoll.budget(GraphicsQuality.level()):
 		return false
 	var model := node.get_node_or_null("Model")
 	if model == null or not model.has_method("start_ragdoll"):
@@ -698,9 +706,20 @@ func _try_ragdoll(node: Node3D) -> bool:
 	return true
 
 
+## Bodies stay where they fell while they still carry loot, glowing so you know to search them.
 func _update_corpses(delta: float) -> void:
 	for i in range(_corpses.size() - 1, -1, -1):
 		var corpse: Dictionary = _corpses[i]
+		corpse["life"] = float(corpse.get("life", 0.0)) + delta
+		if not corpse.has("bag") and float(corpse["life"]) < 3.0 and is_instance_valid(corpse["node"]):
+			_link_corpse_bag(corpse)
+		var bag_key: String = str(corpse.get("bag", ""))
+		var holds_loot: bool = bag_key != "" and _nodes.has(bag_key) and float(corpse["life"]) < CORPSE_MAX_SECONDS
+		_set_corpse_glow(corpse, holds_loot)
+		if holds_loot:
+			# Keep the body settled and searchable; the basket stand-in is hidden behind it.
+			corpse["age"] = minf(float(corpse["age"]) + delta, Ragdoll.SETTLE_SECONDS - 0.01)
+			continue
 		corpse["age"] = float(corpse["age"]) + delta
 		var burn_t: float = CorpseBurn.progress(float(corpse["age"]), Ragdoll.SETTLE_SECONDS, Ragdoll.SINK_SECONDS)
 		if burn_t > 0.0:
@@ -753,6 +772,7 @@ func _process(delta: float) -> void:
 				var bike = node.get_node("TrailBike")
 				if bike.visible:
 					bike.set_riding(true, model.speed, delta)
+	_apply_leaps(delta)
 	# Animation LOD / crowd budget, foot IK terrain source and head look-at (character_anim.gd).
 	CharacterAnim.apply_crowd(anim_models, get_viewport().get_camera_3d(), GraphicsQuality.level(),
 		_world.height_at if _world != null else Callable())
@@ -873,3 +893,48 @@ func nearest_of_kind(point: Vector3, kind: String, count: int, radius: float) ->
 	for i in mini(count, found.size()):
 		result.append(found[i][1])
 	return result
+
+
+func _link_corpse_bag(corpse: Dictionary) -> void:
+	var at: Vector3 = (corpse["node"] as Node3D).position
+	for key in _nodes:
+		if str(key).begins_with("bag:") and Vector2(_nodes[key].position.x - at.x, _nodes[key].position.z - at.z).length() < 1.6:
+			corpse["bag"] = key
+			var basket = _nodes[key].get_child(0)
+			if basket is MeshInstance3D:
+				(basket as MeshInstance3D).visible = false # The body itself is what you loot.
+			return
+
+
+func _set_corpse_glow(corpse: Dictionary, on: bool) -> void:
+	if bool(corpse.get("glowing", false)) == on or not is_instance_valid(corpse["model"]):
+		return
+	corpse["glowing"] = on
+	var overlay: ShaderMaterial = null
+	if on:
+		overlay = ShaderMaterial.new()
+		overlay.shader = LOOT_GLOW_SHADER
+	for mesh in (corpse["model"] as Node).find_children("*", "MeshInstance3D", true, false):
+		(mesh as MeshInstance3D).material_overlay = overlay
+
+
+## A tree ambusher's drop: an arc from the branch to the ground in front of its prey.
+func leap(id: int, from: Vector3, to: Vector3) -> void:
+	var key := "zombie:%d" % id
+	if not _nodes.has(key):
+		return
+	_leaps[key] = {"from": from, "to": to, "t": 0.0}
+	play_hit("zombie", id, true)
+
+
+func _apply_leaps(delta: float) -> void:
+	for key in _leaps.keys():
+		var leap_state: Dictionary = _leaps[key]
+		leap_state["t"] = float(leap_state["t"]) + delta
+		var k: float = clampf(float(leap_state["t"]) / LEAP_SECONDS, 0.0, 1.0)
+		if not _nodes.has(key) or k >= 1.0:
+			_leaps.erase(key)
+			continue
+		var p: Vector3 = (leap_state["from"] as Vector3).lerp(leap_state["to"], k)
+		p.y += sin(k * PI) * 1.2 # Up off the branch, then down hard.
+		_nodes[key].position = p

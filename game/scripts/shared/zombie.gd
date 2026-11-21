@@ -45,6 +45,7 @@ var spit_seconds: float = 0.0
 var spit_center: Vector2 = Vector2.ZERO
 var stuck_time: float = 0.0
 var snared_seconds: float = 0.0 # Server-owned root; movement-only, not attack immunity.
+var perched: bool = false # Waiting up in a tree; drops onto prey (server TreeAmbush).
 var stagger_seconds: float = 0.0 # Short PvE-only incapacitation from a confirmed heavy blow.
 var melee_blocked: bool = false # Server-observed solid cover between claw and target.
 var stagger_resolve_stacks: int = 0 # Number of effective successive server-side staggers.
@@ -597,6 +598,8 @@ func take_damage(amount: float, attacker_id: int = -1) -> bool:
 	if state == State.DEAD or not is_finite(amount) or amount <= 0.0:
 		return false
 	Threat.record(threat, attacker_id, minf(health, amount))
+	if perched and attacker_id > 0:
+		target_id = attacker_id # Hurt up in the tree: drops onto the attacker next tick.
 	health = maxf(0.0, health - amount)
 	if health <= 0.0:
 		state = State.DEAD

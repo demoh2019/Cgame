@@ -1060,6 +1060,11 @@ func _spawn_effects(event: Dictionary) -> void:
 		var peer_info: Dictionary = client.players.get(int(event.get("peer", -1)), {})
 		var weapon_id: String = str(client.inventory.weapon) if int(event.get("peer", -1)) == client.peer_id else str(peer_info.get("weapon", ""))
 		_wound_fx.finisher(entities.model_of("zombie", int(event.get("zombie", -1))), weapon_id, true)
+	if str(event.get("type", "")) == "zombie_leap":
+		entities.leap(int(event.get("id", -1)), Vector3(float(event.get("fx", 0.0)), float(event.get("fy", 0.0)), float(event.get("fz", 0.0))),
+			Vector3(float(event.get("x", 0.0)), float(event.get("y", 0.0)), float(event.get("z", 0.0))))
+		if hud != null and int(event.get("target", -1)) == client.peer_id:
+			hud.say("Infected drops from the tree!")
 	if str(event.get("type", "")) == "knockdown":
 		entities.play_hit("zombie", int(event.get("zombie", -1)), true)
 	physics_fx.on_event(event, at)

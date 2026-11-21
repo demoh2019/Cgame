@@ -87,6 +87,7 @@ const BikeIntegrity = preload("res://scripts/shared/bike_integrity.gd")
 const BikeLantern = preload("res://scripts/shared/bike_lantern.gd")
 const BikeGrip = preload("res://scripts/shared/bike_grip.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
+const TreeAmbush = preload("res://scripts/shared/tree_ambush.gd")
 const Brawl = preload("res://scripts/shared/brawl.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
 const ParryRiposte = preload("res://scripts/shared/parry_riposte.gd")
@@ -5196,6 +5197,44 @@ func cmd_stagger_finisher(peer_id: int) -> Dictionary:
 		"energy": player.combat_energy}
 
 
+## A tree ambusher watches the ground; prey close below (or being hurt) makes it drop and strike.
+func _tick_percher(zombie) -> void:
+	if not zombie.is_alive():
+		return
+	var here := Vector2(zombie.position.x, zombie.position.z)
+	var prey: Player = null
+	var best: float = TreeAmbush.TRIGGER_RANGE
+	for player in players.values():
+		if not _alive(player) or _is_safe(player.position) or player.mounted:
+			continue
+		var d: float = here.distance_to(Vector2(player.position.x, player.position.z))
+		if d < best:
+			best = d
+			prey = player
+	if prey == null and zombie.target_id != -1:
+		prey = players.get(zombie.target_id) # Shot or struck while perched.
+	if prey == null:
+		zombie.yaw += 0.01
+		return
+	var toward := Vector2(prey.position.x, prey.position.z) - here
+	var landing2: Vector2 = Vector2(prey.position.x, prey.position.z) - toward.normalized() * TreeAmbush.LAND_OFFSET \
+			if toward.length() > TreeAmbush.LAND_OFFSET else here
+	var from: Vector3 = zombie.position
+	var landing := Vector3(landing2.x, world.height_at(landing2.x, landing2.y), landing2.y)
+	zombie.perched = false
+	zombie.position = landing
+	zombie.yaw = atan2(toward.x, toward.y)
+	zombie.target_id = prey.id
+	zombie.attack_timer = maxf(zombie.attack_timer, 0.9)
+	events.append({"type": "zombie_leap", "id": zombie.id, "fx": from.x, "fy": from.y, "fz": from.z,
+		"x": landing.x, "y": landing.y, "z": landing.z, "target": prey.id})
+	if prey.dodge_immunity <= 0.0 and landing2.distance_to(Vector2(prey.position.x, prey.position.z)) <= TreeAmbush.LAND_HIT_RANGE:
+		var zone: int = world.zone_at(prey.position.x, prey.position.z)
+		var hurt: float = _hurt_player(prey, TreeAmbush.damage(zone))
+		if hurt > 0.0:
+			events.append({"type": "hit", "kind": "player", "id": prey.id, "damage": hurt, "by": -zombie.id})
+
+
 ## Stagger, shove and — if already reeling — knock the infected flat.
 func _brawl_impact(attacker: Player, zombie, stagger_seconds: float, knockback: float) -> void:
 	if downed_until.size() > 256:
@@ -7431,6 +7470,9 @@ func _tick_zombies(delta: float) -> void:
 					events.append({"type": "snare_triggered", "id": trap_id,
 						"zombie": zombie.id, "x": trap["x"], "z": trap["z"]})
 					break
+		if zombie.perched:
+			_tick_percher(zombie)
+			continue
 		var result: Dictionary = zombie.think(world, info, delta, rng)
 		if zombie.consume_howl():
 			_howl(zombie, info)
@@ -7676,6 +7718,12 @@ func _manage_zombie_population() -> void:
 					world.zone_at(float(spawn["x"]), float(spawn["z"])),
 					bool(spawn["ruin"]), world.world_seed) or bool(spawn.get("dungeon_boss", false)):
 				z.become_elite() # The guardian of a dungeon's deepest room is always a champion.
+			elif not bool(spawn.get("ruin", false)) and TreeAmbush.rolls(int(spawn["id"]),
+					world.zone_at(float(spawn["x"]), float(spawn["z"])), world.world_seed):
+				var tree: Dictionary = TreeAmbush.tree_near(data["nodes"], float(spawn["x"]), float(spawn["z"]))
+				if not tree.is_empty():
+					z.perched = true
+					z.position = Vector3(float(tree["x"]) + 0.45, world.height_at(float(tree["x"]), float(tree["z"])) + TreeAmbush.PERCH_HEIGHT, float(tree["z"]))
 			zombies[zombie_id] = z
 			state["zombie"] = zombie_id
 	# Sleeping: remove zombies nobody is near, and let their spawns create them again later.
@@ -8091,7 +8139,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 					player, zombie, players, parties, world):
 				party_flank_hint = {"zombie": zombie.id,
 					"bonus": 10 if zombie.raid_boss else 18}
-			nearby_zombies.append({"id": zombie.id, "type": zombie.type, "x": p.x, "y": p.y, "z": p.z, "yaw": zombie.yaw, "hp": zombie.health, "state": zombie.state,
+			nearby_zombies.append({"id": zombie.id, "type": zombie.type, "x": p.x, "y": p.y, "z": p.z, "yaw": zombie.yaw, "hp": zombie.health, "state": zombie.state, "perched": zombie.perched,
 					"elite": zombie.elite, "raid_boss": zombie.raid_boss,
 					"raid_enraged": zombie.raid_enraged,
 					"raid_exposed_seconds": RaidRecovery.remaining(zombie, raid_exposed_until, time) if zombie.id == raid_boss_id else 0.0,
