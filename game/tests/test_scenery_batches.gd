@@ -115,3 +115,63 @@ func run(t) -> void:
 	else:
 		t.eq(SceneryBatches.partition_indices_3d(positions), expected,
 			"stock Godot uses exactly the same index plan")
+
+	t.current = "HISM-style adaptive cluster coarsening after draw-call overflow"
+	var spaced_3d := PackedVector3Array()
+	var transforms_3d: Array[Transform3D] = []
+	for i in 80:
+		var p := Vector3(float(i) * 33.0, 0.0, 0.0)
+		spaced_3d.append(p)
+		transforms_3d.append(Transform3D(Basis.IDENTITY, p))
+	var adaptive: Array = SceneryBatches.partition_indices_adaptive_3d(
+		spaced_3d, 32.0, 48, 3, 8, false)
+	t.eq(adaptive.size(), 3, "adaptive grid coarsens to three draw-call groups")
+	var recovered: Array[int] = []
+	for group in adaptive:
+		for original_index in group:
+			recovered.append(original_index)
+	t.eq(recovered.size(), 80, "adaptive clustering preserves every instance")
+	for i in recovered.size():
+		t.eq(recovered[i], i, "adaptive grouping preserves stable order %d" % i)
+	t.eq(SceneryBatches.partition_indices_adaptive_3d(
+		spaced_3d, 32.0, 48, 3, 0, false).size(),
+		1, "zero coarsening retries keeps legacy unsplit safety")
+	t.eq(SceneryBatches.partition_indices_adaptive_3d(
+		spaced_3d, 32.0, 48, 3, 9, false).size(),
+		0, "unbounded retry requests fail closed")
+	t.eq(SceneryBatches.partition_indices_adaptive_3d(
+		positions, 32.0, 48, 256, 8, false),
+		expected, "under-budget cells retain original native grid plan")
+	var many: Array[Transform3D] = []
+	for i in 270:
+		many.append(Transform3D(Basis.IDENTITY, Vector3(float(i) * 33.0, 0.0, 0.0)))
+	var clustered: Array = SceneryBatches.partition(many)
+	t.check(clustered.size() > 1 and clustered.size() <= 256,
+		"Albion retains multiple cullable batches when first-pass grid overflows")
+	var found_instances := 0
+	for group in clustered:
+		found_instances += group.size()
+	t.eq(found_instances, many.size(), "Albion adaptive partition never drops transforms")
+	var adaptive_native: Object = null
+	if ClassDB.class_exists("PCGInstanceCluster3D"):
+		adaptive_native = ClassDB.instantiate("PCGInstanceCluster3D")
+	if adaptive_native != null and adaptive_native.has_method("partition_indices_adaptive"):
+		t.eq(adaptive_native.call("partition_indices_adaptive",
+			spaced_3d, 32.0, 48, 3, 8), adaptive,
+			"native and fallback coarsening parity")
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 621061
+		for sample in 16:
+			var random_points := PackedVector3Array()
+			for i in 350:
+				random_points.append(Vector3(rng.randf_range(-100.0, 100.0),
+					rng.randf_range(-100.0, 100.0),
+					rng.randf_range(-100.0, 100.0)))
+			t.eq(adaptive_native.call("partition_indices_adaptive",
+				random_points, 10.0, 48, 25, 8),
+				SceneryBatches.partition_indices_adaptive_3d(
+					random_points, 10.0, 48, 25, 8, false),
+				"native/fallback adaptive parity sample %d" % sample)
+	else:
+		t.eq(SceneryBatches.partition_indices_adaptive_3d(spaced_3d, 32.0, 48, 3),
+			adaptive, "stock Godot executes the deterministic adaptive fallback")

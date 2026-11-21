@@ -30,7 +30,7 @@ static func _single_cluster_indices(count: int) -> Array:
 
 
 static func _cluster_indices_fallback(points: PackedVector3Array, cell_size: float,
-		min_split_count: int, max_clusters: int) -> Array:
+		min_split_count: int, max_clusters: int, unsplit_on_overflow: bool = true) -> Array:
 	var result: Array = []
 	if points.size() > MAX_SCENERY_INSTANCES or min_split_count < 1 or \
 			min_split_count > MAX_SCENERY_INSTANCES or max_clusters < 1 or \
@@ -53,7 +53,7 @@ static func _cluster_indices_fallback(points: PackedVector3Array, cell_size: flo
 			floori(p.z / cell_size))
 		if not buckets.has(cell):
 			if order.size() >= max_clusters:
-				return _single_cluster_indices(points.size())
+				return _single_cluster_indices(points.size()) if unsplit_on_overflow else []
 			order.append(cell)
 			buckets[cell] = PackedInt32Array()
 		var indices: PackedInt32Array = buckets[cell]
@@ -82,6 +82,58 @@ static func partition_indices_3d(points: PackedVector3Array, cell_size: float = 
 	return _cluster_indices_fallback(points, cell_size, min_split_count, max_clusters)
 
 
+## Adaptive cell coarsening prevents one oversized batch when the world
+## contains more occupied cells than the draw-call budget permits.
+## Each retry doubles all three cell dimensions; no points are removed.
+## Scripts remain compatible with stock Godot and older native binaries.
+static func _cluster_indices_adaptive_fallback(points: PackedVector3Array,
+		cell_size: float, min_split_count: int, max_clusters: int,
+		max_coarsen_passes: int) -> Array:
+	var result: Array = []
+	if max_coarsen_passes < 0 or max_coarsen_passes > 8 or \
+			points.size() > MAX_SCENERY_INSTANCES or min_split_count < 1 or \
+			min_split_count > MAX_SCENERY_INSTANCES or max_clusters < 1 or \
+			max_clusters > MAX_SCENERY_CLUSTERS or not is_finite(cell_size) or \
+			cell_size < 0.5 or cell_size > 10000.0:
+		return result
+	for p in points:
+		if not p.is_finite() or absf(p.x) > 10000000.0 or \
+				absf(p.y) > 10000000.0 or absf(p.z) > 10000000.0:
+			return result
+	if points.is_empty():
+		return result
+	if points.size() < min_split_count or max_clusters == 1:
+		return _single_cluster_indices(points.size())
+	var size: float = cell_size
+	for attempt in range(max_coarsen_passes + 1):
+		var attempt_groups: Array = _cluster_indices_fallback(
+			points, size, min_split_count, max_clusters, false)
+		if not attempt_groups.is_empty():
+			return attempt_groups
+		if size >= 10000.0:
+			break
+		size = minf(size * 2.0, 10000.0)
+	return _single_cluster_indices(points.size())
+
+
+static func partition_indices_adaptive_3d(points: PackedVector3Array,
+		cell_size: float = TILE_SIZE, min_split_count: int = SPLIT_MIN_INSTANCES,
+		max_clusters: int = MAX_SCENERY_CLUSTERS, max_coarsen_passes: int = 8,
+		prefer_native: bool = true) -> Array:
+	if prefer_native:
+		if not _cluster_checked:
+			_cluster_checked = true
+			if ClassDB.class_exists("PCGInstanceCluster3D"):
+				var instance: Object = ClassDB.instantiate("PCGInstanceCluster3D")
+				if instance != null and instance.has_method("partition_indices"):
+					_cluster_native = instance
+		if _cluster_native != null and _cluster_native.has_method("partition_indices_adaptive"):
+			return _cluster_native.call("partition_indices_adaptive", points,
+				cell_size, min_split_count, max_clusters, max_coarsen_passes)
+	return _cluster_indices_adaptive_fallback(
+		points, cell_size, min_split_count, max_clusters, max_coarsen_passes)
+
+
 ## Native 3D spatial cells yield tighter cullable MultiMesh bounds on steep
 ## terrain; flat ground still produces the same stable 32 m XY-plane tiles.
 ## Every instance appears in exactly one batch, preserving its original order.
@@ -94,7 +146,7 @@ static func partition(transforms: Array[Transform3D]) -> Array:
 	points.resize(transforms.size())
 	for i in transforms.size():
 		points[i] = transforms[i].origin
-	var index_groups: Array = partition_indices_3d(points)
+	var index_groups: Array = partition_indices_adaptive_3d(points)
 	if index_groups.is_empty():
 		return [transforms] # Fail open for cosmetic geometry; never drop transforms.
 	var result: Array = []

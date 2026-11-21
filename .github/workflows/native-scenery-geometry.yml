@@ -1,7 +1,8 @@
-name: Native scenery GPU packing and visibility bounds
+name: Native scenery GPU packing and adaptive 3D instancing
 
 on:
   pull_request:
+    branches: [develop]
     paths:
       - 'modules/procedural_scatter/**'
       - 'scene/resources/multimesh.cpp'
@@ -57,27 +58,33 @@ jobs:
         run: |
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
-          "$BIN" --headless --test --test-case="*Native static scenery transforms and visible bounds*"
+          timeout 180s "$BIN" --headless --test --test-case="*Native static scenery transforms and visible bounds*" --no-colors
       - name: Native 3D instancing cluster regression
         shell: bash
         run: |
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 180s "$BIN" --headless --test --test-case="*PCGInstanceCluster3D*" --no-colors 2>&1 | tee instance-cluster-native.log
-      - name: Headless Albion After 3D instancing parity
-        shell: bash
-        run: |
-          set -euo pipefail
-          BIN=./bin/godot.linuxbsd.editor.x86_64
-          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee instance-cluster-import.log
-          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' instance-cluster-import.log; then exit 1; fi
-          timeout 180s "$BIN" --headless --path game --script res://tests/run_scenery_clusters.gd 2>&1 | tee instance-cluster-game.log
-          grep -E '^SCENERY CLUSTERS TOTAL: [0-9]+ checks, 0 failures
+      - name: Import Albion After game
         shell: bash
         run: |
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee native-scenery-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' native-scenery-import.log; then exit 1; fi
+      - name: Headless Albion After 3D instancing parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_scenery_clusters.gd 2>&1 | tee instance-cluster-game.log
+          grep -E '^SCENERY CLUSTERS TOTAL: [0-9]+ checks, 0 failures$' instance-cluster-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' instance-cluster-game.log; then exit 1; fi
+      - name: Headless Albion After graphics tests using native engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 300s "$BIN" --headless --path game --script res://tests/run_graphics.gd 2>&1 | tee native-scenery-tests.log
           grep -E '^GRAPHICS TOTAL: [0-9]+ checks, 0 failures$' native-scenery-tests.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' native-scenery-tests.log; then exit 1; fi
@@ -91,25 +98,4 @@ jobs:
             native-scenery-import.log
             native-scenery-tests.log
             instance-cluster-native.log
-            instance-cluster-import.log
             instance-cluster-game.log
- instance-cluster-game.log
-          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' instance-cluster-game.log; then exit 1; fi
-      - name: Headless Albion After graphics tests using native engine
-        shell: bash
-        run: |
-          set -euo pipefail
-          BIN=./bin/godot.linuxbsd.editor.x86_64
-          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee native-scenery-import.log
-          timeout 300s "$BIN" --headless --path game --script res://tests/run_graphics.gd 2>&1 | tee native-scenery-tests.log
-          grep -E '^GRAPHICS TOTAL: [0-9]+ checks, 0 failures$' native-scenery-tests.log
-          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' native-scenery-tests.log; then exit 1; fi
-      - name: Store detailed test logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-scenery-geometry-logs
-          if-no-files-found: ignore
-          path: |
-            native-scenery-import.log
-            native-scenery-tests.log
