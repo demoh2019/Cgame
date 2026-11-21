@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="DynamicResolutionPanicPolicy" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Bounded GPU over-budget panic policy for dynamic 3D resolution.</brief_description>
+	<description>
+		Calculates a fast emergency decrease in the viewport's internal 3D scale when consecutive GPU frames strongly exceed their frame-time budget. Inspired by Unreal Engine's dynamic resolution panic behavior. Does not read frame timers or modify a viewport: the caller owns the GPU data, warmup, cooldown, and actual scaler. CPU-bound slowdowns and missing GPU timing never trigger a panic.
+	</description>
+	<methods>
+		<method name="calculate_scale" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="current_scale" type="float" />
+			<param index="1" name="floor_scale" type="float" />
+			<param index="2" name="gpu_ms" type="float" />
+			<param index="3" name="target_ms" type="float" />
+			<param index="4" name="consecutive_frames" type="int" />
+			<param index="5" name="required_frames" type="int" default="3" />
+			<description>
+				Returns the next 3D scale. At least [param required_frames] consecutive GPU-over-budget frames and [param gpu_ms] at least the greater of 38 ms or 1.75 times [param target_ms] trigger the reduction. Pixel cost is approximated as quadratic in linear resolution, capped to a 0.12 scale reduction per request, quantized to 1% and never lowered beyond [param floor_scale]. Otherwise returns the unchanged [param current_scale]. Requires finite current/floor scales between 0.5 and 1, floor not above current, GPU time in 0..80 ms, target in 5..40 ms, valid frame count and required count 1..10. Invalid data returns -1 and must not be applied.
+			</description>
+		</method>
+	</methods>
+</class>
