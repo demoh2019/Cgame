@@ -14,7 +14,6 @@ const SUITES := [
 	"res://tests/test_rain_vfx.gd",
 	"res://tests/test_graphics_lens_rain.gd",
 	"res://tests/test_gpu_culling.gd",
-	"res://tests/test_ground_grass_volume.gd",
 	"res://tests/test_terrain_rvt.gd",
 	"res://tests/test_cgame_foveation.gd",
 	"res://tests/test_footprint_decals.gd",

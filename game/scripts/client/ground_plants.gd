@@ -90,12 +90,6 @@ const CARD_ATLAS := "res://assets/models/polyhaven/grass_medium_01/textures/gras
 const CARD_REGIONS := [Rect2(210, 790, 290, 112), Rect2(620, 784, 220, 106), Rect2(30, 900, 170, 124),
 	Rect2(256, 900, 260, 110), Rect2(580, 890, 240, 130)]
 const CARD_HEIGHT := 0.5
-# Real scanned cards are still kept for distant soft grass coverage. Nearby,
-# a second opaque MultiMesh gives each tuft broad *closed* diamond-profile
-# leaves: unlike alpha cards, they have a nonzero side-on silhouette.
-const VOLUME_GRASS_DISTANCE := 30.0
-static var _volume_grass_material: StandardMaterial3D
-static var _volume_grass_meshes: Dictionary = {}
 static var _card_material: StandardMaterial3D
 
 
@@ -154,107 +148,6 @@ static func card_mesh(region_index: int, planes: int = 5) -> Mesh:
 	result.surface_set_material(0, card_material())
 	return result
 
-
-
-## Opaque, shaded leaf volumes layered over photographed grass only nearby.
-## Each leaf has four vertices around its cross-section, three height rings
-## and 16 indexed triangles. This is genuinely 3D rather than crossing
-## zero-thickness quads. Shared meshes keep the extra draw/vertex cost bounded.
-static func volume_grass_material() -> StandardMaterial3D:
-	if _volume_grass_material == null:
-		_volume_grass_material = StandardMaterial3D.new()
-		_volume_grass_material.albedo_color = Color(0.52, 0.7, 0.32)
-		_volume_grass_material.vertex_color_use_as_albedo = true
-		_volume_grass_material.diffuse_mode = BaseMaterial3D.DIFFUSE_LAMBERT_WRAP
-		_volume_grass_material.roughness = 0.92
-		_volume_grass_material.metallic = 0.0
-		_volume_grass_material.cull_mode = BaseMaterial3D.CULL_DISABLED
-		_volume_grass_material.backlight_enabled = true
-		_volume_grass_material.backlight = Color(0.18, 0.3, 0.09)
-	return _volume_grass_material
-
-
-static func volume_grass_mesh(region_index: int, blade_count: int = 5) -> ArrayMesh:
-	blade_count = clampi(blade_count, 1, 8)
-	var key := "%d|%d" % [region_index, blade_count]
-	if _volume_grass_meshes.has(key):
-		return _volume_grass_meshes[key]
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 18011 + region_index * 41
-	var vertices := PackedVector3Array()
-	var normals := PackedVector3Array()
-	var colors := PackedColorArray()
-	var indices := PackedInt32Array()
-	for blade in blade_count:
-		var angle := TAU * (float(blade) + rng.randf_range(-0.18, 0.18)) / float(blade_count)
-		var radial := Vector3(cos(angle), 0.0, sin(angle))
-		var lateral := Vector3(-radial.z, 0.0, radial.x)
-		var root := radial * rng.randf_range(0.035, 0.18)
-		var height := rng.randf_range(0.3, 0.58)
-		var half_width := rng.randf_range(0.055, 0.095)
-		var lean := rng.randf_range(0.11, 0.27)
-		var curl := lateral * rng.randf_range(-0.045, 0.045)
-		var dry := rng.randf_range(0.0, 0.23)
-		var offset: int = vertices.size()
-		for ring in 3:
-			var progress := 0.0 if ring == 0 else (0.56 if ring == 1 else 1.0)
-			var width: float = half_width * (0.48 if ring == 0 else (1.0 if ring == 1 else 0.08))
-			var depth: float = half_width * (0.22 if ring == 0 else (0.62 if ring == 1 else 0.08))
-			var center: Vector3 = root + radial * lean * progress * progress + curl * progress
-			center.y += height * progress
-			# Four corners give the leaf a diamond cross-section. Both lateral
-			# width AND front-to-back depth remain visible at grazing angles.
-			var profile := [center - lateral * width, center + radial * depth,
-				center + lateral * width, center - radial * depth]
-			var dirs := [-lateral, radial, lateral, -radial]
-			var lit: Color = Color(0.62, 0.7, 0.54) if ring == 0 else (
-				Color(0.96, 1.0, 0.85) if ring == 1 else Color(1.04 + dry, 1.02, 0.76 + dry * 0.3))
-			for edge in 4:
-				vertices.append(profile[edge])
-				normals.append((dirs[edge] + Vector3.UP * 0.42).normalized())
-				colors.append(lit)
-		for segment in 2:
-			for side in 4:
-				var a: int = offset + segment * 4 + side
-				var b: int = offset + segment * 4 + (side + 1) % 4
-				var c: int = a + 4
-				var d: int = b + 4
-				indices.append_array(PackedInt32Array([a, b, c, b, d, c]))
-	var arrays: Array = []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = vertices
-	arrays[Mesh.ARRAY_NORMAL] = normals
-	arrays[Mesh.ARRAY_COLOR] = colors
-	arrays[Mesh.ARRAY_INDEX] = indices
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	mesh.surface_set_material(0, volume_grass_material())
-	_volume_grass_meshes[key] = mesh
-	return mesh
-
-
-## Reuse *the same* 16-m-tile placements as the scanned grass. The companion
-## is only drawn near the camera; distant foliage stays the original cheap
-## photo cards. It never creates a gameplay or physics object.
-static func volume_grass_companion(cards: MultiMeshInstance3D, region_index: int) -> MultiMeshInstance3D:
-	if cards == null or cards.multimesh == null or cards.multimesh.instance_count == 0:
-		return null
-	var volume_range := minf(cards.visibility_range_end, VOLUME_GRASS_DISTANCE * distance_scale)
-	if volume_range <= 0.0:
-		return null
-	var volume := MultiMesh.new()
-	volume.transform_format = MultiMesh.TRANSFORM_3D
-	volume.mesh = volume_grass_mesh(region_index, 4 if card_planes <= 3 else 5)
-	volume.instance_count = cards.multimesh.instance_count
-	volume.buffer = cards.multimesh.buffer
-	var node := MultiMeshInstance3D.new()
-	node.name = "Plants_lush_grass_volume"
-	node.multimesh = volume
-	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	node.visibility_range_end = volume_range
-	node.custom_aabb = cards.custom_aabb
-	GpuCulling.enable(volume, volume_range, volume_range * 0.35, maxf(far_density, 0.65))
-	return node
 
 static func mesh(file: String, dry: bool = false, max_triangles: int = 0) -> Mesh:
 	if file.begins_with("#card"):
@@ -369,13 +262,6 @@ static func build_tile(origin: Vector2, tile: int, tiles_per_side: int, sample: 
 			var instance: MultiMeshInstance3D = _scatter(species, info, plant_mesh, wanted, tile_x, tile_z, rng, sample)
 			if instance != null:
 				result.append(instance)
-				# The procedural grass ribbons in GrassField are no longer spawned.
-				# Add real 3D geometry to the scanned grass that is actually visible.
-				if bool(info.get("cards", false)):
-					var volume: MultiMeshInstance3D = volume_grass_companion(
-						instance, int(str(choice["file"]).substr(5)))
-					if volume != null:
-						result.append(volume)
 	return result
 
 
