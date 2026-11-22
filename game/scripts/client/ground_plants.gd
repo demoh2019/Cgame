@@ -90,6 +90,9 @@ const CARD_ATLAS := "res://assets/models/polyhaven/grass_medium_01/textures/gras
 const CARD_REGIONS := [Rect2(210, 790, 290, 112), Rect2(620, 784, 220, 106), Rect2(30, 900, 170, 124),
 	Rect2(256, 900, 260, 110), Rect2(580, 890, 240, 130)]
 const CARD_HEIGHT := 0.5
+# Expand the photographed tuft's canopy, not its root footprint. Keep the
+# same plane/triangle count to limit the existing alpha-tested GPU cost.
+const CARD_WIDTH_SCALE := 1.18
 static var _card_material: StandardMaterial3D
 
 
@@ -118,7 +121,7 @@ static func card_mesh(region_index: int, planes: int = 5) -> Mesh:
 	var uv0 := Vector2(0.0, row * float(region_index))
 	var uv1 := Vector2(1.0, row * float(region_index + 1))
 	var height := CARD_HEIGHT
-	var half_width := height * region.size.x / region.size.y * 0.5
+	var half_width := height * region.size.x / region.size.y * 0.5 * CARD_WIDTH_SCALE
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 9001 + region_index
 	var surface := SurfaceTool.new()
@@ -126,18 +129,24 @@ static func card_mesh(region_index: int, planes: int = 5) -> Mesh:
 	var cards: int = clampi(planes, 1, 8)
 	for k in cards:
 		var angle := PI * float(k) / float(cards) + rng.randf_range(-0.2, 0.2)
-		var side := Vector3(cos(angle), 0.0, sin(angle)) * half_width * rng.randf_range(0.8, 1.05)
+		var side := Vector3(cos(angle), 0.0, sin(angle)) * half_width * rng.randf_range(0.84, 1.12)
 		var facing := Vector3(-sin(angle), 0.0, cos(angle))
 		if rng.randf() < 0.5:
 			facing = -facing
-		var lean := facing * height * rng.randf_range(0.12, 0.3) # Tops splay outward.
-		var offset := facing * rng.randf_range(0.0, 0.06)
+		var lean := facing * height * rng.randf_range(0.17, 0.37) # Wide, irregular canopy.
+		var offset := facing * rng.randf_range(-0.025, 0.085)
 		var tall := height * rng.randf_range(0.85, 1.1)
-		var normal := (Vector3.UP * 0.75 + facing * 0.25).normalized()
+		var normal := (Vector3.UP * 0.72 + facing * 0.28).normalized()
 		var root_shade := Color(0.64, 0.66, 0.58)
-		var corners := [[offset - side, Vector2(uv0.x, uv1.y), root_shade], [offset + side, Vector2(uv1.x, uv1.y), root_shade],
-			[offset + side + lean + Vector3.UP * tall, Vector2(uv1.x, uv0.y), Color.WHITE],
-			[offset - side + lean + Vector3.UP * tall, Vector2(uv0.x, uv0.y), Color.WHITE]]
+		# The photographed cards form a shallow twisted fan instead of five flat
+		# identical rectangles. Taper the foot and open the top to add depth.
+		var root_side := side * 0.80
+		var canopy_side := side * rng.randf_range(0.95, 1.06)
+		var twist := facing * height * rng.randf_range(-0.06, 0.06)
+		var corners := [[offset - root_side, Vector2(uv0.x, uv1.y), root_shade],
+			[offset + root_side, Vector2(uv1.x, uv1.y), root_shade],
+			[offset + canopy_side + lean + twist + Vector3.UP * tall, Vector2(uv1.x, uv0.y), Color.WHITE],
+			[offset - canopy_side + lean - twist + Vector3.UP * tall, Vector2(uv0.x, uv0.y), Color.WHITE]]
 		for tri in [[0, 1, 2], [0, 2, 3]]:
 			for i in tri:
 				surface.set_normal(normal)
