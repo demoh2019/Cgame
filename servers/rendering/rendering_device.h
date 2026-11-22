@@ -489,6 +489,12 @@ public:
 	// Cgame: GPU-side copy of one layer's mipmap from a buffer (for example blocks a compute shader encoded) into a
 	// texture of any format, including block-compressed ones Metal cannot reinterpret as uncompressed views.
 	Error texture_update_from_buffer(RID p_buffer, uint32_t p_buffer_offset, uint32_t p_row_pitch, RID p_texture, uint32_t p_layer, uint32_t p_mipmap);
+	// Cgame: desktop variable rasterization rate maps (Metal). Separable per-axis rates in (0, 1] over
+	// p_screen_size. The result is a VRS attachment for framebuffers; attachments are physical-size.
+	RID rasterization_rate_map_create(const Vector2i &p_screen_size, const Vector<float> &p_horizontal, const Vector<float> &p_vertical);
+	Vector2i rasterization_rate_map_get_physical_size(RID p_map);
+	// Physical coordinate of every screen pixel centre along x (axis 0) or y (axis 1).
+	Vector<float> rasterization_rate_map_get_axis_mapping(RID p_map, uint32_t p_axis);
 	Error texture_clear(RID p_texture, const Color &p_color, uint32_t p_base_mipmap, uint32_t p_mipmaps, uint32_t p_base_layer, uint32_t p_layers);
 	Error texture_resolve_multisample(RID p_from_texture, RID p_to_texture);
 

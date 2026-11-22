@@ -1207,6 +1207,22 @@ vec3 encode24(vec3 v) {
 }
 #endif // MODE_RENDER_NORMAL_ROUGHNESS
 
+// Cgame foveated rendering: under a rasterization rate map gl_FragCoord is in the smaller physical target.
+// Screen-space lookups (light clusters, SCREEN_UV) need the screen position, rebuilt from 16 knots per axis.
+vec2 cgame_screen_frag_coord(vec2 frag_coord) {
+	if (implementation_data.cgame_foveation.x < 0.5) {
+		return frag_coord;
+	}
+	vec2 t = clamp(frag_coord / implementation_data.cgame_foveation.yz, vec2(0.0), vec2(1.0)) * 15.0;
+	ivec2 i = min(ivec2(t), ivec2(14));
+	vec2 f = t - vec2(i);
+	float x0 = implementation_data.cgame_knots_x[i.x >> 2][i.x & 3];
+	float x1 = implementation_data.cgame_knots_x[(i.x + 1) >> 2][(i.x + 1) & 3];
+	float y0 = implementation_data.cgame_knots_y[i.y >> 2][i.y & 3];
+	float y1 = implementation_data.cgame_knots_y[(i.y + 1) >> 2][(i.y + 1) & 3];
+	return vec2(mix(x0, x1, f.x), mix(y0, y1, f.y));
+}
+
 void fragment_shader(in SceneData scene_data, uint instance_index) {
 #ifdef PREMUL_ALPHA_USED
 	float premul_alpha = 1.0;
@@ -1294,7 +1310,7 @@ void fragment_shader(in SceneData scene_data, uint instance_index) {
 
 	float normal_map_depth = 1.0;
 
-	vec2 screen_uv = gl_FragCoord.xy * scene_data.screen_pixel_size;
+	vec2 screen_uv = cgame_screen_frag_coord(gl_FragCoord.xy) * scene_data.screen_pixel_size;
 
 	float sss_strength = 0.0;
 
@@ -1579,7 +1595,7 @@ void fragment_shader(in SceneData scene_data, uint instance_index) {
 #ifdef USE_MULTIVIEW
 	uvec2 cluster_pos = uvec2(combined_uv.xy / scene_data.screen_pixel_size) >> implementation_data.cluster_shift;
 #else
-	uvec2 cluster_pos = uvec2(gl_FragCoord.xy) >> implementation_data.cluster_shift;
+	uvec2 cluster_pos = uvec2(cgame_screen_frag_coord(gl_FragCoord.xy)) >> implementation_data.cluster_shift;
 #endif
 	uint cluster_offset = (implementation_data.cluster_width * cluster_pos.y + cluster_pos.x) * (implementation_data.max_cluster_element_count_div_32 + 32);
 

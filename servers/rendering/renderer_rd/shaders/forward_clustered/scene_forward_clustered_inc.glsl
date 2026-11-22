@@ -349,6 +349,12 @@ struct ImplementationData {
 	float volumetric_fog_inv_length;
 	float volumetric_fog_detail_spread;
 	uint volumetric_fog_pad;
+
+	// Cgame foveated rendering: x active, yz physical target size. Knots map 16 evenly spaced physical
+	// coordinates per axis back to screen coordinates (gl_FragCoord is physical under a rate map).
+	vec4 cgame_foveation;
+	vec4 cgame_knots_x[4];
+	vec4 cgame_knots_y[4];
 };
 
 layout(set = 1, binding = 1, std140) uniform ImplementationDataBlock {

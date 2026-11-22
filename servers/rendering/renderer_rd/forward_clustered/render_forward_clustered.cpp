@@ -821,6 +821,13 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 		scene_state.ubo.ss_effects_flags = 0;
 	}
 
+	scene_state.ubo.cgame_foveation[0] = cgame_foveation.active ? 1.0f : 0.0f;
+	scene_state.ubo.cgame_foveation[1] = float(cgame_foveation.physical_size.x);
+	scene_state.ubo.cgame_foveation[2] = float(cgame_foveation.physical_size.y);
+	scene_state.ubo.cgame_foveation[3] = 0.0f;
+	memcpy(scene_state.ubo.cgame_knots_x, cgame_foveation.knots_x, sizeof(cgame_foveation.knots_x));
+	memcpy(scene_state.ubo.cgame_knots_y, cgame_foveation.knots_y, sizeof(cgame_foveation.knots_y));
+
 	if (uniform_buffer_index >= scene_state.implementation_uniform_buffers.size()) {
 		uint32_t from = scene_state.implementation_uniform_buffers.size();
 		scene_state.implementation_uniform_buffers.resize(uniform_buffer_index + 1);
@@ -974,6 +981,176 @@ _FORCE_INLINE_ static uint32_t _indices_to_primitives(RSE::PrimitiveType p_primi
 	static const uint32_t subtractor[RSE::PRIMITIVE_MAX] = { 0, 0, 1, 0, 2 };
 	return (p_indices - subtractor[p_primitive]) / divisor[p_primitive];
 }
+// Cgame foveated rendering ------------------------------------------------------------------------------------
+
+void RenderForwardClustered::_cgame_foveation_free_targets() {
+	RD *rd = RD::get_singleton();
+	// Framebuffers and the uniform set depend on these textures and are freed with them.
+	for (RID *rid : { &cgame_foveation.color, &cgame_foveation.depth, &cgame_foveation.mapping, &cgame_foveation.map }) {
+		if (rid->is_valid()) {
+			rd->free_rid(*rid);
+		}
+		*rid = RID();
+	}
+	cgame_foveation.depth_fb = RID();
+	cgame_foveation.color_fb = RID();
+	cgame_foveation.resolve_set = RID();
+	cgame_foveation.screen_size = Size2i();
+}
+
+bool RenderForwardClustered::_cgame_foveation_prepare(const Ref<RenderSceneBuffersRD> &p_rb, float p_edge_rate) {
+	RD *rd = RD::get_singleton();
+	if (!cgame_foveation.initialized) {
+		cgame_foveation.initialized = true;
+		cgame_foveation.supported = rd->has_feature(RD::SUPPORTS_RASTERIZATION_RATE_MAP);
+		if (cgame_foveation.supported) {
+			Vector<String> modes;
+			modes.push_back("");
+			cgame_foveation.shader.initialize(modes);
+			cgame_foveation.shader_version = cgame_foveation.shader.version_create();
+			cgame_foveation.shader_rd = cgame_foveation.shader.version_get_shader(cgame_foveation.shader_version, 0);
+		}
+	}
+	if (!cgame_foveation.supported) {
+		return false;
+	}
+	const Size2i size = p_rb->get_internal_size();
+	const RID internal_color = p_rb->get_internal_texture();
+	const RID internal_depth = p_rb->get_depth_texture();
+	if (size.x < 64 || size.y < 64 || internal_color.is_null() || internal_depth.is_null()) {
+		return false;
+	}
+	RD::TextureFormat color_format = rd->texture_get_format(internal_color);
+	RD::TextureFormat depth_format = rd->texture_get_format(internal_depth);
+	if (cgame_foveation.map.is_valid() && cgame_foveation.screen_size == size && cgame_foveation.edge_rate == p_edge_rate &&
+			cgame_foveation.color_format == color_format.format && cgame_foveation.depth_format == depth_format.format) {
+		return true;
+	}
+	_cgame_foveation_free_targets();
+
+	// Full rate over the middle half of the screen, falling to the edge rate at the borders (both axes).
+	const float edge = CLAMP(p_edge_rate, 0.25f, 1.0f);
+	const float mid = (1.0f + edge) * 0.5f;
+	Vector<float> rates;
+	rates.push_back(edge);
+	rates.push_back(mid);
+	rates.push_back(1.0f);
+	rates.push_back(1.0f);
+	rates.push_back(mid);
+	rates.push_back(edge);
+	cgame_foveation.map = rd->rasterization_rate_map_create(size, rates, rates);
+	if (cgame_foveation.map.is_null()) {
+		cgame_foveation.supported = false;
+		return false;
+	}
+	cgame_foveation.physical_size = rd->rasterization_rate_map_get_physical_size(cgame_foveation.map);
+	const Size2i physical = cgame_foveation.physical_size;
+	ERR_FAIL_COND_V(physical.x <= 0 || physical.y <= 0, false);
+
+	color_format.width = physical.x;
+	color_format.height = physical.y;
+	color_format.usage_bits |= RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT;
+	cgame_foveation.color = rd->texture_create(color_format, RD::TextureView());
+	depth_format.width = physical.x;
+	depth_format.height = physical.y;
+	depth_format.usage_bits |= RD::TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT;
+	cgame_foveation.depth = rd->texture_create(depth_format, RD::TextureView());
+
+	// Exact per-pixel screen-to-physical mapping for the resolve (row 0: columns, row 1: rows).
+	const Vector<float> map_x = rd->rasterization_rate_map_get_axis_mapping(cgame_foveation.map, 0);
+	const Vector<float> map_y = rd->rasterization_rate_map_get_axis_mapping(cgame_foveation.map, 1);
+	const int width = MAX(size.x, size.y);
+	Vector<uint8_t> mapping_data;
+	mapping_data.resize(width * 2 * sizeof(float));
+	float *mapping_ptr = reinterpret_cast<float *>(mapping_data.ptrw());
+	for (int i = 0; i < width; i++) {
+		mapping_ptr[i] = map_x[MIN(i, map_x.size() - 1)];
+		mapping_ptr[width + i] = map_y[MIN(i, map_y.size() - 1)];
+	}
+	RD::TextureFormat mapping_format;
+	mapping_format.format = RD::DATA_FORMAT_R32_SFLOAT;
+	mapping_format.width = width;
+	mapping_format.height = 2;
+	mapping_format.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_UPDATE_BIT;
+	Vector<Vector<uint8_t>> mapping_layers;
+	mapping_layers.push_back(mapping_data);
+	cgame_foveation.mapping = rd->texture_create(mapping_format, RD::TextureView(), mapping_layers);
+
+	// Inverse mapping for the scene shader (gl_FragCoord is physical): screen coordinate at 16 evenly spaced
+	// physical coordinates per axis, found on the monotonic forward mapping.
+	for (int axis = 0; axis < 2; axis++) {
+		const Vector<float> &forward = axis == 0 ? map_x : map_y;
+		float *knots = axis == 0 ? cgame_foveation.knots_x : cgame_foveation.knots_y;
+		const float extent = axis == 0 ? physical.x : physical.y;
+		int cursor = 0;
+		for (int k = 0; k < 16; k++) {
+			const float target = extent * float(k) / 15.0f;
+			while (cursor < forward.size() - 1 && forward[cursor + 1] < target) {
+				cursor++;
+			}
+			float screen = float(cursor) + 0.5f;
+			if (cursor < forward.size() - 1 && forward[cursor + 1] > forward[cursor]) {
+				screen += CLAMP((target - forward[cursor]) / (forward[cursor + 1] - forward[cursor]), -0.5f, 1.0f);
+			}
+			knots[k] = k == 0 ? 0.0f : (k == 15 ? float(forward.size()) : screen);
+		}
+	}
+
+	Vector<RID> depth_attachments;
+	depth_attachments.push_back(cgame_foveation.depth);
+	depth_attachments.push_back(cgame_foveation.map);
+	cgame_foveation.depth_fb = rd->framebuffer_create(depth_attachments);
+	Vector<RID> color_attachments;
+	color_attachments.push_back(cgame_foveation.color);
+	color_attachments.push_back(cgame_foveation.depth);
+	color_attachments.push_back(cgame_foveation.map);
+	cgame_foveation.color_fb = rd->framebuffer_create(color_attachments);
+	if (cgame_foveation.depth_fb.is_null() || cgame_foveation.color_fb.is_null() || cgame_foveation.mapping.is_null()) {
+		_cgame_foveation_free_targets();
+		cgame_foveation.supported = false;
+		return false;
+	}
+
+	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
+	const RID linear = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+	const RID nearest = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+	Vector<RD::Uniform> uniforms;
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ linear, cgame_foveation.color })));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, Vector<RID>({ nearest, cgame_foveation.depth })));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, Vector<RID>({ nearest, cgame_foveation.mapping })));
+	cgame_foveation.resolve_set = rd->uniform_set_create(uniforms, cgame_foveation.shader_rd, 0);
+
+	cgame_foveation.screen_size = size;
+	cgame_foveation.edge_rate = p_edge_rate;
+	cgame_foveation.color_format = color_format.format;
+	cgame_foveation.depth_format = depth_format.format;
+	return true;
+}
+
+void RenderForwardClustered::_cgame_foveation_resolve(RID p_target_fb) {
+	RD *rd = RD::get_singleton();
+	const RD::FramebufferFormatID format = rd->framebuffer_get_format(p_target_fb);
+	RID *pipeline = cgame_foveation.pipelines.getptr(format);
+	if (pipeline == nullptr) {
+		RD::PipelineDepthStencilState depth_state;
+		depth_state.enable_depth_test = true;
+		depth_state.enable_depth_write = true;
+		depth_state.depth_compare_operator = RD::COMPARE_OP_ALWAYS;
+		RID created = rd->render_pipeline_create(cgame_foveation.shader_rd, format, RD::INVALID_ID, RD::RENDER_PRIMITIVE_TRIANGLES,
+				RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), depth_state, RD::PipelineColorBlendState::create_disabled(), 0);
+		pipeline = &cgame_foveation.pipelines.insert(format, created)->value;
+	}
+	float push[4] = { float(cgame_foveation.physical_size.x), float(cgame_foveation.physical_size.y), 0.0f, 0.0f };
+	RD::get_singleton()->draw_command_begin_label("Cgame Foveated Resolve");
+	RD::DrawListID draw_list = rd->draw_list_begin(p_target_fb, RD::DRAW_IGNORE_ALL);
+	rd->draw_list_bind_render_pipeline(draw_list, *pipeline);
+	rd->draw_list_bind_uniform_set(draw_list, cgame_foveation.resolve_set, 0);
+	rd->draw_list_set_push_constant(draw_list, push, sizeof(push));
+	rd->draw_list_draw(draw_list, false, 1, 3);
+	rd->draw_list_end();
+	RD::get_singleton()->draw_command_end_label();
+}
+
 void RenderForwardClustered::_gpu_cull_multimeshes(const RenderDataRD *p_render_data) {
 	// Cgame: a MultiMesh is otherwise drawn whole whenever its combined AABB is visible. For MultiMeshes that opt
 	// in (MultiMesh.gpu_culling), one compute dispatch tests every instance against this camera's frustum and
@@ -2126,6 +2303,24 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	RD::get_singleton()->draw_command_begin_label("Render Setup");
 
+	// Cgame foveated rendering: only in the plain path where nothing reads the depth/colour targets by
+	// screen position before the resolve (no SSAO/SSIL/SSR/SDFGI/VoxelGI/contact shadows, motion vectors,
+	// MSAA, multiview or compositor effects before transparency).
+	cgame_foveation.active = false;
+	{
+		const float edge_rate = float(GLOBAL_GET_CACHED(float, "rendering/vrs/cgame_foveation_edge_rate"));
+		if (edge_rate < 0.999f && rb_data.is_valid() && !is_reflection_probe && rb->get_view_count() == 1 &&
+				rb->get_msaa_3d() == RSE::VIEWPORT_MSAA_DISABLED && !using_motion_pass && !motion_vectors_required &&
+				!using_ssao && !using_ssil && !using_ssr && !using_sdfgi && !using_voxelgi && !using_sscs &&
+				!ce_needs_normal_roughness && !ce_needs_separate_specular && !global_surface_data.sss_used &&
+				get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_DISABLED &&
+				!_has_compositor_effect(RSE::COMPOSITOR_EFFECT_CALLBACK_TYPE_PRE_OPAQUE, p_render_data) &&
+				!_has_compositor_effect(RSE::COMPOSITOR_EFFECT_CALLBACK_TYPE_POST_OPAQUE, p_render_data) &&
+				!_has_compositor_effect(RSE::COMPOSITOR_EFFECT_CALLBACK_TYPE_POST_SKY, p_render_data)) {
+			cgame_foveation.active = _cgame_foveation_prepare(rb, edge_rate);
+		}
+	}
+
 	_setup_lightmaps(p_render_data, *p_render_data->lightmaps, p_render_data->scene_data->cam_transform);
 	_setup_voxelgis(*p_render_data->voxel_gi_instances);
 	uint32_t depth_prepass_uniform_buffer_index = _setup_environment(p_render_data, is_reflection_probe, screen_size, screen_size, p_default_bg_color, false);
@@ -2206,6 +2401,18 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	if (using_sss || using_separate_specular || scene_state.used_lightmap || scene_state.lightmaps_used > 0 || using_voxelgi || global_surface_data.sss_used) {
 		scene_shader.enable_advanced_shader_group(p_render_data->scene_data->view_count > 1);
+	}
+
+	RID cgame_resolve_framebuffer;
+	if (cgame_foveation.active && (depth_pass_mode != PASS_MODE_DEPTH || using_separate_specular || using_sss ||
+										  scene_state.used_normal_texture || color_pass_flags != 0)) {
+		cgame_foveation.active = false; // Shade this frame normally; the knots in the pre-pass buffer are harmless.
+	}
+	if (cgame_foveation.active) {
+		cgame_resolve_framebuffer = color_only_framebuffer; // Full-resolution colour + depth for everything after the sky.
+		depth_framebuffer = cgame_foveation.depth_fb;
+		color_framebuffer = cgame_foveation.color_fb;
+		color_only_framebuffer = cgame_foveation.color_fb;
 	}
 
 	// Update the global pipeline requirements with all the features found to be in use in this scene.
@@ -2534,6 +2741,14 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 		RD::get_singleton()->draw_list_end();
 		RD::get_singleton()->draw_command_end_label();
+	}
+
+	if (cgame_foveation.active) {
+		RENDER_TIMESTAMP("Cgame Foveated Resolve");
+		_cgame_foveation_resolve(cgame_resolve_framebuffer);
+		color_only_framebuffer = cgame_resolve_framebuffer;
+		color_framebuffer = rb_data->get_color_pass_fb(color_pass_flags);
+		cgame_foveation.active = false; // Transparent and later passes render at full resolution.
 	}
 
 	if (use_msaa) {
@@ -5437,6 +5652,7 @@ void RenderForwardClustered::_update_shader_quality_settings() {
 }
 
 RenderForwardClustered::RenderForwardClustered() {
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/vrs/cgame_foveation_edge_rate", PROPERTY_HINT_RANGE, "0.25,1,0.05"), 1.0);
 	singleton = this;
 
 	/* SCENE SHADER */
@@ -5599,6 +5815,16 @@ RenderForwardClustered::RenderForwardClustered() {
 }
 
 RenderForwardClustered::~RenderForwardClustered() {
+	_cgame_foveation_free_targets();
+	for (KeyValue<RD::FramebufferFormatID, RID> &E : cgame_foveation.pipelines) {
+		if (E.value.is_valid()) {
+			RD::get_singleton()->free_rid(E.value);
+		}
+	}
+	cgame_foveation.pipelines.clear();
+	if (cgame_foveation.shader_version.is_valid()) {
+		cgame_foveation.shader.version_free(cgame_foveation.shader_version);
+	}
 	if (ss_effects != nullptr) {
 		memdelete(ss_effects);
 		ss_effects = nullptr;

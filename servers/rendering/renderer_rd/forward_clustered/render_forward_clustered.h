@@ -40,6 +40,7 @@
 #include "servers/rendering/renderer_rd/effects/taa.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_forward_clustered.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
+#include "servers/rendering/renderer_rd/shaders/effects/cgame_foveation_resolve.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/best_fit_normal.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/integrate_dfg.glsl.gen.h"
 
@@ -335,6 +336,10 @@ private:
 			float volumetric_fog_inv_length;
 			float volumetric_fog_detail_spread;
 			uint32_t volumetric_fog_pad;
+
+			float cgame_foveation[4]; // Cgame foveated rendering: active, physical width, physical height, unused.
+			float cgame_knots_x[16]; // Screen x at 16 evenly spaced physical x (gl_FragCoord is physical under a rate map).
+			float cgame_knots_y[16];
 		};
 
 		struct PushConstantUbershader {
@@ -502,6 +507,36 @@ private:
 	// Cgame: GPU per-instance culling of MultiMeshes in the main render lists (see multimesh_cull.glsl).
 	uint64_t gpu_cull_render_id_current = 0;
 	void _gpu_cull_multimeshes(const RenderDataRD *p_render_data);
+
+	// Cgame foveated rendering (Metal rasterization rate maps, "rendering/vrs/cgame_foveation_edge_rate"): the depth
+	// pre-pass, opaque pass and sky shade the screen edges at a lower rate into smaller physical targets, then
+	// one resolve pass writes the full-resolution colour and depth the rest of the frame uses.
+	struct CgameFoveation {
+		bool initialized = false;
+		bool supported = false;
+		bool active = false;
+		CgameFoveationResolveShaderRD shader;
+		RID shader_version;
+		RID shader_rd;
+		HashMap<RD::FramebufferFormatID, RID> pipelines;
+		Size2i screen_size;
+		float edge_rate = 1.0f;
+		RD::DataFormat color_format = RD::DATA_FORMAT_MAX;
+		RD::DataFormat depth_format = RD::DATA_FORMAT_MAX;
+		RID map;
+		RID color;
+		RID depth;
+		RID mapping;
+		Size2i physical_size;
+		RID depth_fb;
+		RID color_fb;
+		RID resolve_set;
+		float knots_x[16] = {};
+		float knots_y[16] = {};
+	} cgame_foveation;
+	bool _cgame_foveation_prepare(const Ref<RenderSceneBuffersRD> &p_rb, float p_edge_rate);
+	void _cgame_foveation_resolve(RID p_target_fb);
+	void _cgame_foveation_free_targets();
 	void _fill_render_list(RenderListType p_render_list, const RenderDataRD *p_render_data, PassMode p_pass_mode, bool p_using_sdfgi = false, bool p_using_opaque_gi = false, bool p_using_motion_pass = false, bool p_append = false);
 
 	HashMap<Size2i, RID> sdfgi_framebuffer_size_cache;

@@ -251,6 +251,10 @@ public:
 	virtual TextureID texture_create(const TextureFormat &p_format, const TextureView &p_view) override final;
 	virtual TextureSamples texture_get_nearest_supported_samples(const TextureFormat &p_format) override final;
 	virtual TextureID texture_create_from_extension(uint64_t p_native_texture, TextureType p_type, DataFormat p_format, uint32_t p_array_layers, bool p_depth_stencil, uint32_t p_mipmaps) override final;
+	virtual uint64_t rasterization_rate_map_create_native(const Size2i &p_screen_size, VectorView<float> p_horizontal, VectorView<float> p_vertical) override final;
+	virtual void rasterization_rate_map_release_native(uint64_t p_native) override final;
+	virtual Size2i rasterization_rate_map_get_physical_size(TextureID p_map) override final;
+	virtual Vector2 rasterization_rate_map_screen_to_physical(TextureID p_map, const Vector2 &p_screen) override final;
 	virtual TextureID texture_create_shared(TextureID p_original_texture, const TextureView &p_view) override final;
 	virtual TextureID texture_create_shared_from_slice(TextureID p_original_texture, const TextureView &p_view, TextureSliceType p_slice_type, uint32_t p_layer, uint32_t p_layers, uint32_t p_mipmap, uint32_t p_mipmaps) override final;
 	virtual void texture_free(TextureID p_texture) override final;

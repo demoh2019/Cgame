@@ -23,6 +23,7 @@ const Net = preload("res://scripts/shared/net.gd")
 const GameClient = preload("res://scripts/client/game_client.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 const TerrainRvt = preload("res://scripts/client/terrain_rvt.gd")
+const AbBenchmark = preload("res://scripts/client/ab_benchmark.gd")
 const EntityView = preload("res://scripts/client/entity_view.gd")
 const RaidTelegraph = preload("res://scripts/client/raid_telegraph.gd")
 const LightningVisual = preload("res://scripts/client/storm_lightning_visual.gd")
@@ -269,6 +270,8 @@ var _lightning_visual: Node3D
 var _screenshot_path := ""
 var _capture_path := "" # --capture: one PNG of the normal game after 60 s in the world (no benchmark mode).
 var _capture_time := 0.0
+# Frames sampled by the screenshot benchmark; CGAME_BENCH_FRAMES="start:end" moves the window past streaming.
+var _bench_window := Vector2i(540, 700)
 var _screenshot_frames := 0
 var _frame_ms: Array[float] = [] # CPU process deltas in the screenshot capture window.
 var _gpu_frame_ms: Array[float] = [] # Native viewport GPU timings, sampled independently.
@@ -379,6 +382,9 @@ func _ready() -> void:
 			"--screenshot":
 				i += 1
 				_screenshot_path = args[i]
+				var window: PackedStringArray = OS.get_environment("CGAME_BENCH_FRAMES").split(":")
+				if window.size() == 2 and window[0].is_valid_int() and window[1].is_valid_int():
+					_bench_window = Vector2i(maxi(window[0].to_int(), 1), maxi(window[1].to_int(), window[0].to_int() + 1))
 			"--capture":
 				i += 1
 				_capture_path = args[i]
@@ -1552,6 +1558,10 @@ func _on_welcomed() -> void:
 	_terrain_rvt.name = "TerrainRvt"
 	add_child(_terrain_rvt)
 	_terrain_rvt.setup(camera, streamer, Defs.CHUNK_SIZE)
+	# CGAME_AB="setting:a:b": same-scene A/B timing of one engine setting (ab_benchmark.gd).
+	var ab: Node = AbBenchmark.from_environment()
+	if ab != null:
+		add_child(ab)
 	# The map can now show native streaming-source readiness without any
 	# gameplay RPC, scene creation, or extra work when the map is closed.
 	world_map.world_streamer = streamer
@@ -3269,14 +3279,14 @@ func _run_demo() -> void:
 				_fp_pitch = -0.55
 	if _screenshot_path != "":
 		_screenshot_frames += 1
-		if _screenshot_frames > 540:
+		if _screenshot_frames > _bench_window.x:
 			_frame_ms.append(get_process_delta_time() * 1000.0)
 			if RenderingServer.get_current_rendering_method() == "forward_plus":
 				var gpu_sample: float = RenderingServer.viewport_get_measured_render_time_gpu(
 					get_viewport().get_viewport_rid())
 				if is_finite(gpu_sample) and gpu_sample > 0.0:
 					_gpu_frame_ms.append(gpu_sample)
-		if _screenshot_frames == 700:
+		if _screenshot_frames == _bench_window.y:
 			# The window may be hidden behind others, in which case the last drawn frame would be stale: draw now.
 			RenderingServer.force_draw()
 			get_viewport().get_texture().get_image().save_png(_screenshot_path)

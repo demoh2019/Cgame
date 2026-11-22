@@ -3649,6 +3649,9 @@
 			If [code]true[/code], enables [member Viewport.transparent_bg] on the root viewport. This allows per-pixel transparency to be effective after also enabling [member display/window/size/transparent] and [member display/window/per_pixel_transparency/allowed].
 			[b]Note:[/b] This property only applies to the root [Viewport]. Custom viewports have transparent background disabled by default, and need to have it enabled by setting [member Viewport.transparent_bg] on them instead.
 		</member>
+		<member name="rendering/vrs/cgame_foveation_edge_rate" type="float" setter="" getter="" default="1.0">
+			Cgame foveated rendering (Forward+, Metal rasterization rate maps). Below [code]1.0[/code], the depth pre-pass, opaque pass and sky shade the screen edges at this rate, rising to full rate over the middle half of the screen. They draw into smaller physical targets, and one resolve pass writes the full-resolution colour and depth used by the rest of the frame. It only applies when nothing reads those targets by screen position before the resolve: no MSAA, SSAO, SSIL, SSR, SDFGI, VoxelGI, screen-space contact shadows, motion vectors, subsurface scattering, multiview or compositor effects before the transparent pass. Otherwise the frame renders normally. Can be changed at run time.
+		</member>
 		<member name="rendering/vrs/mode" type="int" setter="" getter="" default="0">
 			Set the default Variable Rate Shading (VRS) mode for the main viewport. See [member Viewport.vrs_mode] to change this at runtime, and [enum Viewport.VRSMode] for possible values.
 			[b]Note:[/b] This property only applies to the root [Viewport]. Custom viewports have variable rate shading disabled by default, and need to have it enabled by setting [member Viewport.vrs_mode] on them instead.

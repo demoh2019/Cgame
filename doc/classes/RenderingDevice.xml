@@ -831,6 +831,30 @@
 				Limits for various graphics hardware can be found in the [url=https://vulkan.gpuinfo.org/]Vulkan Hardware Database[/url].
 			</description>
 		</method>
+		<method name="rasterization_rate_map_create">
+			<return type="RID" />
+			<param index="0" name="screen_size" type="Vector2i" />
+			<param index="1" name="horizontal_rates" type="PackedFloat32Array" />
+			<param index="2" name="vertical_rates" type="PackedFloat32Array" />
+			<description>
+				Creates a variable rasterization rate map (Metal) for [param screen_size]. The rates in (0, 1] are evenly spaced samples across the screen for each axis; the driver interpolates between them. Use the returned RID as an extra attachment in [method framebuffer_create]: the colour and depth attachments are then allocated at [method rasterization_rate_map_get_physical_size] while the framebuffer keeps the logical screen size. Fragments receive physical [code]gl_FragCoord[/code] values; varyings are interpolated in screen space. Returns an invalid RID when [constant SUPPORTS_RASTERIZATION_RATE_MAP] is not available.
+			</description>
+		</method>
+		<method name="rasterization_rate_map_get_axis_mapping">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="map" type="RID" />
+			<param index="1" name="axis" type="int" />
+			<description>
+				Returns the physical coordinate of every screen pixel centre along x ([param axis] [code]0[/code]) or y ([code]1[/code]). The mapping is separable, so these two arrays describe it fully; use them to resolve a rate-mapped image back to full resolution.
+			</description>
+		</method>
+		<method name="rasterization_rate_map_get_physical_size">
+			<return type="Vector2i" />
+			<param index="0" name="map" type="RID" />
+			<description>
+				Returns the size of the physical attachments a framebuffer using [param map] must have.
+			</description>
+		</method>
 		<method name="raytracing_list_begin" experimental="">
 			<return type="int" />
 			<description>

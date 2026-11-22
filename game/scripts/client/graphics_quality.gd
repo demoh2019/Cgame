@@ -422,6 +422,13 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	GroundPlants.distance_scale = GroundPlants.quality_distance_scale(_level)
 	GroundPlants.card_planes = GroundPlants.quality_card_planes(_level)
 	GroundPlants.far_density = GroundPlants.quality_far_density(_level)
+	# Engine foveated rendering (Metal rasterization rate maps): screen edges shade at a lower rate on the
+	# cheaper presets. CGAME_FOVEATION=<edge rate> overrides it for A/B runs (1 = off).
+	var foveation: float = [0.5, 0.6, 1.0, 1.0][clampi(_level, 0, 3)]
+	if OS.get_environment("CGAME_FOVEATION") != "":
+		foveation = clampf(OS.get_environment("CGAME_FOVEATION").to_float(), 0.25, 1.0)
+	if ProjectSettings.has_setting("rendering/vrs/cgame_foveation_edge_rate"):
+		ProjectSettings.set_setting("rendering/vrs/cgame_foveation_edge_rate", foveation)
 	GrassField.far_density = GroundPlants.quality_far_density(_level) # Applies to grass tiles built from now on.
 	# Reuse the game's existing 3-tier grass LOD; never rebuild world geometry on a preset switch.
 	ChunkView.configure_grass(float(world_profile["grass_build_radius"]), int(world_profile["grass_budget_usec"]),

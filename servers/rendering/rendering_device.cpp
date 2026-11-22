@@ -2396,6 +2396,42 @@ Error RenderingDevice::texture_update(RID p_texture, uint32_t p_layer, const Vec
 	return OK;
 }
 
+RID RenderingDevice::rasterization_rate_map_create(const Vector2i &p_screen_size, const Vector<float> &p_horizontal, const Vector<float> &p_vertical) {
+	ERR_RENDER_THREAD_GUARD_V(RID());
+	ERR_FAIL_COND_V_MSG(!driver->has_feature(SUPPORTS_RASTERIZATION_RATE_MAP), RID(), "Rasterization rate maps are not supported by this rendering driver.");
+	ERR_FAIL_COND_V(p_screen_size.x <= 0 || p_screen_size.y <= 0 || p_horizontal.is_empty() || p_vertical.is_empty(), RID());
+	const uint64_t native = driver->rasterization_rate_map_create_native(Size2i(p_screen_size), VectorView<float>(p_horizontal), VectorView<float>(p_vertical));
+	ERR_FAIL_COND_V(native == 0, RID());
+	// Imported like an XR runtime's map; the texture entry keeps its own reference to the native object.
+	RID map = texture_create_from_extension(TEXTURE_TYPE_2D, DATA_FORMAT_R8_UINT, TEXTURE_SAMPLES_1, TEXTURE_USAGE_VRS_ATTACHMENT_BIT, native, p_screen_size.x, p_screen_size.y, 1, 1, 1);
+	driver->rasterization_rate_map_release_native(native);
+	return map;
+}
+
+Vector2i RenderingDevice::rasterization_rate_map_get_physical_size(RID p_map) {
+	ERR_RENDER_THREAD_GUARD_V(Vector2i());
+	Texture *texture = texture_owner.get_or_null(p_map);
+	ERR_FAIL_NULL_V(texture, Vector2i());
+	return Vector2i(driver->rasterization_rate_map_get_physical_size(texture->driver_id));
+}
+
+Vector<float> RenderingDevice::rasterization_rate_map_get_axis_mapping(RID p_map, uint32_t p_axis) {
+	ERR_RENDER_THREAD_GUARD_V(Vector<float>());
+	Texture *texture = texture_owner.get_or_null(p_map);
+	ERR_FAIL_NULL_V(texture, Vector<float>());
+	ERR_FAIL_COND_V(p_axis > 1, Vector<float>());
+	const uint32_t count = p_axis == 0 ? texture->width : texture->height;
+	Vector<float> mapping;
+	mapping.resize(count);
+	float *w = mapping.ptrw();
+	for (uint32_t i = 0; i < count; i++) {
+		const Vector2 screen = p_axis == 0 ? Vector2(i + 0.5f, 0.5f) : Vector2(0.5f, i + 0.5f);
+		const Vector2 physical = driver->rasterization_rate_map_screen_to_physical(texture->driver_id, screen);
+		w[i] = p_axis == 0 ? physical.x : physical.y;
+	}
+	return mapping;
+}
+
 Error RenderingDevice::texture_update_from_buffer(RID p_buffer, uint32_t p_buffer_offset, uint32_t p_row_pitch, RID p_texture, uint32_t p_layer, uint32_t p_mipmap) {
 	ERR_RENDER_THREAD_GUARD_V(ERR_UNAVAILABLE);
 
@@ -9462,6 +9498,9 @@ void RenderingDevice::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("texture_copy", "from_texture", "to_texture", "from_pos", "to_pos", "size", "src_mipmap", "dst_mipmap", "src_layer", "dst_layer"), &RenderingDevice::texture_copy);
 	ClassDB::bind_method(D_METHOD("texture_update_from_buffer", "buffer", "buffer_offset", "row_pitch", "texture", "layer", "mipmap"), &RenderingDevice::texture_update_from_buffer);
+	ClassDB::bind_method(D_METHOD("rasterization_rate_map_create", "screen_size", "horizontal_rates", "vertical_rates"), &RenderingDevice::rasterization_rate_map_create);
+	ClassDB::bind_method(D_METHOD("rasterization_rate_map_get_physical_size", "map"), &RenderingDevice::rasterization_rate_map_get_physical_size);
+	ClassDB::bind_method(D_METHOD("rasterization_rate_map_get_axis_mapping", "map", "axis"), &RenderingDevice::rasterization_rate_map_get_axis_mapping);
 	ClassDB::bind_method(D_METHOD("texture_clear", "texture", "color", "base_mipmap", "mipmap_count", "base_layer", "layer_count"), &RenderingDevice::texture_clear);
 	ClassDB::bind_method(D_METHOD("texture_resolve_multisample", "from_texture", "to_texture"), &RenderingDevice::texture_resolve_multisample);
 

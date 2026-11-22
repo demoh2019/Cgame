@@ -97,6 +97,7 @@ const SUITES := [
 	"res://tests/test_graphics_resolution.gd",
 	"res://tests/test_gpu_culling.gd",
 	"res://tests/test_terrain_rvt.gd",
+	"res://tests/test_cgame_foveation.gd",
 	"res://tests/test_graphics_texture_streaming.gd",
 	"res://tests/test_predictive_streaming.gd",
 	"res://tests/test_world_streamer_shared_budget.gd",

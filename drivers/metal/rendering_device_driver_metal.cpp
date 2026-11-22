@@ -428,6 +428,50 @@ RDD::TextureSamples RenderingDeviceDriverMetal::texture_get_nearest_supported_sa
 	return TextureSamples(Math::get_shift_from_power_of_2((uint32_t)supported));
 }
 
+// Cgame: desktop variable rasterization rate maps. The rates are separable per axis, so the screen-to-physical
+// mapping is too; the renderer samples it per pixel row/column to build its resolve lookup.
+uint64_t RenderingDeviceDriverMetal::rasterization_rate_map_create_native(const Size2i &p_screen_size, VectorView<float> p_horizontal, VectorView<float> p_vertical) {
+	ERR_FAIL_COND_V(p_screen_size.x <= 0 || p_screen_size.y <= 0, 0);
+	ERR_FAIL_COND_V(p_horizontal.size() == 0 || p_vertical.size() == 0, 0);
+	ERR_FAIL_COND_V_MSG(!device->supportsRasterizationRateMap(1), 0, "This GPU does not support rasterization rate maps.");
+	LocalVector<float> horizontal;
+	LocalVector<float> vertical;
+	for (uint32_t i = 0; i < p_horizontal.size(); i++) {
+		horizontal.push_back(CLAMP(p_horizontal[i], 0.0f, 1.0f));
+	}
+	for (uint32_t i = 0; i < p_vertical.size(); i++) {
+		vertical.push_back(CLAMP(p_vertical[i], 0.0f, 1.0f));
+	}
+	NS::SharedPtr<MTL::RasterizationRateLayerDescriptor> layer = NS::TransferPtr(MTL::RasterizationRateLayerDescriptor::alloc()->init(
+			MTL::Size::Make(horizontal.size(), vertical.size(), 0), horizontal.ptr(), vertical.ptr()));
+	MTL::RasterizationRateMapDescriptor *descriptor = MTL::RasterizationRateMapDescriptor::rasterizationRateMapDescriptor(
+			MTL::Size::Make(p_screen_size.x, p_screen_size.y, 0), layer.get());
+	MTL::RasterizationRateMap *map = device->newRasterizationRateMap(descriptor);
+	ERR_FAIL_NULL_V_MSG(map, 0, "Failed to create a rasterization rate map.");
+	return reinterpret_cast<uint64_t>(map);
+}
+
+void RenderingDeviceDriverMetal::rasterization_rate_map_release_native(uint64_t p_native) {
+	if (p_native != 0) {
+		reinterpret_cast<MTL::RasterizationRateMap *>(p_native)->release();
+	}
+}
+
+Size2i RenderingDeviceDriverMetal::rasterization_rate_map_get_physical_size(TextureID p_map) {
+	TextureInfo *tex_info = (TextureInfo *)p_map.id;
+	ERR_FAIL_COND_V(tex_info == nullptr || !tex_info->rasterization_rate_map, Size2i());
+	MTL::Size size = reinterpret_cast<MTL::RasterizationRateMap *>(tex_info->texture.get())->physicalSize(0);
+	return Size2i(size.width, size.height);
+}
+
+Vector2 RenderingDeviceDriverMetal::rasterization_rate_map_screen_to_physical(TextureID p_map, const Vector2 &p_screen) {
+	TextureInfo *tex_info = (TextureInfo *)p_map.id;
+	ERR_FAIL_COND_V(tex_info == nullptr || !tex_info->rasterization_rate_map, p_screen);
+	MTL::Coordinate2D physical = reinterpret_cast<MTL::RasterizationRateMap *>(tex_info->texture.get())->mapScreenToPhysicalCoordinates(
+			MTL::Coordinate2D::Make(p_screen.x, p_screen.y), 0);
+	return Vector2(physical.x, physical.y);
+}
+
 RDD::TextureID RenderingDeviceDriverMetal::texture_create_from_extension(uint64_t p_native_texture, TextureType p_type, DataFormat p_format, uint32_t p_array_layers, bool p_depth_stencil, uint32_t p_mipmaps) {
 	MTL::Texture *res = reinterpret_cast<MTL::Texture *>(p_native_texture);
 
