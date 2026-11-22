@@ -217,9 +217,18 @@ func set_footsteps(active: bool) -> void:
 
 
 ## Gore foley (CC0, assets/gore): wet flesh hits and bone cracks, with pitch variation.
-const FLESH := [preload("res://assets/gore/flesh_1.ogg"), preload("res://assets/gore/flesh_2.ogg"), preload("res://assets/gore/flesh_3.ogg")]
-const BONE := [preload("res://assets/gore/bone_break_1.ogg"), preload("res://assets/gore/bone_break_2.ogg"),
-	preload("res://assets/gore/bone_break_3.ogg"), preload("res://assets/gore/bone_break_4.ogg")]
+## Loaded at runtime, not preloaded: a checkout that has not imported these files yet (`*.import` is gitignored)
+## must still compile; missing clips are simply skipped.
+const FLESH_PATHS := ["res://assets/gore/flesh_1.ogg", "res://assets/gore/flesh_2.ogg", "res://assets/gore/flesh_3.ogg"]
+const BONE_PATHS := ["res://assets/gore/bone_break_1.ogg", "res://assets/gore/bone_break_2.ogg",
+	"res://assets/gore/bone_break_3.ogg", "res://assets/gore/bone_break_4.ogg"]
+static var _gore_streams: Dictionary = {}
+
+
+static func gore_stream(path: String) -> AudioStream:
+	if not _gore_streams.has(path):
+		_gore_streams[path] = load(path) if ResourceLoader.exists(path) else null
+	return _gore_streams[path]
 # Independent random bags prevent immediate cosmetic sample repetition.
 var _flesh_variants = AudioVariants.new(PackedFloat64Array([1.0, 1.0, 1.0]))
 var _bone_variants = AudioVariants.new(PackedFloat64Array([1.0, 1.0, 1.0, 1.0]))
@@ -228,13 +237,17 @@ var _bone_variants = AudioVariants.new(PackedFloat64Array([1.0, 1.0, 1.0, 1.0]))
 func play_gore(bone: bool, position: Vector3, volume_db: float = -6.0) -> void:
 	if not enabled:
 		return
-	var pool: Array = BONE if bone else FLESH
+	var pool: Array = BONE_PATHS if bone else FLESH_PATHS
 	var variants = _bone_variants if bone else _flesh_variants
 	var clip_index: int = variants.choose(randf())
 	if clip_index < 0:
 		return
 	var player := AudioStreamPlayer3D.new()
-	player.stream = pool[clip_index]
+	var stream := gore_stream(pool[clip_index])
+	if stream == null:
+		player.free()
+		return
+	player.stream = stream
 	player.volume_db = volume_db
 	player.pitch_scale = randf_range(0.88, 1.12)
 	player.unit_size = 10.0
