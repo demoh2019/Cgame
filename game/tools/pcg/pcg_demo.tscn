@@ -1,0 +1,18 @@
+[gd_scene format=3]
+
+[ext_resource type="PCGGraph" path="res://tools/pcg/biome_clutter.tres" id="1_0kcts"]
+
+[node name="PCGDemoRoot" type="Node3D" unique_id=1825523881]
+
+[node name="PCGDemo" type="PCGComponent3D" parent="." unique_id=1706912149]
+graph = ExtResource("1_0kcts")
+extents = Vector3(48, 50, 48)
+generate_on_ready = true
+async = false
+debug_draw = true
+
+[node name="KeepClear" type="PCGExclusionVolume3D" parent="." unique_id=857377182]
+size = Vector3(16, 8, 16)
+
+[node name="@DirectionalLight3D@2" type="DirectionalLight3D" parent="." unique_id=1356723361]
+transform = Transform3D(0.8660254, -0.38302222, 0.32139382, 0, 0.64278764, 0.76604444, -0.5, -0.66341394, 0.5566704, 0, 0, 0)
