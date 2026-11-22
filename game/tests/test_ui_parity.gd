@@ -15,6 +15,7 @@ const TMP := "user://test_ui_parity.cfg"
 
 
 func run(t) -> void:
+	_streaming_line(t)
 	DirAccess.remove_absolute(TMP)
 	UiSettings.path = TMP
 	UiSettings.reset_defaults()
@@ -181,3 +182,15 @@ func run(t) -> void:
 	DirAccess.remove_absolute(TMP)
 	UiSettings.path = UiSettings.DEFAULT_PATH
 	UiSettings.reset_defaults()
+
+
+func _streaming_line(t) -> void:
+	t.current = "FPS overlay streaming line tolerates older engine builds"
+	var Layer = load("res://scripts/client/ui_accessibility_layer.gd")
+	t.eq(Layer.world_streaming_line(RefCounted.new()), "streaming stats unavailable", "no streamer methods: no call, no error")
+	if ClassDB.class_exists("WorldStreamer"):
+		var streamer = ClassDB.instantiate("WorldStreamer")
+		var line: String = Layer.world_streaming_line(streamer)
+		t.check(line.contains("chunks"), "real streamer reports chunks")
+		t.check(line.contains("retry") == streamer.has_method("get_retry_pending_count"), "retry shown only when the build has it")
+		streamer.free()

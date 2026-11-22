@@ -147,11 +147,7 @@ func _process(delta: float) -> void:
 			metrics += "\n3D: " + GraphicsResolution.diagnostic_label(
 				int(vp.scaling_3d_mode), float(vp.scaling_3d_scale))
 			if is_instance_valid(_world_streamer):
-				metrics += "\nWorld: %d chunks | %d queued | %d visual" % [
-					_world_streamer.get_loaded_count(),
-					_world_streamer.get_queued_generation_count(),
-					_world_streamer.get_pending_visual_details_count()]
-				metrics += " | %d retry" % _world_streamer.get_retry_pending_count()
+				metrics += "\nWorld: " + world_streaming_line(_world_streamer)
 			fps_label.text = metrics
 
 
@@ -172,3 +168,14 @@ func _on_event(event: Dictionary) -> void:
 	var line: String = UiCaptions.caption_for(event, int(_client.peer_id), Vector2(predicted.x, predicted.z), forward, right)
 	if line != "":
 		captions.add_caption(line)
+
+
+## "N chunks | N queued | N visual | N retry" with only the counters this engine build exposes:
+## WorldStreamer gains diagnostics over time, and an older editor binary must not error every refresh.
+static func world_streaming_line(streamer: Object) -> String:
+	var parts: PackedStringArray = []
+	for entry in [["get_loaded_count", "chunks"], ["get_queued_generation_count", "queued"],
+			["get_pending_visual_details_count", "visual"], ["get_retry_pending_count", "retry"]]:
+		if streamer.has_method(entry[0]):
+			parts.append("%d %s" % [int(streamer.call(entry[0])), entry[1]])
+	return " | ".join(parts) if not parts.is_empty() else "streaming stats unavailable"

@@ -1551,7 +1551,8 @@ func _on_welcomed() -> void:
 			_ambient_monitors.append(loading_area_monitor)
 	# Retries respect the normal generation/activation budgets; these
 	# counters expose waiting failures and admission pressure separately.
-	if streamer.has_method("get_last_retry_deferred_count"):
+	if streamer.has_method("get_last_retry_deferred_count") and streamer.has_method("get_retry_pending_count") \
+			and streamer.has_method("get_last_retry_release_count"):
 		for monitor in [
 			[&"Albion/StreamRetryPending", Callable(streamer, "get_retry_pending_count")],
 			[&"Albion/StreamRetryReleased", Callable(streamer, "get_last_retry_release_count")],
