@@ -112,21 +112,43 @@ static func with_triangle_budget(mesh: Mesh, max_triangles: int) -> Mesh:
 	if total <= max_triangles:
 		_budgeted[key] = mesh
 		return mesh
-	var reduced := ImporterMesh.new()
+	# The importer owns meshoptimizer's current, non-deprecated simplification path.
+	# Generate a full LOD ladder once and promote the best level under each surface's
+	# share of the triangle budget to its new base mesh. If no level fits, use the
+	# smallest valid generated LOD; never increase the source's triangle count.
+	var generated := ImporterMesh.new()
 	for s in source.get_surface_count():
-		# SurfaceTool.generate_lod takes an explicit index target (meshoptimizer); the engine retries with
-		# seams and open borders unlocked when scanned props would otherwise stop near full detail.
-		var tool := SurfaceTool.new()
-		tool.create_from(source, s)
-		var arrays: Array = tool.commit_to_arrays()
+		generated.add_surface(Mesh.PRIMITIVE_TRIANGLES, source.surface_get_arrays(s), [], {},
+			source.surface_get_material(s), source.surface_get_name(s))
+	generated.generate_lods(25.0, 60.0, [])
+	var reduced := ImporterMesh.new()
+	var any_reduced := false
+	for s in source.get_surface_count():
+		var arrays: Array = source.surface_get_arrays(s)
 		var full: PackedInt32Array = arrays[Mesh.ARRAY_INDEX] if arrays[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
 		var share: int = maxi(12, int(float(max_triangles) * float(full.size() / 3) / float(total)))
-		if full.size() / 3 > share:
-			var chosen: PackedInt32Array = tool.generate_lod(1.0, share * 3)
-			if chosen.size() >= 3 and chosen.size() % 3 == 0 and chosen.size() < full.size():
-				arrays[Mesh.ARRAY_INDEX] = chosen
+		var best_under_budget := PackedInt32Array()
+		var smallest_available := PackedInt32Array()
+		if full.size() > share * 3:
+			for level in generated.get_surface_lod_count(s):
+				var candidate: PackedInt32Array = generated.get_surface_lod_indices(s, level)
+				if candidate.size() < 3 or candidate.size() % 3 != 0 or candidate.size() >= full.size():
+					continue
+				if candidate.size() <= share * 3:
+					if best_under_budget.is_empty() or candidate.size() > best_under_budget.size():
+						best_under_budget = candidate
+				elif smallest_available.is_empty() or candidate.size() < smallest_available.size():
+					smallest_available = candidate
+		var chosen: PackedInt32Array = best_under_budget if not best_under_budget.is_empty() else smallest_available
+		if not chosen.is_empty():
+			arrays[Mesh.ARRAY_INDEX] = chosen
+			any_reduced = true
 		reduced.add_surface(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {},
 			source.surface_get_material(s), source.surface_get_name(s))
+	if not any_reduced:
+		_budgeted[key] = mesh
+		return mesh
+	# Regenerate distance/error thresholds for the new base geometry.
 	reduced.generate_lods(25.0, 60.0, [])
 	var rebuilt: ArrayMesh = reduced.get_mesh()
 	var result: Mesh = mesh
