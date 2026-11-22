@@ -2,6 +2,7 @@ extends RefCounted
 ## Loads and caches the imported Kenney models and the meshes derived from them.
 
 const Split = preload("res://scripts/client/mesh_split.gd")
+const ProceduralSounds = preload("res://scripts/client/procedural_sounds.gd")
 
 const ROOT := "res://assets/kenney/"
 const BUILDINGS := ["city/building-small-a", "city/building-small-b", "city/building-small-c", "city/building-small-d", "city/building-garage"]
@@ -46,10 +47,19 @@ static func tree_meshes() -> Array:
 	return _cache["trees"]
 
 
+## The imported Kenney sound `name`, or (when no such file exists) a procedurally synthesized
+## stand-in for footsteps, zombie groans, gunshots, fire, wind and UI clicks, so missing assets
+## play something instead of silence. Returns null only when neither exists.
 static func sound(name: String) -> AudioStream:
 	var key := "sound:" + name
 	if not _cache.has(key):
-		_cache[key] = load(ROOT + "sounds/" + name + ".ogg")
+		var path: String = ROOT + "sounds/" + name + ".ogg"
+		var stream: AudioStream = null
+		if ResourceLoader.exists(path):
+			stream = load(path) as AudioStream
+		if stream == null:
+			stream = ProceduralSounds.fallback_stream(name)
+		_cache[key] = stream
 	return _cache[key]
 
 

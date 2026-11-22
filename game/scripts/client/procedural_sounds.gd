@@ -4,6 +4,7 @@ extends RefCounted
 ## All graphs are original designs; DSP primitives are documented in audio_graph.gd.
 
 const AudioGraph = preload("res://scripts/client/audio_graph.gd")
+const AudioFacade = preload("res://scripts/native/cgame_audio_facade.gd")
 
 const SAMPLE_RATE := 22050
 const CACHE_LIMIT := 24
@@ -11,6 +12,8 @@ const CACHE_LIMIT := 24
 static var _cache: Dictionary = {}
 static var cache_hits: int = 0
 static var cache_misses: int = 0
+## Streams synthesized for asset names that have no imported file (see fallback_stream()).
+static var _fallback_streams: Dictionary = {}
 
 
 static func footstep(surface: String) -> Dictionary:
@@ -279,3 +282,56 @@ static func clear_cache() -> void:
 	_cache.clear()
 	cache_hits = 0
 	cache_misses = 0
+
+
+## Maps a game sound name (as passed to Assets.sound()) onto a procedural preset when the name
+## describes one of the synthesized families. Returns {} when the name is not covered, otherwise
+## {"preset": String, "args": Array}. Optional suffixes pick a variant: "footstep_grass",
+## "gunshot_shotgun". Order matters: "gunfire" must be a gunshot, not a fire crackle.
+static func preset_for_sound_name(sound_name: String) -> Dictionary:
+	var n: String = sound_name.to_lower()
+	if n.contains("footstep") or n.contains("walking") or n.begins_with("step"):
+		for surface: String in ["gravel", "grass", "wood", "metal"]:
+			if n.contains(surface):
+				return {"preset": "footstep", "args": [surface]}
+		return {"preset": "footstep", "args": ["gravel"]}
+	if n.contains("groan") or n.contains("zombie"):
+		return {"preset": "zombie_groan", "args": []}
+	if n.contains("gunshot") or n.contains("gunfire") or n.contains("shot") or n.contains("blaster"):
+		for caliber: String in ["shotgun", "rifle", "9mm"]:
+			if n.contains(caliber):
+				return {"preset": "gunshot", "args": [caliber]}
+		return {"preset": "gunshot", "args": ["9mm"]}
+	if n.contains("fire") or n.contains("crackle"):
+		return {"preset": "fire_crackle", "args": []}
+	if n.contains("wind") or n.contains("ambience"):
+		return {"preset": "wind", "args": [0.5]}
+	if n.contains("click") or n.begins_with("ui_"):
+		return {"preset": "ui_click", "args": []}
+	return {}
+
+
+## A playable stream synthesized for `sound_name`, or null when no preset covers the name.
+## Uses the cgame_audio facade (native AudioStreamProcedural, or an offline-rendered WAV when the
+## engine lacks the module). Cached per name so repeated misses cost nothing. The stream length
+## is the preset's duration so voice bookkeeping (get_length()) stays finite.
+static func fallback_stream(sound_name: String) -> AudioStream:
+	if _fallback_streams.has(sound_name):
+		return _fallback_streams[sound_name] as AudioStream
+	var stream: AudioStream = null
+	var spec: Dictionary = preset_for_sound_name(sound_name)
+	if not spec.is_empty():
+		var seed_value: int = absi(hash(sound_name)) % 100000
+		var graph: Dictionary = graph_for(str(spec["preset"]), spec["args"] as Array, seed_value)
+		if not graph.is_empty():
+			stream = AudioFacade.make_procedural_stream(graph, seed_value, SAMPLE_RATE, float(graph.get("duration", 1.0)))
+	_fallback_streams[sound_name] = stream
+	return stream
+
+
+static func fallback_cache_size() -> int:
+	return _fallback_streams.size()
+
+
+static func clear_fallback_cache() -> void:
+	_fallback_streams.clear()
