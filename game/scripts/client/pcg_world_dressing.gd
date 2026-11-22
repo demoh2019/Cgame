@@ -23,6 +23,7 @@ const BAKE_STEP := 2.0
 ## world generation (heights, biomes, roads) or the graphs change meaning without changing their parameters.
 const CACHE_DIR := "user://pcg_cache"
 const CACHE_VERSION := 1
+const PROXY_RANGE_FACTOR := 2.5
 const REPOSITION_STEP := 8.0 # The streaming anchor follows the player in steps, not every frame.
 const LEVEL_POLL_SECONDS := 2.0
 
@@ -46,6 +47,11 @@ var _last_anchor := Vector3(1.0e9, 0.0, 1.0e9)
 static var _fallback_cache: Dictionary = {}
 ## Runtime PCG debugging: crosses at every generated point, coloured by asset (toggle with set_debug_draw).
 static var debug_draw := false
+static var _proxy_cache: Dictionary = {}
+var _start_ms := Time.get_ticks_msec()
+var _cells_ready := 0
+var _ms_to_first_cells := -1
+const FIRST_CELLS := 12
 
 
 ## The budget of a quality level ({} = off). Pure: also used by tests.
@@ -131,11 +137,19 @@ func _make_component(key: String, graph, meshes: Array[Mesh], tier: Dictionary, 
 	c.set_asset_meshes(meshes)
 	c.set_cluster_instances(true)
 	c.set_visibility_range_end(float(tier["range"]))
+	if c.has_method("set_asset_proxy_meshes"):
+		# HLOD: a box of each mesh's size and colour stands in past the detail range, out to 2.5x it.
+		var proxies: Array[Mesh] = []
+		for m in meshes:
+			proxies.append(proxy_for(m))
+		c.set_asset_proxy_meshes(proxies)
+		c.set_proxy_range_end(float(tier["range"]) * PROXY_RANGE_FACTOR)
 	c.set_cast_shadows(shadows)
 	c.set_align_to_normal(false)
 	add_child(c)
 	c.set_streaming_target(c.get_path_to(_anchor))
 	c.set_streaming_enabled(true)
+	c.cell_generated.connect(func(_cell, _points) -> void: _note_cell_ready())
 	_components[key] = c
 
 
@@ -241,3 +255,55 @@ func set_debug_draw(enabled: bool) -> void:
 		if c.has_method("set_debug_draw"):
 			c.set_debug_draw(enabled)
 			c.clear()
+
+
+## Far stand-in for a mesh (HLOD level 1): a box with the mesh's bounds and the base colour of its first surface.
+## Shared per source mesh; null in, null out.
+static func proxy_for(mesh: Mesh) -> Mesh:
+	if mesh == null:
+		return null
+	if _proxy_cache.has(mesh):
+		return _proxy_cache[mesh]
+	var bounds := mesh.get_aabb()
+	var box := BoxMesh.new()
+	box.size = Vector3(maxf(bounds.size.x, 0.05), maxf(bounds.size.y, 0.05), maxf(bounds.size.z, 0.05)) * 0.9
+	var colour := Color(0.45, 0.42, 0.38)
+	if mesh.get_surface_count() > 0:
+		var source = mesh.surface_get_material(0)
+		if source is BaseMaterial3D:
+			colour = (source as BaseMaterial3D).albedo_color
+	var material := StandardMaterial3D.new()
+	material.albedo_color = colour
+	material.roughness = 1.0
+	box.material = material
+	# Boxes are centred on their origin; the source mesh sits where its AABB is, so offset via a one-surface ArrayMesh.
+	var arrays := box.get_mesh_arrays()
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var centre := bounds.get_center()
+	for i in verts.size():
+		verts[i] += centre
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	var proxy := ArrayMesh.new()
+	proxy.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	proxy.surface_set_material(0, material)
+	_proxy_cache[mesh] = proxy
+	return proxy
+
+
+func _note_cell_ready() -> void:
+	_cells_ready += 1
+	if _cells_ready == FIRST_CELLS:
+		_ms_to_first_cells = Time.get_ticks_msec() - _start_ms
+
+
+## Cells generated, disk-cache loads/saves and time until the first FIRST_CELLS cells were ready (benchmarks).
+func get_stats() -> Dictionary:
+	var loads := 0
+	var saves := 0
+	for key in _components:
+		var c = _components[key]
+		if c.has_method("get_cache_stats"):
+			var s: Dictionary = c.get_cache_stats()
+			loads += int(s.get("loads", 0))
+			saves += int(s.get("saves", 0))
+	return {"cells": _cells_ready, "disk_loads": loads, "disk_saves": saves, "ms_to_first_cells": _ms_to_first_cells}

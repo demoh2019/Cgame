@@ -3261,6 +3261,8 @@ func _run_demo() -> void:
 			print("CLIENT frame: %d fps, %d draw calls, %d primitives, %d objects" % [Engine.get_frames_per_second(),
 				Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
 				Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)])
+			if _pcg_dressing != null and _pcg_dressing.has_method("get_stats"):
+				print("CLIENT pcg: " + JSON.stringify(_pcg_dressing.get_stats()))
 			# Distinguish missing streamed terrain from slow rendering in
 			# automatic screenshot benchmarks, with no per-frame HUD work.
 			if streamer != null:
