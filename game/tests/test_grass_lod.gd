@@ -67,9 +67,12 @@ func run(t) -> void:
 	var near_mesh: ArrayMesh = GrassField.clump_mesh(18)
 	var middle_mesh: ArrayMesh = GrassField.clump_mesh(9)
 	var far_mesh: ArrayMesh = GrassField.clump_mesh(4)
-	var near_size: int = (near_mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX] as PackedInt32Array).size()
-	var middle_size: int = (middle_mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX] as PackedInt32Array).size()
-	var far_size: int = (far_mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX] as PackedInt32Array).size()
+	var near_indices: PackedInt32Array = near_mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+	var middle_indices: PackedInt32Array = middle_mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+	var far_indices: PackedInt32Array = far_mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+	var near_size: int = near_indices.size()
+	var middle_size: int = middle_indices.size()
+	var far_size: int = far_indices.size()
 	t.check(near_size > middle_size and middle_size > far_size,
 		"crossed geometry is limited to nearby LODs")
 	t.check(GrassField.BLADE_WIDTH_SCALE >= 1.2,
