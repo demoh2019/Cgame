@@ -12,12 +12,71 @@ func run(t) -> void:
 		var arrays: Array = mesh.surface_get_arrays(0)
 		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
-		t.eq(vertices.size(), blades * 6, "%d blades have six vertices each" % blades)
-		t.eq(indices.size(), blades * 12, "%d blades have four triangles each" % blades)
+		var crossed: int = blades if blades >= 18 else (ceili(float(blades) * 0.5) if blades >= 9 else 0)
+		var ribbons: int = blades + crossed
+		var petal_vertices: int = vertices.size() - ribbons * 6
+		t.check(petal_vertices >= 0 and petal_vertices % 20 == 0,
+			"%d blades have two six-vertex ribbons near, plus optional flower petals" % blades)
+		var flower_heads: int = petal_vertices / 20
+		t.eq(indices.size(), ribbons * 12 + flower_heads * 30,
+			"%d blades have four triangles per ribbon plus five-petal flower heads" % blades)
 		t.check(indices.size() < previous_triangles, "lower LOD draws fewer triangles")
 		previous_triangles = indices.size()
 	t.check(GrassField.clump_mesh(18) == GrassField.clump_mesh(18), "near mesh is reused across tiles")
 	t.check(GrassField.clump_mesh(4) == GrassField.clump_mesh(4), "far mesh is reused across tiles")
+
+	t.current = "grass blades have real side-on volume"
+	var near_arrays: Array = GrassField.clump_mesh(18).surface_get_arrays(0)
+	var near_vertices: PackedVector3Array = near_arrays[Mesh.ARRAY_VERTEX]
+	var near_uvs: PackedVector2Array = near_arrays[Mesh.ARRAY_TEX_UV]
+	var near_normals: PackedVector3Array = near_arrays[Mesh.ARRAY_NORMAL]
+	var at := 0
+	var total_root_width := 0.0
+	var curved_count := 0
+	var angled_normals := 0
+	for blade in 18:
+		var root_middle: Vector3 = (near_vertices[at] + near_vertices[at + 1]) * 0.5
+		var shoulder_middle: Vector3 = (near_vertices[at + 2] + near_vertices[at + 3]) * 0.5
+		var tip_middle: Vector3 = (near_vertices[at + 4] + near_vertices[at + 5]) * 0.5
+		var axis_front: Vector3 = (near_vertices[at + 1] - near_vertices[at]).normalized()
+		var axis_side: Vector3 = (near_vertices[at + 7] - near_vertices[at + 6]).normalized()
+		var root_width: float = near_vertices[at].distance_to(near_vertices[at + 1])
+		var shoulder_width: float = near_vertices[at + 2].distance_to(near_vertices[at + 3])
+		var tip_width: float = near_vertices[at + 4].distance_to(near_vertices[at + 5])
+		total_root_width += root_width
+		t.check(absf(axis_front.dot(axis_side)) < 0.4,
+			"crossed ribbons give blade %d a broad edge-on silhouette" % blade)
+		t.check(shoulder_width > tip_width, "grass widens at the shoulder and tapers to the tip")
+		if shoulder_middle.distance_to(root_middle.lerp(tip_middle, 0.54)) > 0.004:
+			curved_count += 1
+		if near_normals[at].distance_to(Vector3.UP) > 0.1:
+			angled_normals += 1
+		at += 12
+		# Five four-vertex petals are interleaved after the crossed flower blade.
+		if at < near_vertices.size() and near_uvs[at].y > 1.2:
+			at += 20
+	t.eq(at, near_vertices.size(), "every flower and crossed blade has a complete indexed mesh")
+	t.check(total_root_width / 18.0 > 0.035,
+		"near grass blades have more width than the old paper-thin quads")
+	t.check(curved_count >= 9, "at least half the blades have non-linear bends")
+	t.check(angled_normals >= 9, "normals vary around the grass")
+	t.check(GrassField.SHADER_CODE.contains("MODEL_MATRIX * vec4(NORMAL, 0.0)"),
+		"shader shades the two real ribbon orientations separately")
+
+	t.current = "grass edge-on detail is budgeted by LOD"
+	var near_mesh: ArrayMesh = GrassField.clump_mesh(18)
+	var middle_mesh: ArrayMesh = GrassField.clump_mesh(9)
+	var far_mesh: ArrayMesh = GrassField.clump_mesh(4)
+	var near_indices: PackedInt32Array = near_mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+	var middle_indices: PackedInt32Array = middle_mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+	var far_indices: PackedInt32Array = far_mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+	var near_size: int = near_indices.size()
+	var middle_size: int = middle_indices.size()
+	var far_size: int = far_indices.size()
+	t.check(near_size > middle_size and middle_size > far_size,
+		"crossed geometry is limited to nearby LODs")
+	t.check(GrassField.BLADE_WIDTH_SCALE >= 1.2,
+		"blade width is large enough for crossed ribbons to remain visible")
 
 	t.current = "grass LOD hysteresis"
 	t.eq(GrassField.lod_for_distance(0.0), 0, "close view uses highest geometry")
