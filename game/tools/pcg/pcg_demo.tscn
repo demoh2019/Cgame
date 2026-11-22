@@ -1,18 +1,41 @@
 [gd_scene format=3]
 
-[ext_resource type="PCGGraph" path="res://tools/pcg/biome_clutter.tres" id="1_0kcts"]
+[ext_resource type="PCGGraph" path="res://tools/pcg/scatter_demo.tres" id="1_0kcts"]
 
-[node name="PCGDemoRoot" type="Node3D" unique_id=1825523881]
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_hegpf"]
+albedo_color = Color(0.62, 0.42, 0.22, 1)
 
-[node name="PCGDemo" type="PCGComponent3D" parent="." unique_id=1706912149]
+[sub_resource type="BoxMesh" id="BoxMesh_1vobk"]
+material = SubResource("StandardMaterial3D_hegpf")
+size = Vector3(0.9, 0.9, 0.9)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_iusmb"]
+albedo_color = Color(0.52, 0.53, 0.55, 1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_ks4ss"]
+material = SubResource("StandardMaterial3D_iusmb")
+height = 0.7
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_uxtnq"]
+size = Vector2(64, 64)
+
+[node name="PCGDemoRoot" type="Node3D" unique_id=1048772888]
+
+[node name="PCGDemo" type="PCGComponent3D" parent="." unique_id=665888498]
 graph = ExtResource("1_0kcts")
-extents = Vector3(48, 50, 48)
+extents = Vector3(32, 20, 32)
 generate_on_ready = true
 async = false
 debug_draw = true
+asset_meshes = Array[Mesh]([SubResource("BoxMesh_1vobk"), SubResource("SphereMesh_ks4ss")])
 
-[node name="KeepClear" type="PCGExclusionVolume3D" parent="." unique_id=857377182]
-size = Vector3(16, 8, 16)
+[node name="KeepClear" type="PCGExclusionVolume3D" parent="." unique_id=887838999]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 0, -6)
+size = Vector3(12, 8, 12)
 
-[node name="@DirectionalLight3D@2" type="DirectionalLight3D" parent="." unique_id=1356723361]
+[node name="Ground" type="MeshInstance3D" parent="." unique_id=1055395844]
+mesh = SubResource("PlaneMesh_uxtnq")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=341749901]
 transform = Transform3D(0.8660254, -0.38302222, 0.32139382, 0, 0.64278764, 0.76604444, -0.5, -0.66341394, 0.5566704, 0, 0, 0)
+shadow_enabled = true

@@ -77,6 +77,9 @@ class PCGGraphEditor : public VBoxContainer {
 	Vector<int> _selected_ids() const;
 
 	void _rebuild();
+	// Zoom and scroll so every node fits below the GraphEdit toolbar (run after layout: deferred twice).
+	void _frame_all();
+	void _frame_all_after_layout();
 	void _queue_rebuild();
 	void _graph_changed();
 	void _refresh_info();

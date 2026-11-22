@@ -33,6 +33,9 @@ func _enter_tree() -> void:
 
     _summary = Label.new()
     _summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    # A wrapping label needs a width floor: squeezed to ~30 px in a shared dock it wraps one word per line, demands
+    # thousands of pixels of height and pushes the whole editor (bottom panels included) off the window.
+    _summary.custom_minimum_size = Vector2(260, 0)
     _dock.add_child(_summary)
 
     _view = Tree.new()
@@ -53,6 +56,7 @@ func _enter_tree() -> void:
 
     _details = Label.new()
     _details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    _details.custom_minimum_size = Vector2(260, 0)
     _details.text = "Select a task to inspect its resource path."
     _dock.add_child(_details)
 

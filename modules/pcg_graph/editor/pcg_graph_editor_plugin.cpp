@@ -709,7 +709,8 @@ void PCGGraphEditor::edit_graph(const Ref<PCGGraph> &p_graph, PCGComponent3D *p_
 	if (graph.is_valid() && graph->is_connected(CoreStringName(changed), callable_mp(this, &PCGGraphEditor::_graph_changed))) {
 		graph->disconnect(CoreStringName(changed), callable_mp(this, &PCGGraphEditor::_graph_changed));
 	}
-	if (graph != p_graph || _get_component() != p_component) {
+	const bool opened_new = graph != p_graph || _get_component() != p_component;
+	if (opened_new) {
 		_clear_debug_mesh();
 		selected_id = -1;
 		last_result = Dictionary();
@@ -723,7 +724,42 @@ void PCGGraphEditor::edit_graph(const Ref<PCGGraph> &p_graph, PCGComponent3D *p_
 	_rebuild();
 	if (graph.is_valid()) {
 		refresh_timer->start();
+		if (opened_new) {
+			// GraphNode sizes are known only after the next layout pass.
+			callable_mp(this, &PCGGraphEditor::_frame_all_after_layout).call_deferred();
+		}
 	}
+}
+
+void PCGGraphEditor::_frame_all_after_layout() {
+	callable_mp(this, &PCGGraphEditor::_frame_all).call_deferred();
+}
+
+void PCGGraphEditor::_frame_all() {
+	Rect2 bounds;
+	bool any = false;
+	for (int i = 0; i < graph_edit->get_child_count(); i++) {
+		GraphNode *gn = Object::cast_to<GraphNode>(graph_edit->get_child(i));
+		if (gn == nullptr) {
+			continue;
+		}
+		const Rect2 rect(gn->get_position_offset(), gn->get_size());
+		bounds = any ? bounds.merge(rect) : rect;
+		any = true;
+	}
+	if (!any || bounds.size.x <= 0.0f || bounds.size.y <= 0.0f) {
+		return;
+	}
+	// Leave room for the GraphEdit toolbar (zoom, grid, minimap buttons) along the top.
+	const Vector2 margin = Vector2(24, 24) * EDSCALE;
+	const float toolbar = 56 * EDSCALE;
+	const Vector2 available = graph_edit->get_size() - margin * 2.0f - Vector2(0, toolbar);
+	if (available.x <= 0.0f || available.y <= 0.0f) {
+		return;
+	}
+	const float zoom = CLAMP(MIN(available.x / bounds.size.x, available.y / bounds.size.y), graph_edit->get_zoom_min(), 1.0f);
+	graph_edit->set_zoom(zoom);
+	graph_edit->set_scroll_offset(bounds.position * zoom - margin - Vector2(0, toolbar));
 }
 
 void PCGGraphEditor::on_hidden() {
@@ -902,7 +938,8 @@ void PCGGraphEditorPlugin::make_visible(bool p_visible) {
 
 PCGGraphEditorPlugin::PCGGraphEditorPlugin() {
 	graph_editor = memnew(PCGGraphEditor);
-	graph_editor->set_custom_minimum_size(Size2(0, 320 * EDSCALE));
+	// Small floor like the built-in bottom panels: a tall minimum pushes the 3D view and the panel off-window on short screens.
+	graph_editor->set_custom_minimum_size(Size2(0, 180 * EDSCALE));
 	bottom_button = EditorNode::get_bottom_panel()->add_item(TTR("PCG Graph"), graph_editor);
 	bottom_button->hide();
 

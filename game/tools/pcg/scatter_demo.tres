@@ -1,0 +1,103 @@
+[gd_resource type="PCGGraph" format=3]
+
+[sub_resource type="PCGSurfaceSamplerNode" id="PCGSurfaceSamplerNode_yl5ul"]
+node_id = 1
+title = "Ground lattice"
+parameter_bindings = {
+&"spacing": &"spacing"
+}
+spacing = 2.5
+jitter = 0.9
+
+[sub_resource type="PCGDensityNoiseNode" id="PCGDensityNoiseNode_72w7u"]
+node_id = 2
+title = "Patchiness"
+graph_position = Vector2(240, 90)
+frequency = 0.06
+contrast = 2.2
+
+[sub_resource type="PCGDensityFilterNode" id="PCGDensityFilterNode_eme5t"]
+node_id = 3
+title = "Roll density"
+graph_position = Vector2(480, 0)
+
+[sub_resource type="PCGExclusionFilterNode" id="PCGExclusionFilterNode_tg1yx"]
+node_id = 4
+title = "Exclusion volumes"
+graph_position = Vector2(720, 90)
+margin = 0.5
+
+[sub_resource type="PCGSelfPruneNode" id="PCGSelfPruneNode_tk0q7"]
+node_id = 5
+title = "Spacing"
+graph_position = Vector2(960, 0)
+min_distance = 2.0
+
+[sub_resource type="PCGTransformNode" id="PCGTransformNode_m58bf"]
+node_id = 6
+title = "Random yaw/scale"
+graph_position = Vector2(1200, 90)
+scale_min = 0.6
+scale_max = 1.4
+
+[sub_resource type="PCGAssetRuleNode" id="PCGAssetRuleNode_b7syq"]
+node_id = 7
+title = "Crates or rocks"
+graph_position = Vector2(1440, 0)
+rules = [{
+"asset": 0,
+"min_density": 0.55,
+"weight": 1.0
+}, {
+"asset": 1,
+"weight": 3.0
+}]
+
+[sub_resource type="PCGClusterNode" id="PCGClusterNode_4y387"]
+node_id = 8
+title = "HLOD clusters"
+graph_position = Vector2(1680, 90)
+cluster_size = 24.0
+
+[sub_resource type="PCGOutputNode" id="PCGOutputNode_4mlk6"]
+node_id = 9
+graph_position = Vector2(1920, 0)
+
+[resource]
+nodes = Array[PCGNode]([SubResource("PCGSurfaceSamplerNode_yl5ul"), SubResource("PCGDensityNoiseNode_72w7u"), SubResource("PCGDensityFilterNode_eme5t"), SubResource("PCGExclusionFilterNode_tg1yx"), SubResource("PCGSelfPruneNode_tk0q7"), SubResource("PCGTransformNode_m58bf"), SubResource("PCGAssetRuleNode_b7syq"), SubResource("PCGClusterNode_4y387"), SubResource("PCGOutputNode_4mlk6")])
+connections = [{
+"from": 1,
+"to": 2,
+"to_port": 0
+}, {
+"from": 2,
+"to": 3,
+"to_port": 0
+}, {
+"from": 3,
+"to": 4,
+"to_port": 0
+}, {
+"from": 4,
+"to": 5,
+"to_port": 0
+}, {
+"from": 5,
+"to": 6,
+"to_port": 0
+}, {
+"from": 6,
+"to": 7,
+"to_port": 0
+}, {
+"from": 7,
+"to": 8,
+"to_port": 0
+}, {
+"from": 8,
+"to": 9,
+"to_port": 0
+}]
+parameters = {
+&"spacing": 2.5
+}
