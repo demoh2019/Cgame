@@ -398,6 +398,20 @@ const AI_CROWD_SEPARATION_RADIUS := 2.5
 const AI_CROWD_LOOKAHEAD_SECONDS := 0.75 # Mass-style desired-velocity anticipation.
 var _crowd_separation_enabled: bool = false
 var last_crowd_separation_stats: Dictionary = {"enabled": false, "population": 0, "sources": 0}
+# ORCA crowd avoidance for chasing infected near players (CgameCrowdAvoidance). Native only: the
+# GDScript ORCA fallback is too slow for the 20 Hz server tick, so without the native class this
+# stays off and pursuit movement is exactly the pre-existing behaviour.
+const CrowdFacade = preload("res://scripts/native/cgame_crowd_facade.gd")
+const AI_CHASE_AVOIDANCE_TICKS := 2 # 10 Hz; corrections persist between refreshes.
+const AI_CHASE_AVOIDANCE_NEAR := 40.0 # Only infected this close to a living player take part.
+const AI_CHASE_AVOIDANCE_MAX_AGENTS := 512
+const AI_CHASE_AVOIDANCE_RADIUS := 0.55 # Body radius used by ORCA (m).
+const AI_CHASE_AVOIDANCE_HORIZON := 1.0
+const AI_CHASE_AVOIDANCE_NEIGHBOR_DIST := 4.0
+const AI_CHASE_AVOIDANCE_NEIGHBORS := 8
+var crowd_avoidance_enabled: bool = CrowdFacade.has_native_crowd() # Server flag; forced off without native.
+var last_chase_avoidance_stats: Dictionary = {"enabled": false, "agents": 0, "chasers": 0}
+var _chase_avoidance_dirty: bool = false # Some infected may hold a correction that must be cleared.
 # EQS-style nearest cue query: one native spatial index for 3 passive senses.
 const AI_CUE_NATIVE_MIN_NPCS := 32
 const AI_CUE_NATIVE_MIN_SOURCES := 4
@@ -8290,6 +8304,88 @@ func _refresh_passive_crowd_separation(cohort: Array) -> void:
 		"predictive": predictive}
 
 
+func get_chase_avoidance_stats() -> Dictionary:
+	return last_chase_avoidance_stats.duplicate(true)
+
+
+## ORCA velocity correction for infected chasing a survivor near players. Every alive infected
+## within AI_CHASE_AVOIDANCE_NEAR of a living player is an ORCA agent (sorted by id, so the result
+## is independent of dictionary order); only out-of-reach CHASE agents get a preferred velocity
+## toward their target and receive the correction, which Zombie applies to its flank-pursuit step
+## only. Attack, leap/pounce, perch, flank-goal and target logic are untouched.
+func _refresh_chase_crowd_avoidance(cohort: Array, info: Dictionary) -> void:
+	var active: bool = crowd_avoidance_enabled and CrowdFacade.has_native_crowd()
+	if not active and not _chase_avoidance_dirty:
+		last_chase_avoidance_stats = {"enabled": false, "agents": 0, "chasers": 0}
+		return # Off (flag or no native class): zero per-tick cost, pursuit unchanged.
+	var anchors: Array = []
+	if active:
+		for peer_id in info:
+			var entry: Dictionary = info[peer_id]
+			if bool(entry["alive"]):
+				var p: Vector3 = entry["position"]
+				anchors.append(Vector2(p.x, p.z))
+	var agents: Array = []
+	if active and not anchors.is_empty():
+		var near_sq: float = AI_CHASE_AVOIDANCE_NEAR * AI_CHASE_AVOIDANCE_NEAR
+		for infected in cohort:
+			if not infected.is_alive() or not infected.position.is_finite():
+				continue
+			var here := Vector2(infected.position.x, infected.position.z)
+			for anchor in anchors:
+				if here.distance_squared_to(anchor) <= near_sq:
+					agents.append(infected)
+					break
+		agents.sort_custom(func(a, b) -> bool: return int(a.id) < int(b.id))
+		if agents.size() > AI_CHASE_AVOIDANCE_MAX_AGENTS:
+			agents.resize(AI_CHASE_AVOIDANCE_MAX_AGENTS)
+	var chasers: Array = []
+	var chaser_slots := PackedInt32Array()
+	var positions := PackedVector2Array()
+	var preferred := PackedVector2Array()
+	var max_speed: float = 0.1
+	for infected in agents:
+		var here := Vector2(infected.position.x, infected.position.z)
+		var want := Vector2.ZERO
+		if infected.state == Zombie.State.CHASE and info.has(infected.target_id) \
+				and not infected.raid_boss and not infected.perched and not pounces.has(infected.id) \
+				and infected.snared_seconds <= 0.0 and infected.stagger_seconds <= 0.0:
+			var target_pos: Vector3 = info[infected.target_id]["position"]
+			var toward: Vector2 = Vector2(target_pos.x, target_pos.z) - here
+			var speed: float = clampf(float(infected.data["speed"]), 0.0, 20.0)
+			if toward.length() > float(infected.data["attack_range"]) and speed > 0.0:
+				want = toward.normalized() * speed
+				max_speed = maxf(max_speed, speed)
+				chasers.append(infected)
+				chaser_slots.append(positions.size())
+		positions.append(here)
+		preferred.append(want)
+	# Clear every stale correction first; only this refresh's chasers get a new one.
+	for infected in cohort:
+		infected.set_chase_crowd_correction(Vector2.ZERO)
+	_chase_avoidance_dirty = false
+	if chasers.size() < 2:
+		last_chase_avoidance_stats = {"enabled": active, "agents": agents.size(), "chasers": chasers.size()}
+		return
+	var result: PackedVector2Array = CrowdFacade.compute_velocities(positions, preferred, preferred,
+		AI_CHASE_AVOIDANCE_RADIUS, max_speed, AI_CHASE_AVOIDANCE_HORIZON,
+		AI_CHASE_AVOIDANCE_NEIGHBOR_DIST, AI_CHASE_AVOIDANCE_NEIGHBORS, 0.05 * AI_CHASE_AVOIDANCE_TICKS)
+	if result.size() != positions.size():
+		last_chase_avoidance_stats = {"enabled": false, "agents": agents.size(), "chasers": chasers.size()}
+		return
+	var corrected := 0
+	for k in chasers.size():
+		var slot: int = chaser_slots[k]
+		var want: Vector2 = preferred[slot]
+		var correction: Vector2 = (result[slot] - want) / maxf(want.length(), 0.1)
+		if correction.is_finite() and correction.length_squared() > 0.0004:
+			chasers[k].set_chase_crowd_correction(correction)
+			_chase_avoidance_dirty = true
+			corrected += 1
+	last_chase_avoidance_stats = {"enabled": true, "agents": agents.size(),
+		"chasers": chasers.size(), "corrected": corrected, "period_ticks": AI_CHASE_AVOIDANCE_TICKS}
+
+
 ## Server-only profiling; candidate counts are prefilters, never confirmed hits.
 func get_snare_query_stats() -> Dictionary:
 	return last_snare_query_stats.duplicate(true)
@@ -8535,6 +8631,9 @@ func _tick_zombies(delta: float) -> void:
 			or (_crowd_separation_enabled and (ai_cohort.size() < AI_CROWD_SEPARATION_MIN \
 			or ai_cohort.size() > AI_CROWD_SEPARATION_MAX)):
 		_refresh_passive_crowd_separation(ai_cohort)
+	# Native ORCA correction for chasing packs near players (flag + native class gated).
+	if tick_count % AI_CHASE_AVOIDANCE_TICKS == 0:
+		_refresh_chase_crowd_avoidance(ai_cohort, info)
 	# Snapshot trap order once and use source-to-target spatial hashing.
 	# Exact trap rules remain in _try_trigger_infected_snare(), and removed
 	# traps are ignored when later NPCs encounter the same index.

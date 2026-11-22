@@ -69,6 +69,9 @@ var _ai_trace: Variant = null # Opt-in server-only native target decision trace.
 var _ai_lod_staggered: bool = false # Phase only the first distant passive scan.
 var _ai_lod_previous_interval: float = 0.0 # Per-infected nominal passive tier; engine stays stateless.
 var _passive_crowd_separation: Vector2 = Vector2.ZERO # Server-sampled cosmetic steering; never combat authority.
+var _chase_crowd_correction: Vector2 = Vector2.ZERO # Server ORCA correction for pursuit movement only (bounded).
+var _chase_avoidance_active: bool = false # True only while the flank-pursuit step moves this infected.
+const CHASE_CROWD_CORRECTION_MAX := 0.75 # Never enough to reverse or stall a pursuit.
 static var _ai_lod_checked: bool = false
 static var _ai_lod_scheduler: Variant = null
 var _native_howl_cooldowns: Variant = null # Lazily allocated native event gate for pack howls.
@@ -523,7 +526,11 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 						result = {"hit": target_id, "damage": float(data["damage"])}
 			else:
 				state = State.CHASE
+				# Only this out-of-reach pursuit step takes the server's ORCA crowd correction;
+				# attacks, blocked-claw approach, leaps and the flank goal itself are untouched.
+				_chase_avoidance_active = true
 				_move_toward(world, here, _flank_goal(here, target), float(data["speed"]), delta)
+				_chase_avoidance_active = false
 	return result
 
 
@@ -970,6 +977,16 @@ func set_passive_crowd_separation(value: Vector2) -> void:
 	_passive_crowd_separation = value.limit_length(1.0) if value.is_finite() else Vector2.ZERO
 
 
+## Server-computed ORCA correction (velocity delta / speed) for the flank-pursuit step only.
+## Malformed or oversized values are clamped; zero disables it.
+func set_chase_crowd_correction(value: Vector2) -> void:
+	_chase_crowd_correction = value.limit_length(CHASE_CROWD_CORRECTION_MAX) if value.is_finite() else Vector2.ZERO
+
+
+func get_chase_crowd_correction() -> Vector2:
+	return _chase_crowd_correction
+
+
 func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: float) -> void:
 	if snared_seconds > 0.0:
 		stuck_time = 0.0 # A trap cannot be mistaken for a wall to damage.
@@ -982,6 +999,12 @@ func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: floa
 	# Never divert pursuit, melee, boss attacks, snares or combat knockback.
 	if state == State.WANDER or state == State.INVESTIGATE:
 		direction = (direction + _passive_crowd_separation * 0.35).normalized()
+	elif _chase_avoidance_active and _chase_crowd_correction != Vector2.ZERO:
+		# ORCA (CgameCrowdAvoidance) velocity correction keeps a chasing pack from piling
+		# into one file; bounded so the pursuit heading always keeps a forward component.
+		var corrected: Vector2 = direction + _chase_crowd_correction
+		if corrected.dot(direction) > 0.05:
+			direction = corrected.normalized()
 	yaw = atan2(direction.x, direction.y)
 	var before := position
 	# Zombies use the same movement rules as players, so they are stopped by trees, rocks and deep water.
