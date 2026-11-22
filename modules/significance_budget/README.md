@@ -179,7 +179,7 @@ var selected := plan.select_world_priority_stable_cone(
   This is a **cosmetic scheduling/cone heuristic**, not the renderer's
   actual frustum-plane test or GPU occlusion culling.
 
-`games/days_after/debris_lod.gd` now uses this API for 96 small
+the removed Days After prototype (`debris_lod.gd`, in git history) now uses this API for 96 small
 ruin fragments, with a strict 18-fragment presentation budget.
 Camera direction updates which details are considered while the 5.5m
 near field keeps close items from disappearing behind the camera.

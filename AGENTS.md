@@ -4,6 +4,16 @@ Godot 4.8 engine fork ("Cgame") at the repo root, plus a game project in `game/`
 open world, Albion-style tiers/zones/full loot, Days-After-style scavenging and zombies). Custom engine
 modules live in `modules/cgame_*`; the game-side libraries are GDScript.
 
+## One game
+
+There is exactly one game: `game/` (Albion After). Every gameplay feature, visual, sound or UI change goes
+there, wired into the default client `scripts/client/online_main.tscn` (Play solo / Join server) and,
+for rules, into the server (`scripts/server/game_server.gd`). Do not create another game project under
+`demo/`, `demos/`, `games/` or `misc/` — the five parallel survival prototypes were merged away on
+2026-11-22 because work landed in them and never reached the game. Projects left in `demo/`, `demos/`
+and `misc/` are engine feature labs and benchmarks, not games. `scripts/client/client_main.tscn` is a
+legacy local preview kept for tests; do not add features only there.
+
 ## Build (only when asked, it is slow)
 
 - `scons` reads `custom.py` (platform=macos target=editor arch=arm64, accesskit=no, angle=no).

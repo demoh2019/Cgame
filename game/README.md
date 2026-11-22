@@ -1,7 +1,7 @@
 # Albion After — main game
 
 **This is the canonical game project at `game/`.** All new gameplay
-features belong here; demos under `demo/` and `games/` are prototypes.
+features belong here. It is the only game in the repository; `demo/` and `misc/` hold engine labs, not games.
 
 **New engine/game feature — bounded AI decision replay:** Cgame now records optional multi-tick BehaviorTree traces, allows skipping unchanged decisions and ranks CPU-heavy tasks by estimated exclusive execution time. The playable sandbox has Previous/Next/Live replay, while Albion After server NPCs expose an optional eight-tick private decision history. See [Native AI Perception and Diagnostics](docs/NATIVE_AI_PERCEPTION.md).
 

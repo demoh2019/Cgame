@@ -186,7 +186,7 @@ var indices := filter.filter_indices_excluding(
 
 ## Game integration
 
-`games/days_after/foliage_scatter.gd` generates candidate grass positions on
+the removed Days After prototype (`foliage_scatter.gd`, in git history) generates candidate grass positions on
 a shuffled deterministic grid, reserves spherical areas around player spawn,
 ruins, resources and barricades, and draws up to 160 instances in bounded MultiMesh batches
 batch. On Cgame, it calls the native API; on stock Godot, it follows the same
@@ -270,7 +270,7 @@ var selected := pcg.filter_indices_excluding_oriented_volumes(
   16,384 finite bounded positions, 128 rotated boxes, half-extents 0–10,000,
   4,096 selected indices, and existing sphere/AABB/spacing rules. Invalid
   requests reject the whole operation.
-- `games/days_after/main.gd` now includes a genuinely rotated
+- the removed Days After prototype (`main.gd`, in git history) now includes a genuinely rotated
   `DiagonalFence` collision/mesh. `foliage_scatter.gd` uses its matching
   oriented footprint in the native pipeline and the standalone GDScript
   fallback. The headless smoke checks the physical fence rotation, exclusion
@@ -400,7 +400,7 @@ var variants := selector.choose_variants(
 - The selector is deterministic and CPU-only, but **does not perform
   spacing, exclusions, mesh creation, texture loading or GPU rendering**.
   Compose with existing native PCG filters for those behaviors.
-- `games/days_after/pcg_weighted_variants.gd` implements the same
+- the removed Days After prototype (`pcg_weighted_variants.gd`, in git history) implements the same
   unsigned 32-bit operations for stock Godot. Native C++ doctests and a
   headless gameplay runner check stable ID behavior, weight ratios,
   invalid input, zero weights and parity.
@@ -446,7 +446,7 @@ var posts := sampler.sample_positions(route_waypoints, 1.35, 192, true)
   sampler does not calculate cubic Bézier tangents, pathfinding,
   terrain projection, or camera visibility; those are distinct tasks.
 
-In `games/days_after/trail_markers.gd`, the live scene places
+In the removed Days After prototype (`trail_markers.gd`, in git history), the live scene places
 path-aligned ground stones at native sampled positions using **one
 MultiMesh**, skips stones within building AABBs, and supplies the same
 sampling algorithm in GDScript for stock Godot. Native unit tests and
@@ -479,7 +479,7 @@ instances**. Valid empty inputs yield the requested number of empty groups.
 It never touches meshes, materials, scene nodes, physics or renderer state,
 so engine users can separately build their own per-mesh MultiMeshes.
 
-`games/days_after/pcg_weighted_variants.gd` provides an independent
+the removed Days After prototype (`pcg_weighted_variants.gd`, in git history) provides an independent
 stock-Godot fallback. Existing `choose_variants()` remains unchanged.
 The playable Days After scene takes each group's original source indices,
 creates a distinct primitive mesh for each of the three variant types,
