@@ -165,6 +165,7 @@ public:
 
 	virtual void multimesh_set_visible_instances(RID p_multimesh, int p_visible);
 	virtual int multimesh_get_visible_instances(RID p_multimesh) const;
+	virtual void multimesh_set_gpu_culling(RID p_multimesh, bool p_enabled, float p_max_distance, float p_density_start, float p_min_density) { _multimesh_set_gpu_culling(p_multimesh, p_enabled, p_max_distance, p_density_start, p_min_density); }
 
 	virtual AABB multimesh_get_aabb(RID p_multimesh);
 
@@ -203,6 +204,7 @@ public:
 	virtual AABB _multimesh_get_aabb(RID p_multimesh) = 0;
 	// Largest per-instance transform scale (used to scale LOD selection). 1.0 when unknown.
 	virtual float _multimesh_get_lod_scale(RID p_multimesh) const { return 1.0f; }
+	virtual void _multimesh_set_gpu_culling(RID p_multimesh, bool p_enabled, float p_max_distance, float p_density_start, float p_min_density) {} // Renderers without GPU culling draw every instance.
 
 	// Multimesh is responsible for allocating / destroying a MultiMeshInterpolator object.
 	// This allows shared functionality for interpolation across backends.

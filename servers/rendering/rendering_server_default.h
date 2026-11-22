@@ -483,6 +483,7 @@ public:
 
 	FUNC2(multimesh_set_visible_instances, RID, int)
 	FUNC1RC(int, multimesh_get_visible_instances, RID)
+	FUNC5(multimesh_set_gpu_culling, RID, bool, float, float, float)
 
 	/* SKELETON API */
 

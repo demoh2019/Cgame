@@ -6,12 +6,15 @@ extends RefCounted
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const RoadMaskMaxFilter = preload("res://scripts/client/road_mask_max_filter.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
+const GpuCulling = preload("res://scripts/native/cgame_gpu_culling.gd")
 
 const SPACING := 0.55 # Metres between tuft candidates (jittered): dense enough that the soil barely shows.
 const CLUMP_CELL := 3.2 # Size of the patches (Voronoi cells) that share a height and a shade.
 const TILE := 16.0 # Each chunk is cut into tiles of this size, so the camera only draws the tiles it sees.
 const FADE_START := 44.0 # Horizontal distance from the camera where the blades begin to sink, and where they are gone.
 const FADE_END := 60.0
+## Share of blades kept at the far end of the range (engine GPU density LOD; survivors grow). Set per quality.
+static var far_density: float = 1.0
 # Geometry LOD reduces GPU vertex work without changing tuft placement or the close-up silhouette.
 # Hysteresis prevents distracting geometry switches when the camera moves near a boundary.
 const LOD_BLADES := [18, 9, 4]
@@ -787,6 +790,8 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	# Drawn only while the tile's centre is near the camera; the shader has sunk the blades by then.
 	instance.visibility_range_end = FADE_END + 22.0
+	# Same range per blade instead of per tile centre, and blades off-screen are skipped on the GPU.
+	GpuCulling.enable(multimesh, instance.visibility_range_end, instance.visibility_range_end * 0.3, far_density)
 	instance.custom_aabb = AABB(Vector3(tile_x, low - 0.2, tile_z), Vector3(TILE, high - low + 1.4, TILE))
 	return instance
 

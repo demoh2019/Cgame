@@ -1,5 +1,6 @@
 extends RefCounted
 const GroundPlants = preload("res://scripts/client/ground_plants.gd")
+const GrassField = preload("res://scripts/client/grass_field.gd")
 
 ## User-selectable visual fidelity. Both the Compatibility and Forward+ renderers remain supported.
 ## Keep the choice local to the client; it must never affect authoritative simulation.
@@ -420,6 +421,8 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	GroundPlants.density_scale = GroundPlants.quality_scale(_level)
 	GroundPlants.distance_scale = GroundPlants.quality_distance_scale(_level)
 	GroundPlants.card_planes = GroundPlants.quality_card_planes(_level)
+	GroundPlants.far_density = GroundPlants.quality_far_density(_level)
+	GrassField.far_density = GroundPlants.quality_far_density(_level) # Applies to grass tiles built from now on.
 	# Reuse the game's existing 3-tier grass LOD; never rebuild world geometry on a preset switch.
 	ChunkView.configure_grass(float(world_profile["grass_build_radius"]), int(world_profile["grass_budget_usec"]),
 			float(world_profile["grass_fade_start"]), float(world_profile["grass_fade_end"]))

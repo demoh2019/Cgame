@@ -185,6 +185,15 @@ MeshStorage::MeshStorage() {
 			skeleton_shader.default_skeleton_uniform_set = RD::get_singleton()->uniform_set_create(uniforms, skeleton_shader.version_shader[0], SkeletonShader::UNIFORM_SET_SKELETON);
 		}
 	}
+
+	{
+		Vector<String> cull_modes;
+		cull_modes.push_back("");
+		multimesh_cull_shader.shader.initialize(cull_modes);
+		multimesh_cull_shader.version = multimesh_cull_shader.shader.version_create();
+		multimesh_cull_shader.version_shader = multimesh_cull_shader.shader.version_get_shader(multimesh_cull_shader.version, 0);
+		multimesh_cull_shader.pipeline = RD::get_singleton()->compute_pipeline_create(multimesh_cull_shader.version_shader);
+	}
 }
 
 MeshStorage::~MeshStorage() {
@@ -194,6 +203,7 @@ MeshStorage::~MeshStorage() {
 	}
 
 	skeleton_shader.shader.version_free(skeleton_shader.version);
+	multimesh_cull_shader.shader.version_free(multimesh_cull_shader.version);
 
 	RD::get_singleton()->free_rid(default_rd_storage_buffer);
 
@@ -1570,6 +1580,7 @@ void MeshStorage::_multimesh_free(RID p_rid) {
 	_update_dirty_multimeshes();
 	multimesh_allocate_data(p_rid, 0, RSE::MULTIMESH_TRANSFORM_2D);
 	MultiMesh *multimesh = multimesh_owner.get_or_null(p_rid);
+	_multimesh_free_cull_resources(multimesh);
 	multimesh->dependency.deleted_notify(p_rid);
 	multimesh_owner.free(p_rid);
 }
@@ -1581,6 +1592,8 @@ void MeshStorage::_multimesh_allocate_data(RID p_multimesh, int p_instances, RSE
 	if (multimesh->instances == p_instances && multimesh->xform_format == p_transform_format && multimesh->uses_colors == p_use_colors && multimesh->uses_custom_data == p_use_custom_data && multimesh->indirect == p_use_indirect) {
 		return;
 	}
+
+	_multimesh_free_cull_resources(multimesh);
 
 	if (multimesh->buffer.is_valid()) {
 		RD::get_singleton()->free_rid(multimesh->buffer);
@@ -1676,6 +1689,7 @@ void MeshStorage::_multimesh_enable_motion_vectors(MultiMesh *multimesh) {
 
 	multimesh->buffer = new_buffer;
 	multimesh->uniform_set_3d = RID(); // Cleared by dependency.
+	_multimesh_free_cull_resources(multimesh); // The compacted copy must match the doubled layout.
 
 	// Invalidate any references to the buffer that was released and the uniform set that was pointing to it.
 	multimesh->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_MULTIMESH);
@@ -1710,6 +1724,7 @@ void MeshStorage::_multimesh_set_mesh(RID p_multimesh, RID p_mesh) {
 		return;
 	}
 	multimesh->mesh = p_mesh;
+	_multimesh_free_cull_resources(multimesh); // Surface count (indirect commands) may change.
 
 	if (multimesh->indirect) {
 		ERR_FAIL_COND(p_mesh.is_null());
@@ -2602,4 +2617,161 @@ float MeshStorage::_multimesh_get_lod_scale(RID p_multimesh) const {
 	// (pooled VFX) simply has no instance scale yet.
 	const MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
 	return multimesh ? multimesh->lod_scale : 1.0f;
+}
+
+/* Cgame: GPU per-instance MultiMesh culling (Forward+) */
+
+void MeshStorage::_multimesh_free_cull_resources(MultiMesh *multimesh) {
+	// Freeing the buffers also frees the uniform sets that reference them.
+	if (multimesh->cull_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(multimesh->cull_buffer);
+	}
+	if (multimesh->cull_command_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(multimesh->cull_command_buffer);
+	}
+	multimesh->cull_buffer = RID();
+	multimesh->cull_command_buffer = RID();
+	multimesh->cull_uniform_set_3d = RID();
+	multimesh->cull_compute_set = RID();
+	multimesh->cull_surface_count = 0;
+}
+
+void MeshStorage::_multimesh_set_gpu_culling(RID p_multimesh, bool p_enabled, float p_max_distance, float p_density_start, float p_min_density) {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL(multimesh);
+	const float distance = MAX(0.0f, p_max_distance);
+	const float density_start = CLAMP(p_density_start, 0.0f, distance);
+	const float min_density = CLAMP(p_min_density, 0.0f, 1.0f);
+	if (multimesh->gpu_culling == p_enabled && multimesh->gpu_culling_distance == distance && multimesh->gpu_culling_density_start == density_start && multimesh->gpu_culling_min_density == min_density) {
+		return;
+	}
+	const bool was_enabled = multimesh->gpu_culling;
+	multimesh->gpu_culling = p_enabled;
+	multimesh->gpu_culling_distance = distance;
+	multimesh->gpu_culling_density_start = density_start;
+	multimesh->gpu_culling_min_density = min_density;
+	if (was_enabled == p_enabled) {
+		return; // Only parameters changed; they are read at dispatch time.
+	}
+	if (!p_enabled) {
+		_multimesh_free_cull_resources(multimesh);
+	}
+	// Geometry instances cache their draw flags; make them pick the culled path up (or drop it).
+	multimesh->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_MULTIMESH);
+}
+
+bool MeshStorage::multimesh_uses_gpu_culling(RID p_multimesh) const {
+	const MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	// Only plain 3D transforms; user-written indirect commands keep their own instance counts.
+	return multimesh && multimesh->gpu_culling && !multimesh->indirect && multimesh->xform_format == RSE::MULTIMESH_TRANSFORM_3D &&
+			multimesh->instances > 0 && multimesh->buffer.is_valid() && multimesh->mesh.is_valid();
+}
+
+bool MeshStorage::multimesh_gpu_cull_prepare(RID p_multimesh, const uint32_t *p_vertex_counts, uint32_t p_surface_count) {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	if (!multimesh || !multimesh_uses_gpu_culling(p_multimesh) || p_surface_count == 0 || p_surface_count > 255) {
+		return false;
+	}
+	if (multimesh->cull_surface_count != p_surface_count || multimesh->cull_buffer.is_null()) {
+		_multimesh_free_cull_resources(multimesh);
+		const uint32_t halves = multimesh->motion_vectors_enabled ? 2 : 1;
+		const uint32_t buffer_size = multimesh->instances * multimesh->stride_cache * sizeof(float) * halves;
+		multimesh->cull_buffer = RD::get_singleton()->storage_buffer_create(buffer_size);
+		multimesh->cull_command_buffer = RD::get_singleton()->storage_buffer_create(sizeof(uint32_t) * INDIRECT_MULTIMESH_COMMAND_STRIDE * p_surface_count, Vector<uint8_t>(), RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
+		multimesh->cull_surface_count = p_surface_count;
+	}
+	if (!multimesh->cull_compute_set.is_valid() || !RD::get_singleton()->uniform_set_is_valid(multimesh->cull_compute_set)) {
+		Vector<RD::Uniform> uniforms;
+		RD::Uniform src(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, multimesh->buffer);
+		RD::Uniform dst(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, multimesh->cull_buffer);
+		RD::Uniform commands(RD::UNIFORM_TYPE_STORAGE_BUFFER, 2, multimesh->cull_command_buffer);
+		uniforms.push_back(src);
+		uniforms.push_back(dst);
+		uniforms.push_back(commands);
+		multimesh->cull_compute_set = RD::get_singleton()->uniform_set_create(uniforms, multimesh_cull_shader.version_shader, 0);
+	}
+	// Per surface: [index or vertex count of the chosen LOD, instance count (written by the GPU), 0, 0, 0].
+	LocalVector<uint32_t> commands;
+	commands.resize_initialized(INDIRECT_MULTIMESH_COMMAND_STRIDE * p_surface_count);
+	for (uint32_t i = 0; i < p_surface_count; i++) {
+		commands[i * INDIRECT_MULTIMESH_COMMAND_STRIDE] = p_vertex_counts[i];
+	}
+	RD::get_singleton()->buffer_update(multimesh->cull_command_buffer, 0, commands.size() * sizeof(uint32_t), commands.ptr());
+	return true;
+}
+
+void MeshStorage::multimesh_gpu_cull_dispatch(RD::ComputeListID p_compute_list, RID p_multimesh, const Transform3D &p_transform, const Vector<Plane> &p_world_planes, const Vector3 &p_eye) {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	ERR_FAIL_NULL(multimesh);
+	ERR_FAIL_COND(p_world_planes.size() < 6 || multimesh->cull_compute_set.is_null());
+	const Mesh *mesh = mesh_owner.get_or_null(multimesh->mesh);
+	ERR_FAIL_NULL(mesh);
+
+	MultimeshCullShader::PushConstant push;
+	memset(&push, 0, sizeof(push));
+	// Projection planes are near, far, left, top, right, bottom. The far plane is left out: the camera clips
+	// there anyway and the distance limit does the useful far culling.
+	const Transform3D inverse = p_transform.affine_inverse();
+	const Basis transpose = p_transform.basis.transposed();
+	const int plane_ids[5] = { 0, 2, 3, 4, 5 };
+	for (int i = 0; i < 5; i++) {
+		const Plane local = Transform3D::xform_inv_fast(p_world_planes[plane_ids[i]], inverse, transpose);
+		push.planes[i][0] = local.normal.x;
+		push.planes[i][1] = local.normal.y;
+		push.planes[i][2] = local.normal.z;
+		push.planes[i][3] = local.d;
+	}
+	const Vector3 eye = inverse.xform(p_eye);
+	const Vector3 node_scale = p_transform.basis.get_scale_abs();
+	const float min_scale = MAX(0.000001f, MIN(node_scale.x, MIN(node_scale.y, node_scale.z)));
+	push.eye_and_distance[0] = eye.x;
+	push.eye_and_distance[1] = eye.y;
+	push.eye_and_distance[2] = eye.z;
+	// Converted to local units with the smallest node scale, so it never culls something within range.
+	push.eye_and_distance[3] = multimesh->gpu_culling_distance > 0.0f ? multimesh->gpu_culling_distance / min_scale : 0.0f;
+	const AABB box = mesh->custom_aabb.has_volume() ? mesh->custom_aabb : mesh->aabb;
+	const Vector3 center = box.get_center();
+	push.aabb_center_radius[0] = center.x;
+	push.aabb_center_radius[1] = center.y;
+	push.aabb_center_radius[2] = center.z;
+	push.aabb_center_radius[3] = (box.size * 0.5f).length();
+	const uint32_t count = multimesh->visible_instances >= 0 ? MIN(uint32_t(multimesh->visible_instances), uint32_t(multimesh->instances)) : uint32_t(multimesh->instances);
+	push.instance_count = count;
+	// Density LOD packed in the top bytes: minimum share kept, and where thinning starts as a fraction of the range.
+	uint32_t min_density = 255;
+	uint32_t density_start = 255;
+	if (multimesh->gpu_culling_distance > 0.0f && multimesh->gpu_culling_min_density < 1.0f) {
+		min_density = uint32_t(CLAMP(Math::round(multimesh->gpu_culling_min_density * 255.0f), 0.0f, 254.0f));
+		density_start = uint32_t(CLAMP(Math::round(multimesh->gpu_culling_density_start / multimesh->gpu_culling_distance * 255.0f), 0.0f, 255.0f));
+	}
+	push.stride_and_surfaces = (multimesh->stride_cache & 0xFF) | ((multimesh->cull_surface_count & 0xFF) << 8) | (min_density << 16) | (density_start << 24);
+	uint32_t current_offset = 0;
+	uint32_t previous_offset = 0;
+	_multimesh_get_motion_vectors_offsets(p_multimesh, current_offset, previous_offset);
+	push.current_offset = current_offset;
+	push.previous_offset = previous_offset;
+
+	RD::get_singleton()->compute_list_bind_compute_pipeline(p_compute_list, multimesh_cull_shader.pipeline);
+	RD::get_singleton()->compute_list_bind_uniform_set(p_compute_list, multimesh->cull_compute_set, 0);
+	RD::get_singleton()->compute_list_set_push_constant(p_compute_list, &push, sizeof(push));
+	RD::get_singleton()->compute_list_dispatch_threads(p_compute_list, MAX(1u, count), 1, 1);
+}
+
+RID MeshStorage::multimesh_get_cull_3d_uniform_set(RID p_multimesh, RID p_shader, uint32_t p_set) const {
+	MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	if (multimesh == nullptr || multimesh->cull_buffer.is_null()) {
+		return RID();
+	}
+	if (!multimesh->cull_uniform_set_3d.is_valid() || !RD::get_singleton()->uniform_set_is_valid(multimesh->cull_uniform_set_3d)) {
+		Vector<RD::Uniform> uniforms;
+		RD::Uniform u(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, multimesh->cull_buffer);
+		uniforms.push_back(u);
+		multimesh->cull_uniform_set_3d = RD::get_singleton()->uniform_set_create(uniforms, p_shader, p_set);
+	}
+	return multimesh->cull_uniform_set_3d;
+}
+
+RID MeshStorage::multimesh_get_cull_command_buffer(RID p_multimesh) const {
+	const MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	return multimesh ? multimesh->cull_command_buffer : RID();
 }

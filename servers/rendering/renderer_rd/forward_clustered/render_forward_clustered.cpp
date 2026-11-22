@@ -443,6 +443,18 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 		pipeline_key.primitive_type = surf->primitive;
 
 		RID xforms_uniform_set = surf->owner->transforms_uniform_set;
+		// Cgame: MultiMeshes culled on the GPU for this render draw their compacted instances (not in shadow,
+		// material or SDF passes, which see the scene from elsewhere and use the full buffer).
+		bool gpu_culled = false;
+		if constexpr (p_pass_mode != PASS_MODE_SHADOW && p_pass_mode != PASS_MODE_SHADOW_DP && p_pass_mode != PASS_MODE_DEPTH_MATERIAL && p_pass_mode != PASS_MODE_SDF) {
+			if (surf->owner->gpu_cull_render_id != 0 && surf->owner->gpu_cull_render_id == gpu_cull_render_id_current && surf->primitive != RSE::PRIMITIVE_POINTS) {
+				RID culled_set = mesh_storage->multimesh_get_cull_3d_uniform_set(surf->owner->data->base, scene_shader.default_shader_rd, TRANSFORMS_UNIFORM_SET);
+				if (culled_set.is_valid()) {
+					xforms_uniform_set = culled_set;
+					gpu_culled = true;
+				}
+			}
+		}
 
 		SceneShaderForwardClustered::ShaderSpecialization pipeline_specialization = p_params->base_specialization;
 		pipeline_specialization.multimesh = bool(surf->owner->base_flags & INSTANCE_DATA_FLAG_MULTIMESH);
@@ -635,6 +647,8 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 					WARN_PRINT("Indirect draws are not supported when emulating point size.");
 				}
 				RD::get_singleton()->draw_list_draw(draw_list, false, mesh_storage->mesh_surface_get_vertex_count(mesh_surface), instance_count * 6);
+			} else if (gpu_culled) {
+				RD::get_singleton()->draw_list_draw_indirect(draw_list, index_array_rd.is_valid(), mesh_storage->multimesh_get_cull_command_buffer(surf->owner->data->base), surf->surface_index * sizeof(uint32_t) * mesh_storage->INDIRECT_MULTIMESH_COMMAND_STRIDE, 1, 0);
 			} else if (indirect) {
 				RD::get_singleton()->draw_list_draw_indirect(draw_list, index_array_rd.is_valid(), mesh_storage->_multimesh_get_command_buffer_rd_rid(surf->owner->data->base), surf->surface_index * sizeof(uint32_t) * mesh_storage->INDIRECT_MULTIMESH_COMMAND_STRIDE, 1, 0);
 			} else {
@@ -960,6 +974,74 @@ _FORCE_INLINE_ static uint32_t _indices_to_primitives(RSE::PrimitiveType p_primi
 	static const uint32_t subtractor[RSE::PRIMITIVE_MAX] = { 0, 0, 1, 0, 2 };
 	return (p_indices - subtractor[p_primitive]) / divisor[p_primitive];
 }
+void RenderForwardClustered::_gpu_cull_multimeshes(const RenderDataRD *p_render_data) {
+	// Cgame: a MultiMesh is otherwise drawn whole whenever its combined AABB is visible. For MultiMeshes that opt
+	// in (MultiMesh.gpu_culling), one compute dispatch tests every instance against this camera's frustum and
+	// draw distance and packs the survivors; the colour, depth pre-pass and motion passes then draw them
+	// indirectly. Shadow passes keep the full buffer.
+	gpu_cull_render_id_current++;
+	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
+
+	struct Pending {
+		GeometryInstanceForwardClustered *owner = nullptr;
+		LocalVector<uint32_t> counts;
+	};
+	LocalVector<Pending> pending;
+	HashMap<GeometryInstanceForwardClustered *, uint32_t> index_of;
+
+	const RenderListType lists[3] = { RENDER_LIST_OPAQUE, RENDER_LIST_MOTION, RENDER_LIST_ALPHA };
+	for (RenderListType list_type : lists) {
+		RenderList &list = render_list[list_type];
+		for (uint32_t i = 0; i < list.elements.size(); i++) {
+			GeometryInstanceSurfaceDataCache *surf = list.elements[i];
+			GeometryInstanceForwardClustered *owner = surf->owner;
+			if (owner->data->base_type != RSE::INSTANCE_MULTIMESH || !mesh_storage->multimesh_uses_gpu_culling(owner->data->base)) {
+				continue;
+			}
+			uint32_t *found = index_of.getptr(owner);
+			uint32_t slot;
+			if (found) {
+				slot = *found;
+			} else {
+				slot = pending.size();
+				index_of.insert(owner, slot);
+				Pending p;
+				p.owner = owner;
+				p.counts.resize_initialized(mesh_storage->mesh_get_surface_count(mesh_storage->_multimesh_get_mesh(owner->data->base)));
+				pending.push_back(p);
+			}
+			Pending &p = pending[slot];
+			if (surf->surface_index < p.counts.size()) {
+				p.counts[surf->surface_index] = mesh_storage->mesh_surface_get_lod_draw_count(surf->surface, list.element_info[i].lod_index);
+			}
+		}
+	}
+	if (pending.is_empty()) {
+		return;
+	}
+
+	// Commands are uploaded before the compute list opens; dispatches then share one list.
+	LocalVector<GeometryInstanceForwardClustered *> ready;
+	for (Pending &p : pending) {
+		if (mesh_storage->multimesh_gpu_cull_prepare(p.owner->data->base, p.counts.ptr(), p.counts.size())) {
+			ready.push_back(p.owner);
+		}
+	}
+	if (ready.is_empty()) {
+		return;
+	}
+	const Vector<Plane> planes = p_render_data->scene_data->cam_projection.get_projection_planes(p_render_data->scene_data->cam_transform);
+	const Vector3 eye = p_render_data->scene_data->cam_transform.origin;
+	RD::get_singleton()->draw_command_begin_label("MultiMesh GPU Culling");
+	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
+	for (GeometryInstanceForwardClustered *owner : ready) {
+		mesh_storage->multimesh_gpu_cull_dispatch(compute_list, owner->data->base, owner->transform, planes, eye);
+		owner->gpu_cull_render_id = gpu_cull_render_id_current;
+	}
+	RD::get_singleton()->compute_list_end();
+	RD::get_singleton()->draw_command_end_label();
+}
+
 void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, const RenderDataRD *p_render_data, PassMode p_pass_mode, bool p_using_sdfgi, bool p_using_opaque_gi, bool p_using_motion_pass, bool p_append) {
 	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
 	uint64_t frame = RSG::rasterizer->get_frame_number();
@@ -2060,6 +2142,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	_fill_instance_data(RENDER_LIST_OPAQUE, render_info);
 	_fill_instance_data(RENDER_LIST_MOTION, render_info);
 	_fill_instance_data(RENDER_LIST_ALPHA, render_info);
+	_gpu_cull_multimeshes(p_render_data);
 
 	RD::get_singleton()->draw_command_end_label();
 

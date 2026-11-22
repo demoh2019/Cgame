@@ -35,6 +35,7 @@
 #include "core/templates/self_list.h"
 #include "servers/rendering/renderer_compositor.h"
 #include "servers/rendering/renderer_rd/shaders/skeleton.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/multimesh_cull.glsl.gen.h"
 #include "servers/rendering/rendering_server_globals.h"
 #include "servers/rendering/storage/mesh_storage.h"
 #include "servers/rendering/storage/utilities.h"
@@ -258,6 +259,17 @@ private:
 		RID uniform_set_2d;
 		RID command_buffer; //used if indirect setting is used
 
+		// Cgame: GPU per-instance culling (Forward+). The compacted copy of `buffer` and its indirect commands.
+		bool gpu_culling = false;
+		float gpu_culling_distance = 0.0f;
+		float gpu_culling_density_start = 0.0f;
+		float gpu_culling_min_density = 1.0f;
+		uint32_t cull_surface_count = 0;
+		RID cull_buffer;
+		RID cull_command_buffer;
+		RID cull_uniform_set_3d;
+		RID cull_compute_set;
+
 		bool dirty = false;
 		MultiMesh *dirty_list = nullptr;
 
@@ -279,6 +291,7 @@ private:
 	_FORCE_INLINE_ void _multimesh_re_create_aabb(MultiMesh *multimesh, const float *p_data, int p_instances);
 	void _multimesh_update_lod_scale(MultiMesh *multimesh, const float *p_data, int p_instances);
 	_FORCE_INLINE_ void _multimesh_create_indirect_command_buffer(MultiMesh *multimesh);
+	void _multimesh_free_cull_resources(MultiMesh *multimesh);
 
 	/* Skeleton */
 
@@ -326,6 +339,24 @@ private:
 
 		RID default_skeleton_uniform_set;
 	} skeleton_shader;
+
+	struct MultimeshCullShader {
+		struct PushConstant {
+			float planes[5][4];
+			float eye_and_distance[4];
+			float aabb_center_radius[4];
+			uint32_t instance_count;
+			uint32_t stride_and_surfaces;
+			uint32_t current_offset;
+			uint32_t previous_offset;
+		};
+		static_assert(sizeof(PushConstant) == 128);
+
+		MultimeshCullShaderRD shader;
+		RID version;
+		RID version_shader;
+		RID pipeline;
+	} multimesh_cull_shader;
 
 	struct Skeleton {
 		bool use_2d = false;
@@ -503,6 +534,15 @@ public:
 			r_index_count = s->lods[current_lod].index_count;
 			return current_lod + 1;
 		}
+	}
+
+	// Indices (or vertices, when not indexed) drawn for a LOD of a surface; 0 is full detail.
+	_FORCE_INLINE_ uint32_t mesh_surface_get_lod_draw_count(void *p_surface, uint32_t p_lod) const {
+		Mesh::Surface *s = reinterpret_cast<Mesh::Surface *>(p_surface);
+		if (p_lod == 0 || p_lod > s->lod_count) {
+			return s->index_count ? s->index_count : s->vertex_count;
+		}
+		return s->lods[p_lod - 1].index_count;
 	}
 
 	_FORCE_INLINE_ RID mesh_surface_get_index_array(void *p_surface, uint32_t p_lod) const {
@@ -695,6 +735,16 @@ public:
 
 	virtual AABB _multimesh_get_aabb(RID p_multimesh) override;
 	virtual float _multimesh_get_lod_scale(RID p_multimesh) const override;
+	virtual void _multimesh_set_gpu_culling(RID p_multimesh, bool p_enabled, float p_max_distance, float p_density_start, float p_min_density) override;
+
+	// Cgame GPU culling, driven by the Forward+ renderer once per scene render:
+	// prepare (uploads per-surface commands, outside any compute list), dispatch (inside one), then draw the
+	// compacted instances indirectly with the cull uniform set and command buffer.
+	bool multimesh_uses_gpu_culling(RID p_multimesh) const;
+	bool multimesh_gpu_cull_prepare(RID p_multimesh, const uint32_t *p_vertex_counts, uint32_t p_surface_count);
+	void multimesh_gpu_cull_dispatch(RD::ComputeListID p_compute_list, RID p_multimesh, const Transform3D &p_transform, const Vector<Plane> &p_world_planes, const Vector3 &p_eye);
+	RID multimesh_get_cull_3d_uniform_set(RID p_multimesh, RID p_shader, uint32_t p_set) const;
+	RID multimesh_get_cull_command_buffer(RID p_multimesh) const;
 
 	virtual MultiMeshInterpolator *_multimesh_get_interpolator(RID p_multimesh) const override;
 

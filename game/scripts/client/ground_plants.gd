@@ -9,6 +9,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const PointSpacing = preload("res://scripts/client/point_spacing.gd")
 const MeshLOD = preload("res://scripts/client/mesh_lod_preservation.gd")
+const GpuCulling = preload("res://scripts/native/cgame_gpu_culling.gd")
 
 const FOLDER := "res://assets/models/polyhaven/baked/plants/"
 const DRAW_DISTANCE := 34.0
@@ -22,6 +23,9 @@ static var distance_scale: float = 1.0
 ## Photo cards per grass tuft. Every card is a full alpha-tested layer in the depth pre-pass; at Balanced
 ## three keep the tuft round from the orbit camera for 40% less overdraw.
 static var card_planes: int = 5
+## Share of foliage kept at the far end of its range by the engine's GPU density LOD (survivors grow to keep
+## the ground covered). Props such as stones and sticks keep every instance.
+static var far_density: float = 1.0
 
 # species: biomes, instances per 16 m tile at full density, scale range, clustered (flowers grow in patches).
 # "size": [min, max] scale with a long tail ("big": share of instances drawn from [max, max * 1.8]).
@@ -215,6 +219,10 @@ static func quality_card_planes(level: int) -> int:
 	return [3, 3, 5, 5][clampi(level, 0, 3)]
 
 
+static func quality_far_density(level: int) -> float:
+	return [0.25, 0.3, 0.45, 0.6][clampi(level, 0, 3)]
+
+
 ## The plants of one 16 m tile of a chunk, given the grass source sampler.
 ## `sample(lx, lz)` returns {"ok": bool, "h": float, "biome": String} for chunk-local coordinates.
 static func build_tile(origin: Vector2, tile: int, tiles_per_side: int, sample: Callable) -> Array:
@@ -339,6 +347,10 @@ static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted
 		instance.multimesh = multimesh
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		instance.visibility_range_end = float(info.get("distance", DRAW_DISTANCE)) * distance_scale
+		# Per instance, not per 16 m tile; foliage thins out with distance (fewer, larger tufts).
+		var thin: bool = not info.has("files")
+		GpuCulling.enable(multimesh, instance.visibility_range_end, instance.visibility_range_end * 0.3,
+			far_density if thin else 1.0)
 		# No fade: a fading range forces the whole multimesh into the slow transparent pass.
 		var top: float = plant_mesh.get_aabb().size.y * float(info["scale"][1]) * 1.8 + 0.5
 		instance.custom_aabb = AABB(Vector3(tile_x - 1.0, low - 0.3, tile_z - 1.0), Vector3(TILE + 2.0, high - low + top, TILE + 2.0))

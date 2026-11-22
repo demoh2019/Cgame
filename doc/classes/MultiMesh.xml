@@ -239,6 +239,18 @@
 		<member name="custom_data_array" type="PackedColorArray" setter="_set_custom_data_array" getter="_get_custom_data_array" deprecated="Accessing this property is very slow. Use [method set_instance_custom_data] and [method get_instance_custom_data] instead.">
 			Array containing each custom data value used by all instances of this mesh, as a [PackedColorArray].
 		</member>
+		<member name="gpu_culling" type="bool" setter="set_gpu_culling" getter="is_gpu_culling" default="false">
+			If [code]true[/code], each instance is tested on the GPU against the camera frustum and [member gpu_culling_distance] before it is drawn, and only the visible ones are drawn (Forward+ only; other renderers draw every instance). Without it, a [MultiMesh] is drawn whole whenever its combined AABB is visible. Shadow passes still draw every instance.
+		</member>
+		<member name="gpu_culling_density_start" type="float" setter="set_gpu_culling_density_start" getter="get_gpu_culling_density_start" default="0.0">
+			Distance in meters from which [member gpu_culling_min_density] starts to apply. Only used when [member gpu_culling] is enabled and [member gpu_culling_distance] is greater than [code]0.0[/code].
+		</member>
+		<member name="gpu_culling_distance" type="float" setter="set_gpu_culling_distance" getter="get_gpu_culling_distance" default="0.0">
+			Instances further than this distance from the camera (in meters, measured to their bounding sphere) are not drawn. [code]0.0[/code] means no limit. Only used when [member gpu_culling] is enabled.
+		</member>
+		<member name="gpu_culling_min_density" type="float" setter="set_gpu_culling_min_density" getter="get_gpu_culling_min_density" default="1.0">
+			Share of instances still drawn at [member gpu_culling_distance]. Between [member gpu_culling_density_start] and [member gpu_culling_distance] instances are dropped in a stable random order, and the remaining ones are scaled up by [code]1 / sqrt(density)[/code] so the covered area stays about the same. Instances about to be dropped shrink first instead of popping. [code]1.0[/code] disables this density LOD. Useful for grass and other ground cover, where distant overdraw dominates the cost.
+		</member>
 		<member name="instance_count" type="int" setter="set_instance_count" getter="get_instance_count" default="0">
 			Number of instances that will get drawn. This clears and (re)sizes the buffers. Setting data format or flags afterwards will have no effect.
 			By default, all instances are drawn but you can limit this with [member visible_instance_count].

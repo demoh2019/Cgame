@@ -2495,6 +2495,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("multimesh_instance_get_color", "multimesh", "index"), &RenderingServer::multimesh_instance_get_color);
 	ClassDB::bind_method(D_METHOD("multimesh_instance_get_custom_data", "multimesh", "index"), &RenderingServer::multimesh_instance_get_custom_data);
 	ClassDB::bind_method(D_METHOD("multimesh_set_visible_instances", "multimesh", "visible"), &RenderingServer::multimesh_set_visible_instances);
+	ClassDB::bind_method(D_METHOD("multimesh_set_gpu_culling", "multimesh", "enabled", "max_distance", "density_start", "min_density"), &RenderingServer::multimesh_set_gpu_culling, DEFVAL(0.0), DEFVAL(0.0), DEFVAL(1.0));
 	ClassDB::bind_method(D_METHOD("multimesh_get_visible_instances", "multimesh"), &RenderingServer::multimesh_get_visible_instances);
 	ClassDB::bind_method(D_METHOD("multimesh_set_buffer", "multimesh", "buffer"), &RenderingServer::multimesh_set_buffer);
 	ClassDB::bind_method(D_METHOD("multimesh_get_command_buffer_rd_rid", "multimesh"), &RenderingServer::multimesh_get_command_buffer_rd_rid);

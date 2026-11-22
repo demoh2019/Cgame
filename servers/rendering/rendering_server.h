@@ -298,6 +298,12 @@ public:
 	virtual void multimesh_set_visible_instances(RID p_multimesh, int p_visible) = 0;
 	virtual int multimesh_get_visible_instances(RID p_multimesh) const = 0;
 
+	// Cgame: per-instance frustum and distance culling on the GPU (Forward+). Instances further than
+	// p_max_distance from the camera (0 = no limit) or outside the view frustum are not drawn. Past
+	// p_density_start metres the share of instances kept falls to p_min_density at p_max_distance; survivors
+	// grow so coverage stays the same (density LOD, 1 = off).
+	virtual void multimesh_set_gpu_culling(RID p_multimesh, bool p_enabled, float p_max_distance = 0.0, float p_density_start = 0.0, float p_min_density = 1.0) = 0;
+
 	/* SKELETON API */
 
 	virtual RID skeleton_create() = 0;

@@ -58,6 +58,11 @@ private:
 	bool use_custom_data = false;
 	int instance_count = 0;
 	int visible_instance_count = -1;
+	bool gpu_culling = false;
+	float gpu_culling_distance = 0.0;
+	float gpu_culling_density_start = 0.0;
+	float gpu_culling_min_density = 1.0;
+	void _update_gpu_culling();
 	PhysicsInterpolationQuality _physics_interpolation_quality = INTERP_QUALITY_FAST;
 
 protected:
@@ -111,6 +116,15 @@ public:
 
 	void set_visible_instance_count(int p_count);
 	int get_visible_instance_count() const;
+
+	void set_gpu_culling(bool p_enabled);
+	bool is_gpu_culling() const { return gpu_culling; }
+	void set_gpu_culling_distance(float p_distance);
+	float get_gpu_culling_distance() const { return gpu_culling_distance; }
+	void set_gpu_culling_density_start(float p_distance);
+	float get_gpu_culling_density_start() const { return gpu_culling_density_start; }
+	void set_gpu_culling_min_density(float p_density);
+	float get_gpu_culling_min_density() const { return gpu_culling_min_density; }
 
 	void set_physics_interpolation_quality(PhysicsInterpolationQuality p_quality);
 	PhysicsInterpolationQuality get_physics_interpolation_quality() const { return _physics_interpolation_quality; }

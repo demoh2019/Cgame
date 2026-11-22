@@ -383,6 +383,47 @@ int MultiMesh::get_visible_instance_count() const {
 	return visible_instance_count;
 }
 
+// Cgame: per-instance culling on the GPU (Forward+). A MultiMesh is otherwise drawn whole whenever its combined
+// AABB is visible; scattered foliage tiles then submit many instances behind the camera or past their range.
+void MultiMesh::_update_gpu_culling() {
+	RenderingServer::get_singleton()->multimesh_set_gpu_culling(multimesh, gpu_culling, gpu_culling_distance, gpu_culling_density_start, gpu_culling_min_density);
+}
+
+void MultiMesh::set_gpu_culling_density_start(float p_distance) {
+	p_distance = MAX(0.0f, p_distance);
+	if (gpu_culling_density_start == p_distance) {
+		return;
+	}
+	gpu_culling_density_start = p_distance;
+	_update_gpu_culling();
+}
+
+void MultiMesh::set_gpu_culling_min_density(float p_density) {
+	p_density = CLAMP(p_density, 0.0f, 1.0f);
+	if (gpu_culling_min_density == p_density) {
+		return;
+	}
+	gpu_culling_min_density = p_density;
+	_update_gpu_culling();
+}
+
+void MultiMesh::set_gpu_culling(bool p_enabled) {
+	if (gpu_culling == p_enabled) {
+		return;
+	}
+	gpu_culling = p_enabled;
+	_update_gpu_culling();
+}
+
+void MultiMesh::set_gpu_culling_distance(float p_distance) {
+	p_distance = MAX(0.0f, p_distance);
+	if (gpu_culling_distance == p_distance) {
+		return;
+	}
+	gpu_culling_distance = p_distance;
+	_update_gpu_culling();
+}
+
 void MultiMesh::set_physics_interpolation_quality(PhysicsInterpolationQuality p_quality) {
 	ERR_FAIL_COND_MSG(p_quality != INTERP_QUALITY_FAST && p_quality != INTERP_QUALITY_HIGH, "Unsupported MultiMesh physics interpolation quality.");
 	if (_physics_interpolation_quality == p_quality) {
@@ -726,6 +767,14 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_instance_count"), &MultiMesh::get_instance_count);
 	ClassDB::bind_method(D_METHOD("set_visible_instance_count", "count"), &MultiMesh::set_visible_instance_count);
 	ClassDB::bind_method(D_METHOD("get_visible_instance_count"), &MultiMesh::get_visible_instance_count);
+	ClassDB::bind_method(D_METHOD("set_gpu_culling", "enabled"), &MultiMesh::set_gpu_culling);
+	ClassDB::bind_method(D_METHOD("is_gpu_culling"), &MultiMesh::is_gpu_culling);
+	ClassDB::bind_method(D_METHOD("set_gpu_culling_distance", "distance"), &MultiMesh::set_gpu_culling_distance);
+	ClassDB::bind_method(D_METHOD("get_gpu_culling_distance"), &MultiMesh::get_gpu_culling_distance);
+	ClassDB::bind_method(D_METHOD("set_gpu_culling_density_start", "distance"), &MultiMesh::set_gpu_culling_density_start);
+	ClassDB::bind_method(D_METHOD("get_gpu_culling_density_start"), &MultiMesh::get_gpu_culling_density_start);
+	ClassDB::bind_method(D_METHOD("set_gpu_culling_min_density", "density"), &MultiMesh::set_gpu_culling_min_density);
+	ClassDB::bind_method(D_METHOD("get_gpu_culling_min_density"), &MultiMesh::get_gpu_culling_min_density);
 	ClassDB::bind_method(D_METHOD("set_physics_interpolation_quality", "quality"), &MultiMesh::set_physics_interpolation_quality);
 	ClassDB::bind_method(D_METHOD("get_physics_interpolation_quality"), &MultiMesh::get_physics_interpolation_quality);
 	ClassDB::bind_method(D_METHOD("set_instance_transform", "instance", "transform"), &MultiMesh::set_instance_transform);
@@ -765,6 +814,10 @@ void MultiMesh::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::AABB, "custom_aabb", PROPERTY_HINT_NONE, "suffix:m"), "set_custom_aabb", "get_custom_aabb");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "instance_count", PROPERTY_HINT_RANGE, "0,16384,1,or_greater"), "set_instance_count", "get_instance_count");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "visible_instance_count", PROPERTY_HINT_RANGE, "-1,16384,1,or_greater"), "set_visible_instance_count", "get_visible_instance_count");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "gpu_culling"), "set_gpu_culling", "is_gpu_culling");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gpu_culling_distance", PROPERTY_HINT_RANGE, "0,4096,0.1,or_greater,suffix:m"), "set_gpu_culling_distance", "get_gpu_culling_distance");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gpu_culling_density_start", PROPERTY_HINT_RANGE, "0,4096,0.1,or_greater,suffix:m"), "set_gpu_culling_density_start", "get_gpu_culling_density_start");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gpu_culling_min_density", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_gpu_culling_min_density", "get_gpu_culling_min_density");
 	// Specify all types for explicit ordering in the inspector,
 	// but list generic Mesh last to allow extended types to show up at the end.
 	// Keep the order in sync with MeshInstance3D's `mesh` property.
