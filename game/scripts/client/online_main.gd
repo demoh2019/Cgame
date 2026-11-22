@@ -265,6 +265,8 @@ var _party_supply_marker: Node3D
 var _raid_telegraph: Node3D
 var _lightning_visual: Node3D
 var _screenshot_path := ""
+var _capture_path := "" # --capture: one PNG of the normal game after 60 s in the world (no benchmark mode).
+var _capture_time := 0.0
 var _screenshot_frames := 0
 var _frame_ms: Array[float] = [] # CPU process deltas in the screenshot capture window.
 var _gpu_frame_ms: Array[float] = [] # Native viewport GPU timings, sampled independently.
@@ -375,6 +377,9 @@ func _ready() -> void:
 			"--screenshot":
 				i += 1
 				_screenshot_path = args[i]
+			"--capture":
+				i += 1
+				_capture_path = args[i]
 			"--demo":
 				i += 1
 				_demo = args[i]
@@ -1796,6 +1801,12 @@ func _physics_process(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	if _capture_path != "" and client != null and client.welcomed:
+		_capture_time += delta
+		if _capture_time >= 60.0:
+			get_viewport().get_texture().get_image().save_png(_capture_path)
+			print("CLIENT capture saved: ", _capture_path)
+			_capture_path = ""
 	_frames += 1
 	# Attribute frame hitches to shader compiles, streaming or VRAM growth.
 	var hitch: Dictionary = _hitch_analyzer.sample(delta, FrameHitchAnalyzer.read_counters(
@@ -3282,6 +3293,7 @@ func _run_demo() -> void:
 			if camera != null:
 				for row in RenderProfile.geometry_by_group(self, camera):
 					print("CLIENT geometry %9d tris  %6d inst  %s" % [row[1], row[2], row[0]])
+				print("CLIENT instance culling: " + JSON.stringify(RenderProfile.instance_culling_estimate(self, camera)))
 			# Distinguish missing streamed terrain from slow rendering in
 			# automatic screenshot benchmarks, with no per-frame HUD work.
 			if streamer != null:
