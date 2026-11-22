@@ -123,7 +123,7 @@ Contents: [1 Planners](#1-planners-goap-htn-utility-ai) - [2 Navigation](#2-navi
   [`mocap_cleanup`](api/client/mocap_cleanup.md) (One Euro and Butterworth filtering, spike removal, gap filling, foot-skate cleanup, root-motion extraction, key reduction),
   [`lip_sync`](api/client/lip_sync.md) and [`facial_animation`](api/client/facial_animation.md) (rule-based visemes, layered blend-shape graph),
   and [`motion_warp`](api/client/motion_warp.md).
-- **Status.** Motion warping is **wired**. The rest is **library**.
+- **Status.** Motion warping is **wired**. Motion matching is **wired** (visual only) for remote players and infected on High/Ultra when the native `CgameMotionMatchingDatabase` exists (`client/character_anim.gd` `match_locomotion`, `client/character_model.gd`); the speed-bracket state machine is the fallback. The rest is **library**.
 - **Guarantees.** IK and cleanup are pure math on arrays, so they run headless. Motion matching search through the bucket index is exact (triangle-inequality pruning).
   Lip sync and blinks/saccades are deterministic.
 - **Known limitations.** Lip-sync grapheme-to-phoneme covers English and Cyrillic transliteration only (header). Retargeting targets humanoid skeletons;
@@ -134,7 +134,7 @@ Contents: [1 Planners](#1-planners-goap-htn-utility-ai) - [2 Navigation](#2-navi
 - **Purpose.** [`voronoi_fracture`](api/shared/voronoi_fracture.md): fracture a box into convex Voronoi cells. [`xpbd_cloth`](api/shared/xpbd_cloth.md) and [`xpbd_rope`](api/shared/xpbd_rope.md):
   XPBD cloth (stretch, shear, bending, collision, self-collision, tearing) and rope (distance/bending, self-collision, knot heuristic). [`hair_strands`](api/client/hair_strands.md): guide-strand hair.
 - **Status.** Voronoi fracture is **wired** for barricade debris (`client/barricade_debris.gd`; deterministic fracture seeds replicate through `destruction_replication`). `client/cloth_flag.gd` is a separate in-game cloth visual.
-  The XPBD cloth/rope and hair libraries are **library**.
+  XPBD cloth is **wired** for outpost banners on High/Ultra when the native `ClothInstance3D`/`CgameXPBDCloth` exist (`ClothFlag.apply`); otherwise the shader cloth is used. Rope and hair are **library**.
 - **Guarantees.** Fracture cells are the intersection of the box half-spaces with one bisector per other site. Cloth grid layout is fixed (row 0 is the top edge, local -Y is down, +Z is the front normal).
 - **Known limitations.** Fracture input is a box. Cloth and rope self-collision use a spatial hash; the rope knot test is a crossing-number heuristic, not a topological proof. Hair ribbons are expanded in the vertex shader `assets/shaders/hair_strand.gdshader`.
 
@@ -151,7 +151,7 @@ Contents: [1 Planners](#1-planners-goap-htn-utility-ai) - [2 Navigation](#2-navi
 
 - **Purpose.** [`audio_graph`](api/client/audio_graph.md): MetaSounds-style node graph rendered block-wise into sample buffers or `AudioStreamWAV` (oscillators with polyBLEP, noise, ADSR/AR, RBJ filters, smoothing, delay and more).
   Companions: [`procedural_sounds`](api/client/procedural_sounds.md), [`audio_mix_snapshots`](api/client/audio_mix_snapshots.md).
-- **Status.** Library.
+- **Status.** Library, plus **wired** fallback: `Assets.sound()` synthesizes footstep, zombie groan, gunshot, fire, wind and UI click streams (`ProceduralSounds.fallback_stream`, native `AudioStreamProcedural` when present) for names without an imported asset.
 - **Guarantees.** Assets are plain Dictionaries (`nodes`, `connections`, `output`). A connection to `X` replaces the constant param; to `X_mod` it is added; several connections to one input are summed.
   A delay output never depends on the current block, so a delay may close a feedback loop.
 - **Known limitations.** Rendering is CPU, block-based, in GDScript. Envelopes are linear segments. See the node table in the file header for the exact vocabulary; unknown node types are not supported.
@@ -259,7 +259,7 @@ Contents: [1 Planners](#1-planners-goap-htn-utility-ai) - [2 Navigation](#2-navi
 
 - **Purpose.** [`mass_entity`](api/shared/mass_entity.md): archetypes, structure-of-arrays fragments, processors with dependency ordering and optional parallel chunk execution.
   [`crowd_avoidance`](api/shared/crowd_avoidance.md): ORCA reciprocal avoidance with a spatial hash. Related client animation tiering: `client/anim_lod.gd`.
-- **Status.** Library (the game has its own crowd tiering in the client; see `tests/test_crowd_animation_tier_planner.gd`).
+- **Status.** Library for mass entity. Native-only **wired** uses on the server (`server/game_server.gd`): ORCA correction for infected chasing players (`crowd_avoidance_enabled`, `_refresh_chase_crowd_avoidance`) and off-zone herds via `CgamePopulationLOD` for free-roaming infected (`herd_simulation_enabled`, `_tick_herds`). Both default on only when the native class exists. The client has its own crowd animation tiering (`tests/test_crowd_animation_tier_planner.gd`).
 - **Guarantees.** Fragment types are limited to `PackedVector3Array`, `PackedFloat32Array`, `PackedInt32Array`; archetype keys are independent of fragment order; ids carry a generation (24-bit index), so stale ids fail `is_alive()`. Processor order is a stable topological sort by `depends_on`; a cycle logs an error and runs the rest anyway.
 - **Known limitations.** ORCA is a port of RVO2 (Apache-2.0, credited in the header); the neighbour search is a uniform hash, O(n) average. Parallel processors must not touch shared state outside their chunk.
 
