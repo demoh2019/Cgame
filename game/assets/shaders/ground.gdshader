@@ -71,6 +71,77 @@ varying float aa_macro_broad;
 varying float aa_vertex_mid;
 varying float aa_vertex_cloud_shadow;
 
+// Cgame runtime virtual texture (terrain_rvt.gd). Pages of the finished terrain material, baked from
+// above by orthographic cameras rendering this same shader, replace the per-pixel layer blending past
+// the live radius. Page table: 64x32 RGBA8, left half level 0 (8 m pages), right half level 1 (16 m);
+// a texel is (layer + 1 low, high, page x & 255, page z & 255) of the page at its toroidal slot.
+global uniform sampler2DArray aa_rvt_albedo : filter_linear, repeat_disable;
+global uniform sampler2DArray aa_rvt_data : filter_linear, repeat_disable;
+global uniform sampler2DArray aa_rvt_wet : filter_linear, repeat_disable;
+global uniform sampler2D aa_rvt_table : filter_nearest, repeat_disable;
+global uniform vec4 aa_rvt_params; // x on, y live radius, z level 0 radius, w level 1 radius
+const uint AA_RVT_BAKE_WET = 65536u;
+const uint AA_RVT_BAKE_DATA = 131072u;
+const uint AA_RVT_BAKE_ALBEDO = 262144u;
+const uint AA_RVT_ORDINARY_LAYERS = 32767u;
+const float AA_RVT_TEXELS = 256.0;
+
+vec3 aa_srgb_to_linear(vec3 c) {
+	return mix(pow((c + 0.055) / 1.055, vec3(2.4)), c / 12.92, lessThan(c, vec3(0.04045)));
+}
+
+// One level's page for a world point: returns false when it is not resident.
+bool aa_rvt_page(vec2 p, int level, float page_size, out vec3 uvw) {
+	vec2 page_f = floor(p / page_size);
+	ivec2 page = ivec2(page_f);
+	vec4 t = texelFetch(aa_rvt_table, ivec2((page.x & 31) + level * 32, page.y & 31), 0);
+	ivec4 b = ivec4(round(t * 255.0));
+	int layer = b.r + b.g * 256 - 1;
+	uvw = vec3(0.0);
+	if (layer < 0 || b.b != (page.x & 255) || b.a != (page.y & 255)) {
+		return false;
+	}
+	// The bake covers one border texel around the page so bilinear taps never leave it.
+	vec2 f = p / page_size - page_f;
+	uvw = vec3((f * (AA_RVT_TEXELS - 2.0) + 1.0) / AA_RVT_TEXELS, float(layer));
+	return true;
+}
+
+// Baked material for a point, and how much of it to use (0 = shade live).
+// `view_dist` is the 3D distance to the eye (pixel footprint decides live vs cached); `dist` is horizontal,
+// matching how terrain_rvt.gd picks pages around the camera.
+float aa_rvt_fetch(vec2 p, float dist, float view_dist, out vec3 albedo, out vec3 normal, out float roughness, out vec3 wet) {
+	albedo = vec3(0.0);
+	normal = vec3(0.0, 1.0, 0.0);
+	roughness = 0.9;
+	wet = vec3(0.0);
+	float weight = smoothstep(aa_rvt_params.y, aa_rvt_params.y + 4.0, view_dist)
+		* (1.0 - smoothstep(aa_rvt_params.w - 6.0, aa_rvt_params.w, dist));
+	if (weight <= 0.0) {
+		return 0.0;
+	}
+	vec3 uvw;
+	bool found = dist < aa_rvt_params.z && aa_rvt_page(p, 0, 8.0, uvw);
+	bool coarse = false;
+	if (!found) {
+		found = aa_rvt_page(p, 1, 16.0, uvw);
+		coarse = found;
+	}
+	if (!found) {
+		return 0.0;
+	}
+	albedo = aa_srgb_to_linear(textureLod(aa_rvt_albedo, uvw, 0.0).rgb);
+	if (aa_rvt_params.x > 1.5) {
+		albedo = mix(albedo, coarse ? vec3(0.1, 0.2, 1.0) : vec3(1.0, 0.1, 0.1), 0.35); // CGAME_RVT_DEBUG
+	}
+	vec3 d = textureLod(aa_rvt_data, uvw, 0.0).rgb;
+	vec2 nxz = d.rg * 2.0 - 1.0;
+	normal = normalize(vec3(nxz.x, sqrt(max(1.0 - dot(nxz, nxz), 0.0)), nxz.y));
+	roughness = d.b;
+	wet = textureLod(aa_rvt_wet, uvw, 0.0).rgb;
+	return weight;
+}
+
 float hash21(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
 	p += dot(p, p + 45.32);
@@ -220,7 +291,24 @@ void fragment() {
 	// Domain warp and the PBR blend must share the same near/far mid-frequency
 	// soil field. Declare it before use: shader processors reject forward local
 	// references (and the prior layout could fail to compile on Metal).
-	float camera_distance = distance(p, CAMERA_POSITION_WORLD.xz);
+	// Bake cameras see only the terrain plus one marker layer (and none of the ordinary layers).
+	uint aa_layers = CAMERA_VISIBLE_LAYERS;
+	bool bake_any = (aa_layers & AA_RVT_ORDINARY_LAYERS) == 0u;
+	bool bake_albedo = bake_any && (aa_layers & AA_RVT_BAKE_ALBEDO) != 0u;
+	bool bake_data = bake_any && (aa_layers & AA_RVT_BAKE_DATA) != 0u;
+	bool bake_wet = bake_any && (aa_layers & AA_RVT_BAKE_WET) != 0u;
+	bool baking = bake_albedo || bake_data || bake_wet;
+	// Pages are baked at full detail; the view distance only decides where they are used.
+	float camera_distance = baking ? 0.0 : distance(p, CAMERA_POSITION_WORLD.xz);
+	vec3 rvt_albedo;
+	vec3 rvt_normal;
+	float rvt_roughness;
+	vec3 rvt_wet;
+	float rvt_weight = 0.0;
+	if (!baking && aa_rvt_params.x > 0.5) {
+		rvt_weight = aa_rvt_fetch(p, camera_distance, distance(world_position, CAMERA_POSITION_WORLD), rvt_albedo, rvt_normal, rvt_roughness, rvt_wet);
+	}
+	bool need_live = rvt_weight < 0.999;
 	float detail_fade = 1.0 - smoothstep(aa_terrain_detail_radius,
 		aa_terrain_detail_radius + 24.0, camera_distance);
 	// Quality-dependent material complexity, like distance-faded detail
@@ -228,7 +316,7 @@ void fragment() {
 	// Within the full-detail radius, the old pixel noise is preserved exactly.
 	float mid = aa_vertex_mid;
 	float mixer = 0.5;
-	if (detail_fade > 0.001) {
+	if (detail_fade > 0.001 && need_live) {
 		mid = mix(aa_vertex_mid, fbm(p * 0.07 + 3.0), detail_fade);
 		// At far LOD the per-pixel mixer had no contribution to albedo:
 		// near_weight is already multiplied by detail_fade.
@@ -251,14 +339,24 @@ void fragment() {
 	}
 	// Direction from the surface toward the camera, in world space, for parallax.
 	vec3 view_world = normalize(CAMERA_POSITION_WORLD - world_position);
-	float parallax_fade = 1.0 - smoothstep(8.0, 18.0, camera_distance);
+	float parallax_fade = baking ? 0.0 : 1.0 - smoothstep(8.0, 18.0, camera_distance);
 	vec2 cliff_dx_zy = dFdx(world_position.zy / tile_meters);
 	vec2 cliff_dy_zy = dFdy(world_position.zy / tile_meters);
 	vec2 cliff_dx_xy = dFdx(world_position.xy / tile_meters);
 	vec2 cliff_dy_xy = dFdy(world_position.xy / tile_meters);
 
-	// Biome weights from the chunk map, sampled between texel centres so neighbouring chunks meet exactly.
+	// The material record both paths fill: live layer blending near the camera, baked pages further out.
+	vec3 color = vec3(0.5);
+	vec3 bent = n;
+	float r_dry_roughness = 0.9;
+	float r_wet_factor = 0.22;
+	float r_puddle_shape = 0.0;
+	float r_hard_surface = 0.0;
+	float r_coherence = 1.0;
 	vec2 local = (p - chunk_origin) / chunk_size;
+	float r_micro_cavity = 0.0;
+	if (need_live) {
+	// Biome weights from the chunk map, sampled between texel centres so neighbouring chunks meet exactly.
 	vec2 biome_uv = local * ((biome_texels - 1.0) / biome_texels) + 0.5 / biome_texels;
 	vec3 biome = textureLod(biome_map, biome_uv, 0.0).rgb;
 
@@ -413,7 +511,7 @@ void fragment() {
 			}
 		}
 	}
-	vec3 color = macro_color;
+	color = macro_color;
 	vec3 bump = vec3(0.0);
 	float coherence_sum = 0.0;
 	vec3 cliff_world_normal = n;
@@ -524,7 +622,7 @@ void fragment() {
 	vec3 tangent = normalize(vec3(1.0, 0.0, 0.0) - n * n.x);
 	vec3 bitangent = normalize(cross(n, tangent));
 	vec3 detail = normalize(vec3(bump.xy * normal_strength, max(bump.z, 0.2)));
-	vec3 bent = normalize(tangent * detail.x + bitangent * detail.y + n * detail.z);
+	bent = normalize(tangent * detail.x + bitangent * detail.y + n * detail.z);
 	// The cliff relief never bleeds into a grassy or paved transition.
 	float cliff_mix = clamp(w[5] / max(all_weight, 0.0001), 0.0, 1.0)
 		* clamp(aa_cliff_normal_quality, 0.0, 1.0) * detail_fade;
@@ -533,9 +631,40 @@ void fragment() {
 	// Wet earth absorbs light; shallow mud and worn pavement collect small smooth puddles.
 	// Reuse existing biome and noise weights instead of additional texture reads or noise octaves.
 	float wettable = clamp(w[3] + w[4] + w[7] * 0.65 + w[9] + w[10] + w[2] * 0.25, 0.0, 1.0);
-	float wetness = clamp(aa_weather_wetness, 0.0, 1.0) * (0.22 + 0.78 * wettable) * (1.0 - clamp(w[8], 0.0, 1.0));
-	float puddle = wetness * clamp(w[3] + w[4] + w[9] + w[10], 0.0, 1.0)
+	r_wet_factor = (0.22 + 0.78 * wettable) * (1.0 - clamp(w[8], 0.0, 1.0));
+	r_puddle_shape = clamp(w[3] + w[4] + w[9] + w[10], 0.0, 1.0)
 		* smoothstep(0.52, 0.78, mid) * (1.0 - smoothstep(0.08, 0.25, slope));
+	// A physically plausible microfacet roughness for each existing layer.
+	// This reuses the 13 biome weights (no extra textures or VRAM).
+	r_dry_roughness = (
+		w[0] * 0.91 + w[1] * 0.94 + w[2] * 0.88 + w[3] * 0.86
+		+ w[4] * 0.89 + w[5] * 0.73 + w[6] * 0.77 + w[7] * 0.93
+		+ w[8] * 0.94 + w[9] * 0.72 + w[10] * 0.83
+		+ w[11] * 0.78 + w[12] * 0.82) / max(all_weight, 0.0001);
+	r_dry_roughness = clamp(r_dry_roughness + (mid - 0.5) * 0.055, 0.55, 0.98);
+	// Moss is diffuse and rough; keep the smooth puddle override below intact.
+	r_dry_roughness = mix(r_dry_roughness, 0.92, ruin_moss * 0.45);
+	// Hard, film-holding surfaces for the optional wet clearcoat; moss stays porous, snow is dry.
+	r_hard_surface = clamp(w[4] + w[5] * 0.35 + w[6] * 0.25
+		+ w[9] + w[10] + w[11] + w[12] * 0.35, 0.0, 1.0)
+		* (1.0 - clamp(w[8], 0.0, 1.0)) * (1.0 - ruin_moss * 0.45);
+	r_coherence = sampled_weight > 0.001 ? clamp(coherence_sum / sampled_weight, 0.05, 1.0) : 1.0;
+	r_micro_cavity = 1.0 - clamp(bump.z, 0.0, 1.0);
+	}
+	if (rvt_weight > 0.0) {
+		color = mix(color, rvt_albedo, rvt_weight);
+		bent = normalize(mix(bent, rvt_normal, rvt_weight));
+		r_dry_roughness = mix(r_dry_roughness, rvt_roughness, rvt_weight);
+		r_wet_factor = mix(r_wet_factor, rvt_wet.r, rvt_weight);
+		r_puddle_shape = mix(r_puddle_shape, rvt_wet.g, rvt_weight);
+		r_hard_surface = mix(r_hard_surface, rvt_wet.b, rvt_weight);
+		r_coherence = mix(r_coherence, 1.0, rvt_weight);
+		r_micro_cavity = mix(r_micro_cavity, 0.0, rvt_weight);
+	}
+	vec3 material_color = color; // What the albedo pages store (weather, clouds and AO stay live).
+
+	float wetness = clamp(aa_weather_wetness, 0.0, 1.0) * r_wet_factor;
+	float puddle = wetness * r_puddle_shape;
 	bent = normalize(mix(bent, n, puddle * 0.75));
 	// Near, wet, flat ground only: animated impact rings disturb existing
 	// PBR puddle reflections without any extra texture samples or meshes.
@@ -565,7 +694,7 @@ void fragment() {
 	// HDRP-like micro-occlusion from already sampled tangent-space normals.
 	// Flattened distant normals cost nothing; wet puddles visually fill cracks.
 	// Keep the effect subtle because Forward+ also supplies screen-space AO.
-	float micro_cavity = 1.0 - clamp(bump.z, 0.0, 1.0);
+	float micro_cavity = r_micro_cavity;
 	float micro_shadow = 1.0 - min(0.18,
 		micro_cavity * 0.32 * aa_terrain_micro_occlusion * detail_fade
 		* (1.0 - puddle * 0.85));
@@ -597,16 +726,7 @@ void fragment() {
 		p, h, n.y, camera_distance, TIME);
 	ALBEDO += vec3(0.10, 0.19, 0.18) * caustics
 		* (1.0 - aa_vertex_cloud_shadow * 0.70);
-	// A physically plausible microfacet roughness for each existing layer.
-	// This reuses the 13 biome weights (no extra textures or VRAM).
-	float dry_roughness = (
-		w[0] * 0.91 + w[1] * 0.94 + w[2] * 0.88 + w[3] * 0.86
-		+ w[4] * 0.89 + w[5] * 0.73 + w[6] * 0.77 + w[7] * 0.93
-		+ w[8] * 0.94 + w[9] * 0.72 + w[10] * 0.83
-		+ w[11] * 0.78 + w[12] * 0.82) / max(all_weight, 0.0001);
-	dry_roughness = clamp(dry_roughness + (mid - 0.5) * 0.055, 0.55, 0.98);
-	// Moss is diffuse and rough; keep the smooth puddle override below intact.
-	dry_roughness = mix(dry_roughness, 0.92, ruin_moss * 0.45);
+	float dry_roughness = r_dry_roughness;
 	// Wetness changes roughness, not the dielectric material's F0.
 	// Existing shallow puddles still produce very tight highlights.
 	float final_roughness = clamp(
@@ -617,8 +737,8 @@ void fragment() {
 	// Zero strength on low tiers skips this ALU, and water-filled puddles stay
 	// optically smooth rather than turning matte due to the underlying mud.
 	if (aa_terrain_normal_variance_strength > 0.001 && detail_fade > 0.001
-			&& sampled_weight > 0.001 && puddle < 0.85) {
-		float coherence = clamp(coherence_sum / sampled_weight, 0.05, 1.0);
+			&& r_coherence < 0.999 && puddle < 0.85) {
+		float coherence = r_coherence;
 		float variance = min((1.0 - coherence) / coherence, 0.14);
 		final_roughness = sqrt(min(1.0, final_roughness * final_roughness
 			+ variance * aa_terrain_normal_variance_strength
@@ -632,12 +752,10 @@ void fragment() {
 	// A thin liquid film contributes a second, smooth dielectric reflection
 	// on top of porous rock and paving. Reuse existing sampled biome weights,
 	// weather and curvature instead of fetching new mask/normal textures.
-	float hard_surface = clamp(w[4] + w[5] * 0.35 + w[6] * 0.25
-		+ w[9] + w[10] + w[11] + w[12] * 0.35, 0.0, 1.0);
-	float water_film = wetness * hard_surface * detail_fade
-		* (1.0 - clamp(w[8], 0.0, 1.0));
+	float hard_surface = r_hard_surface; // Snow and moss are already folded in.
+	float water_film = wetness * hard_surface * detail_fade;
 	// Rain gathers in worn recessed stone, but moss remains porous/matte.
-	water_film *= (0.86 + cavity * 0.14) * (1.0 - ruin_moss * 0.45);
+	water_film *= 0.86 + cavity * 0.14;
 	// Steep walls shed moisture instead of reflecting like horizontal asphalt.
 	water_film *= 1.0 - smoothstep(0.20, 0.70, slope) * 0.30;
 	CLEARCOAT = clamp(water_film * aa_terrain_wet_clearcoat, 0.0, 0.65);
@@ -647,4 +765,15 @@ void fragment() {
 	// avoiding scintillating pinpoint reflections at FSR2 output resolution.
 	CLEARCOAT_ROUGHNESS = filter_specular_roughness(film_roughness, bent);
 #endif
+	if (baking) {
+		// Rendered with the Unshaded debug draw and a linear tonemap: the page stores ALBEDO, sRGB-encoded.
+		// Data pages are pre-decoded so the stored bytes are the values themselves.
+		if (bake_albedo) {
+			ALBEDO = clamp(material_color, vec3(0.0), vec3(1.0));
+		} else if (bake_data) {
+			ALBEDO = aa_srgb_to_linear(vec3(bent.x * 0.5 + 0.5, bent.z * 0.5 + 0.5, r_dry_roughness));
+		} else {
+			ALBEDO = aa_srgb_to_linear(clamp(vec3(r_wet_factor, r_puddle_shape, r_hard_surface), vec3(0.0), vec3(1.0)));
+		}
+	}
 }

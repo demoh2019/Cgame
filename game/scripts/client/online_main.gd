@@ -22,6 +22,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Net = preload("res://scripts/shared/net.gd")
 const GameClient = preload("res://scripts/client/game_client.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
+const TerrainRvt = preload("res://scripts/client/terrain_rvt.gd")
 const EntityView = preload("res://scripts/client/entity_view.gd")
 const RaidTelegraph = preload("res://scripts/client/raid_telegraph.gd")
 const LightningVisual = preload("res://scripts/client/storm_lightning_visual.gd")
@@ -122,6 +123,7 @@ var net
 var client
 var peer: ENetMultiplayerPeer
 var streamer: WorldStreamer
+var _terrain_rvt: Node
 # Last displayed position, not input intent: online prediction uses actual
 # corrected player motion and resets on teleport/network resync.
 var _stream_previous_position := Vector3.ZERO
@@ -1545,6 +1547,11 @@ func _on_welcomed() -> void:
 			0.4, GraphicsQuality.startup_streaming_ramp_duration(GraphicsQuality.level()))
 	streamer.set_chunk_generator(_generate_chunk)
 	add_child(streamer)
+	# Terrain runtime virtual texture: the finished ground material baked into pages around the camera.
+	_terrain_rvt = TerrainRvt.new()
+	_terrain_rvt.name = "TerrainRvt"
+	add_child(_terrain_rvt)
+	_terrain_rvt.setup(camera, streamer, Defs.CHUNK_SIZE)
 	# The map can now show native streaming-source readiness without any
 	# gameplay RPC, scene creation, or extra work when the map is closed.
 	world_map.world_streamer = streamer
@@ -3494,3 +3501,5 @@ func _apply_data_layers(delta: float) -> void:
 	if not is_equal_approx(_snow_cover, target):
 		_snow_cover = move_toward(_snow_cover, target, delta / 20.0)
 		RenderingServer.global_shader_parameter_set("aa_snow_cover", _snow_cover)
+		if _terrain_rvt != null:
+			_terrain_rvt.snow_cover = _snow_cover

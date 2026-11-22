@@ -249,6 +249,9 @@
 		<member name="material" type="Material" setter="set_material" getter="get_material">
 			Material of the terrain. Texture coordinates run from [code]0[/code] to [code]1[/code] over the whole terrain; use a [ShaderMaterial] to splat textures by height or slope.
 		</member>
+		<member name="render_layers" type="int" setter="set_render_layers" getter="get_render_layers" default="1">
+			The visual layers of the terrain chunk instances, matched against [member Camera3D.cull_mask]. Useful to let auxiliary cameras (for example top-down cameras baking a runtime virtual texture) see only the terrain.
+		</member>
 		<member name="screen_space_lod_enabled" type="bool" setter="set_screen_space_lod_enabled" getter="is_screen_space_lod_enabled" default="false">
 			If [code]true[/code], rescale distance-based terrain mesh LOD by the internal 3D resolution after viewport scaling and by perspective field of view, inspired by screen-size LOD systems in Unreal Engine and Unity. Dynamic 3D resolution and FSR affect geometry detail because the internal 3D pixel height is used instead of only the output window size. The multiplier is limited to [code]0.6[/code]–[code]1.65[/code]. Disabled by default to preserve existing scenes; cached meshes, collision, skirts, smooth LOD morphing and culling remain unchanged.
 		</member>

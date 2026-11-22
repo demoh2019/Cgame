@@ -140,6 +140,31 @@ aa_terrain_layer_budget={
 "value": 3
 }
 
+aa_rvt_albedo={
+"type": "sampler2DArray",
+"value": ""
+}
+
+aa_rvt_data={
+"type": "sampler2DArray",
+"value": ""
+}
+
+aa_rvt_wet={
+"type": "sampler2DArray",
+"value": ""
+}
+
+aa_rvt_table={
+"type": "sampler2D",
+"value": ""
+}
+
+aa_rvt_params={
+"type": "vec4",
+"value": Vector4(0, 10, 26, 66)
+}
+
 aa_terrain_warp_strength={
 "type": "float",
 "value": 0.0

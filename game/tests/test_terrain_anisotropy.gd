@@ -51,7 +51,7 @@ func run(t) -> void:
 	t.check(base_code.contains("#ifdef AA_TERRAIN_WET_CLEARCOAT")
 		and base_code.contains("CLEARCOAT = clamp(water_film"),
 		"cached premium variants shade existing wet paving as thin film")
-	t.check(base_code.contains("float hard_surface = clamp(w[4]") and
+	t.check(base_code.contains("r_hard_surface = clamp(w[4]") and
 		base_code.contains("w[9] + w[10] + w[11]"),
 		"coating follows roads, asphalt, stone and masonry")
 	t.check(base_code.contains("water_film = wetness * hard_surface * detail_fade")
@@ -59,8 +59,8 @@ func run(t) -> void:
 		"coating fades with distance, weather and excludes snow")
 	t.check(not base_code.contains("clearcoat_texture"),
 		"no new coat texture, VRAM, or screen pass is required")
-	t.check(base_code.contains("water_film *= (0.86 + cavity * 0.14)")
-		and base_code.contains("ruin_moss * 0.45"),
+	t.check(base_code.contains("water_film *= 0.86 + cavity * 0.14")
+		and base_code.contains("* (1.0 - clamp(w[8], 0.0, 1.0)) * (1.0 - ruin_moss * 0.45)"),
 		"wet reflections collect in worn recesses and preserve porous moss")
 	t.check(base_code.contains("water_film *= 1.0 - smoothstep(0.20, 0.70, slope)"),
 		"sloped surfaces cannot reflect as much as waterlogged roads")

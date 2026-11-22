@@ -553,6 +553,7 @@ void ChunkedTerrain3D::_update_chunks(bool p_ignore_mesh_budget) {
 							rs->instance_geometry_set_flag(chunk.instance, RSE::INSTANCE_FLAG_USE_BAKED_LIGHT, contribute_to_gi);
 							rs->instance_set_transform(chunk.instance, global);
 							rs->instance_geometry_set_cast_shadows_setting(chunk.instance, cast_shadows ? RSE::SHADOW_CASTING_SETTING_ON : RSE::SHADOW_CASTING_SETTING_OFF);
+							rs->instance_set_layer_mask(chunk.instance, render_layers);
 						} else {
 							rs->instance_set_base(chunk.instance, chunk.meshes[lod]);
 						}
@@ -885,6 +886,22 @@ void ChunkedTerrain3D::set_cast_shadows(bool p_enabled) {
 	}
 }
 
+void ChunkedTerrain3D::set_render_layers(uint32_t p_layers) {
+	if (render_layers == p_layers) {
+		return;
+	}
+	render_layers = p_layers;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (!rs) {
+		return;
+	}
+	for (Chunk &chunk : chunks) {
+		if (chunk.instance.is_valid()) {
+			rs->instance_set_layer_mask(chunk.instance, render_layers);
+		}
+	}
+}
+
 void ChunkedTerrain3D::set_contribute_to_gi(bool p_enabled) {
 	if (contribute_to_gi == p_enabled) {
 		return;
@@ -1095,6 +1112,8 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_material", "material"), &ChunkedTerrain3D::set_material);
 	ClassDB::bind_method(D_METHOD("get_material"), &ChunkedTerrain3D::get_material);
 	ClassDB::bind_method(D_METHOD("set_cast_shadows", "enabled"), &ChunkedTerrain3D::set_cast_shadows);
+	ClassDB::bind_method(D_METHOD("set_render_layers", "layers"), &ChunkedTerrain3D::set_render_layers);
+	ClassDB::bind_method(D_METHOD("get_render_layers"), &ChunkedTerrain3D::get_render_layers);
 	ClassDB::bind_method(D_METHOD("get_cast_shadows"), &ChunkedTerrain3D::get_cast_shadows);
 	ClassDB::bind_method(D_METHOD("set_contribute_to_gi", "enabled"), &ChunkedTerrain3D::set_contribute_to_gi);
 	ClassDB::bind_method(D_METHOD("is_contributing_to_gi"), &ChunkedTerrain3D::is_contributing_to_gi);
@@ -1129,6 +1148,7 @@ void ChunkedTerrain3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "centered"), "set_centered", "is_centered");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material", PROPERTY_HINT_RESOURCE_TYPE, "BaseMaterial3D,ShaderMaterial"), "set_material", "get_material");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "cast_shadows"), "set_cast_shadows", "get_cast_shadows");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "render_layers", PROPERTY_HINT_LAYERS_3D_RENDER), "set_render_layers", "get_render_layers");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "contribute_to_gi"), "set_contribute_to_gi", "is_contributing_to_gi");
 	ADD_GROUP("Detail", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "chunk_quads", PROPERTY_HINT_RANGE, "2,256,1"), "set_chunk_quads", "get_chunk_quads");

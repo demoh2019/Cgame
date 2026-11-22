@@ -93,7 +93,7 @@ func run(t) -> void:
 			"ruin moss uses existing mid-frequency detail without another noise evaluation")
 		t.check(code.contains("color *= mix(vec3(1.0), vec3(0.75, 0.92, 0.73), ruin_moss)"),
 			"aging shifts the albedo gently without extra texture samples")
-		t.check(code.contains("dry_roughness = mix(dry_roughness, 0.92, ruin_moss * 0.45)"),
+		t.check(code.contains("r_dry_roughness = mix(r_dry_roughness, 0.92, ruin_moss * 0.45)"),
 			"moss makes urban ground more matte, without removing rain puddle highlights")
 		t.check(code.contains("puddle * 0.9"), "existing puddle response remains after moss shading")
 	for paved_share in [0.0, 0.3, 0.6, 1.0]:

@@ -100,6 +100,7 @@ private:
 	real_t skirt_depth = 4.0;
 	Ref<Material> material;
 	bool cast_shadows = true;
+	uint32_t render_layers = 1; // Visual layers of the chunk instances (Camera3D.cull_mask), e.g. for top-down bake cameras.
 	// The RID-backed heightfield is static and can contribute to SDFGI without
 	// becoming a shadow caster. Off by default for non-GI projects.
 	bool contribute_to_gi = false;
@@ -191,6 +192,8 @@ public:
 	Ref<Material> get_material() const { return material; }
 	void set_cast_shadows(bool p_enabled);
 	bool get_cast_shadows() const { return cast_shadows; }
+	void set_render_layers(uint32_t p_layers);
+	uint32_t get_render_layers() const { return render_layers; }
 	void set_contribute_to_gi(bool p_enabled);
 	bool is_contributing_to_gi() const { return contribute_to_gi; }
 	void set_collision_enabled(bool p_enabled);

@@ -6,6 +6,7 @@ extends Node3D
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GroundPlants = preload("res://scripts/client/ground_plants.gd")
+const TerrainRvt = preload("res://scripts/client/terrain_rvt.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const Assets = preload("res://scripts/client/assets.gd")
@@ -933,6 +934,9 @@ func _build_terrain(origin: Vector2) -> void:
 	# optional Ultra SDFGI. No extra cascades or shadow atlas allocations
 	# exist on Performance/Balanced/High.
 	_terrain.contribute_to_gi = true
+	# Also on the layer the terrain runtime virtual texture's bake cameras see (terrain_rvt.gd).
+	if "render_layers" in _terrain:
+		_terrain.render_layers = TerrainRvt.terrain_layers()
 	_terrain.update_interval = 0.16 if terrain_geomorph_enabled else 0.5
 	_terrain.material = _ground_with_roads(origin)
 	_terrain.set_height_data(heights, Vector2i(SAMPLES, SAMPLES))
