@@ -46,7 +46,7 @@ of replacing another food shortcut.
   in account saves (missing field defaults to zero for older saves). Only the
   survivor's own snapshot shows symptoms. Changes are marked for autosave.
 - `scripts/client/hud.gd`: debuff icon, clear gameplay actions and result
-  feedback. `online_main.gd` and `client_main.gd` support the same
+  feedback. `online_main.gd` support the same
   fast keys.
 
 Only authoritative server state controls symptoms, item costs and recovery.

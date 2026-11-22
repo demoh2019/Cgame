@@ -4,7 +4,6 @@ const BiomeAtmosphere = preload("res://scripts/client/biome_atmosphere.gd")
 const CinematicFog = preload("res://scripts/client/cinematic_fog.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const OnlineGame = preload("res://scripts/client/online_main.gd")
-const OfflineGame = preload("res://scripts/client/client_main.gd")
 
 func run(t) -> void:
 	t.current = "biome fog presets are bounded and independent"
@@ -88,5 +87,3 @@ func run(t) -> void:
 		"all fog transitions are driven by shared atmosphere")
 	t.check((OnlineGame as Script).source_code.contains("_visual_biome ="),
 		"online world samples its own biome at the weather cadence")
-	t.check((OfflineGame as Script).source_code.contains("_visual_biome ="),
-		"offline preview samples the same authoritative world biome")

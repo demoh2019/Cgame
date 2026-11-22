@@ -4,7 +4,6 @@ extends RefCounted
 const GraphicsLighting = preload("res://scripts/client/graphics_lighting.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
-const LocalPreview = preload("res://scripts/client/client_main.gd")
 
 
 func run(t) -> void:
@@ -165,11 +164,3 @@ func run(t) -> void:
 	var atmosphere_code: String = (Atmosphere as Script).source_code
 	t.check(atmosphere_code.contains("sun.global_transform.basis.z.normalized()"),
 		"visible sun disc aligns with the direction toward the sun, not emitted rays")
-	var preview_code: String = (LocalPreview as Script).source_code
-	t.check(preview_code.contains("_atmosphere = Atmosphere.new()"),
-		"offline preview uses the same sky and sun renderer as multiplayer")
-	t.check(preview_code.contains("GraphicsQuality.apply(get_viewport(), _atmosphere, null)"),
-		"offline preview receives the saved quality preset")
-	t.check(preview_code.contains("Weather.conditions(") and
-		preview_code.contains("_weather_next_update = seconds + 0.25"),
-		"offline atmosphere samples authoritative weather with bounded CPU cost")

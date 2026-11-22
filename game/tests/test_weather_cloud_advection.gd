@@ -6,7 +6,6 @@ const Clouds = preload("res://scripts/client/cloud_shadow_lut.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const Online = preload("res://scripts/client/online_main.gd")
-const Offline = preload("res://scripts/client/client_main.gd")
 
 
 func run(t) -> void:
@@ -102,7 +101,5 @@ func run(t) -> void:
 		"sky radiance still avoids per-frame realtime cubemap invalidation")
 	t.check((Online as Script).source_code.contains("Weather.wind_at("),
 		"online regional weather reaches atmospheric cloud motion")
-	t.check((Offline as Script).source_code.contains("Weather.wind_at("),
-		"offline mode uses the same world weather field")
 	t.eq(GraphicsQuality.profile(0)["cloud_shadows"], false,
 		"existing low-cost Performance mode keeps cloud shadows disabled")

@@ -11,7 +11,6 @@ on:
       - "game/scripts/shared/net.gd"
       - "game/scripts/shared/storm_lightning.gd"
       - "game/scripts/client/online_main.gd"
-      - "game/scripts/client/client_main.gd"
       - "game/tests/test_storm_thunder.gd"
       - "game/tests/run_all.gd"
       - ".github/workflows/lightning-thunder-acoustics.yml"
@@ -23,7 +22,6 @@ on:
       - "game/scripts/shared/net.gd"
       - "game/scripts/shared/storm_lightning.gd"
       - "game/scripts/client/online_main.gd"
-      - "game/scripts/client/client_main.gd"
       - "game/tests/test_storm_thunder.gd"
   workflow_dispatch:
 
@@ -54,7 +52,6 @@ jobs:
           header = Path("modules/gameplay_fx/sound_propagation.h").read_text()
           policy = Path("modules/gameplay_fx/sound_propagation_policy.h").read_text()
           spatial = Path("game/scripts/client/storm_thunder.gd").read_text()
-          solo = Path("game/scripts/client/client_main.gd").read_text()
           online = Path("game/scripts/client/online_main.gd").read_text()
           tests = Path("game/tests/run_all.gd").read_text()
           net = Path("game/scripts/shared/net.gd").read_text()
@@ -68,7 +65,6 @@ jobs:
           assert "MAX_PENDING := 4" in spatial
           assert "MAX_VOICES := 2" in spatial
           assert "_storm_thunder.on_strike(event, here," in online
-          assert "_storm_thunder.on_strike(game_event, survivor.position," in solo
           assert "test_storm_thunder.gd" in tests
           assert 'distant_thunder' in spatial and 'distant_thunder' in online
           assert 'func _lightning_for_peer(' in net

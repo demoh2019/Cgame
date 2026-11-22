@@ -6,7 +6,6 @@ const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const OnlineClient = preload("res://scripts/client/online_main.gd")
-const LocalClient = preload("res://scripts/client/client_main.gd")
 
 
 func run(t) -> void:
@@ -78,5 +77,3 @@ func run(t) -> void:
 			"sky disc and moonlight respond to the same phase")
 	t.check((OnlineClient as Script).source_code.contains("MoonVisuals.phase_at(clock)"),
 			"multiplayer sky uses authoritative server time")
-	t.check((LocalClient as Script).source_code.contains("MoonVisuals.phase_at(seconds)"),
-			"offline preview sky uses its local simulation clock")

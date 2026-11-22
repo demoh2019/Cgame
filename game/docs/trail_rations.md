@@ -52,7 +52,7 @@ downgrade the stronger effect. There is no duration stacking.
 - `scripts/server/game_server.gd` owns item use, inventory debit, effect
   rank and duration, skill-aware hunger drain, expiry, death reset, strict
   version-1 save validation and migration, and owner-only HUD snapshots.
-- `scripts/client/hud.gd`, `online_main.gd` and `client_main.gd`
+- `scripts/client/hud.gd`, `online_main.gd`
   connect field actions, keyboard shortcuts, result feedback and timers to
   the already existing network and local simulation commands.
 - `assets/icons/items/smoked_fish.svg` is a lightweight original scalable

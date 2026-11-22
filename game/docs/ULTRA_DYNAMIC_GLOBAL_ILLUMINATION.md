@@ -53,7 +53,7 @@ Implementation:
 - `scene/resources/environment.cpp`: native visibility profile and binding
 - `game/scripts/client/graphics_indirect_lighting.gd`: preset policy and fast path
 - `game/scripts/client/graphics_quality.gd`: shared live update entry point
-- `game/scripts/client/online_main.gd` and `client_main.gd`: actual interior transitions
+- `game/scripts/client/online_main.gd`: actual interior transitions
 - `tests/scene/test_sky.cpp`: engine regression
 - `game/tests/test_graphics_indirect_lighting.gd`: game regressions
 

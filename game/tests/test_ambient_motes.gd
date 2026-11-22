@@ -4,7 +4,6 @@ extends RefCounted
 
 const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
 const OnlineClient = preload("res://scripts/client/online_main.gd")
-const SoloClient = preload("res://scripts/client/client_main.gd")
 
 
 func run(t) -> void:
@@ -156,7 +155,3 @@ func run(t) -> void:
 		"multiplayer streams particles from world height and actual weather")
 	t.check(online.contains('"" if underground else _visual_biome'),
 		"underground gameplay suppresses surface fireflies and pollen")
-	var solo: String = (SoloClient as Script).source_code
-	t.check(solo.contains("_ambient_motes.setup(world)") and
-		solo.contains("_ambient_motes.update_view(survivor.position"),
-		"solo mode shares the same GPU motes and deterministic world seeds")

@@ -5,7 +5,6 @@ extends RefCounted
 const Flash = preload("res://scripts/client/graphics_lightning_flash.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const Online = preload("res://scripts/client/online_main.gd")
-const Offline = preload("res://scripts/client/client_main.gd")
 const Server = preload("res://scripts/server/game_server.gd")
 
 
@@ -98,13 +97,6 @@ func run(t) -> void:
 		"multiplayer delivers near-field attenuation to visual atmosphere")
 	t.check(online.contains("not Dungeon.is_underground("),
 		"online caves are shielded from outdoor sky flashes")
-	var offline: String = (Offline as Script).source_code
-	t.check(offline.contains('str(game_event.get("type", "")) == "lightning_struck"'),
-		"offline simulation uses the same confirmed impact event")
-	t.check(offline.contains("_atmosphere.trigger_lightning(distance_m)"),
-		"offline lightning uses one equivalent visual pipeline")
-	t.check(offline.contains("not Dungeon.is_underground(survivor.position.x)"),
-		"offline dungeons are excluded from atmospheric flashes")
 	var server_source: String = (Server as Script).source_code
 	t.check(server_source.contains('events.append({"type": "lightning_struck"'),
 		"authoritative impact event already exists; no new gameplay or RPC")

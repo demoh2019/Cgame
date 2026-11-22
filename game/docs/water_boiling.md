@@ -34,7 +34,7 @@ pouch rather than giving a free permanent bottle or duplicate resources.
 - `scripts/shared/crafting.gd` and existing `FieldCampfire.has_warmth`:
   the original atomic crafting transaction validates fuel, live station,
   capacity and rewards; no new network message or engine change is required.
-- `scripts/client/online_main.gd` and `client_main.gd`: Shift+2 support.
+- `scripts/client/online_main.gd`: Shift+2 support.
   `scripts/client/hud.gd`: discoverable inventory Field action.
 - `tests/test_water_boiling.gd`: recipes, shore validation, one-time item
   debit, shared cooldown, persistence, no raw-water drinking, fire requirement,

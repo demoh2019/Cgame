@@ -1,7 +1,6 @@
 # Cinematic ground tracks — terrain-aligned decals, quality budgets and native Godot optimization
 
-**Integrated into:** `game/scripts/client/online_main.gd` and
-`game/scripts/client/client_main.gd` on `develop`. The engine changes
+**Integrated into:** `game/scripts/client/online_main.gd` on `develop`. The engine changes
 live in `scene/3d/decal.cpp`.
 
 ## Visual result

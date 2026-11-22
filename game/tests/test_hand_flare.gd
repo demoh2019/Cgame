@@ -2,7 +2,6 @@ extends RefCounted
 ## Paid visual lighting, secure server timing, AI reaction and save validation.
 const HandFlare = preload("res://scripts/shared/hand_flare.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
-const OfflineClient = preload("res://scripts/client/client_main.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
@@ -11,25 +10,15 @@ const Zombie = preload("res://scripts/shared/zombie.gd")
 
 
 func run(t) -> void:
-	t.current = "unique physical keys for portable light and fishing traps"
-	var offline := OfflineClient.new()
-	offline._setup_actions()
-	var flare_keys: Array = InputMap.action_get_events("survive_flare")
-	var trap_keys: Array = InputMap.action_get_events("survive_place_fish_trap")
-	t.check(flare_keys.size() == 1 and flare_keys[0] is InputEventKey,
-		"offline flare has one real physical key binding")
-	t.check(trap_keys.size() == 1 and trap_keys[0] is InputEventKey,
-		"shoreline net has one real physical key binding")
-	if (flare_keys.size() == 1 and flare_keys[0] is InputEventKey
-			and trap_keys.size() == 1 and trap_keys[0] is InputEventKey):
-		t.eq((flare_keys[0] as InputEventKey).physical_keycode, KEY_F2,
-			"F2 ignites the signal flare")
-		t.eq((trap_keys[0] as InputEventKey).physical_keycode, KEY_F10,
-			"F10 deploys the shoreline fishing net")
-		t.check((flare_keys[0] as InputEventKey).physical_keycode !=
-			(trap_keys[0] as InputEventKey).physical_keycode,
-			"both actions cannot fire from the same physical key")
-	offline.free()
+	t.current = "the game client lights the flare and places the net"
+	var game_client: String = FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
+	var hud: String = FileAccess.get_file_as_string("res://scripts/client/hud.gd")
+	t.check(game_client.contains("HandFlareVisual.new()") and game_client.contains('client.you.get("flare_seconds"'),
+		"the survivor carries a visible flare while the server reports burn time")
+	t.check(hud.contains('kind == "use" and data.has("flare_seconds")'),
+		"using the flare from the inventory is confirmed in the HUD")
+	t.check(game_client.contains("KEY_F10:") and game_client.contains("client.place_fish_trap()"),
+		"F10 deploys the shoreline fishing net")
 
 	var night: float = WorldCycle.DAY_LENGTH * 0.75
 	var day: float = WorldCycle.DAY_LENGTH * 0.25

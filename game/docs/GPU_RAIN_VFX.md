@@ -45,7 +45,6 @@ existing graphics presets; **Ctrl+F11** switches the local preview tier.
 - `res://scripts/client/rain_vfx.gd`: profile budgets, GPU/CPU factory,
   smooth storm density and quality application
 - `res://scripts/client/effects.gd`: live multiplayer connection
-- `res://scripts/client/client_main.gd`: playable offline integration
 - `res://tests/test_rain_vfx.gd`: clamping, scaling, real particle node
   properties, no restart on rain-intensity updates, engine fallback,
   both-client integration

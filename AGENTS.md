@@ -11,8 +11,8 @@ there, wired into the default client `scripts/client/online_main.tscn` (Play sol
 for rules, into the server (`scripts/server/game_server.gd`). Do not create another game project under
 `demo/`, `demos/`, `games/` or `misc/` — the five parallel survival prototypes were merged away on
 2026-11-22 because work landed in them and never reached the game. Projects left in `demo/`, `demos/`
-and `misc/` are engine feature labs and benchmarks, not games. `scripts/client/client_main.tscn` is a
-legacy local preview kept for tests; do not add features only there.
+and `misc/` are engine feature labs and benchmarks, not games. The old offline preview client
+(`client_main`) was removed too: `online_main` is the only client.
 
 ## Build (only when asked, it is slow)
 

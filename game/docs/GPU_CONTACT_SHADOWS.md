@@ -65,7 +65,6 @@ opacity toward the shadow's border.
 - `assets/shaders/contact_shadow.gdshader`: analytical penumbra
 - `scripts/client/character_model.gd`: registration of live actors
 - `scripts/client/online_main.gd`: online world integration
-- `scripts/client/client_main.gd`: solo preview integration
 - `tests/test_contact_shadow_batch.gd`: quality budgets,
   distance/water/death culling, alpha fade, GPU resource creation,
   and both scene integrations

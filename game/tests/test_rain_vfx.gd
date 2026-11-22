@@ -5,7 +5,6 @@ extends RefCounted
 const RainVfx = preload("res://scripts/client/rain_vfx.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const Effects = preload("res://scripts/client/effects.gd")
-const LocalClient = preload("res://scripts/client/client_main.gd")
 const OnlineClient = preload("res://scripts/client/online_main.gd")
 
 
@@ -102,9 +101,3 @@ func run(t) -> void:
 	var online: String = (OnlineClient as Script).source_code
 	t.check(online.contains("effects.update_rain("),
 		"multiplayer frame loop still feeds real-world storm strength")
-	var offline: String = (LocalClient as Script).source_code
-	t.check(offline.contains("RainVfx.create(") and
-		offline.contains("RainVfx.update(_rain_vfx,"),
-		"local preview also renders storm rain with the same GPU budgets")
-	t.check(offline.contains("RainVfx.apply_quality(_rain_vfx, GraphicsQuality.level())"),
-		"offline quality hotkey refreshes its rain cap")

@@ -5,7 +5,6 @@ const Foliage = preload("res://scripts/client/foliage.gd")
 const GrassField = preload("res://scripts/client/grass_field.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const Online = preload("res://scripts/client/online_main.gd")
-const Offline = preload("res://scripts/client/client_main.gd")
 const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
 
 func run(t) -> void:
@@ -42,8 +41,6 @@ func run(t) -> void:
 		"atmosphere publishes the one global wind parameter")
 	t.check((Online as Script).source_code.contains("Weather.wind_at("),
 		"online client reads deterministic regional wind")
-	t.check((Offline as Script).source_code.contains("Weather.wind_at("),
-		"offline client uses identical world weather")
 
 
 	t.current = "world-space wind is invariant under instanced rotation and scale"

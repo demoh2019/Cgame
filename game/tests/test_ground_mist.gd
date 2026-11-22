@@ -2,7 +2,6 @@ extends RefCounted
 ## Fog volumes use native Forward+ froxels and remain off for low-end/dungeons.
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const Online = preload("res://scripts/client/online_main.gd")
-const Offline = preload("res://scripts/client/client_main.gd")
 const ShaderPath := "res://assets/shaders/ground_mist.gdshader"
 
 
@@ -114,8 +113,5 @@ func run(t) -> void:
 		t.eq(mist.get_child_count(), 1, "setup reuses the same native fog volume")
 	mist.free()
 	var online: String = (Online as Script).source_code
-	var offline: String = (Offline as Script).source_code
 	t.check(online.contains("GroundMist.new()") and online.contains("_ground_mist.update_view("),
 		"multiplayer camera streams localized fog without server code")
-	t.check(offline.contains("GroundMist.new()") and offline.contains("_ground_mist.update_view("),
-		"offline scene uses the same graphics API")

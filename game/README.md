@@ -66,10 +66,11 @@ The solo launcher requests a **graceful stop** so the world and character are
 flushed before quitting (with a bounded emergency hard-kill fallback).
 Public offline guest servers still do not persist anonymous characters.
 
-The old `scripts/client/client_main.tscn` remains a separate local test/preview
-scene; it is **not** the default launch mode.
+There is one client: `scripts/client/online_main.tscn`. The old offline
+preview scene (`client_main`) was removed on 2026-11-22 so every feature lands
+in the game players actually run.
 
-## Run playable local preview
+## Run the game
 
 Open `game/project.godot` with a compiled Cgame editor or start:
 
@@ -77,12 +78,10 @@ Open `game/project.godot` with a compiled Cgame editor or start:
 godot --path game
 ```
 
-This launches `scripts/client/client_main.tscn`. The local preview
-reuses `GameServer` for the actual gameplay rules, so movement, crafting,
-combat and survival do not have a separate client-side implementation.
-The camera, environment, streaming terrain and entities use native Godot/Cgame
-rendering. This **local preview is not multiplayer**; remote networking and
-account persistence must be wired into this scene before claiming an MMO.
+This launches `scripts/client/online_main.tscn`: choose **Play solo** (a
+loopback-only local world on the same `GameServer` as online play) or **Join
+server**. Movement, crafting, combat and survival rules live only in the server
+simulation; the client renders and sends input.
 
 New melee choice: **Ruin Machetes T1–T4** combine scavenged scrap with
 tier-matched planks and metal bars at the workbench. Equip one with **4**

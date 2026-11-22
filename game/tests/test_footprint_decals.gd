@@ -2,7 +2,6 @@ extends RefCounted
 ## Renderer and lifetime budgets for pooled GPU-native footprint projectors.
 const Tracks = preload("res://scripts/client/footprint_decals.gd")
 const Online = preload("res://scripts/client/online_main.gd")
-const Offline = preload("res://scripts/client/client_main.gd")
 
 
 class FlatTerrain:
@@ -117,9 +116,5 @@ func run(t) -> void:
 	t.current = "online and offline integration"
 	t.check((Online as Script).source_code.contains("_footprints.setup(client.world)"),
 		"multiplayer projects imprints onto the streamed terrain heightmap")
-	t.check((Offline as Script).source_code.contains("_footprints.setup(world)"),
-		"local client projects imprints onto the same terrain heightmap")
 	t.check((Online as Script).source_code.contains("_footprints.update_track("),
 		"networked player movement renders native decals")
-	t.check((Offline as Script).source_code.contains("_footprints.update_track("),
-		"local gameplay uses the identical graphics feature")

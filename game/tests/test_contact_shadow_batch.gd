@@ -109,13 +109,7 @@ func run(t) -> void:
 		"res://scripts/client/character_model.gd")
 	var online_code: String = FileAccess.get_file_as_string(
 		"res://scripts/client/online_main.gd")
-	var solo_code: String = FileAccess.get_file_as_string(
-		"res://scripts/client/client_main.gd")
 	t.check(model_code.contains('add_to_group("aa_grounded_characters")'),
 		"all real survivors and infected share one actor render group")
 	t.check(online_code.contains("ContactShadowBatch.new()"),
 		"the multiplayer world has a shared GPU shadow renderer")
-	t.check(solo_code.contains("ContactShadowBatch.new()"),
-		"the local survival mode uses the exact same GPU path")
-	t.check(solo_code.contains("mesh.add_to_group(ContactShadowBatch.GROUP)"),
-		"solo infected are included instead of only the local player")
