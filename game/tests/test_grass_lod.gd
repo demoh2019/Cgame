@@ -2,6 +2,7 @@ extends RefCounted
 ## Checks the geometry budget and hysteresis of the grass LOD used by ChunkView.
 
 const GrassField = preload("res://scripts/client/grass_field.gd")
+const GroundPlants = preload("res://scripts/client/ground_plants.gd")
 
 
 func run(t) -> void:
@@ -18,6 +19,43 @@ func run(t) -> void:
 		previous_triangles = indices.size()
 	t.check(GrassField.clump_mesh(18) == GrassField.clump_mesh(18), "near mesh is reused across tiles")
 	t.check(GrassField.clump_mesh(4) == GrassField.clump_mesh(4), "far mesh is reused across tiles")
+
+	t.current = "grass blades form wide, bent tufts without extra geometry"
+	var near_arrays: Array = GrassField.clump_mesh(18).surface_get_arrays(0)
+	var near_vertices: PackedVector3Array = near_arrays[Mesh.ARRAY_VERTEX]
+	var near_normals: PackedVector3Array = near_arrays[Mesh.ARRAY_NORMAL]
+	var total_root_width := 0.0
+	var visibly_curved := 0
+	var varied_normals := 0
+	for blade in 18:
+		var at: int = blade * 6
+		var root_middle: Vector3 = (near_vertices[at] + near_vertices[at + 1]) * 0.5
+		var shoulder_middle: Vector3 = (near_vertices[at + 2] + near_vertices[at + 3]) * 0.5
+		var tip_middle: Vector3 = (near_vertices[at + 4] + near_vertices[at + 5]) * 0.5
+		var root_width: float = near_vertices[at].distance_to(near_vertices[at + 1])
+		var shoulder_width: float = near_vertices[at + 2].distance_to(near_vertices[at + 3])
+		var tip_width: float = near_vertices[at + 4].distance_to(near_vertices[at + 5])
+		total_root_width += root_width
+		t.check(shoulder_width > tip_width, "grass widens at the shoulder and tapers to the tip")
+		if shoulder_middle.distance_to(root_middle.lerp(tip_middle, 0.54)) > 0.004:
+			visibly_curved += 1
+		if near_normals[at].distance_to(Vector3.UP) > 0.1:
+			varied_normals += 1
+	t.check(total_root_width / 18.0 > 0.045,
+		"broader tuft roots remain visibly thicker than the old paper-thin grass")
+	t.check(visibly_curved >= 9, "at least half the blades have non-linear bends")
+	t.check(varied_normals >= 9, "blade lighting varies around the clump")
+	t.check(GrassField.SHADER_CODE.contains("MODEL_MATRIX * vec4(NORMAL, 0.0)"),
+		"grass shader keeps the individual blade normals instead of flattening all lighting")
+
+	t.current = "photographed grass cards fan out into a broad canopy"
+	var cards: Mesh = GroundPlants.card_mesh(0, 3)
+	var card_vertices: PackedVector3Array = cards.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	t.eq(cards.get_faces().size(), 6, "three photo cards still cost six triangles")
+	var root_span: float = card_vertices[0].distance_to(card_vertices[1])
+	var canopy_span: float = card_vertices[2].distance_to(card_vertices[5])
+	t.check(canopy_span > root_span * 1.05, "photographed canopy spreads wider than the root")
+	t.check(GroundPlants.CARD_WIDTH_SCALE >= 1.15, "photo tufts use a noticeably wider silhouette")
 
 	t.current = "grass LOD hysteresis"
 	t.eq(GrassField.lod_for_distance(0.0), 0, "close view uses highest geometry")
