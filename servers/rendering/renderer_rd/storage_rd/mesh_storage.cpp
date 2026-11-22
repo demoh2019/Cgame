@@ -1733,6 +1733,7 @@ void MeshStorage::_multimesh_set_mesh(RID p_multimesh, RID p_mesh) {
 			Vector<uint8_t> buffer = RD::get_singleton()->buffer_get_data(multimesh->buffer);
 			const uint8_t *r = buffer.ptr() + multimesh->motion_vectors_current_offset * multimesh->stride_cache * sizeof(float);
 			const float *data = reinterpret_cast<const float *>(r);
+			_multimesh_update_lod_scale(multimesh, data, multimesh->instances);
 			_multimesh_re_create_aabb(multimesh, data, multimesh->instances);
 		}
 	}
@@ -2191,10 +2192,11 @@ void MeshStorage::_multimesh_set_buffer(RID p_multimesh, const Vector<float> &p_
 		//if we have a mesh set, we need to re-generate the AABB from the new data
 		const float *data = p_buffer.ptr();
 
+		_multimesh_update_lod_scale(multimesh, data, multimesh->instances);
 		if (multimesh->custom_aabb == AABB()) {
 			_multimesh_re_create_aabb(multimesh, data, multimesh->instances);
-			multimesh->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_AABB);
 		}
+		multimesh->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_AABB);
 	}
 }
 
@@ -2350,8 +2352,12 @@ void MeshStorage::_update_dirty_multimeshes() {
 			if (multimesh->aabb_dirty) {
 				//aabb is dirty..
 				multimesh->aabb_dirty = false;
+				const float previous_lod_scale = multimesh->lod_scale;
+				_multimesh_update_lod_scale(multimesh, data, visible_instances);
 				if (multimesh->custom_aabb == AABB()) {
 					_multimesh_re_create_aabb(multimesh, data, visible_instances);
+					multimesh->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_AABB);
+				} else if (previous_lod_scale != multimesh->lod_scale) {
 					multimesh->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_AABB);
 				}
 			}
@@ -2568,4 +2574,32 @@ void MeshStorage::skeleton_update_dependency(RID p_skeleton, DependencyTracker *
 	ERR_FAIL_NULL(skeleton);
 
 	p_instance->update_dependency(&skeleton->dependency);
+}
+
+void MeshStorage::_multimesh_update_lod_scale(MultiMesh *multimesh, const float *p_data, int p_instances) {
+	// One LOD is chosen per multimesh; let it see how big the instances really are (scattered props are often
+	// scaled to 0.1-0.5), using the largest one so no instance gets a coarser LOD than it needs.
+	float largest = 0.0f;
+	if (multimesh->xform_format == RSE::MULTIMESH_TRANSFORM_3D) {
+		for (int i = 0; i < p_instances; i++) {
+			const float *d = p_data + multimesh->stride_cache * i;
+			const float sx = d[0] * d[0] + d[4] * d[4] + d[8] * d[8];
+			const float sy = d[1] * d[1] + d[5] * d[5] + d[9] * d[9];
+			const float sz = d[2] * d[2] + d[6] * d[6] + d[10] * d[10];
+			largest = MAX(largest, MAX(sx, MAX(sy, sz)));
+		}
+	} else {
+		for (int i = 0; i < p_instances; i++) {
+			const float *d = p_data + multimesh->stride_cache * i;
+			largest = MAX(largest, MAX(d[0] * d[0] + d[4] * d[4], d[1] * d[1] + d[5] * d[5]));
+		}
+	}
+	multimesh->lod_scale = (p_instances > 0 && largest > 0.0f) ? Math::sqrt(largest) : 1.0f;
+}
+
+float MeshStorage::_multimesh_get_lod_scale(RID p_multimesh) const {
+	// Called for every multimesh instance on transform updates; a base that was freed or not yet allocated
+	// (pooled VFX) simply has no instance scale yet.
+	const MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	return multimesh ? multimesh->lod_scale : 1.0f;
 }

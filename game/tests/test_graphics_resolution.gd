@@ -106,8 +106,17 @@ func run(t) -> void:
 		"gl_compatibility", "web compatibility")
 
 
+	t.current = "cheap Apple MetalFX spatial on the low presets"
+	for low_level in [0, 1]:
+		var cheap: Dictionary = Resolution.plan("forward_plus", Quality.profile(low_level), -1.0, false, "metal", 0.5)
+		t.eq(cheap["mode"], Viewport.SCALING_3D_MODE_METALFX_SPATIAL,
+			"%s skips the temporal scaler and its motion-vector pass" % Quality.NAMES[low_level])
+		t.eq(cheap["screen_space_aa"], Viewport.SCREEN_SPACE_AA_FXAA, "spatial scaling keeps FXAA edges")
+	t.eq(Resolution.diagnostic_label(Viewport.SCALING_3D_MODE_METALFX_SPATIAL, 0.77), "MetalFX Spatial 77%",
+		"overlay names the spatial scaler")
+
 	t.current = "native Apple MetalFX temporal and portable FSR2 fallback"
-	var native: Dictionary = Resolution.plan("forward_plus", Quality.profile(1),
+	var native: Dictionary = Resolution.plan("forward_plus", Quality.profile(2),
 		0.65, true, "metal", 0.70)
 	t.eq(native["mode"], Viewport.SCALING_3D_MODE_METALFX_TEMPORAL,
 		"native Metal backend selects Apple's temporal upscale path")
@@ -160,7 +169,7 @@ func run(t) -> void:
 		"Balanced rejects MetalFX when its minimum exceeds 0.77")
 	var affordable: Dictionary = Resolution.plan("forward_plus", Quality.profile(1),
 		0.68, true, "metal", 0.70)
-	t.eq(affordable["mode"], Viewport.SCALING_3D_MODE_METALFX_TEMPORAL,
+	t.eq(affordable["mode"], Viewport.SCALING_3D_MODE_METALFX_SPATIAL,
 		"Balanced accepts MetalFX when hardware minimum fits the tier ceiling")
 	t.near(float(affordable["scale"]), 0.70, 0.00001,
 		"selected native MetalFX honors its minimum fraction")

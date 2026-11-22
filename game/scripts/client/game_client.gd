@@ -47,6 +47,7 @@ var outposts: Array = [] # Public server-controlled PvP objectives.
 var bags: Dictionary = {}
 var depleted: Dictionary = {}
 var crates_used: Dictionary = {}
+var world_state_revision: int = Time.get_ticks_usec() # Bumped only when depleted/crates_used really change, so views skip per-frame rescans.
 var server_time: float = 0.0
 var snapshots_received: int = 0
 var events: Array = [] # Recent events, newest last (for the HUD log).
@@ -172,12 +173,16 @@ func on_snapshot(snapshot: Dictionary) -> void:
 				world.add_structure_blockers(id, HousePieces.blockers_of(entity))
 			else:
 				world.add_dynamic_blocker(id, float(entity["x"]), float(entity["z"]), 0.85)
-	depleted.clear()
+	var next_depleted: Dictionary = {}
 	for id in snapshot["depleted"]:
-		depleted[id] = true
-	crates_used.clear()
+		next_depleted[id] = true
+	var next_crates: Dictionary = {}
 	for id in snapshot["crates_used"]:
-		crates_used[id] = true
+		next_crates[id] = true
+	if next_depleted != depleted or next_crates != crates_used:
+		world_state_revision += 1
+	depleted = next_depleted
+	crates_used = next_crates
 	_reconcile(snapshot)
 	snapshot_received.emit()
 

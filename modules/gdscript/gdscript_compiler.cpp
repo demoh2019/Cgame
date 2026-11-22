@@ -37,6 +37,7 @@
 #include "gdscript_utility_functions.h"
 
 #include "core/config/engine.h"
+#include "core/os/os.h"
 #include "core/config/project_settings.h"
 #include "core/io/resource_loader.h"
 #include "core/object/class_db.h"
@@ -2602,7 +2603,7 @@ GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_
 	}
 
 #ifdef DEBUG_ENABLED
-	if (EngineDebugger::is_active()) {
+	if (EngineDebugger::is_active() || OS::get_singleton()->has_environment("GODOT_SCRIPT_PROFILE")) {
 		String signature;
 		// Path.
 		if (!p_script->get_script_path().is_empty()) {

@@ -1305,6 +1305,22 @@ Vector<int> SurfaceTool::generate_lod(float p_threshold, int p_target_index_coun
 	float error;
 	const int simplify_options = SIMPLIFY_LOCK_BORDER;
 	uint32_t index_count = simplify_func((unsigned int *)lod.ptrw(), (unsigned int *)index_array.ptr(), index_array.size(), vertices.ptr(), vertex_array.size(), sizeof(float) * 3, p_target_index_count, p_threshold, simplify_options, &error);
+	// Cgame: scanned props (roots, bark) are open meshes cut by many UV seams, so the border-locked pass stops
+	// far above the requested budget. Only then retry letting borders and seams collapse (meshoptimizer
+	// Permissive + Prune); callers asking for an explicit count get close to it instead of ~85% of the source.
+	if (index_count > (uint32_t)p_target_index_count + (uint32_t)p_target_index_count / 2 && p_target_index_count >= 3) {
+		LocalVector<int> loose;
+		loose.resize(index_array.size());
+		float loose_error;
+		const uint32_t loose_count = simplify_func((unsigned int *)loose.ptr(), (unsigned int *)index_array.ptr(), index_array.size(), vertices.ptr(), vertex_array.size(), sizeof(float) * 3, p_target_index_count, p_threshold, SIMPLIFY_PERMISSIVE | SIMPLIFY_PRUNE, &loose_error);
+		if (loose_count > 0 && loose_count < index_count) {
+			for (uint32_t i = 0; i < loose_count; i++) {
+				lod.write[i] = loose[i];
+			}
+			index_count = loose_count;
+			error = loose_error;
+		}
+	}
 	ERR_FAIL_COND_V(index_count == 0, lod);
 	lod.resize(index_count);
 

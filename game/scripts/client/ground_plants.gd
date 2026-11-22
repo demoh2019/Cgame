@@ -8,6 +8,7 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const PointSpacing = preload("res://scripts/client/point_spacing.gd")
+const MeshLOD = preload("res://scripts/client/mesh_lod_preservation.gd")
 
 const FOLDER := "res://assets/models/polyhaven/baked/plants/"
 const DRAW_DISTANCE := 34.0
@@ -15,6 +16,12 @@ const TILE := 16.0
 
 ## Quality multiplier on counts: Low 0 (off), Medium 0.55, High 1, Ultra 1.35.
 static var density_scale: float = 1.0
+## Quality multiplier on each species' draw distance. From the orbit camera the alpha-tested plants cover
+## the whole screen; on an M1 at Balanced they were ~14 ms of the GPU frame (depth pre-pass + opaque).
+static var distance_scale: float = 1.0
+## Photo cards per grass tuft. Every card is a full alpha-tested layer in the depth pre-pass; at Balanced
+## three keep the tuft round from the orbit camera for 40% less overdraw.
+static var card_planes: int = 5
 
 # species: biomes, instances per 16 m tile at full density, scale range, clustered (flowers grow in patches).
 # "size": [min, max] scale with a long tail ("big": share of instances drawn from [max, max * 1.8]).
@@ -48,17 +55,17 @@ const SPECIES := {
 	# Scanned stones, sticks, branches, bark and roots lying in the grass, every size.
 	"pebbles": {"files": ["rock_9.res", "stone_scatter.res", "rock_7.res"],
 		"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 170, "scale": [0.05, 0.32], "cluster": true,
-		"variants": 2, "distance": 36.0, "embed": 0.35},
+		"variants": 2, "distance": 36.0, "embed": 0.35, "triangles": 80},
 	"stones": {"files": ["rock_7.res", "rock_9.res", "mossy_rock_1.res", "mossy_rock_3.res", "mossy_rock_5.res", "stone_scatter.res"],
 		"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 60, "scale": [0.14, 0.75], "big": 0.12, "cluster": false,
-		"variants": 2, "distance": 80.0, "embed": 0.3},
+		"variants": 2, "distance": 80.0, "embed": 0.3, "triangles": 300},
 	# Knee-high boulders (no collision, so they stay below a survivor's knees).
 	"boulders": {"files": ["boulder_01.res", "boulder_02.res", "boulder_04.res", "boulder_05.res", "mossy_rock_2.res",
 		"mossy_rock_4.res", "mossy_rock_6.res"], "biomes": ["plains", "forest", "mountain", "beach", "swamp"], "count": 4,
-		"scale": [0.18, 0.45], "cluster": false, "variants": 1, "distance": 140.0, "embed": 0.25},
+		"scale": [0.18, 0.45], "cluster": false, "variants": 1, "distance": 140.0, "embed": 0.25, "triangles": 600},
 	"wood": {"files": ["stick_1.res", "stick_2.res", "branches.res", "bark_debris.res", "single_root.res", "pine_roots.res"],
 		"biomes": ["forest", "swamp", "plains"], "count": 140, "scale": [0.2, 1.2], "big": 0.1, "cluster": false, "variants": 3, "embed": 0.15,
-		"distance": 55.0},
+		"distance": 55.0, "triangles": 240},
 }
 
 static var _manifest: Dictionary = {}
@@ -101,7 +108,7 @@ static func card_material() -> StandardMaterial3D:
 ## One tuft: five photo cards fanned around the root (random angles) and leaning outward,
 ## with roots darkened by vertex colour, so it reads as a round, deep tuft from any side.
 ## Normals lean up so the cards light like a soft mass instead of showing flat faces.
-static func card_mesh(region_index: int) -> Mesh:
+static func card_mesh(region_index: int, planes: int = 5) -> Mesh:
 	var region: Rect2 = CARD_REGIONS[region_index]
 	var row := 1.0 / float(CARD_REGIONS.size())
 	var uv0 := Vector2(0.0, row * float(region_index))
@@ -112,7 +119,7 @@ static func card_mesh(region_index: int) -> Mesh:
 	rng.seed = 9001 + region_index
 	var surface := SurfaceTool.new()
 	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var cards := 5
+	var cards: int = clampi(planes, 1, 8)
 	for k in cards:
 		var angle := PI * float(k) / float(cards) + rng.randf_range(-0.2, 0.2)
 		var side := Vector3(cos(angle), 0.0, sin(angle)) * half_width * rng.randf_range(0.8, 1.05)
@@ -138,17 +145,23 @@ static func card_mesh(region_index: int) -> Mesh:
 	return result
 
 
-static func mesh(file: String, dry: bool = false) -> Mesh:
+static func mesh(file: String, dry: bool = false, max_triangles: int = 0) -> Mesh:
 	if file.begins_with("#card"):
-		if not _meshes.has(file):
-			_meshes[file] = card_mesh(int(file.substr(5)))
-		return _meshes[file]
-	var key := file + ("|dry" if dry else "")
+		var card_key: String = "%s|%d" % [file, card_planes]
+		if not _meshes.has(card_key):
+			_meshes[card_key] = card_mesh(int(file.substr(5)), card_planes)
+		return _meshes[card_key]
+	var key := file + ("|dry" if dry else "") + ("|%d" % max_triangles if max_triangles > 0 else "")
 	if not _meshes.has(key):
 		var loaded: Mesh = load(FOLDER + file) if ResourceLoader.exists(FOLDER + file) else null
+		if max_triangles > 0:
+			loaded = MeshLOD.with_triangle_budget(loaded, max_triangles) # Centimetre pebbles need no scan detail.
+		loaded = MeshLOD.with_generated_lods(loaded) # Baked props lost their LODs; distant ones drew full detail.
 		if loaded != null and not file.begins_with("../"):
 			var id: String = file.get_basename().rsplit("_", true, 1)[0]
 			loaded = _foliage_ready(loaded, _alpha_texture(id, dry))
+		if loaded != null and loaded.resource_path == "" and loaded.resource_name == "":
+			loaded.resource_name = file.get_file() # Names the geometry in benchmark breakdowns.
 		_meshes[key] = loaded
 	return _meshes[key]
 
@@ -194,6 +207,14 @@ static func quality_scale(level: int) -> float:
 	return [0.0, 0.55, 1.0, 1.35][clampi(level, 0, 3)]
 
 
+static func quality_distance_scale(level: int) -> float:
+	return [0.0, 0.6, 1.0, 1.15][clampi(level, 0, 3)]
+
+
+static func quality_card_planes(level: int) -> int:
+	return [3, 3, 5, 5][clampi(level, 0, 3)]
+
+
 ## The plants of one 16 m tile of a chunk, given the grass source sampler.
 ## `sample(lx, lz)` returns {"ok": bool, "h": float, "biome": String} for chunk-local coordinates.
 static func build_tile(origin: Vector2, tile: int, tiles_per_side: int, sample: Callable) -> Array:
@@ -223,7 +244,7 @@ static func build_tile(origin: Vector2, tile: int, tiles_per_side: int, sample: 
 			var choice: Dictionary = choices[(first + v * 7) % choices.size()]
 			# Some grass tiles carry the scanned dry colouring for natural straw-and-green variety.
 			var dry: bool = species.begins_with("grass_") and rng.randf() < 0.3
-			var plant_mesh: Mesh = mesh(str(choice["file"]), dry)
+			var plant_mesh: Mesh = mesh(str(choice["file"]), dry, int(info.get("triangles", 0)))
 			if plant_mesh == null:
 				continue
 			var spread: float = rng.randf_range(0.95, 1.05) if bool(info.get("cards", false)) else rng.randf_range(0.6, 1.3)
@@ -317,7 +338,7 @@ static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted
 		instance.name = "Plants_" + species
 		instance.multimesh = multimesh
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		instance.visibility_range_end = float(info.get("distance", DRAW_DISTANCE))
+		instance.visibility_range_end = float(info.get("distance", DRAW_DISTANCE)) * distance_scale
 		# No fade: a fading range forces the whole multimesh into the slow transparent pass.
 		var top: float = plant_mesh.get_aabb().size.y * float(info["scale"][1]) * 1.8 + 0.5
 		instance.custom_aabb = AABB(Vector3(tile_x - 1.0, low - 0.3, tile_z - 1.0), Vector3(TILE + 2.0, high - low + top, TILE + 2.0))

@@ -77,7 +77,15 @@ void RenderGeometryInstanceBase::set_transform(const Transform3D &p_transform, c
 	float min_scale = MIN(model_scale_vec.x, MIN(model_scale_vec.y, model_scale_vec.z));
 	non_uniform_scale = max_scale > 0.0 && (min_scale / max_scale) < 0.999;
 
-	lod_model_scale = max_scale;
+	lod_node_scale = max_scale;
+	lod_model_scale = lod_node_scale * lod_model_scale_multiplier;
+}
+
+void RenderGeometryInstanceBase::set_lod_model_scale_multiplier(float p_multiplier) {
+	// Multimeshes pick one LOD for all instances; scaling by the largest instance keeps that choice honest
+	// for small scattered props without ever choosing a coarser LOD than the biggest instance needs.
+	lod_model_scale_multiplier = p_multiplier > 0.0f ? p_multiplier : 1.0f;
+	lod_model_scale = lod_node_scale * lod_model_scale_multiplier;
 }
 
 void RenderGeometryInstanceBase::set_pivot_data(float p_sorting_offset, bool p_use_aabb_center) {

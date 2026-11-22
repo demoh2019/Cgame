@@ -363,8 +363,24 @@ static func entry_mesh(entry: Dictionary) -> Mesh:
 		return null
 	var key := "%s|%s|%s" % [entry["path"], entry.get("node", ""), entry["size"]]
 	if not _cache.has(key):
-		_cache[key] = bake(String(entry["path"]), String(entry.get("node", "")), String(entry["kind"]), float(entry["size"]), String(entry.get("tex", "")))
+		# Baked .res props carry no LODs; give them generated ones so scattered copies are not full detail at range.
+		var baked: Mesh = bake(String(entry["path"]), String(entry.get("node", "")), String(entry["kind"]), float(entry["size"]), String(entry.get("tex", "")))
+		_cache[key] = MeshLOD.with_generated_lods(MeshLOD.with_triangle_budget(baked, triangle_budget(entry)))
+		var named: Mesh = _cache[key]
+		if named != null and named.resource_path == "" and named.resource_name == "":
+			named.resource_name = String(entry["path"]).get_file() # Names the geometry in benchmark breakdowns.
 	return _cache[key]
+
+
+## Small scattered props (roots, bark, sticks under 2.5 m) were scanned at 1–3k triangles and hundreds are on
+## screen at once; ~400 per metre keeps their silhouette. Larger models keep full detail (0 = no budget).
+static func triangle_budget(entry: Dictionary) -> int:
+	if entry.has("triangles"):
+		return int(entry["triangles"])
+	var size: float = float(entry.get("size", 0.0))
+	if String(entry.get("kind", "")) == "footprint" or size <= 0.0 or size > 2.5:
+		return 0
+	return maxi(200, int(size * 400.0))
 
 
 ## One object of a model file, transformed, scaled and recentred. `node` empty takes the first mesh that is not a collision hull.

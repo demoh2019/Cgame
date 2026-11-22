@@ -201,6 +201,8 @@ public:
 	virtual int _multimesh_get_visible_instances(RID p_multimesh) const = 0;
 
 	virtual AABB _multimesh_get_aabb(RID p_multimesh) = 0;
+	// Largest per-instance transform scale (used to scale LOD selection). 1.0 when unknown.
+	virtual float _multimesh_get_lod_scale(RID p_multimesh) const { return 1.0f; }
 
 	// Multimesh is responsible for allocating / destroying a MultiMeshInterpolator object.
 	// This allows shared functionality for interpolation across backends.

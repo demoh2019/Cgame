@@ -51,6 +51,8 @@ public:
 	virtual void set_transform(const Transform3D &p_transform, const AABB &p_aabb, const AABB &p_transformed_aabb) = 0;
 	virtual void set_pivot_data(float p_sorting_offset, bool p_use_aabb_center) = 0;
 	virtual void set_lod_bias(float p_lod_bias) = 0;
+	// Extra factor on the LOD model scale (multimeshes: largest per-instance scale). Default: no change.
+	virtual void set_lod_model_scale_multiplier(float p_multiplier) {}
 	virtual void set_layer_mask(uint32_t p_layer_mask) = 0;
 	virtual void set_fade_range(bool p_enable_near, float p_near_begin, float p_near_end, bool p_enable_far, float p_far_begin, float p_far_end) = 0;
 	virtual void set_parent_fade_alpha(float p_alpha) = 0;
@@ -93,6 +95,8 @@ public:
 	AABB transformed_aabb;
 	bool non_uniform_scale = false;
 	float lod_model_scale = 1.0;
+	float lod_model_scale_multiplier = 1.0;
+	float lod_node_scale = 1.0;
 	float lod_bias = 0.0;
 	float sorting_offset = 0.0;
 	bool use_aabb_center = true;
@@ -138,6 +142,7 @@ public:
 	virtual void set_surface_materials(const Vector<RID> &p_materials) override;
 	virtual void set_mesh_instance(RID p_mesh_instance) override;
 	virtual void set_transform(const Transform3D &p_transform, const AABB &p_aabb, const AABB &p_transformed_aabb) override;
+	virtual void set_lod_model_scale_multiplier(float p_multiplier) override;
 	virtual void set_pivot_data(float p_sorting_offset, bool p_use_aabb_center) override;
 	virtual void set_lod_bias(float p_lod_bias) override;
 	virtual void set_layer_mask(uint32_t p_layer_mask) override;

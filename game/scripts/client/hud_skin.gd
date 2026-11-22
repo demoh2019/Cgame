@@ -35,6 +35,9 @@ var _banner_time := 0.0
 var _last_skill := ""
 var _last_skill_time := -100.0
 var _time := 0.0
+var _draw_delta := 0.0 # Time since the last redraw; easing in _draw advances by it (redraws are throttled).
+var _since_draw := 0.0
+const REDRAW_INTERVAL := 1.0 / 30.0 # ~45 draw calls rebuilt every frame cost ~1.6 ms of CPU; 30 Hz reads the same.
 var _font: Font
 var _textures: Dictionary = {}
 var _vitals_bottom := 150.0 # Where the vitals block ends, so the quest card can sit under it.
@@ -118,7 +121,12 @@ func _process(delta: float) -> void:
 		if _last_health >= 0.0 and health < _last_health - 0.5:
 			_flash = minf(1.0, _flash + (_last_health - health) / 30.0 + 0.35)
 		_last_health = health
-	queue_redraw()
+	_since_draw += delta
+	# Hit flashes, banners and the low-health pulse stay at full rate; steady bars refresh at 30 Hz.
+	if _since_draw >= REDRAW_INTERVAL or _flash > 0.0 or _banner_time > 0.0:
+		_draw_delta = _since_draw
+		_since_draw = 0.0
+		queue_redraw()
 
 
 # --- Drawing helpers --------------------------------------------------------------------------------------------------
@@ -168,7 +176,7 @@ func _bar(rect: Rect2, value: float, color: Color, trail: float = -1.0, caption:
 
 func _ease(key: String, target: float, speed: float = 7.0) -> float:
 	var current: float = float(_shown.get(key, target))
-	current = lerpf(current, target, clampf(get_process_delta_time() * speed, 0.0, 1.0))
+	current = lerpf(current, target, clampf(_draw_delta * speed, 0.0, 1.0))
 	_shown[key] = current
 	return current
 
@@ -365,7 +373,7 @@ func _draw_vitals(you: Dictionary) -> void:
 	draw_string(_font, Vector2(left + 4.0, plate_top + 17.0), title, HORIZONTAL_ALIGNMENT_CENTER, right - left - 20.0, 14, INK_DARK)
 	# Health (with a light trail of recent damage) and energy.
 	var shown: float = _ease("health", fraction, 9.0)
-	_trail_health = move_toward(_trail_health, fraction, get_process_delta_time() * 0.18) if fraction < _trail_health else fraction
+	_trail_health = move_toward(_trail_health, fraction, _draw_delta * 0.18) if fraction < _trail_health else fraction
 	_framed_bar(Rect2(Vector2(left, 40), Vector2(right - left, 14)), shown, Color(0.78, 0.16, 0.13), _trail_health,
 		"%d / %d" % [mini(roundi(health), roundi(maximum)), roundi(maximum)], 11)
 	var energy: float = clampf(float(you.get("combat_energy", Defs.COMBAT_ENERGY_MAX)) / Defs.COMBAT_ENERGY_MAX, 0.0, 1.0)

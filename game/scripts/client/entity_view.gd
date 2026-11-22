@@ -155,6 +155,9 @@ func network_recovery_hold_remaining() -> int:
 	return int(_snapshot_buffer.get_recovery_hold_remaining())
 
 
+var _touched_time := -1.0 # Server time of the snapshot whose entities were last applied.
+
+
 func update_from(client) -> void:
 	# This method runs every render frame, not on every network event.
 	# Only new *server timestamps* may update the measured arrival jitter.
@@ -168,6 +171,8 @@ func update_from(client) -> void:
 		_snapshot_buffer.reset()
 		_history.clear()
 		_render_time = -1.0
+	elif incoming_time == _snapshot_time and _touched_time == incoming_time:
+		return # Same snapshot as last frame (20 Hz server, 60 Hz render): entities have not changed.
 	_snapshot_time = incoming_time
 	_snapshot_buffer.observe(_snapshot_time, float(Time.get_ticks_usec()) * 0.000001)
 	if _render_time < 0.0 or absf(_render_time - (_snapshot_time - _snapshot_buffer.delay)) > 0.5:
@@ -205,6 +210,7 @@ func update_from(client) -> void:
 	if not client.raid_telegraph.is_empty():
 		_touch("raid_warning:%d" % int(client.raid_telegraph["id"]),
 			"raid_warning", client.raid_telegraph, seen)
+	_touched_time = incoming_time
 	_world = client.world
 	for key in _nodes.keys():
 		if not seen.has(key):

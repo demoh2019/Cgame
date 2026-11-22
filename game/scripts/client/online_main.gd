@@ -35,6 +35,7 @@ const CharacterModel = preload("res://scripts/client/character_model.gd")
 const FirstSteps = preload("res://scripts/client/first_steps.gd")
 const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const FirstPersonView = preload("res://scripts/client/first_person_view.gd")
+const RenderProfile = preload("res://scripts/client/render_profile.gd")
 const FirstPersonViewmodel = preload("res://scripts/client/first_person_viewmodel.gd")
 const NetTimeouts = preload("res://scripts/shared/net_timeouts.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
@@ -2002,13 +2003,21 @@ func _process(delta: float) -> void:
 
 
 func _apply_world_state() -> void:
+	# Rescanning every node of every loaded chunk each frame cost ~1.2 ms; only chunks that have not seen
+	# the current server revision (new chunks, or after a gather/crate change) need it.
+	var revision: int = client.world_state_revision
 	var hidden: Dictionary = {}
-	hidden.merge(client.depleted)
-	hidden.merge(client.crates_used)
 	for cell in streamer.get_loaded_cells():
 		var chunk := streamer.get_chunk(cell)
-		if chunk != null and chunk.has_method("apply_state"):
-			chunk.apply_state(hidden)
+		if chunk == null or not chunk.has_method("apply_state"):
+			continue
+		if chunk.has_meta("aa_state_revision") and int(chunk.get_meta("aa_state_revision")) == revision:
+			continue
+		if hidden.is_empty():
+			hidden.merge(client.depleted)
+			hidden.merge(client.crates_used)
+		chunk.apply_state(hidden)
+		chunk.set_meta("aa_state_revision", revision)
 
 
 ## Announces the settlement or the region you walk into.
@@ -2508,6 +2517,10 @@ func _set_first_person(enabled: bool) -> void:
 	if enabled == _first_person or client == null or not client.welcomed:
 		return
 	_first_person = enabled
+	if _grade_material != null:
+		# Tilt-shift blur reads the screen 5–9 times per pixel at output resolution; in first person the
+		# "diorama" band only smears the horizon, so skip it there.
+		_grade_material.set_shader_parameter("diorama_blur", not enabled)
 	_jump_time = -1.0
 	if _crosshair == null:
 		_crosshair = FirstPersonView.make_crosshair()
@@ -3264,6 +3277,11 @@ func _run_demo() -> void:
 				Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)])
 			if _pcg_dressing != null and _pcg_dressing.has_method("get_stats"):
 				print("CLIENT pcg: " + JSON.stringify(_pcg_dressing.get_stats()))
+			print("CLIENT passes: " + JSON.stringify(RenderProfile.pass_counts(get_viewport())))
+			print("CLIENT settings: " + JSON.stringify(RenderProfile.settings(get_viewport(), environment, GraphicsQuality.level())))
+			if camera != null:
+				for row in RenderProfile.geometry_by_group(self, camera):
+					print("CLIENT geometry %9d tris  %6d inst  %s" % [row[1], row[2], row[0]])
 			# Distinguish missing streamed terrain from slow rendering in
 			# automatic screenshot benchmarks, with no per-frame HUD work.
 			if streamer != null:

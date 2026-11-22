@@ -52,3 +52,87 @@ static func decode_indices(encoded: PackedByteArray, stride: int, vertex_count: 
 			return PackedInt32Array()
 		result[i] = index
 	return result
+
+
+static var _generated: Dictionary = {} # source Mesh -> Mesh with LODs (or the source when not worth it)
+
+## Gives a static ArrayMesh automatic LODs (meshoptimizer, as Godot's importer does) when it has none.
+## Baked props lost their importer LODs when their surfaces were rebuilt, so every scattered rock and
+## stick drew full detail at any distance. Small meshes (< min_triangles) and meshes that already have
+## LODs are returned unchanged. Cached per source mesh; run once at load, never per frame.
+static func with_generated_lods(mesh: Mesh, min_triangles: int = 200) -> Mesh:
+	if mesh == null or not (mesh is ArrayMesh):
+		return mesh
+	if _generated.has(mesh):
+		return _generated[mesh]
+	var result: Mesh = mesh
+	var triangles := 0
+	var has_lods := false
+	for s in mesh.get_surface_count():
+		var data: Dictionary = RenderingServer.mesh_get_surface(mesh.get_rid(), s)
+		has_lods = has_lods or not (data.get("lods", []) as Array).is_empty()
+		triangles += int(data.get("index_count", data.get("vertex_count", 0))) / 3
+		if mesh.surface_get_primitive_type(s) != Mesh.PRIMITIVE_TRIANGLES or (mesh as ArrayMesh).get_blend_shape_count() > 0:
+			has_lods = true # Not a plain static triangle mesh: leave it alone.
+	if not has_lods and triangles >= min_triangles:
+		var importer := ImporterMesh.new()
+		for s in mesh.get_surface_count():
+			importer.add_surface(Mesh.PRIMITIVE_TRIANGLES, mesh.surface_get_arrays(s), [], {},
+				mesh.surface_get_material(s), (mesh as ArrayMesh).surface_get_name(s))
+		importer.generate_lods(25.0, 60.0, [])
+		var rebuilt: ArrayMesh = importer.get_mesh()
+		if rebuilt != null and rebuilt.get_surface_count() == mesh.get_surface_count():
+			rebuilt.resource_name = mesh.resource_name
+			rebuilt.custom_aabb = (mesh as ArrayMesh).custom_aabb
+			result = rebuilt
+	_generated[mesh] = result
+	return result
+
+
+static var _budgeted: Dictionary = {} # "instance_id|budget" -> Mesh decimated to the budget
+
+## Ground scatter (pebbles a few centimetres across, sticks) was drawn with full scanned detail
+## (up to ~3000 triangles each, hundreds per tile), and MultiMesh LOD cannot help near the camera
+## because it is chosen per tile, not per instance. Returns a copy whose full-detail level is the
+## first meshoptimizer LOD within `max_triangles`, with its own LODs below that. Cached; load-time only.
+static func with_triangle_budget(mesh: Mesh, max_triangles: int) -> Mesh:
+	if mesh == null or not (mesh is ArrayMesh) or max_triangles <= 0:
+		return mesh
+	var key: String = "%d|%d" % [mesh.get_instance_id(), max_triangles]
+	if _budgeted.has(key):
+		return _budgeted[key]
+	var source := mesh as ArrayMesh
+	var total := 0
+	for s in source.get_surface_count():
+		if source.surface_get_primitive_type(s) != Mesh.PRIMITIVE_TRIANGLES or source.get_blend_shape_count() > 0:
+			_budgeted[key] = mesh
+			return mesh
+		var data: Dictionary = RenderingServer.mesh_get_surface(source.get_rid(), s)
+		total += int(data.get("index_count", data.get("vertex_count", 0))) / 3
+	if total <= max_triangles:
+		_budgeted[key] = mesh
+		return mesh
+	var reduced := ImporterMesh.new()
+	for s in source.get_surface_count():
+		# SurfaceTool.generate_lod takes an explicit index target (meshoptimizer); the engine retries with
+		# seams and open borders unlocked when scanned props would otherwise stop near full detail.
+		var tool := SurfaceTool.new()
+		tool.create_from(source, s)
+		var arrays: Array = tool.commit_to_arrays()
+		var full: PackedInt32Array = arrays[Mesh.ARRAY_INDEX] if arrays[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+		var share: int = maxi(12, int(float(max_triangles) * float(full.size() / 3) / float(total)))
+		if full.size() / 3 > share:
+			var chosen: PackedInt32Array = tool.generate_lod(1.0, share * 3)
+			if chosen.size() >= 3 and chosen.size() % 3 == 0 and chosen.size() < full.size():
+				arrays[Mesh.ARRAY_INDEX] = chosen
+		reduced.add_surface(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {},
+			source.surface_get_material(s), source.surface_get_name(s))
+	reduced.generate_lods(25.0, 60.0, [])
+	var rebuilt: ArrayMesh = reduced.get_mesh()
+	var result: Mesh = mesh
+	if rebuilt != null and rebuilt.get_surface_count() == source.get_surface_count():
+		rebuilt.resource_name = source.resource_name
+		rebuilt.custom_aabb = source.custom_aabb
+		result = rebuilt
+	_budgeted[key] = result
+	return result

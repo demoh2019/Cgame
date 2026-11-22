@@ -764,6 +764,9 @@ void RendererSceneCull::instance_set_base(RID p_instance, RID p_base) {
 				geom->geometry_instance->set_material_overlay(instance->material_overlay);
 				geom->geometry_instance->set_surface_materials(instance->materials);
 				geom->geometry_instance->set_transform(instance->transform, instance->aabb, instance->transformed_aabb);
+				if (instance->base_type == RSE::INSTANCE_MULTIMESH) {
+					geom->geometry_instance->set_lod_model_scale_multiplier(RSG::mesh_storage->_multimesh_get_lod_scale(instance->base));
+				}
 				geom->geometry_instance->set_layer_mask(instance->layer_mask);
 				geom->geometry_instance->set_pivot_data(instance->sorting_offset, instance->use_aabb_center);
 				geom->geometry_instance->set_lod_bias(instance->lod_bias);
@@ -1763,6 +1766,10 @@ void RendererSceneCull::_update_instance(Instance *p_instance) const {
 		ERR_FAIL_NULL(geom->geometry_instance);
 
 		geom->geometry_instance->set_transform(*instance_xform, p_instance->aabb, p_instance->transformed_aabb);
+		if (p_instance->base_type == RSE::INSTANCE_MULTIMESH) {
+			// The multimesh may have new instance transforms (AABB dependency); keep LOD scale in step.
+			geom->geometry_instance->set_lod_model_scale_multiplier(RSG::mesh_storage->_multimesh_get_lod_scale(p_instance->base));
+		}
 		if (p_instance->teleported) {
 			geom->geometry_instance->reset_motion_vectors();
 		}

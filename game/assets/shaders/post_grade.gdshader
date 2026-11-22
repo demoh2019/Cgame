@@ -13,6 +13,7 @@ uniform float grade = 1.0;
 uniform vec3 shadow_tone = vec3(-0.012, 0.0, 0.025);
 uniform vec3 highlight_tone = vec3(0.03, 0.015, -0.02);
 uniform int blur_quality = 1; // 0: no blur, 1: 4 extra samples, 2: 8 extra samples.
+uniform bool diorama_blur = true; // Off in first person: the tilt-shift band only suits the high orbit camera.
 uniform float sharpen_strength = 0.0; // High/Ultra only: local contrast enhancement of the sharp player band.
 // Interleaved-gradient noise suppresses 8-bit bands in ACES sky/fog gradients.
 // Runs in the existing composite, with no extra screen texture sample or pass.
@@ -43,7 +44,7 @@ void fragment() {
 	}
 	float away = smoothstep(focus_width, focus_width + 0.32, abs(uv.y - focus_center));
 	vec3 color = texture(screen, uv).rgb;
-	if (away > 0.01 && blur_quality > 0) {
+	if (diorama_blur && away > 0.01 && blur_quality > 0) {
 		// Four taps for balanced hardware; four more for the high-quality diorama look.
 		vec2 r = SCREEN_PIXEL_SIZE * blur_radius * away;
 		vec3 sum = color;

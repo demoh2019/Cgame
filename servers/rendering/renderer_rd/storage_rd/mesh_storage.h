@@ -236,6 +236,7 @@ private:
 		AABB aabb;
 		AABB custom_aabb;
 		bool aabb_dirty = false;
+		float lod_scale = 1.0f; // Largest instance scale, for LOD selection.
 		bool buffer_set = false;
 		bool indirect = false;
 		bool motion_vectors_enabled = false;
@@ -276,6 +277,7 @@ private:
 	_FORCE_INLINE_ void _multimesh_mark_dirty(MultiMesh *multimesh, int p_index, bool p_aabb);
 	_FORCE_INLINE_ void _multimesh_mark_all_dirty(MultiMesh *multimesh, bool p_data, bool p_aabb);
 	_FORCE_INLINE_ void _multimesh_re_create_aabb(MultiMesh *multimesh, const float *p_data, int p_instances);
+	void _multimesh_update_lod_scale(MultiMesh *multimesh, const float *p_data, int p_instances);
 	_FORCE_INLINE_ void _multimesh_create_indirect_command_buffer(MultiMesh *multimesh);
 
 	/* Skeleton */
@@ -692,6 +694,7 @@ public:
 	virtual AABB _multimesh_get_custom_aabb(RID p_multimesh) const override;
 
 	virtual AABB _multimesh_get_aabb(RID p_multimesh) override;
+	virtual float _multimesh_get_lod_scale(RID p_multimesh) const override;
 
 	virtual MultiMeshInterpolator *_multimesh_get_interpolator(RID p_multimesh) const override;
 

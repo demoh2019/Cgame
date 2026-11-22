@@ -136,11 +136,11 @@ static func profile(value: int) -> Dictionary:
 		0:
 			return {"shadows": false, "shadow_distance": 45.0, "msaa": Viewport.MSAA_DISABLED, "anisotropy": Viewport.ANISOTROPY_2X,
 				"blur_quality": 0, "blur_radius": 0.0, "glow": false, "ssao": false, "ssil": false, "sdfgi": false, "cloud_shadows": false,
-				"scale": 0.59, "grass_radius": 66.0, "grass_budget": 1500, "decor_budget_usec": 850, "grass_fade_start": 25.0, "grass_fade_end": 40.0, "terrain_detail_radius": 24.0, "terrain_mesh_build_budget_usec": 900, "terrain_mesh_streaming_priority": 1, "horizon_ao_strength": 0.0, "terrain_pixel_error": 6.0, "ground_contact_strength": 0.0, "curvature_strength": 0.0, "puddle_ripple_strength": 0.0, "mesh_lod_threshold": 4.0, "terrain_layer_budget": 2, "terrain_warp_strength": 0.0, "terrain_height_blend": 0.0, "cliff_normal_quality": 0.0, "specular_aa_strength": 0.0, "micro_occlusion": 0.0, "normal_variance_strength": 0.0, "wet_clearcoat": 0.0, "sharpen_strength": 0.0, "deband_strength": 0.0}
+				"scale": 0.59, "upscaler": "spatial", "grass_radius": 66.0, "grass_budget": 1500, "decor_budget_usec": 850, "grass_fade_start": 25.0, "grass_fade_end": 40.0, "terrain_detail_radius": 24.0, "terrain_mesh_build_budget_usec": 900, "terrain_mesh_streaming_priority": 1, "horizon_ao_strength": 0.0, "terrain_pixel_error": 6.0, "ground_contact_strength": 0.0, "curvature_strength": 0.0, "puddle_ripple_strength": 0.0, "mesh_lod_threshold": 4.0, "terrain_layer_budget": 2, "terrain_warp_strength": 0.0, "terrain_height_blend": 0.0, "cliff_normal_quality": 0.0, "specular_aa_strength": 0.0, "micro_occlusion": 0.0, "normal_variance_strength": 0.0, "wet_clearcoat": 0.0, "sharpen_strength": 0.0, "deband_strength": 0.0}
 		1:
 			return {"shadows": true, "shadow_distance": 70.0, "msaa": Viewport.MSAA_DISABLED, "anisotropy": Viewport.ANISOTROPY_4X,
 				"blur_quality": 1, "blur_radius": 1.6, "glow": false, "ssao": false, "ssil": false, "sdfgi": false, "cloud_shadows": true,
-				"scale": 0.77, "grass_radius": 90.0, "grass_budget": 2200, "decor_budget_usec": 1100, "grass_fade_start": 40.0, "grass_fade_end": 60.0, "terrain_detail_radius": 42.0, "terrain_mesh_build_budget_usec": 1500, "terrain_mesh_streaming_priority": 2, "horizon_ao_strength": 0.0, "terrain_pixel_error": 3.5, "ground_contact_strength": 0.28, "curvature_strength": 0.30, "puddle_ripple_strength": 0.22, "mesh_lod_threshold": 2.0, "terrain_layer_budget": 3, "terrain_warp_strength": 0.0, "terrain_height_blend": 0.0, "cliff_normal_quality": 0.0, "specular_aa_strength": 0.0, "micro_occlusion": 0.0, "normal_variance_strength": 0.0, "wet_clearcoat": 0.0, "sharpen_strength": 0.12, "deband_strength": 0.0}
+				"scale": 0.77, "upscaler": "spatial", "grass_radius": 90.0, "grass_budget": 2200, "decor_budget_usec": 1100, "grass_fade_start": 40.0, "grass_fade_end": 60.0, "terrain_detail_radius": 42.0, "terrain_mesh_build_budget_usec": 1500, "terrain_mesh_streaming_priority": 2, "horizon_ao_strength": 0.0, "terrain_pixel_error": 3.5, "ground_contact_strength": 0.28, "curvature_strength": 0.30, "puddle_ripple_strength": 0.22, "mesh_lod_threshold": 2.0, "terrain_layer_budget": 3, "terrain_warp_strength": 0.0, "terrain_height_blend": 0.0, "cliff_normal_quality": 0.0, "specular_aa_strength": 0.0, "micro_occlusion": 0.0, "normal_variance_strength": 0.0, "wet_clearcoat": 0.0, "sharpen_strength": 0.12, "deband_strength": 0.0}
 		2:
 			return {"shadows": true, "shadow_distance": 110.0, "msaa": Viewport.MSAA_2X, "anisotropy": Viewport.ANISOTROPY_8X,
 				"blur_quality": 2, "blur_radius": 2.6, "glow": true, "ssao": true, "ssil": true, "sdfgi": false, "cloud_shadows": true,
@@ -418,6 +418,8 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 			ChunkView.apply_terrain_filter(terrain)
 	# Scanned ground plants: off on Low, sparser on Medium, densest on Ultra (applies to new tiles).
 	GroundPlants.density_scale = GroundPlants.quality_scale(_level)
+	GroundPlants.distance_scale = GroundPlants.quality_distance_scale(_level)
+	GroundPlants.card_planes = GroundPlants.quality_card_planes(_level)
 	# Reuse the game's existing 3-tier grass LOD; never rebuild world geometry on a preset switch.
 	ChunkView.configure_grass(float(world_profile["grass_build_radius"]), int(world_profile["grass_budget_usec"]),
 			float(world_profile["grass_fade_start"]), float(world_profile["grass_fade_end"]))

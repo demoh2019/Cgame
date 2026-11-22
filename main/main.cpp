@@ -289,6 +289,54 @@ static bool validate_extension_api = false;
 static String validate_extension_api_file;
 #endif
 bool profile_gpu = false;
+// --script-profile: GDScript self-time ranking printed every few seconds (find CPU-heavy game scripts without the editor).
+static bool profile_scripts = false;
+static bool profile_scripts_running = false;
+static uint64_t profile_scripts_window_start = 0;
+static uint64_t profile_scripts_frames = 0;
+
+static void _print_script_profile_window(uint64_t p_now) {
+	const double seconds = double(p_now - profile_scripts_window_start) / 1000000.0;
+	const uint64_t frames = MAX<uint64_t>(1, profile_scripts_frames);
+	LocalVector<ScriptLanguage::ProfilingInfo> rows;
+	for (int l = 0; l < ScriptServer::get_language_count(); l++) {
+		ScriptLanguage *language = ScriptServer::get_language(l);
+		// Native calls take one row each, so a large project overflows a small buffer and silently drops
+		// whole scripts from the report.
+		LocalVector<ScriptLanguage::ProfilingInfo> info;
+		info.resize(65536);
+		const int count = language->profiling_get_accumulated_data(info.ptr(), (int)info.size());
+		for (int i = 0; i < count; i++) {
+			rows.push_back(info[i]);
+		}
+		language->profiling_stop();
+		language->profiling_start();
+	}
+	struct BySelf {
+		bool operator()(const ScriptLanguage::ProfilingInfo &a, const ScriptLanguage::ProfilingInfo &b) const { return a.self_time > b.self_time; }
+	};
+	rows.sort_custom<BySelf>();
+	uint64_t total_self = 0;
+	for (const ScriptLanguage::ProfilingInfo &row : rows) {
+		total_self += row.self_time;
+	}
+	print_line(vformat("SCRIPT PROFILE %.1f s, %d frames: scripts %.2f ms/frame (self time, top 25)", seconds, int64_t(frames), double(total_self) / 1000.0 / double(frames)));
+	for (uint32_t i = 0; i < MIN<uint32_t>(25, rows.size()); i++) {
+		const ScriptLanguage::ProfilingInfo &row = rows[i];
+		print_line(vformat("  %7.3f ms/frame self  %7.3f total  %6d calls/frame  %s", double(row.self_time) / 1000.0 / double(frames), double(row.total_time) / 1000.0 / double(frames), int64_t(row.call_count / frames), String(row.signature)));
+	}
+	struct ByTotal {
+		bool operator()(const ScriptLanguage::ProfilingInfo &a, const ScriptLanguage::ProfilingInfo &b) const { return a.total_time > b.total_time; }
+	};
+	rows.sort_custom<ByTotal>();
+	print_line("SCRIPT PROFILE by total time (includes engine calls made from the function), top 20");
+	for (uint32_t i = 0; i < MIN<uint32_t>(20, rows.size()); i++) {
+		const ScriptLanguage::ProfilingInfo &row = rows[i];
+		print_line(vformat("  %7.3f ms/frame total  %7.3f self  %6d calls/frame  %s", double(row.total_time) / 1000.0 / double(frames), double(row.self_time) / 1000.0 / double(frames), int64_t(row.call_count / frames), String(row.signature)));
+	}
+	profile_scripts_window_start = p_now;
+	profile_scripts_frames = 0;
+}
 
 // Constants.
 
@@ -603,6 +651,7 @@ void Main::print_help(const char *p_binary) {
 	print_help_option("--profiling", "Enable profiling in the script debugger.\n", CLI_OPTION_AVAILABILITY_TEMPLATE_DEBUG);
 #endif
 	print_help_option("--gpu-profile", "Show a GPU profile of the tasks that took the most time during frame rendering.\n");
+	print_help_option("--script-profile", "Print the GDScript functions with the most self time every 5 seconds.\n");
 	print_help_option("--gpu-validation", "Enable graphics API validation layers for debugging.\n");
 #ifdef DEBUG_ENABLED
 	print_help_option("--gpu-abort", "Abort on graphics API usage errors (usually validation layer errors). May help see the problem if your system freezes.\n", CLI_OPTION_AVAILABILITY_TEMPLATE_DEBUG);
@@ -1956,6 +2005,10 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 #endif // TOOLS_ENABLED
 		} else if (arg == "--gpu-profile") {
 			profile_gpu = true;
+		} else if (arg == "--script-profile") {
+			profile_scripts = true;
+			// Scripts compile later; the GDScript compiler records profiler signatures when this is set.
+			OS::get_singleton()->set_environment("GODOT_SCRIPT_PROFILE", "1");
 		} else if (arg == "--disable-crash-handler") {
 			OS::get_singleton()->disable_crash_handler();
 #ifdef DEBUG_ENABLED
@@ -4997,6 +5050,20 @@ bool Main::iteration() {
 	main_timer_sync.set_fixed_fps(fixed_fps);
 
 	const uint64_t ticks_elapsed = ticks - last_ticks;
+
+	if (profile_scripts) {
+		if (!profile_scripts_running) {
+			for (int l = 0; l < ScriptServer::get_language_count(); l++) {
+				ScriptServer::get_language(l)->profiling_set_save_native_calls(true);
+				ScriptServer::get_language(l)->profiling_start();
+			}
+			profile_scripts_running = true;
+			profile_scripts_window_start = ticks;
+		} else if (ticks - profile_scripts_window_start >= 5000000) {
+			_print_script_profile_window(ticks);
+		}
+		profile_scripts_frames++;
+	}
 
 	const int physics_ticks_per_second = Engine::get_singleton()->get_user_physics_ticks_per_second();
 	const double physics_step = 1.0 / physics_ticks_per_second;

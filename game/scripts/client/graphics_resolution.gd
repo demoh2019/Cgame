@@ -72,6 +72,14 @@ static func plan(method: String, profile: Dictionary,
 		var minimum: float = metalfx_budget_floor(
 			metal_min_scale, float(profile.get("scale", 1.0)))
 		var native_metal: bool = driver.to_lower() == "metal" and minimum > 0.0
+		if native_metal and str(profile.get("upscaler", "")) == "spatial":
+			# MetalFX Temporal cost ~4.5 ms plus a ~1.2 ms motion-vector pass on an M1 at 1080p, a third of a
+			# 60 FPS frame; the spatial scaler needs neither. FXAA (in tonemap, internal res) covers edges.
+			return {"mode": Viewport.SCALING_3D_MODE_METALFX_SPATIAL,
+				"scale": maxf(scale, minimum),
+				"msaa": Viewport.MSAA_DISABLED,
+				"fsr_sharpness": 0.2,
+				"screen_space_aa": Viewport.SCREEN_SPACE_AA_FXAA}
 		if native_metal:
 			return {"mode": Viewport.SCALING_3D_MODE_METALFX_TEMPORAL,
 				"scale": maxf(scale, minimum),
@@ -96,6 +104,8 @@ static func diagnostic_label(mode: int, scale: float) -> String:
 	match mode:
 		Viewport.SCALING_3D_MODE_METALFX_TEMPORAL:
 			name = "MetalFX Temporal"
+		Viewport.SCALING_3D_MODE_METALFX_SPATIAL:
+			name = "MetalFX Spatial"
 		Viewport.SCALING_3D_MODE_FSR2:
 			name = "FSR2"
 		Viewport.SCALING_3D_MODE_BILINEAR:
