@@ -48,7 +48,7 @@ static func active_snapshot(kind: String, state: Dictionary) -> Dictionary:
 static func sync(node: Node, kind: String, state: Dictionary) -> void:
 	if node == null:
 		return
-	var cues: Object = node.get_meta("gameplay_cues", null) as Object
+	var cues: Object = (node.get_meta("gameplay_cues") if node.has_meta("gameplay_cues") else null) as Object
 	if cues != null and cues.has_method("replace_active"):
 		var server_status: Dictionary = active_snapshot(kind, state)
 		# Only server-owned Status.* may be replaced from replication.
@@ -69,7 +69,7 @@ static func sync(node: Node, kind: String, state: Dictionary) -> void:
 static func frame_events(node: Node, periodic: Dictionary) -> Array:
 	var cues: Object = null
 	if node != null:
-		cues = node.get_meta("gameplay_cues", null) as Object
+		cues = (node.get_meta("gameplay_cues") if node.has_meta("gameplay_cues") else null) as Object
 	if cues != null and cues.has_method("emit_cue") and cues.has_method("take_events"):
 		# Build one bounded cosmetic batch from the native effect timeline.
 		# Server-authoritative statuses are not changed by cue admission.

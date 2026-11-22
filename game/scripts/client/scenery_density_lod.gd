@@ -225,7 +225,7 @@ static func plan_projected_visible_counts(counts: PackedInt32Array,
 ## than the renderer's AABB for meshes with offset pivots or tall geometry.
 ## Renderer culling *always* retains its full conservative custom_aabb.
 static func _anchor_center(node: MultiMeshInstance3D) -> Vector3:
-	var anchors: Variant = node.get_meta("aa_pcg_anchor_bounds", null)
+	var anchors: Variant = (node.get_meta("aa_pcg_anchor_bounds") if node.has_meta("aa_pcg_anchor_bounds") else null)
 	if anchors is AABB:
 		var exact: AABB = anchors
 		return node.to_global(exact.get_center())

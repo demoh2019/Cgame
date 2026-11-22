@@ -112,7 +112,7 @@ static func runtime_tags(kind: String, state: Dictionary) -> PackedStringArray:
 static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) -> void:
 	if node == null:
 		return
-	var container: Object = node.get_meta("tags", null) as Object
+	var container: Object = (node.get_meta("tags") if node.has_meta("tags") else null) as Object
 	if container != null and container.has_method("replace_tag_branch"):
 		container.call("replace_tag_branch", StringName("Runtime"), runtime_tags(kind, snapshot))
 	# A complete, validated snapshot prevents stale effect stacks after expiry.
@@ -134,7 +134,7 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 	# Replicated status transitions produce cosmetic cue lifecycle events.
 	GameplayCues.sync(node, kind, snapshot)
 	# Attribute snapshots are read-only presentation mirrors, never combat authority.
-	var attrs: Object = node.get_meta("attributes", null) as Object
+	var attrs: Object = (node.get_meta("attributes") if node.has_meta("attributes") else null) as Object
 	if attrs != null and attrs.has_method("replace_snapshot"):
 		var attribute_data: Dictionary = runtime_attribute_snapshot(kind, snapshot)
 		# Server-owned Runtime modifiers should not erase Local / FX visual sources.
@@ -144,7 +144,7 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 		else:
 			attrs.call("replace_snapshot", attribute_data)
 	# Render-only native timers are independent from counted tag branches.
-	var timeline: Object = node.get_meta("effect_timeline", null) as Object
+	var timeline: Object = (node.get_meta("effect_timeline") if node.has_meta("effect_timeline") else null) as Object
 	if timeline != null:
 		var effects: Dictionary = runtime_effect_snapshot(kind, snapshot)
 		var applied := false
@@ -196,7 +196,7 @@ static func runtime_effect_snapshot(kind: String, snapshot: Dictionary) -> Dicti
 static func tick_runtime_effects(node: Node, delta: float) -> Dictionary:
 	if node == null or not is_finite(delta) or delta <= 0.0:
 		return {}
-	var timeline: Object = node.get_meta("effect_timeline", null) as Object
+	var timeline: Object = (node.get_meta("effect_timeline") if node.has_meta("effect_timeline") else null) as Object
 	if timeline != null:
 		# One engine boundary crossing per actor/frame instead of a tick()
 		# followed by take_periodic_pulses(). Cosmetic callers do not use the
@@ -214,7 +214,7 @@ static func tick_runtime_effects(node: Node, delta: float) -> Dictionary:
 static func runtime_effect_remaining(node: Node, tag: String, fallback: float = 0.0) -> float:
 	var timeline: Object = null
 	if node != null:
-		timeline = node.get_meta("effect_timeline", null) as Object
+		timeline = (node.get_meta("effect_timeline") if node.has_meta("effect_timeline") else null) as Object
 	if timeline != null and timeline.has_method("get_remaining"):
 		return maxf(0.0, float(timeline.call("get_remaining", StringName(tag))))
 	return maxf(0.0, fallback) if is_finite(fallback) else 0.0
@@ -263,7 +263,7 @@ static func runtime_attribute_snapshot(kind: String, state: Dictionary) -> Dicti
 
 static func runtime_attribute_value(node: Node, name: String, fallback: float = 0.0) -> float:
 	if node != null:
-		var attribute_set: Object = node.get_meta("attributes", null) as Object
+		var attribute_set: Object = (node.get_meta("attributes") if node.has_meta("attributes") else null) as Object
 		if attribute_set != null and attribute_set.has_method("has_attribute") \
 				and bool(attribute_set.call("has_attribute", StringName(name))):
 			return float(attribute_set.call("get_value", StringName(name)))
@@ -328,11 +328,11 @@ static func hit_feedback_strength(node: Node, base_strength: float) -> float:
 	var scale: float = runtime_attribute_value(node, "Visual.HitResponse", 1.0)
 	var timeline: Object = null
 	if node != null:
-		timeline = node.get_meta("effect_timeline", null) as Object
+		timeline = (node.get_meta("effect_timeline") if node.has_meta("effect_timeline") else null) as Object
 	if timeline != null and timeline.has_method("apply_effect") and timeline.has_method("get_stacks"):
 		var tag := StringName("Local.Visual.RecentHit")
 		var applied := false
-		var tag_container: Object = node.get_meta("tags", null) as Object
+		var tag_container: Object = (node.get_meta("tags") if node.has_meta("tags") else null) as Object
 		if timeline.has_method("apply_effect_with_tag_requirements") and tag_container != null \
 				and tag_container.has_method("get_tags"):
 			# Native GAS-style target requirements: avoid stacking visual hit
