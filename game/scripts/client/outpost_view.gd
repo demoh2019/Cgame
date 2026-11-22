@@ -47,7 +47,7 @@ func _make(site: Dictionary, ground: float) -> Node3D:
 	flag.mesh = flag_mesh
 	flag.position = Vector3(1.3, 6.1, 0.0)
 	flag.material_override = StandardMaterial3D.new()
-	ClothFlag.upgrade(flag, GraphicsQuality.level()) # Wind-driven cloth; Low keeps the rigid flag.
+	ClothFlag.apply(flag, GraphicsQuality.level()) # XPBD cloth on High/Ultra (native), shader cloth below, rigid on Low.
 	root.add_child(flag)
 	_add_pole_fittings(root)
 	var ring := MeshInstance3D.new()
@@ -116,6 +116,7 @@ func _refresh(root: Node3D, site: Dictionary, group_id: int) -> void:
 	var guild: Dictionary = site.get("guild", {})
 	if not guild.is_empty():
 		status += "  [%s]" % str(guild.get("tag", guild.get("name", "")))
+	ClothFlag.update_wind(root.get_node("Flag")) # Simulated banners follow the weather wind.
 	var flag_material = (root.get_node("Flag") as MeshInstance3D).material_override
 	if flag_material is ShaderMaterial:
 		ClothFlag.tint(flag_material, color)
