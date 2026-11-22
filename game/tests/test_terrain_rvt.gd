@@ -1,6 +1,7 @@
 extends RefCounted
 ## Terrain runtime virtual texture: page layout, chunk binding, page-table encoding, eviction, shader wiring.
 const TerrainRvt = preload("res://scripts/client/terrain_rvt.gd")
+const RvtCompressor = preload("res://scripts/client/rvt_compressor.gd")
 
 
 func run(t) -> void:
@@ -60,4 +61,14 @@ func run(t) -> void:
 	t.check(shader.contains("AA_RVT_TEXELS = %d.0" % TerrainRvt.PAGE_TEXELS), "page size agrees with the shader")
 	var chunk: String = FileAccess.get_file_as_string("res://scripts/client/chunk_view.gd")
 	t.check(chunk.contains("_terrain.render_layers = TerrainRvt.terrain_layers()"), "chunks join the bake layer")
+
+	t.current = "compressed pages: BC3 + BC5 with a mip chain built on the GPU"
+	var layout: Dictionary = RvtCompressor.block_layout()
+	t.eq(layout["offsets"], [0, 4096, 5120, 5376, 5440, 5456, 5460], "blocks of mips 256 .. 4 follow each other")
+	t.eq(layout["total"], 5461, "one encoder thread per 4x4 block of every mip")
+	t.check(shader.contains("textureGrad(aa_rvt_albedo") and shader.contains("albedo_roughness.a"),
+		"pages are mip-filtered and roughness rides in the BC3 alpha")
+	t.check(shader.contains("sampler2DArray aa_rvt_albedo : filter_linear_mipmap"), "cached pages sample their mips")
+	t.check(ClassDB.class_has_method("RenderingDevice", "texture_update_from_buffer"),
+		"engine copies encoded blocks from a GPU buffer into the compressed arrays")
 	rvt.free()

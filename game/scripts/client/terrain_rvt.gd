@@ -24,6 +24,7 @@ const MARK_DATA := 1 << 17
 const MARK_WET := 1 << 16
 const BAKES_PER_FRAME := 2
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const RvtCompressor = preload("res://scripts/client/rvt_compressor.gd")
 const CHUNK_SETTLE := 0.75 # Seconds a terrain chunk must exist before its pages are baked.
 
 ## Where pages replace live shading: from `live_radius` (m) out to the level radii.
@@ -37,6 +38,7 @@ var streamer: Node
 var chunk_size := 64.0
 
 var _rd: RenderingDevice
+var _compressor: RvtCompressor # Mips + BC3/BC5 on the GPU (rvt_compressor.gd).
 var _arrays: Array[RID] = [] # albedo, data, wet (RenderingDevice textures)
 var _array_textures: Array[Texture2DArrayRD] = []
 var _table_image: Image
@@ -72,6 +74,12 @@ func setup(p_camera: Camera3D, p_streamer: Node, p_chunk_size: float) -> void:
 		RenderingServer.global_shader_parameter_set(&"aa_rvt_params", Vector4(0.0, live_radius, 0.0, 0.0))
 		return
 	_rd = RenderingServer.get_rendering_device()
+	_compressor = RvtCompressor.new()
+	if not _compressor.setup(_rd):
+		push_warning("Terrain RVT off: " + _compressor.error)
+		_enabled = false
+		RenderingServer.global_shader_parameter_set(&"aa_rvt_params", Vector4(0.0, live_radius, 0.0, 0.0))
+		return
 	_table_image = Image.create(TABLE * 2, TABLE, false, Image.FORMAT_RGBA8)
 	_table_texture = ImageTexture.create_from_image(_table_image)
 	RenderingServer.global_shader_parameter_set(&"aa_rvt_table", _table_texture)
@@ -80,6 +88,12 @@ func setup(p_camera: Camera3D, p_streamer: Node, p_chunk_size: float) -> void:
 		_free.append(layer)
 	for i in BAKES_PER_FRAME:
 		_rigs.append(_make_rig())
+	# The arrays exist before any terrain material binds the globals (an empty array global made each
+	# chunk material fail its uniform set once when it was first replaced).
+	if not _create_arrays():
+		push_warning("Terrain RVT off: page arrays could not be created")
+		_enabled = false
+		return
 	_publish_params(false)
 
 
@@ -95,7 +109,7 @@ func _publish_params(on: bool) -> void:
 
 
 func _make_rig() -> Dictionary:
-	var rig := {"key": null, "state": 0, "viewports": [], "cameras": []}
+	var rig := {"key": null, "state": 0, "viewports": [], "cameras": [], "scratch": _compressor.create_scratch()}
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color.BLACK
@@ -282,17 +296,16 @@ func _copy_finished_bakes() -> void:
 		rig["state"] = 0
 		if _free.is_empty() or not _chunk_ready(key):
 			continue
-		if _arrays.is_empty() and not _create_arrays(rig):
-			_enabled = false
-			_publish_params(false)
-			return
 		var layer: int = _free.pop_back()
-		for pass_index in 3:
-			var vp: SubViewport = rig["viewports"][pass_index]
-			var source: RID = RenderingServer.texture_get_rd_texture(vp.get_texture().get_rid())
-			var texels: int = WET_TEXELS if pass_index == 2 else PAGE_TEXELS
-			_rd.texture_copy(source, _arrays[pass_index], Vector3.ZERO, Vector3.ZERO,
-				Vector3(texels, texels, 1), 0, 0, 0, layer)
+		var baked: Array[RID] = []
+		for vp in rig["viewports"]:
+			baked.append(RenderingServer.texture_get_rd_texture((vp as SubViewport).get_texture().get_rid()))
+		# Albedo + roughness -> BC3, normal -> BC5, both with mips; the low-frequency wet masks stay RGBA8.
+		if not _compressor.encode(rig["scratch"], baked[0], baked[1], _arrays[0], _arrays[1], layer):
+			_free.append(layer)
+			continue
+		_rd.texture_copy(baked[2], _arrays[2], Vector3.ZERO, Vector3.ZERO,
+			Vector3(WET_TEXELS, WET_TEXELS, 1), 0, 0, 0, layer)
 		_pages[key] = layer
 		_layer_keys[layer] = key
 		_write_table(key, layer)
@@ -300,27 +313,30 @@ func _copy_finished_bakes() -> void:
 			_publish_params(true)
 
 
-func _create_arrays(rig: Dictionary) -> bool:
-	for pass_index in 3:
-		var vp: SubViewport = rig["viewports"][pass_index]
-		var source: RID = RenderingServer.texture_get_rd_texture(vp.get_texture().get_rid())
-		if not source.is_valid():
+func _create_arrays() -> bool:
+	for bc5 in [false, true]:
+		var compressed: RID = _compressor.create_array(bc5, CAPACITY)
+		if not compressed.is_valid():
 			return false
-		var source_format: RDTextureFormat = _rd.texture_get_format(source)
-		var format := RDTextureFormat.new()
-		format.format = source_format.format
-		format.texture_type = RenderingDevice.TEXTURE_TYPE_2D_ARRAY
-		format.width = WET_TEXELS if pass_index == 2 else PAGE_TEXELS
-		format.height = format.width
-		format.array_layers = CAPACITY
-		format.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT
-		var rid: RID = _rd.texture_create(format, RDTextureView.new())
-		if not rid.is_valid():
-			return false
-		_arrays.append(rid)
-		var texture := Texture2DArrayRD.new()
-		texture.texture_rd_rid = rid
-		_array_textures.append(texture)
+		_arrays.append(compressed)
+		var compressed_texture := Texture2DArrayRD.new()
+		compressed_texture.texture_rd_rid = compressed
+		_array_textures.append(compressed_texture)
+	# Wet masks: copied straight from the 8-bit viewport (same format as its colour target).
+	var format := RDTextureFormat.new()
+	format.format = RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM
+	format.texture_type = RenderingDevice.TEXTURE_TYPE_2D_ARRAY
+	format.width = WET_TEXELS
+	format.height = format.width
+	format.array_layers = CAPACITY
+	format.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT
+	var rid: RID = _rd.texture_create(format, RDTextureView.new())
+	if not rid.is_valid():
+		return false
+	_arrays.append(rid)
+	var texture := Texture2DArrayRD.new()
+	texture.texture_rd_rid = rid
+	_array_textures.append(texture)
 	RenderingServer.global_shader_parameter_set(&"aa_rvt_albedo", _array_textures[0])
 	RenderingServer.global_shader_parameter_set(&"aa_rvt_data", _array_textures[1])
 	RenderingServer.global_shader_parameter_set(&"aa_rvt_wet", _array_textures[2])
@@ -355,12 +371,23 @@ func _exit_tree() -> void:
 	if _rd == null:
 		return
 	RenderingServer.global_shader_parameter_set(&"aa_rvt_params", Vector4(0.0, live_radius, 0.0, 0.0))
+	# Point the globals at a placeholder of the same type first: an emptied Texture2DArrayRD turns into a
+	# 2D placeholder and every terrain material would fail to rebuild its uniform set.
+	var placeholder := Texture2DArray.new()
+	var blank := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+	if placeholder.create_from_images([blank]) == OK:
+		for global_name in [&"aa_rvt_albedo", &"aa_rvt_data", &"aa_rvt_wet"]:
+			RenderingServer.global_shader_parameter_set(global_name, placeholder)
 	for texture in _array_textures:
 		texture.texture_rd_rid = RID()
 	for rid in _arrays:
 		if rid.is_valid():
 			_rd.free_rid(rid)
 	_arrays.clear()
+	if _compressor != null:
+		for rig in _rigs:
+			_compressor.free_scratch(rig["scratch"])
+		_compressor.free_all()
 
 
 ## Pages resident per level (for diagnostics and tests).

@@ -75,8 +75,8 @@ varying float aa_vertex_cloud_shadow;
 // above by orthographic cameras rendering this same shader, replace the per-pixel layer blending past
 // the live radius. Page table: 64x32 RGBA8, left half level 0 (8 m pages), right half level 1 (16 m);
 // a texel is (layer + 1 low, high, page x & 255, page z & 255) of the page at its toroidal slot.
-global uniform sampler2DArray aa_rvt_albedo : filter_linear, repeat_disable;
-global uniform sampler2DArray aa_rvt_data : filter_linear, repeat_disable;
+global uniform sampler2DArray aa_rvt_albedo : filter_linear_mipmap, repeat_disable;
+global uniform sampler2DArray aa_rvt_data : filter_linear_mipmap, repeat_disable;
 global uniform sampler2DArray aa_rvt_wet : filter_linear, repeat_disable;
 global uniform sampler2D aa_rvt_table : filter_nearest, repeat_disable;
 global uniform vec4 aa_rvt_params; // x on, y live radius, z level 0 radius, w level 1 radius
@@ -110,7 +110,9 @@ bool aa_rvt_page(vec2 p, int level, float page_size, out vec3 uvw) {
 // Baked material for a point, and how much of it to use (0 = shade live).
 // `view_dist` is the 3D distance to the eye (pixel footprint decides live vs cached); `dist` is horizontal,
 // matching how terrain_rvt.gd picks pages around the camera.
-float aa_rvt_fetch(vec2 p, float dist, float view_dist, out vec3 albedo, out vec3 normal, out float roughness, out vec3 wet) {
+// `p_dx`/`p_dy` are screen derivatives of the world position, taken before any divergent branch, so the
+// mipmapped BC pages filter correctly.
+float aa_rvt_fetch(vec2 p, vec2 p_dx, vec2 p_dy, float dist, float view_dist, out vec3 albedo, out vec3 normal, out float roughness, out vec3 wet) {
 	albedo = vec3(0.0);
 	normal = vec3(0.0, 1.0, 0.0);
 	roughness = 0.9;
@@ -127,17 +129,21 @@ float aa_rvt_fetch(vec2 p, float dist, float view_dist, out vec3 albedo, out vec
 		found = aa_rvt_page(p, 1, 16.0, uvw);
 		coarse = found;
 	}
+	float to_uv = (AA_RVT_TEXELS - 2.0) / (AA_RVT_TEXELS * (coarse ? 16.0 : 8.0));
+	vec2 uv_dx = p_dx * to_uv;
+	vec2 uv_dy = p_dy * to_uv;
 	if (!found) {
 		return 0.0;
 	}
-	albedo = aa_srgb_to_linear(textureLod(aa_rvt_albedo, uvw, 0.0).rgb);
+	// BC3: sRGB albedo + roughness in alpha. BC5: normal x, z.
+	vec4 albedo_roughness = textureGrad(aa_rvt_albedo, uvw, uv_dx, uv_dy);
+	albedo = aa_srgb_to_linear(albedo_roughness.rgb);
 	if (aa_rvt_params.x > 1.5) {
 		albedo = mix(albedo, coarse ? vec3(0.1, 0.2, 1.0) : vec3(1.0, 0.1, 0.1), 0.35); // CGAME_RVT_DEBUG
 	}
-	vec3 d = textureLod(aa_rvt_data, uvw, 0.0).rgb;
-	vec2 nxz = d.rg * 2.0 - 1.0;
+	vec2 nxz = textureGrad(aa_rvt_data, uvw, uv_dx, uv_dy).rg * 2.0 - 1.0;
 	normal = normalize(vec3(nxz.x, sqrt(max(1.0 - dot(nxz, nxz), 0.0)), nxz.y));
-	roughness = d.b;
+	roughness = albedo_roughness.a;
 	wet = textureLod(aa_rvt_wet, uvw, 0.0).rgb;
 	return weight;
 }
@@ -280,6 +286,8 @@ vec4 top_normal(float layer, vec2 p, float detail_fade, vec2 lod_dx, vec2 lod_dy
 
 void fragment() {
 	vec2 p = world_position.xz;
+	vec2 aa_p_dx = dFdx(p); // Before any divergent branch (cached-page mip selection).
+	vec2 aa_p_dy = dFdy(p);
 	float h = world_position.y;
 	vec3 n = normalize(world_normal);
 	float slope = 1.0 - clamp(n.y, 0.0, 1.0);
@@ -306,7 +314,7 @@ void fragment() {
 	vec3 rvt_wet;
 	float rvt_weight = 0.0;
 	if (!baking && aa_rvt_params.x > 0.5) {
-		rvt_weight = aa_rvt_fetch(p, camera_distance, distance(world_position, CAMERA_POSITION_WORLD), rvt_albedo, rvt_normal, rvt_roughness, rvt_wet);
+		rvt_weight = aa_rvt_fetch(p, aa_p_dx, aa_p_dy, camera_distance, distance(world_position, CAMERA_POSITION_WORLD), rvt_albedo, rvt_normal, rvt_roughness, rvt_wet);
 	}
 	bool need_live = rvt_weight < 0.999;
 	float detail_fade = 1.0 - smoothstep(aa_terrain_detail_radius,

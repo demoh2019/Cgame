@@ -27,8 +27,20 @@ Same idea as Unreal's Runtime Virtual Texturing, built from engine primitives:
 
   Pages are baked at full detail and without parallax. Two rigs bake at most two pages a frame,
   only for chunks that have existed for 0.75 s.
-- **Cache**: three `Texture2DArrayRD` arrays with 176 layers (~93 MB), filled with
-  `RenderingDevice.texture_copy` from the viewport textures. A 64×32 RGBA8 toroidal page table
+- **Cache**: two block-compressed arrays with full mip chains (256 → 4) plus a small RGBA8 one, 176 layers:
+  - **BC3**: sRGB albedo, with roughness in alpha;
+  - **BC5**: normal x, z;
+  - **RGBA8 64²**: wet factor, puddle shape, hard surface (copied as is).
+
+  Per page, on the GPU (`rvt_compressor.gd`): the two baked viewports seed an RGBA16F pyramid (colour
+  linearised so mips average light), 2×2 box filtering fills mips 1–6, and one thread per 4×4 block
+  encodes BC3/BC5 for every mip into storage buffers. The encoder uses bounding-box endpoints aligned
+  to the colour covariance, with an inset. The new engine call `RenderingDevice.texture_update_from_buffer`
+  copies the blocks into the arrays. Metal cannot view a BC texture as an uncompressed one, so the
+  copy goes through a buffer. Calculated from the formats: about 190 KB per page instead of 528 KB,
+  or ~33 MB for the whole cache instead of ~93 MB.
+
+  A 64×32 RGBA8 toroidal page table
   stores `layer + 1` plus the page's low coordinate bytes as a residency check.
 - **Use**: the shader reads a page once the eye is 10–14 m away (3D distance, so pixel footprint
   decides). Level 0 is used within 26 m horizontally, level 1 out to the quality preset's detail
@@ -45,14 +57,17 @@ Same idea as Unreal's Runtime Virtual Texturing, built from engine primitives:
 | RVT off (`CGAME_RVT=0`) | 24.7 / 24.2 ms | 11.8 ms |
 | RVT on | 20.7 / 20.7 ms | — |
 
+With BC compression and mips, in a later session where the benchmark scene was heavier, the pairs measured
+RVT off 30.0 / 29.7 ms against RVT on 26.2 / 24.7 ms.
+
 The manager costs ~0.04 ms of script time per frame once the cache is warm. Baking renders up to
 six small viewports a frame while pages stream in, which adds CPU time during that phase.
 `CGAME_RVT_DEBUG=1` tints cached pixels (red = level 0, blue = level 1) and logs residency.
 
 ## Limits
 
-- Forward+ only: it needs `RenderingDevice`. Compatibility shades live.
-- Level 1 has no mipmaps, so 6 cm texels can shimmer slightly far away at grazing angles.
+- Forward+ only: it needs `RenderingDevice`, BC3/BC5 sampling and the Cgame engine call. Without them
+  RVT turns itself off and the terrain shades live.
 - High/Ultra-only terms that need per-layer data are flat inside cached pages: normal-map variance
   and micro-occlusion.
 - Terrain geometry LOD is whatever the main camera chose when the page was baked.

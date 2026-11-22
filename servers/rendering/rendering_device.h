@@ -486,6 +486,9 @@ public:
 #endif
 
 	Error texture_copy(RID p_from_texture, RID p_to_texture, const Vector3 &p_from, const Vector3 &p_to, const Vector3 &p_size, uint32_t p_src_mipmap, uint32_t p_dst_mipmap, uint32_t p_src_layer, uint32_t p_dst_layer);
+	// Cgame: GPU-side copy of one layer's mipmap from a buffer (for example blocks a compute shader encoded) into a
+	// texture of any format, including block-compressed ones Metal cannot reinterpret as uncompressed views.
+	Error texture_update_from_buffer(RID p_buffer, uint32_t p_buffer_offset, uint32_t p_row_pitch, RID p_texture, uint32_t p_layer, uint32_t p_mipmap);
 	Error texture_clear(RID p_texture, const Color &p_color, uint32_t p_base_mipmap, uint32_t p_mipmaps, uint32_t p_base_layer, uint32_t p_layers);
 	Error texture_resolve_multisample(RID p_from_texture, RID p_to_texture);
 

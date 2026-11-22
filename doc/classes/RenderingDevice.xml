@@ -1318,6 +1318,18 @@
 				[b]Note:[/b] The existing [param texture] requires the [constant TEXTURE_USAGE_CAN_UPDATE_BIT] to be updatable.
 			</description>
 		</method>
+		<method name="texture_update_from_buffer">
+			<return type="int" enum="Error" />
+			<param index="0" name="buffer" type="RID" />
+			<param index="1" name="buffer_offset" type="int" />
+			<param index="2" name="row_pitch" type="int" />
+			<param index="3" name="texture" type="RID" />
+			<param index="4" name="layer" type="int" />
+			<param index="5" name="mipmap" type="int" />
+			<description>
+				Copies one [param mipmap] of one [param layer] of [param texture] from [param buffer] on the GPU, starting at [param buffer_offset] with rows [param row_pitch] bytes apart ([code]0[/code] means tightly packed; for block-compressed formats a row is a row of blocks). This lets a compute shader write block-compressed data (for example BC blocks) into a storage buffer and fill a compressed texture without a CPU round trip, which also works on drivers that cannot view a compressed texture as an uncompressed one. The texture needs [constant TEXTURE_USAGE_CAN_COPY_TO_BIT]. Not allowed while a draw or compute list is being recorded.
+			</description>
+		</method>
 		<method name="tlas_build" experimental="">
 			<return type="int" enum="Error" />
 			<param index="0" name="tlas" type="RID" />

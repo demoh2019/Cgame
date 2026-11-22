@@ -2396,6 +2396,72 @@ Error RenderingDevice::texture_update(RID p_texture, uint32_t p_layer, const Vec
 	return OK;
 }
 
+Error RenderingDevice::texture_update_from_buffer(RID p_buffer, uint32_t p_buffer_offset, uint32_t p_row_pitch, RID p_texture, uint32_t p_layer, uint32_t p_mipmap) {
+	ERR_RENDER_THREAD_GUARD_V(ERR_UNAVAILABLE);
+
+	ERR_FAIL_COND_V_MSG(draw_list.active, ERR_INVALID_PARAMETER, "Updating textures is forbidden during creation of a draw list.");
+	ERR_FAIL_COND_V_MSG(compute_list.active, ERR_INVALID_PARAMETER, "Updating textures is forbidden during creation of a compute list.");
+	ERR_FAIL_COND_V_MSG(raytracing_list.active, ERR_INVALID_PARAMETER, "Updating textures is forbidden during creation of a raytracing list.");
+
+	Buffer *buffer = _get_buffer_from_owner(p_buffer);
+	ERR_FAIL_NULL_V_MSG(buffer, ERR_INVALID_PARAMETER, "Source argument is not a valid buffer of any type.");
+
+	Texture *texture = texture_owner.get_or_null(p_texture);
+	ERR_FAIL_NULL_V(texture, ERR_INVALID_PARAMETER);
+	if (texture->owner != RID()) {
+		p_texture = texture->owner;
+		texture = texture_owner.get_or_null(texture->owner);
+		ERR_FAIL_NULL_V(texture, ERR_BUG);
+	}
+	ERR_FAIL_COND_V_MSG(texture->bound, ERR_CANT_ACQUIRE_RESOURCE, "Texture can't be updated while a draw list that uses it as part of a framebuffer is being created.");
+	ERR_FAIL_COND_V_MSG(!(texture->usage_flags & TEXTURE_USAGE_CAN_COPY_TO_BIT), ERR_INVALID_PARAMETER, "Texture requires the `RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT` to be set to be updated from a buffer.");
+	ERR_FAIL_COND_V(p_layer >= _texture_layer_count(texture), ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V(p_mipmap >= texture->mipmaps, ERR_INVALID_PARAMETER);
+
+	// Size of this mipmap (block-aligned for compressed formats) and its tight row pitch.
+	uint32_t width = 0, height = 0, depth = 0;
+	const uint32_t total_with = get_image_format_required_size(texture->format, texture->width, texture->height, texture->depth, p_mipmap + 1, &width, &height, &depth);
+	const uint32_t total_before = p_mipmap == 0 ? 0 : get_image_format_required_size(texture->format, texture->width, texture->height, texture->depth, p_mipmap);
+	const uint32_t mip_size = total_with - total_before;
+	uint32_t block_w = 1, block_h = 1;
+	get_compressed_image_format_block_dimensions(texture->format, block_w, block_h);
+	const uint32_t tight_pitch = get_compressed_image_format_pixels_shifted(texture->format, width * get_image_format_pixel_size(texture->format) * block_w);
+	const uint32_t row_pitch = p_row_pitch == 0 ? tight_pitch : p_row_pitch;
+	const uint32_t pitch_step = driver->api_trait_get(RDD::API_TRAIT_TEXTURE_DATA_ROW_PITCH_STEP);
+	ERR_FAIL_COND_V_MSG(row_pitch < tight_pitch || (pitch_step > 1 && row_pitch % pitch_step != 0), ERR_INVALID_PARAMETER,
+			vformat("Row pitch %d must be at least %d and a multiple of %d on this driver.", row_pitch, tight_pitch, pitch_step));
+	const uint32_t transfer_alignment = driver->api_trait_get(RDD::API_TRAIT_TEXTURE_TRANSFER_ALIGNMENT);
+	ERR_FAIL_COND_V_MSG(transfer_alignment > 1 && p_buffer_offset % transfer_alignment != 0, ERR_INVALID_PARAMETER,
+			vformat("Buffer offset must be a multiple of %d on this driver.", transfer_alignment));
+	const uint64_t needed = uint64_t(row_pitch) * (height / block_h) * depth;
+	ERR_FAIL_COND_V_MSG(uint64_t(p_buffer_offset) + MAX(needed, uint64_t(mip_size)) > buffer->size, ERR_INVALID_PARAMETER, "The buffer is too small for this mipmap.");
+
+	_check_transfer_worker_buffer(buffer);
+	_check_transfer_worker_texture(texture);
+	_texture_check_pending_clear(p_texture, texture);
+	// Indicate the texture will get modified for the shared texture fallback.
+	_texture_update_shared_fallback(p_texture, texture, true);
+
+	bool made_mutable = _texture_make_mutable(texture, p_texture);
+	made_mutable = _buffer_make_mutable(buffer, p_buffer) || made_mutable;
+	if (made_mutable) {
+		draw_graph.add_synchronization();
+	}
+
+	RDG::RecordedBufferToTextureCopy copy;
+	copy.from_buffer = buffer->driver_id;
+	copy.region.buffer_offset = p_buffer_offset;
+	copy.region.row_pitch = row_pitch;
+	copy.region.texture_subresource.aspect = RDD::TEXTURE_ASPECT_COLOR;
+	copy.region.texture_subresource.layer = p_layer;
+	copy.region.texture_subresource.mipmap = p_mipmap;
+	copy.region.texture_offset = Vector3i();
+	copy.region.texture_region_size = Vector3i(MAX(1u, texture->width >> p_mipmap), MAX(1u, texture->height >> p_mipmap), MAX(1u, depth));
+	RDG::ResourceTracker *buffer_tracker = buffer->draw_tracker;
+	draw_graph.add_texture_update(texture->driver_id, texture->draw_tracker, VectorView<RDG::RecordedBufferToTextureCopy>(&copy, 1), VectorView<RDG::ResourceTracker *>(&buffer_tracker, 1));
+	return OK;
+}
+
 void RenderingDevice::_texture_check_shared_fallback(Texture *p_texture) {
 	if (p_texture->shared_fallback == nullptr) {
 		p_texture->shared_fallback = memnew(Texture::SharedFallback);
@@ -9395,6 +9461,7 @@ void RenderingDevice::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("texture_is_discardable", "texture"), &RenderingDevice::texture_is_discardable);
 
 	ClassDB::bind_method(D_METHOD("texture_copy", "from_texture", "to_texture", "from_pos", "to_pos", "size", "src_mipmap", "dst_mipmap", "src_layer", "dst_layer"), &RenderingDevice::texture_copy);
+	ClassDB::bind_method(D_METHOD("texture_update_from_buffer", "buffer", "buffer_offset", "row_pitch", "texture", "layer", "mipmap"), &RenderingDevice::texture_update_from_buffer);
 	ClassDB::bind_method(D_METHOD("texture_clear", "texture", "color", "base_mipmap", "mipmap_count", "base_layer", "layer_count"), &RenderingDevice::texture_clear);
 	ClassDB::bind_method(D_METHOD("texture_resolve_multisample", "from_texture", "to_texture"), &RenderingDevice::texture_resolve_multisample);
 
