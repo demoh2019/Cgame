@@ -412,6 +412,21 @@ const AI_CHASE_AVOIDANCE_NEIGHBORS := 8
 var crowd_avoidance_enabled: bool = CrowdFacade.has_native_crowd() # Server flag; forced off without native.
 var last_chase_avoidance_stats: Dictionary = {"enabled": false, "agents": 0, "chasers": 0}
 var _chase_avoidance_dirty: bool = false # Some infected may hold a correction that must be cleared.
+# Off-zone horde simulation (CgamePopulationLOD through cgame_crowd_facade). Free-roaming infected
+# (spawn_id < 0: incidents, hordes, earlier promotions) that leave every player's active radius are
+# folded into abstract herds instead of vanishing; herds migrate toward noise, corpses and (at night)
+# survivors, and promote back into real infected near players under the existing caps and spawn
+# rules. Spawn-point infected keep their unchanged respawn-at-spawn persistence (folding them too
+# would duplicate them). Default on only with the native class; the GDScript fallback works but is
+# kept opt-in for the server tick. Herds are session-only, like every other infected.
+const HERD_CELL_SIZE := 64.0
+const HERD_PROMOTE_RADIUS := 110.0 # < ZOMBIE_ACTIVE_RADIUS so promoted infected are not unloaded at once.
+const HERD_PROMOTE_PER_PASS := 12 # New infected per population pass (1 s) at most.
+const HERD_MIN_SPAWN_DISTANCE := 12.0 # Same "never appear in front of a player" rule as spawn points.
+var herd_simulation_enabled: bool = CrowdFacade.has_native_population_lod()
+var _herds: Object = null # Lazily created population LOD.
+var _herd_last_time: float = -1.0
+var last_herd_stats: Dictionary = {"enabled": false}
 # EQS-style nearest cue query: one native spatial index for 3 passive senses.
 const AI_CUE_NATIVE_MIN_NPCS := 32
 const AI_CUE_NATIVE_MIN_SOURCES := 4
@@ -9096,6 +9111,9 @@ func _manage_zombie_population() -> void:
 	# Native Cgame broadphase; stock Godot keeps identical GDScript rules.
 	var presence = ClassDB.instantiate("SpatialPointGrid2D") if ClassDB.class_exists("SpatialPointGrid2D") else PlayerPresenceGrid.new()
 	presence.rebuild(player_positions)
+	var herds_on: bool = herd_simulation_enabled
+	if herds_on:
+		_tick_herds(player_positions, presence)
 	for cell in active_cells:
 		var data: Dictionary = world.chunk(cell)
 		for spawn in data["spawns"]:
@@ -9130,6 +9148,9 @@ func _manage_zombie_population() -> void:
 	for zombie in zombies.values():
 		if not zombie.is_alive():
 			gone.append(zombie.id)
+			if herds_on and zombie.position.is_finite():
+				# A fresh corpse draws distant herds for a couple of minutes.
+				_herds.add_attractor("corpse", Vector2(zombie.position.x, zombie.position.z), 1.0, 192.0, 120.0)
 		elif zombie.supply_cache_id >= 0 and bags.has(zombie.supply_cache_id):
 			continue # Loot guards cannot be unloaded to reset their loot.
 		elif not night_horde.is_empty() and night_horde.get("ids", []).has(zombie.id):
@@ -9139,14 +9160,126 @@ func _manage_zombie_population() -> void:
 			probe_zombie_ids.append(zombie.id)
 			probe_spawn_ids.append(zombie.spawn_id)
 	var near_players: PackedByteArray = presence.any_within_batch(probe_positions, ZOMBIE_ACTIVE_RADIUS)
+	var folds: Dictionary = {} # herd region -> Array of type names (ids visited in cohort order)
 	for i in range(probe_zombie_ids.size()):
 		if near_players[i] == 0:
 			gone.append(probe_zombie_ids[i])
 			if spawn_state.has(probe_spawn_ids[i]):
 				spawn_state[probe_spawn_ids[i]] = {"zombie": -1, "next": 0.0}
+			elif herds_on and _herd_foldable(zombies[probe_zombie_ids[i]]):
+				var region: int = _herds.region_of(probe_positions[i])
+				if not folds.has(region):
+					folds[region] = []
+				(folds[region] as Array).append(str(zombies[probe_zombie_ids[i]].type))
+	if not folds.is_empty():
+		var fold_regions: Array = folds.keys()
+		fold_regions.sort()
+		var folded := 0
+		for region in fold_regions:
+			_herds.demote(folds[region], int(region))
+			folded += (folds[region] as Array).size()
+		last_herd_stats["folded"] = int(last_herd_stats.get("folded", 0)) + folded
 	for id in gone:
 		zombies.erase(id)
 	last_population_query_stats = presence.snapshot()
+
+
+func get_herd_stats() -> Dictionary:
+	var out: Dictionary = last_herd_stats.duplicate(true)
+	if _herds != null:
+		out["population"] = _herds.stats()
+	return out
+
+
+## Plain free-roaming infected only: spawn-point, loot-guard, elite, raid and perched infected keep
+## their existing lifecycle rules.
+func _herd_foldable(zombie) -> bool:
+	return zombie.spawn_id < 0 and not zombie.elite and not zombie.raid_boss and not zombie.perched \
+		and zombie.supply_cache_id < 0 and Defs.ZOMBIES.has(zombie.type)
+
+
+func _ensure_herds() -> Object:
+	if _herds != null:
+		return _herds
+	_herds = CrowdFacade.make_population_lod()
+	var cells: int = int(ceil(2.0 * WorldGen.WORLD_RADIUS / HERD_CELL_SIZE))
+	var origin := Vector2(-WorldGen.WORLD_RADIUS, -WorldGen.WORLD_RADIUS)
+	_herds.setup(cells, cells, HERD_CELL_SIZE, world.world_seed, origin)
+	_herds.set("max_herd_size", 24)
+	_herds.set("herd_speed", 3.0) # A shambling migration, slower than a walking survivor.
+	_herds.set("promote_radius", HERD_PROMOTE_RADIUS + HERD_CELL_SIZE) # Server pre-filters by herd position.
+	_herds.set("max_concrete_agents", 0) # Budget is opened per promotion call.
+	_herd_last_time = time
+	return _herds
+
+
+## One herd step per population pass: attractors, migration, then promotion near players.
+func _tick_herds(player_positions: Array[Vector2], presence) -> void:
+	_ensure_herds()
+	var dt: float = clampf(time - _herd_last_time, 0.0, 5.0)
+	_herd_last_time = time
+	var night: bool = WorldCycle.is_night(time)
+	_herds.set_night(night)
+	for player in players.values():
+		if not _alive(player) or not player.position.is_finite():
+			continue
+		var at := Vector2(player.position.x, player.position.z)
+		if player.noise_timer > 0.0 and player.noise_radius > 0.0:
+			# Gunfire and other loud actions carry much farther for an abstract herd.
+			_herds.add_attractor("noise", at, clampf(player.noise_radius / 20.0, 0.2, 3.0),
+				maxf(player.noise_radius * 3.0, 96.0), 20.0)
+		if night and not _is_safe(player.position):
+			_herds.add_attractor("night", at, 0.5, 256.0, maxf(dt, 1.0) * 1.5)
+	var packed := PackedVector2Array(player_positions)
+	_herds.tick(dt, packed)
+	var promoted := 0
+	var rejected := 0
+	# Existing global infected cap and the slow-server reinforcement throttle both apply.
+	var budget: int = mini(HERD_PROMOTE_PER_PASS, WorldIncidents.MAX_ACTIVE_INFECTED - zombies.size())
+	budget = mini(budget, clampi(incident_spawn_cap, 0, HERD_PROMOTE_PER_PASS))
+	if budget > 0 and not player_positions.is_empty():
+		var regions: Array = []
+		for herd_id in _herds.herd_ids():
+			var herd: Dictionary = CrowdFacade.herd_info(_herds, int(herd_id))
+			var pos: Vector2 = herd.get("pos", Vector2.INF)
+			if pos.is_finite() and presence.any_within(pos, HERD_PROMOTE_RADIUS, true):
+				var region: int = int(herd["region"])
+				if not regions.has(region):
+					regions.append(region)
+		regions.sort()
+		for region in regions:
+			if budget <= 0:
+				break
+			_herds.set("max_concrete_agents", int(_herds.get("concrete_count")) + budget)
+			var specs: Array = _herds.promote(int(region), packed)
+			var back: Array = []
+			for spec in specs:
+				var type: String = str(spec["type"])
+				var spot: Vector2 = spec["position"]
+				var spot3 := Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y)
+				# Same spawn rules as spawn points: never in sight range, water or safe ground,
+				# and inside the active radius so the new infected is not unloaded straight away.
+				if budget <= 0 or not Defs.ZOMBIES.has(type) or world.is_water(spot.x, spot.y) or _is_safe(spot3) \
+						or presence.any_within(spot, HERD_MIN_SPAWN_DISTANCE, false) \
+						or not presence.any_within(spot, ZOMBIE_ACTIVE_RADIUS - 5.0, true):
+					back.append(type)
+					continue
+				var zombie_id: int = new_id()
+				var infected := Zombie.new(zombie_id, type, spot3, -1)
+				var heading: Vector2 = spec.get("heading", Vector2.ZERO)
+				infected.state = Zombie.State.WANDER
+				infected.wander_target = spot + (heading.normalized() * 20.0 if heading.length_squared() > 0.0001 else Vector2.ZERO)
+				zombies[zombie_id] = infected
+				promoted += 1
+				budget -= 1
+			if not back.is_empty():
+				_herds.demote(back, int(region)) # Conserve the herd: unplaceable agents stay abstract.
+				rejected += back.size()
+	_herds.set("max_concrete_agents", 0)
+	last_herd_stats["enabled"] = true
+	last_herd_stats["promoted"] = int(last_herd_stats.get("promoted", 0)) + promoted
+	last_herd_stats["rejected"] = int(last_herd_stats.get("rejected", 0)) + rejected
+	last_herd_stats["abstract"] = int(_herds.abstract_count())
 
 
 func _nearest_player_distance(point: Vector2) -> float:
