@@ -11,6 +11,9 @@ const GpuCulling = preload("res://scripts/native/cgame_gpu_culling.gd")
 const SPACING := 0.55 # Metres between tuft candidates (jittered): dense enough that the soil barely shows.
 const CLUMP_CELL := 3.2 # Size of the patches (Voronoi cells) that share a height and a shade.
 const TILE := 16.0 # Each chunk is cut into tiles of this size, so the camera only draws the tiles it sees.
+# Wider tapered blades keep close-up clumps from looking like sparse paper slivers.
+# This changes no vertex/triangle counts or MultiMesh instance budgets.
+const BLADE_WIDTH_SCALE := 1.35
 const FADE_START := 44.0 # Horizontal distance from the camera where the blades begin to sink, and where they are gone.
 const FADE_END := 60.0
 ## Share of blades kept at the far end of the range (engine GPU density LOD; survivors grow). Set per quality.
@@ -103,7 +106,9 @@ void vertex() {
 	// waves per vertex. This matters because MultiMesh tiles are still alive in the
 	// culling margin outside the shader fade range.
 	sheen = 0.0;
-	aa_world_grass_normal = vec3(0.0, 1.0, 0.0);
+	// Tilt lighting subtly per blade so a crossed clump reads as a soft volume.
+	// All source normals still point mostly upward for stable two-sided lighting.
+	aa_world_grass_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	if (shrink > 0.001) {
 		float wind_power = clamp(aa_vegetation_wind.z, 0.0, 1.0);
 		// Windless weather must not evaluate 3 wave functions per grass vertex.
@@ -128,8 +133,8 @@ void vertex() {
 			// sun highlights. Low presets leave the old upright normal unchanged.
 			if (aa_grass_normal_wind > 0.001) {
 				vec2 normal_slope = world_bend * (1.0 + UV.y) * aa_grass_normal_wind;
-				aa_world_grass_normal = normalize(vec3(
-					-normal_slope.x, 1.0, -normal_slope.y));
+				aa_world_grass_normal = normalize(aa_world_grass_normal
+					+ vec3(-normal_slope.x, 0.0, -normal_slope.y));
 			}
 			sheen = gust;
 		}
@@ -371,18 +376,23 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 				height = rng.randf_range(0.08, 0.2)
 				lean = rng.randf_range(0.03, 0.1)
 				width = rng.randf_range(0.016, 0.026)
+		width *= BLADE_WIDTH_SCALE
 		var blade_random := rng.randf()
 		var start := vertices.size()
-		# Root pair, middle pair, tip: the blade bends further out near the top.
-		var mid := root + out * lean * 0.35 + Vector3.UP * height * 0.55
-		var tip := root + out * lean + Vector3.UP * height
-		# Thin blades with narrow tips; many of them, so the clump reads as soft fuzz from above.
-		for point in [[root - side * width, 0.0], [root + side * width, 0.0], [mid - side * width * 0.85, 0.55],
-				[mid + side * width * 0.85, 0.55], [tip - side * width * 0.25, 1.0], [tip + side * width * 0.25, 1.0]]:
+		# Each ribbon twists slightly as it arches; a wider shoulder and tapered tip
+		# give the clump a round silhouette from above without adding triangles.
+		var curl := side * rng.randf_range(-0.045, 0.045)
+		var upper_side := (side + out * rng.randf_range(-0.28, 0.28)).normalized()
+		var mid := root + out * lean * 0.42 + curl * 0.35 + Vector3.UP * height * 0.54
+		var tip := root + out * lean + curl + Vector3.UP * height
+		var blade_normal := (Vector3.UP * 0.78 + out * 0.22).normalized()
+		for point in [[root - side * width * 0.88, 0.0], [root + side * width * 0.88, 0.0],
+				[mid - upper_side * width * 1.08, 0.54], [mid + upper_side * width * 1.08, 0.54],
+				[tip - upper_side * width * 0.22, 1.0], [tip + upper_side * width * 0.22, 1.0]]:
 			vertices.append(point[0])
 			uvs.append(Vector2(brightness, point[1]))
 			uv2s.append(Vector2((float(species) + 0.5) / SPECIES_COUNT, blade_random))
-			normals.append(Vector3.UP)
+			normals.append(blade_normal)
 		indices.append_array([start, start + 1, start + 2, start + 1, start + 3, start + 2, start + 2, start + 3, start + 4, start + 3, start + 5, start + 4])
 		if species == SPECIES_FLOWER:
 			# A corolla of five pointed petals around a small centre, tilted outwards so it reads
