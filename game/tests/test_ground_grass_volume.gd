@@ -26,8 +26,9 @@ func run(t) -> void:
 	var back: Vector3 = vertices[7]
 	t.check(left.distance_to(right) > 0.1, "middle of leaf has meaningful lateral width")
 	t.check(front.distance_to(back) > 0.06, "middle of leaf has front-to-back depth")
-	t.check(absf((right - left).cross(front - left).y) < 0.001,
-		"diamond width and depth lie in the same horizontal cross-section")
+	t.check(absf((right - left).cross(front - left).y) > 0.001,
+		"leaf cross-section has real horizontal area, not one straight line")
+	t.near(left.y, front.y, 0.0001, "leaf width and depth share a height ring")
 	for index in indices:
 		t.check(index >= 0 and index < vertices.size(), "all volume triangles are valid")
 	t.check(GroundPlants.volume_grass_mesh(2, 5).surface_get_arrays(0)[Mesh.ARRAY_INDEX].size()
@@ -47,6 +48,10 @@ func run(t) -> void:
 	scanned_node.multimesh = scanned
 	scanned_node.visibility_range_end = 72.0
 	scanned_node.custom_aabb = AABB(Vector3(-1, -1, -1), Vector3(16, 5, 16))
+	var previous_distance: float = GroundPlants.distance_scale
+	var previous_planes: int = GroundPlants.card_planes
+	GroundPlants.distance_scale = 1.0
+	GroundPlants.card_planes = 5
 	var companion: MultiMeshInstance3D = GroundPlants.volume_grass_companion(scanned_node, 1)
 	t.check(companion != null, "scanned tuft gains a near-camera solid mesh")
 	if companion != null:
@@ -61,6 +66,8 @@ func run(t) -> void:
 			"culling retains tile bounds")
 		t.check(companion.multimesh.mesh == GroundPlants.volume_grass_mesh(1, 5),
 			"High-quality tuft uses the cached 5-blade solid volume")
+	GroundPlants.distance_scale = previous_distance
+	GroundPlants.card_planes = previous_planes
 	t.check((GroundPlants as Script).source_code.contains("volume_grass_companion(") and
 		(GroundPlants as Script).source_code.contains("result.append(volume)"),
 		"live GroundPlants.build_tile actually attaches the new geometry")
