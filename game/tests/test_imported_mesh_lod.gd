@@ -83,3 +83,54 @@ func run(t) -> void:
 	t.check(ultra > 0.0, "Ultra retains LOD rather than disabling it")
 	t.eq(MeshLOD.copy_lods(null, 0).size(), 0, "null mesh is safe")
 	t.eq(MeshLOD.copy_lods(mesh, 100).size(), 0, "out-of-range surface is safe")
+
+	t.current = "scanned prop triangle budgets use importer LODs"
+	# Synthetic indexed terrain is deterministic and needs no scanned plant asset pack.
+	var grid_side := 16
+	var verts := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var uv := PackedVector2Array()
+	var indices := PackedInt32Array()
+	for z in grid_side + 1:
+		for x in grid_side + 1:
+			verts.append(Vector3(float(x) * 0.1, sin(float(x) * 0.2) * cos(float(z) * 0.3) * 0.03, float(z) * 0.1))
+			normals.append(Vector3.UP)
+			uv.append(Vector2(float(x) / float(grid_side), float(z) / float(grid_side)))
+	for z in grid_side:
+		for x in grid_side:
+			var a: int = z * (grid_side + 1) + x
+			indices.append_array(PackedInt32Array([a, a + 1, a + grid_side + 1,
+				a + 1, a + grid_side + 2, a + grid_side + 1]))
+	var source_arrays: Array = []
+	source_arrays.resize(Mesh.ARRAY_MAX)
+	source_arrays[Mesh.ARRAY_VERTEX] = verts
+	source_arrays[Mesh.ARRAY_NORMAL] = normals
+	source_arrays[Mesh.ARRAY_TEX_UV] = uv
+	source_arrays[Mesh.ARRAY_INDEX] = indices
+	var dense := ArrayMesh.new()
+	dense.resource_name = "SyntheticGrassScatterLOD"
+	dense.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, source_arrays)
+	var original_material := StandardMaterial3D.new()
+	dense.surface_set_material(0, original_material)
+	var budgeted: Mesh = MeshLOD.with_triangle_budget(dense, 80)
+	t.check(budgeted != null, "triangle budget produces a usable mesh")
+	t.check(budgeted == MeshLOD.with_triangle_budget(dense, 80),
+		"budgeted meshes are cached by source and budget")
+	if budgeted != null:
+		var output_arrays: Array = budgeted.surface_get_arrays(0)
+		var output_indices: PackedInt32Array = output_arrays[Mesh.ARRAY_INDEX]
+		var output_vertices: PackedVector3Array = output_arrays[Mesh.ARRAY_VERTEX]
+		t.check(output_indices.size() > 0 and output_indices.size() < indices.size(),
+			"importer LODs reduce scanned-detail geometry")
+		t.check(output_indices.size() % 3 == 0, "reduced mesh contains whole triangles")
+		t.eq(output_vertices.size(), verts.size(), "simplification preserves vertex attributes")
+		t.check(budgeted.surface_get_material(0) == original_material,
+			"budgeted mesh keeps original PBR material")
+		t.eq(budgeted.resource_name, "SyntheticGrassScatterLOD", "budgeted mesh keeps its name")
+		for index in output_indices:
+			t.check(index >= 0 and index < output_vertices.size(),
+				"LOD indices reference valid original vertices")
+	t.eq(dense.surface_get_arrays(0)[Mesh.ARRAY_INDEX], indices,
+		"generating a budgeted mesh never mutates the source")
+	t.check(MeshLOD.with_triangle_budget(dense, 0) == dense,
+		"a disabled budget retains the original mesh")
