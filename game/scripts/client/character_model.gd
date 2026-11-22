@@ -59,6 +59,10 @@ var _riding := false
 var _swimming := false
 var _sex := "" # "Male" or "Female" for the clothed survivors, which can show worn gear.
 var _gear_shown: Dictionary = {} # Gear slot -> item id currently drawn on the body.
+var motion_matching := false # Visual-only: locomotion clip chosen by the native motion matching search.
+var _mm_clip := "" # Last matched database clip ("" = not searched yet).
+var _mm_frame := -1
+var _mm_timer := 0.0
 
 
 ## `model_name` picks a character of the pack ("Orc_Male", "Elf_Female", ...); empty or an unavailable pack
@@ -619,6 +623,35 @@ func animation_modifier_profile() -> Dictionary:
 	return result
 
 
+## Turns motion-matched locomotion on (only takes effect when the native module is available at `quality`).
+## Returns whether it is active. Visual only: never affects gameplay or networking.
+func enable_motion_matching(quality: int) -> bool:
+	motion_matching = Anim.motion_matching_available(quality)
+	_mm_clip = ""
+	_mm_frame = -1
+	_mm_timer = 0.0
+	return motion_matching
+
+
+## Plays the locomotion loop picked by motion matching. Returns false (caller uses the speed-bracket state
+## machine) when disabled, on cheap LOD tiers, or when the search yields nothing. Searches are throttled to
+## MOTION_MATCHING_INTERVAL; between searches the last match keeps playing with a speed-matched rate.
+func _play_matched_locomotion(delta: float) -> bool:
+	if not motion_matching or _lod_tier >= 2:
+		return false
+	_mm_timer -= delta
+	if _mm_timer <= 0.0 or _mm_clip == "":
+		_mm_timer = Anim.MOTION_MATCHING_INTERVAL
+		var found: Dictionary = Anim.match_locomotion(speed if _moving else 0.0, _yaw_rate, _mm_clip, _mm_frame)
+		_mm_clip = str(found["clip"])
+		_mm_frame = int(found["frame"])
+	if _mm_clip == "":
+		return false
+	var choice: Array = Anim.locomotion_animation(_mm_clip, speed if _moving else 0.0, _zombie)
+	_play(str(choice[0]), float(choice[1]))
+	return true
+
+
 func _track_yaw(delta: float) -> void:
 	var yaw := global_rotation.y
 	if _last_yaw != INF and delta > 0.0:
@@ -1014,6 +1047,8 @@ func update_motion(delta: float) -> void:
 	if _zombie:
 		if _zombie_state == 3:
 			_play("Zombie_Scratch", 1.0)
+		elif _play_matched_locomotion(delta):
+			pass # Motion matching chose the locomotion loop.
 		elif _moving:
 			if speed > 3.0:
 				_play("Jog_Fwd_Loop", clampf(speed / 3.6, 0.6, 2.0))
@@ -1033,6 +1068,8 @@ func update_motion(delta: float) -> void:
 		return
 	# Each clip plays at the rate its stride matches the ground speed (walk about 1.6 m/s, jog 4 m/s, sprint 6.5 m/s
 	# at rate 1), with wide limits so slow cargo walks and fast bike-free sprints do not slide.
+	if _play_matched_locomotion(delta):
+		return
 	if not _moving:
 		_play("Idle_Loop", 1.0)
 	elif speed < 2.6:

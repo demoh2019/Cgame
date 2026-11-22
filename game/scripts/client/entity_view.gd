@@ -650,6 +650,8 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 	root.add_child(model)
 	if _world != null and GraphicsQuality.level() >= 2: # High and Ultra; no-op without the native class.
 		model.enable_foot_placement(_world.height_at)
+	# Remote players and infected: motion-matched locomotion on High/Ultra with the native module.
+	model.enable_motion_matching(GraphicsQuality.level())
 	_register_anim_lod(model)
 	if kind == "zombie":
 		EngineFeatures.tag_node(root, ["Enemy.Infected.%s" % String(entity["type"]).capitalize()])

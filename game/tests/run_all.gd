@@ -59,6 +59,7 @@ const SUITES := [
 	"res://tests/test_procedural_sound_fallback.gd",
 	"res://tests/test_chase_crowd_avoidance.gd",
 	"res://tests/test_herd_population.gd",
+	"res://tests/test_motion_matched_locomotion.gd",
 	"res://tests/test_audio_voice_admission.gd",
 	"res://tests/test_spatial_sound_event_policy.gd",
 	"res://tests/test_audio_duck_mix.gd",

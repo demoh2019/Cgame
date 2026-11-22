@@ -741,3 +741,80 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 		if bool(model.get_meta("aa_combat_pose_retained", false)) != combat_promoted:
 			model.set_meta("aa_combat_pose_retained", combat_promoted)
 		model.set_look_point(cam if tiers[i] == 0 and distances[i] < 12.0 else Vector3.INF)
+
+
+# --- Motion matching locomotion (visual only) ------------------------------------------------------------------------
+# On High/Ultra with the native cgame_animation module (CgameMotionMatchingDatabase + AnimationNodeMotionMatching),
+# remote players and infected pick their locomotion clip by a pose/trajectory search over the default synthesized
+# locomotion database instead of fixed speed brackets: the search's continuation bias gives natural hysteresis between
+# walk and run and reacts to turning. The chosen database clip maps onto the character pack's loop animations; the
+# existing speed-bracket state machine remains the fallback (lower tiers, stock engine, failed search).
+
+const MotionMatchingFacade = preload("res://scripts/native/motion_matching_facade.gd")
+
+const MOTION_MATCHING_MIN_QUALITY := 2 # High.
+const MOTION_MATCHING_INTERVAL := 0.15 # Seconds between searches per character.
+## Database clip -> nominal ground speed (m/s) at playback rate 1 in the pack animations.
+const MM_WALK_SPEED := 1.6
+const MM_ZOMBIE_WALK_SPEED := 1.1
+const MM_JOG_SPEED := 4.0
+const MM_ZOMBIE_JOG_SPEED := 3.6
+const MM_SPRINT_SPEED := 6.5
+
+static var _mm_database: Variant = null
+static var _mm_checked := false
+
+
+## True when motion matching may drive locomotion at `quality` (native module present).
+static func motion_matching_available(quality: int) -> bool:
+	return quality >= MOTION_MATCHING_MIN_QUALITY and ClassDB.class_exists(&"CgameMotionMatchingDatabase") \
+		and ClassDB.class_exists(&"AnimationNodeMotionMatching")
+
+
+## The shared native locomotion database (built once), or null when unavailable.
+static func motion_matching_database() -> Variant:
+	if not _mm_checked:
+		_mm_checked = true
+		if ClassDB.class_exists(&"CgameMotionMatchingDatabase"):
+			_mm_database = MotionMatchingFacade.build_default_database()
+	return _mm_database
+
+
+## Searches the database for the clip matching a character moving forward at `speed` m/s while turning at
+## `yaw_rate` rad/s. Returns {"clip", "frame"}; clip is "" when no database/search result is available.
+static func match_locomotion(speed: float, yaw_rate: float, current_clip: String = "", current_frame: int = -1) -> Dictionary:
+	var db: Variant = motion_matching_database()
+	if db == null:
+		return {"clip": "", "frame": -1}
+	# Remote characters carry no foot state, so the search is restricted by tag to the family the motion
+	# belongs to (moving -> locomotion clips, turning on the spot -> turn clips) and the trajectory/velocity
+	# features pick the clip and frame within it.
+	var moving: bool = speed > 0.35
+	var turn: float = clampf(yaw_rate, -3.0, 3.0) * 0.4 # Facing change expected over the trajectory window.
+	if not moving and absf(yaw_rate) < 1.0:
+		return {"clip": "idle", "frame": 0}
+	var velocity := Vector2(0.0, maxf(speed, 0.0) if moving else 0.0)
+	var tags := PackedStringArray(["locomotion"] if moving else ["turn"])
+	var query: Dictionary = db.query_from(velocity, 0.0, velocity, turn, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO)
+	var found: Dictionary = db.search(query, current_clip, current_frame, tags)
+	return {"clip": str(found.get("clip", "")), "frame": int(found.get("frame", -1))}
+
+
+## Maps a database clip onto the pack loop animation and playback rate. Returns [animation, rate].
+static func locomotion_animation(mm_clip: String, speed: float, zombie: bool) -> Array:
+	match mm_clip:
+		"idle":
+			return ["Zombie_Idle_Loop" if zombie else "Idle_Loop", 1.0]
+		"run_forward":
+			if zombie:
+				return ["Jog_Fwd_Loop", clampf(speed / MM_ZOMBIE_JOG_SPEED, 0.6, 2.0)]
+			if speed >= 5.6:
+				return ["Sprint_Loop", clampf(speed / MM_SPRINT_SPEED, 0.7, 1.5)]
+			return ["Jog_Fwd_Loop", clampf(speed / MM_JOG_SPEED, 0.6, 1.5)]
+		"turn_left", "turn_right":
+			# Turning on the spot: short shuffling steps.
+			if speed < 0.35:
+				return ["Zombie_Walk_Fwd_Loop" if zombie else "Walk_Loop", 0.6]
+	if zombie:
+		return ["Zombie_Walk_Fwd_Loop", clampf(speed / MM_ZOMBIE_WALK_SPEED, 0.6, 2.2)]
+	return ["Walk_Loop", clampf(speed / MM_WALK_SPEED, 0.45, 1.7)]
