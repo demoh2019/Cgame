@@ -12,7 +12,7 @@ const SPACING := 0.55 # Metres between tuft candidates (jittered): dense enough 
 const CLUMP_CELL := 3.2 # Size of the patches (Voronoi cells) that share a height and a shade.
 const TILE := 16.0 # Each chunk is cut into tiles of this size, so the camera only draws the tiles it sees.
 # Wider tapered blades keep close-up clumps from looking like sparse paper slivers.
-# This changes no vertex/triangle counts or MultiMesh instance budgets.
+# Crossed ribbons give near blades a visible side silhouette; far LODs stay cheap.
 const BLADE_WIDTH_SCALE := 1.35
 const FADE_START := 44.0 # Horizontal distance from the camera where the blades begin to sink, and where they are gone.
 const FADE_END := 60.0
@@ -394,6 +394,29 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 			uv2s.append(Vector2((float(species) + 0.5) / SPECIES_COUNT, blade_random))
 			normals.append(blade_normal)
 		indices.append_array([start, start + 1, start + 2, start + 1, start + 3, start + 2, start + 2, start + 3, start + 4, start + 3, start + 5, start + 4])
+		# Edge-on single quads collapse to one pixel. Cross them with a second
+		# tapered, bent ribbon at right angles so each blade has actual 3D
+		# silhouette from ground-level and orbit cameras (no alpha overdraw).
+		# Medium LOD crosses alternate blades; distant LOD stays one ribbon.
+		if blades >= 18 or (blades >= 9 and blade % 2 == 0):
+			var cross_axis := (out + side * rng.randf_range(-0.12, 0.12)).normalized()
+			var cross_width := width * rng.randf_range(0.7, 0.88)
+			var cross_normal := (Vector3.UP * 0.78 + side * 0.22).normalized()
+			var cross_start := vertices.size()
+			for point in [[root - cross_axis * cross_width * 0.88, 0.0],
+					[root + cross_axis * cross_width * 0.88, 0.0],
+					[mid - cross_axis * cross_width * 1.08, 0.54],
+					[mid + cross_axis * cross_width * 1.08, 0.54],
+					[tip - cross_axis * cross_width * 0.22, 1.0],
+					[tip + cross_axis * cross_width * 0.22, 1.0]]:
+				vertices.append(point[0])
+				uvs.append(Vector2(brightness, point[1]))
+				uv2s.append(Vector2((float(species) + 0.5) / SPECIES_COUNT, blade_random))
+				normals.append(cross_normal)
+			indices.append_array([cross_start, cross_start + 1, cross_start + 2,
+					cross_start + 1, cross_start + 3, cross_start + 2,
+					cross_start + 2, cross_start + 3, cross_start + 4,
+					cross_start + 3, cross_start + 5, cross_start + 4])
 		if species == SPECIES_FLOWER:
 			# A corolla of five pointed petals around a small centre, tilted outwards so it reads
 			# from the side as well as from above. UV.y >= 1.5 marks the head for the shader;
