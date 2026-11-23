@@ -216,12 +216,19 @@ public:
 	bool is_over_terrain(const Vector3 &p_world_position) const;
 	// Recomputes meshes and collision after the samples inside `p_region` (sample coordinates) changed.
 	void update_region(const Rect2i &p_region);
+	// Atomically replace at most 4096 height samples in a rectangular source
+	// region; only touched render/collision chunks are invalidated. Use
+	// force_update() to synchronously rebuild immediately if required.
+	bool apply_height_patch(const Rect2i &p_region, const PackedFloat32Array &p_heights);
 
 	int get_chunk_count() const { return int(chunks.size()); }
 	Vector2i get_chunk_grid_size() const { return Vector2i(chunks_x, chunks_z); }
 	int get_visible_chunk_count() const;
 	int get_collision_chunk_count() const;
 	int get_chunk_lod(const Vector2i &p_chunk) const;
+	// Height deviation at a particular simplification level, in world
+	// vertical units; refreshed when nearby height samples are edited.
+	real_t get_chunk_lod_error(const Vector2i &p_chunk, int p_lod) const;
 	// Applies pending changes and the distance based detail selection now, instead of at the next update.
 	void force_update();
 
