@@ -77,6 +77,10 @@ func run(t) -> void:
 	var source: String = (ChunkView as Script).source_code
 	t.check(source.contains("_terrain.apply_color_patch(Rect2i(0, 0, SAMPLES, SAMPLES), colors)"),
 		"the real game terrain uses native color-only patch updates during graphics changes")
+	var plugin_source: String = (TerrainPlugin as Script).source_code
+	t.check(plugin_source.contains("_forward_3d_gui_input") and \
+		plugin_source.contains("terrain_panel.viewport_sculpt_enabled"),
+		"explicit 3D viewport sculpt input reaches the bound terrain editor")
 	panel.free()
 	terrain.free()
 
