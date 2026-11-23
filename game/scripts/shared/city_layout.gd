@@ -194,12 +194,17 @@ static func streets(layout: String, radius: float, rotation: float) -> Array:
 
 ## A road endpoint chosen on the street network becomes an actual connection to the regional road.
 static func entrance_offset(layout: String, radius: float, rotation: float, toward: Vector2) -> Vector2:
+	return entrance_on_paths(streets(layout, radius, rotation), toward)
+
+
+## Reuse the city's baked street paths when routing links to other settlements.
+static func entrance_on_paths(paths: Array, toward: Vector2) -> Vector2:
 	if toward.length_squared() < 0.0001:
 		return Vector2.ZERO
 	var heading: Vector2 = toward.normalized()
 	var best_score: float = -INF
 	var best: Vector2 = Vector2.ZERO
-	for street in streets(layout, radius, rotation):
+	for street in paths:
 		var path: PackedVector2Array = street
 		if path.is_empty():
 			continue
