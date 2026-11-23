@@ -36,6 +36,7 @@
 #include "core/object/class_db.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/local_vector.h"
+#include "scene/resources/mesh.h"
 
 #include <thirdparty/meshoptimizer/meshoptimizer.h>
 
@@ -386,8 +387,53 @@ int CgameClusterLOD::triangle_count(const Dictionary &p_hierarchy, const PackedI
 	return total;
 }
 
+Array CgameClusterLOD::build_cut_arrays(const Array &p_source_arrays, const Dictionary &p_hierarchy, const PackedInt32Array &p_cut) {
+	Array invalid;
+	ERR_FAIL_COND_V_MSG(p_source_arrays.size() != Mesh::ARRAY_MAX ||
+			p_source_arrays[Mesh::ARRAY_VERTEX].get_type() != Variant::PACKED_VECTOR3_ARRAY ||
+			!p_hierarchy.has("vertices") || !p_hierarchy.has("clusters") ||
+			p_hierarchy["vertices"].get_type() != Variant::PACKED_VECTOR3_ARRAY ||
+			p_hierarchy["clusters"].get_type() != Variant::ARRAY,
+			invalid, "CgameClusterLOD: expected Mesh.ARRAY_MAX vertex arrays and a matching cluster hierarchy.");
+	const PackedVector3Array vertices = p_source_arrays[Mesh::ARRAY_VERTEX];
+	const PackedVector3Array hierarchy_vertices = p_hierarchy["vertices"];
+	ERR_FAIL_COND_V_MSG(vertices.is_empty() || vertices != hierarchy_vertices,
+			invalid, "CgameClusterLOD: hierarchy must reference these exact source vertices.");
+	const Array clusters = p_hierarchy["clusters"];
+	PackedByteArray visited;
+	visited.resize(clusters.size());
+	PackedInt32Array cut_indices;
+	for (int i = 0; i < p_cut.size(); i++) {
+		const int id = p_cut[i];
+		ERR_FAIL_COND_V_MSG(id < 0 || id >= clusters.size() || visited[id] != 0 ||
+				clusters[id].get_type() != Variant::DICTIONARY,
+				invalid, "CgameClusterLOD: malformed or repeated cluster ID in selected cut.");
+		visited.set(id, 1);
+		const Dictionary cluster = clusters[id];
+		ERR_FAIL_COND_V_MSG(!cluster.has("indices") ||
+				cluster["indices"].get_type() != Variant::PACKED_INT32_ARRAY,
+				invalid, "CgameClusterLOD: cluster has no triangle index list.");
+		const PackedInt32Array indices = cluster["indices"];
+		ERR_FAIL_COND_V_MSG(indices.is_empty() || indices.size() % 3 != 0,
+				invalid, "CgameClusterLOD: selected cluster is not triangle-aligned.");
+		for (int j = 0; j < indices.size(); j++) {
+			ERR_FAIL_COND_V_MSG(indices[j] < 0 || indices[j] >= vertices.size(),
+					invalid, "CgameClusterLOD: cluster index is outside the source vertex array.");
+		}
+		cut_indices.append_array(indices);
+	}
+	ERR_FAIL_COND_V_MSG(cut_indices.is_empty(), invalid, "CgameClusterLOD: selected cut is empty.");
+	// All simplified indices reference ORIGINAL vertex IDs. Only replace
+	// ARRAY_INDEX: no interpolation of UV seams, colors, tangents or bone
+	// weights, and no duplication of vertex buffers until upload.
+	Array result = p_source_arrays.duplicate();
+	result[Mesh::ARRAY_INDEX] = cut_indices;
+	return result;
+}
+
 void CgameClusterLOD::_bind_methods() {
 	ClassDB::bind_static_method("CgameClusterLOD", D_METHOD("build_hierarchy", "vertices", "indices", "levels"), &CgameClusterLOD::build_hierarchy, DEFVAL(4));
 	ClassDB::bind_static_method("CgameClusterLOD", D_METHOD("select_cut", "hierarchy", "camera_pos", "fov_y", "screen_height", "error_pixels"), &CgameClusterLOD::select_cut, DEFVAL(1.0));
 	ClassDB::bind_static_method("CgameClusterLOD", D_METHOD("triangle_count", "hierarchy", "cut"), &CgameClusterLOD::triangle_count);
+	ClassDB::bind_static_method("CgameClusterLOD", D_METHOD("build_cut_arrays", "source_arrays", "hierarchy", "cut"), &CgameClusterLOD::build_cut_arrays);
 }
