@@ -46,6 +46,28 @@ func _bfs(w: int, h: int, start: Vector2i, goal: Vector2i) -> int:
 
 
 func run(t) -> void:
+	t.current = "invalid and oversized grid builds fail closed without retaining stale routes"
+	var guarded := HierarchicalPathfinder.new()
+	guarded.build(0, 24, 8, _is_open)
+	t.eq(guarded.find_path(Vector2i.ZERO, Vector2i.ONE), PackedVector2Array(),
+		"zero width produces no route")
+	t.eq(guarded.allocated_node_count(), 0, "zero width does not allocate graph nodes")
+	guarded.build(24, -1, 8, _is_open)
+	t.eq(guarded.width, 0, "negative height leaves an empty pathfinder")
+	guarded.build(24, 24, 8, Callable())
+	t.eq(guarded.height, 0, "invalid walkability callback is rejected")
+	guarded.build(1024, 1025, 8, _is_open)
+	t.eq(guarded.width, 0, "grid above the fixed cell budget is refused before allocation")
+	t.eq(guarded.allocated_node_count(), 0, "oversized build creates no abstract graph")
+	guarded.build(8, 8, 8, _is_open)
+	t.check(not guarded.find_path(Vector2i.ZERO, Vector2i(7, 7)).is_empty(),
+		"a valid rebuild recovers after rejected input")
+	guarded.find_path(Vector2i.ZERO, Vector2i(7, 7))
+	t.check(guarded.cached_route_count() <= 1, "only valid rebuild geometry populates route cache")
+	guarded.build(0, 0, 8, _is_open)
+	t.eq(guarded.cached_route_count(), 0, "invalid re-build clears old cached corridors")
+	t.eq(guarded.node_count(), 0, "invalid re-build clears stale graph nodes")
+
 	var w := 24
 	var h := 24
 	t.current = "path around walls"

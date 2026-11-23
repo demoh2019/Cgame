@@ -14,6 +14,8 @@ const DIRS: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), 
 const LONG_RUN := 6
 const FAR := 1 << 30
 const MAX_CACHED_ROUTES := 128 # Bounded resident abstract corridors per pathfinder.
+## Refuse pathological dimensions before multiplying/allocating the walkability grid.
+const MAX_GRID_CELLS := 1_048_576
 
 ## Abstract-route reuses (same start/goal cluster pair).
 var cache_hits: int = 0
@@ -88,16 +90,15 @@ class _Heap:
 
 ## Builds clusters, entrance nodes and the abstract graph. walkable.call(x, y) -> bool.
 func build(w: int, h: int, cluster: int, walkable: Callable) -> void:
-	width = w
-	height = h
+	# Clear old state first: an invalid rebuild must not leave routes through
+	# stale geometry that the caller intended to replace.
+	width = 0
+	height = 0
 	cluster_size = maxi(2, cluster)
-	_walkable = walkable
-	_cw = ceili(float(w) / cluster_size)
-	_ch = ceili(float(h) / cluster_size)
-	_grid.resize(w * h)
-	for y in h:
-		for x in w:
-			_grid[y * w + x] = 1 if walkable.call(x, y) else 0
+	_walkable = Callable()
+	_cw = 0
+	_ch = 0
+	_grid.clear()
 	_n_cell.clear()
 	_n_cluster.clear()
 	_n_alive.clear()
@@ -106,8 +107,23 @@ func build(w: int, h: int, cluster: int, walkable: Callable) -> void:
 	_node_at.clear()
 	_route_cache.clear()
 	_route_cache_order.clear()
+	_cluster_nodes.clear()
 	cache_hits = 0
-	_cluster_nodes = []
+	if w <= 0 or h <= 0 or not walkable.is_valid():
+		return
+	# Divide before multiply so even hostile dimensions cannot overflow the
+	# integer cell count or trigger an excessive PackedByteArray allocation.
+	if w > MAX_GRID_CELLS / h:
+		return
+	width = w
+	height = h
+	_walkable = walkable
+	_cw = ceili(float(w) / cluster_size)
+	_ch = ceili(float(h) / cluster_size)
+	_grid.resize(w * h)
+	for y in h:
+		for x in w:
+			_grid[y * w + x] = 1 if walkable.call(x, y) else 0
 	for i in _cw * _ch:
 		_cluster_nodes.append([])
 	for cy in _ch:
