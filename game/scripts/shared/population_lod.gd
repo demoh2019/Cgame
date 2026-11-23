@@ -133,7 +133,11 @@ func clear_attractors() -> void:
 
 
 func set_night(value: bool) -> void:
+	if night == value:
+		return
 	night = value
+	# Night-only attractors must take effect at the very next simulation tick.
+	_attr_dirty = true
 
 
 ## Herds inside this region lose `rate` agents per second (e.g. fire, base defences).
@@ -159,20 +163,28 @@ func _refresh_attraction() -> void:
 	if not _attr_dirty:
 		return
 	_attr_dirty = false
-	for r in range(_attr.size()):
-		_attr[r] = 0.0
+	_attr.fill(0.0)
 	for a in _attractors:
 		var kind: String = a["kind"]
-		var w: float = kind_weight.get(kind, 1.0)
 		if kind == "night" and not night:
 			continue
+		var w: float = kind_weight.get(kind, 1.0)
 		var apos: Vector2 = a["pos"]
 		var radius: float = a["radius"]
 		var strength: float = a["strength"]
-		for r in range(_attr.size()):
-			var d := region_center(r).distance_to(apos)
-			if d < radius:
-				_attr[r] += strength * w * (1.0 - d / radius)
+		# A short noise or loot event affects only nearby regions. Avoid
+		# scanning the full island for every local attractor.
+		# Conservative one-cell padding retains strict circle-boundary semantics.
+		var low_x: int = maxi(0, floori((apos.x - radius - origin.x) / cell_size - 0.5))
+		var high_x: int = mini(cols - 1, ceili((apos.x + radius - origin.x) / cell_size - 0.5))
+		var low_y: int = maxi(0, floori((apos.y - radius - origin.y) / cell_size - 0.5))
+		var high_y: int = mini(rows - 1, ceili((apos.y + radius - origin.y) / cell_size - 0.5))
+		for cy in range(low_y, high_y + 1):
+			for cx in range(low_x, high_x + 1):
+				var r: int = cy * cols + cx
+				var d: float = region_center(r).distance_to(apos)
+				if d < radius:
+					_attr[r] += strength * w * (1.0 - d / radius)
 
 
 # --- Herd management ----------------------------------------------------------
