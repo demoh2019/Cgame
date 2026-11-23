@@ -79,9 +79,17 @@ static func caption_for(event: Dictionary, local_peer: int, listener: Vector2, f
 
 ## Lines kept on screen: newest last, duplicates within `window` seconds merged, at most `limit` rows.
 static func push_line(lines: Array, text: String, now: float, window: float = 0.8, limit: int = 4) -> Array:
-	var out := lines.duplicate()
+	# Cap the collection even for malformed caller input. Never mutate
+	# existing caption timestamps while deciding whether to merge duplicates.
+	if limit <= 0:
+		return []
+	var out: Array = lines.duplicate(true)
+	if text.strip_edges().is_empty() or not is_finite(now):
+		return out
+	var merge_window: float = maxf(0.0, window) if is_finite(window) else 0.0
 	for row in out:
-		if row["text"] == text and now - float(row["time"]) < window:
+		var elapsed: float = now - float(row["time"])
+		if row["text"] == text and elapsed >= 0.0 and elapsed < merge_window:
 			row["time"] = now
 			return out
 	out.append({"text": text, "time": now})
