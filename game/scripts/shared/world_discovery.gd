@@ -17,7 +17,18 @@ static func reveal(world, position: Vector3, journal: Dictionary) -> Dictionary:
 	if not position.is_finite() or journal.size() >= MAX_DISCOVERIES:
 		return {}
 	var site: Dictionary = world.poi.site_at(position.x, position.z)
-	if site.is_empty() or not site.has("id"):
+	if site.is_empty() or not site.has("id") or not site.has("x") or not site.has("z"):
+		return {}
+	# Even a broken procedural world record must not enter persisted player
+	# progress or award discovery rewards without a valid region and site ID.
+	var raw_id: Variant = site["id"]
+	var raw_x: Variant = site["x"]
+	var raw_z: Variant = site["z"]
+	if typeof(raw_id) != TYPE_INT or int(raw_id) < 0 or int(raw_id) > MAX_SITE_ID:
+		return {}
+	if not (raw_x is float or raw_x is int) or not (raw_z is float or raw_z is int):
+		return {}
+	if not is_finite(float(raw_x)) or not is_finite(float(raw_z)):
 		return {}
 	var region: Vector2i = key_for(site)
 	if journal.has(region):

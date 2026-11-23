@@ -5,6 +5,28 @@ const Readiness = preload("res://scripts/shared/stream_readiness.gd")
 
 
 func run(t) -> void:
+	t.current = "malformed ready-stage marks cannot reveal unloaded world cells"
+	var invalid_gate := Readiness.new()
+	var invalid_cell := Vector2i(981, -702)
+	invalid_gate.mark(invalid_cell, Readiness.Stage.DATA_LOADED, INF)
+	t.check(not invalid_gate.is_tracked(invalid_cell),
+		"infinite stage clock never creates an orphan cell or poisons the clock")
+	invalid_gate.mark(invalid_cell, -1)
+	invalid_gate.mark(invalid_cell, 0)
+	invalid_gate.mark(invalid_cell, 16)
+	t.check(not invalid_gate.is_tracked(invalid_cell),
+		"negative, zero and unknown stage bits are rejected before creating state")
+	invalid_gate.mark(invalid_cell, Readiness.Stage.DATA_LOADED | Readiness.Stage.PHYSICS_READY, 1.0)
+	t.eq(invalid_gate.ready_mask(invalid_cell),
+		Readiness.Stage.DATA_LOADED | Readiness.Stage.PHYSICS_READY,
+		"legitimate combined stage flags remain supported")
+	invalid_gate.mark(invalid_cell, Readiness.Stage.NAVMESH_READY, NAN)
+	t.eq(invalid_gate.ready_mask(invalid_cell),
+		Readiness.Stage.DATA_LOADED | Readiness.Stage.PHYSICS_READY,
+		"malformed clock cannot claim a later navmesh stage")
+	t.check(not invalid_gate.is_revealable(invalid_cell),
+		"GPU and navigation stages must genuinely finish before revealing terrain")
+
 	t.current = "one navmesh bake per streamed cell"
 	var gate := Readiness.new()
 	var cell := Vector2i(4, -3)

@@ -14,6 +14,9 @@ extends RefCounted
 ## obligations.
 
 const HEADER_BYTES: int = 17
+## Wire reports are tiny local windows; cap malformed radius fields before
+## decoding to prevent large bitset traversals from corrupted packets.
+const MAX_WIRE_RADIUS: int = 32
 
 
 static func window_side(radius: int) -> int:
@@ -40,6 +43,8 @@ static func bytes_for(radius: int) -> int:
 ## Sets of cells (Dictionary keyed by Vector2i) <-> bitset over the window.
 static func encode_cells(center: Vector2i, radius: int, cells: Dictionary) -> PackedByteArray:
 	var bits := PackedByteArray()
+	if radius < 0 or radius > MAX_WIRE_RADIUS:
+		return bits
 	bits.resize(bytes_for(radius))
 	for cell: Vector2i in cells.keys():
 		var i := bit_index(center, radius, cell)
@@ -50,6 +55,8 @@ static func encode_cells(center: Vector2i, radius: int, cells: Dictionary) -> Pa
 
 static func decode_cells(center: Vector2i, radius: int, bits: PackedByteArray) -> Dictionary:
 	var out: Dictionary = {}
+	if radius < 0 or radius > MAX_WIRE_RADIUS or bits.size() != bytes_for(radius):
+		return out
 	var n := window_side(radius)
 	for i in n * n:
 		if (bits[i >> 3] & (1 << (i & 7))) != 0:
@@ -75,8 +82,8 @@ static func serialize(packet: Dictionary) -> PackedByteArray:
 static func deserialize(buf: PackedByteArray) -> Dictionary:
 	if buf.size() < HEADER_BYTES:
 		return {}
-	var radius := buf.decode_u8(16)
-	if buf.size() != HEADER_BYTES + bytes_for(radius):
+	var radius: int = buf.decode_u8(16)
+	if radius > MAX_WIRE_RADIUS or buf.size() != HEADER_BYTES + bytes_for(radius):
 		return {}
 	return {
 		"v": buf.decode_u32(0), "base": buf.decode_u32(4),
@@ -197,8 +204,8 @@ func apply_report(client: Variant, packet: Dictionary) -> Dictionary:
 	var bits: PackedByteArray = packet["bits"]
 	var version: int = int(packet["v"])
 	var base: int = int(packet["base"])
-	if radius < 0 or radius > max_report_radius or bits.size() != bytes_for(radius) \
-			or version <= 0 or base < 0 or base >= version:
+	if radius < 0 or radius > mini(max_report_radius, MAX_WIRE_RADIUS) \
+			or bits.size() != bytes_for(radius) or version <= 0 or base < 0 or base >= version:
 		res["reason"] = "malformed"
 		return _violate(s, res)
 	if version <= s.version:
