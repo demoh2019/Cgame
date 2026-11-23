@@ -3,6 +3,7 @@ extends RefCounted
 
 const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
+const StoneResources = preload("res://scripts/shared/stone_resources.gd")
 const ART_ROOT := "res://assets/models/kenney_expanded/"
 const TERRAIN_DIR := "res://assets/textures/terrain/"
 
@@ -32,6 +33,26 @@ func run(t) -> void:
 			t.check("ruin" in ["tree", "rock", "meadow", "rare", "ruin"], "ruin anchor is supported")
 	t.eq(extra_count, 20, "twenty environment decoration models")
 	t.eq(ruin_count, 10, "ten ruin-specific models")
+
+	t.current = "all loose rock model decorations are now interactive"
+	var loose_catalog_rocks := 0
+	for decor in ModelCatalog.DECOR_EXTRA:
+		if not StoneResources.is_loose_stone_entry(decor):
+			continue
+		loose_catalog_rocks += 1
+		var matched := false
+		for model in StoneResources.MODELS:
+			if str(model.get("path", "")) == str(decor["path"]):
+				matched = true
+				break
+		t.check(matched, "catalog rock has authoritative resource representation: %s" % str(decor["path"]))
+	t.check(loose_catalog_rocks >= 20, "all standalone boulders and stone models are covered")
+	t.check(not StoneResources.is_loose_stone_entry({"path": "graveyard/gravestone-broken.glb"}),
+		"constructed grave markers are not treated as loose stones")
+	t.check(not StoneResources.is_loose_stone_entry({"path": "nature/campfire-stones.glb"}),
+		"built stone campfires remain scenery")
+	t.check(StoneResources.MODELS[0].has("nature") and StoneResources.MODELS[1].has("nature"),
+		"both previously cosmetic pebble meshes now have pickup entries")
 
 	t.current = "ground shader layers"
 	t.eq(ChunkView.TERRAIN_LAYERS.size(), 13, "thirteen ground materials")

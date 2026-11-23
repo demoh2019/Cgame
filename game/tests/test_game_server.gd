@@ -86,6 +86,45 @@ func run(t) -> void:
 	t.eq(server.cmd_gather(10, tree["id"])["reason"], "too_far", "cannot gather from far away")
 	t.eq(server.cmd_gather(10, 12345)["reason"], "no_such_node", "unknown node")
 
+	t.current = "modeled stone pickup and mining"
+	var pebble := _find_node(world, "pebble", 1)
+	t.check(not pebble.is_empty(), "world generates hand-pickable stone models")
+	if not pebble.is_empty():
+		_teleport(server, 10, float(pebble["x"]) + 1.0, float(pebble["z"]))
+		var stone_before: int = server.players[10].inventory.count("stone_1")
+		var pickup: Dictionary = server.cmd_gather(10, int(pebble["id"]))
+		t.check(bool(pickup.get("ok", false)) and bool(pickup.get("pickup", false)),
+			"pressing interact picks up a modeled pebble immediately")
+		t.eq(server.players[10].inventory.count("stone_1"), stone_before + 1,
+			"pickup creates exactly one real stone in the inventory")
+		t.check(server.players[10].action.is_empty(), "pickup does not start a mining timer")
+		t.check(server.depleted.has(pebble["id"]), "collected model disappears for everyone")
+		t.eq(server.cmd_gather(10, int(pebble["id"]))["reason"], "depleted",
+			"the same modeled stone cannot be picked up twice")
+	var modeled_rock: Dictionary = {}
+	for cx in range(2, 9):
+		if not modeled_rock.is_empty():
+			break
+		for cz in range(2, 9):
+			if not modeled_rock.is_empty():
+				break
+			for candidate in world.chunk(Vector2i(cx, cz))["nodes"]:
+				if candidate.has("stone_model") and str(candidate["kind"]) == "rock" and int(candidate["tier"]) == 1:
+					modeled_rock = candidate
+					break
+	t.check(not modeled_rock.is_empty(), "world generates a mineable modeled boulder")
+	if not modeled_rock.is_empty():
+		_teleport(server, 10, float(modeled_rock["x"]) + 2.5, float(modeled_rock["z"]))
+		var stone_before_mining: int = server.players[10].inventory.count("stone_1")
+		var mine_result: Dictionary = server.cmd_gather(10, int(modeled_rock["id"]))
+		t.check(bool(mine_result.get("ok", false)) and float(mine_result.get("seconds", 0.0)) > 0.0,
+			"mining a modeled boulder starts the regular gathering action")
+		if bool(mine_result.get("ok", false)):
+			_run_ticks(server, 10.0)
+			t.check(server.players[10].inventory.count("stone_1") >= stone_before_mining + 4,
+				"mined modeled rock yields full stone resources")
+			t.check(server.depleted.has(modeled_rock["id"]), "mined rock disappears")
+
 	t.current = "tools gate higher tiers"
 	var tier2 := _find_node(world, "tree", 2, Vector2i(6, 6))
 	if tier2.is_empty():

@@ -3820,7 +3820,7 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nSTORM MUD: ground travel -%.0f%% | roads reduce the penalty." % [
 			(1.0 - mud_traction) * 100.0]
 	if int(client.you.get("rested_xp_credit", 0)) > 0:
-		_info_label.text += "\nRESTED TRAINING: %d bonus XP left (paid rest at hub/fire)" % int(
+		_info_label.text += "\nRESTED TRAINING: %d bonus XP left (+50-75%% by skill level; paid rest)" % int(
 			client.you["rested_xp_credit"])
 	for bag in client.bags.values():
 		if not bool(bag.get("corpse_scent", false)):

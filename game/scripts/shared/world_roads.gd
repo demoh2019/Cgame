@@ -6,6 +6,7 @@ extends RefCounted
 ## The client asks per chunk: the road pieces crossing it (to paint the ground) and the signposts standing in it.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const CityLayout = preload("res://scripts/shared/city_layout.gd")
 
 const HALF_WIDTH := 2.1
 const STEP := 14.0 # Spacing of the points along a road.
@@ -108,10 +109,31 @@ func _build() -> void:
 				if LINKED_KINDS.has(str(site["kind"])):
 					places.append({"name": str(site["display"]), "x": float(site["x"]), "z": float(site["z"]), "radius": float(site["radius"]),
 						"end": minf(float(site["radius"]) * 0.35, 20.0), "id": int(site["id"])})
+				if str(site["kind"]) == "city":
+					_lay_city_streets(site)
 	# Build the graph in one native nearest-neighbor pass when Cgame supports it.
 	# The identical scalar fallback works on stock Godot.
 	for key in compute_links(places):
 		_lay_road(places[key.x], places[key.y])
+
+
+## Index the local streets with the same terrain mask and authoritative road grip as intercity roads.
+func _lay_city_streets(site: Dictionary) -> void:
+	var center := Vector2(float(site["x"]), float(site["z"]))
+	var paths: Array = CityLayout.streets(str(site["layout"]), float(site["radius"]), float(site["layout_rotation"]))
+	for offsets in paths:
+		var points := PackedVector2Array()
+		for offset in offsets:
+			points.append(center + Vector2(offset))
+		if points.size() < 3:
+			continue
+		roads.append({"from": str(site["display"]), "to": str(site["display"]), "points": points})
+		for i in points.size() - 1:
+			var a: Vector2 = points[i]
+			var b: Vector2 = points[i + 1]
+			if world.is_water(a.x, a.y) and world.is_water(b.x, b.y):
+				continue
+			_add_piece(a, b)
 
 
 func _lay_road(a: Dictionary, b: Dictionary) -> void:
