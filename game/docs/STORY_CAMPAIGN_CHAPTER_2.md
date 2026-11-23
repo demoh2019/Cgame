@@ -54,4 +54,4 @@ Run on a machine with Cgame/Godot available:
 godot --headless --path game --script res://tests/run_all.gd
 ```
 
-**Scope:** Chapter II is fully integrated into existing game interactions; there are no new cinematics, voiced performances, character models, or separate underground map assets included with this change. New endings seed future story possibilities, not an implemented Chapter III. Native/engine and headless runtime checks must be performed on a Godot/Cgame-capable runner; static inspection alone cannot confirm live execution.
+**Scope:** Chapter II is fully integrated into existing game interactions; there are no new cinematics, voiced performances, character models, or separate underground map assets included with this change. Chapter III now continues both of these outcomes in [The Missing Convoy](STORY_CAMPAIGN_CHAPTER_3.md), with an inherited ending and new objectives. Native/engine and headless runtime checks must be performed on a Godot/Cgame-capable runner; static inspection alone cannot confirm live execution.
