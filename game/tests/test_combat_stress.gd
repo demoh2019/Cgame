@@ -58,7 +58,8 @@ func run(t) -> void:
 	t.eq(CombatStress.pressure(server.zombies, solo.id, solo.position), 0.0,
 		"huge but finite enemy separation cannot register as nearby")
 	infected.position = valid_enemy_position
-	var poisoned: Dictionary = {999: null, infected.id: infected}
+	var poisoned: Dictionary = {999: null}
+	poisoned[infected.id] = infected
 	t.eq(CombatStress.pressure(poisoned, solo.id, valid_position), 1.0,
 		"null zombie records cannot break an otherwise valid pressure scan")
 	infected.state = Zombie.State.DEAD
