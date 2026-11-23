@@ -32,13 +32,17 @@ class BitWriter extends RefCounted:
 class BitReader extends RefCounted:
 	var bytes: PackedByteArray = PackedByteArray()
 	var bitpos: int = 0
+	var valid: bool = true
 
 	func read(n: int) -> int:
+		# A truncated packet is invalid, not a smaller (and potentially valid)
+		# number. Check the complete field before consuming any of its bits.
+		if not valid or n < 0 or n > bytes.size() * 8 - bitpos:
+			valid = false
+			return 0
 		var v: int = 0
 		for i in n:
 			var byte_i: int = bitpos >> 3
-			if byte_i >= bytes.size():
-				return v
 			if ((bytes[byte_i] >> (bitpos & 7)) & 1) == 1:
 				v |= 1 << i
 			bitpos += 1
@@ -184,6 +188,10 @@ static func _write_field(w: BitWriter, f: Dictionary, q: Array) -> void:
 		"string":
 			var raw: PackedByteArray = str(q[0]).to_utf8_buffer()
 			var n: int = mini(raw.size(), 255)
+			# Byte-limited network strings must end on a UTF-8 codepoint boundary.
+			# Otherwise a long non-ASCII name is damaged when deserialized.
+			while n < raw.size() and n > 0 and (raw[n] & 0xC0) == 0x80:
+				n -= 1
 			w.write(n, 8)
 			for i in n:
 				w.write(raw[i], 8)
@@ -252,11 +260,15 @@ static func deserialize(schema: Dictionary, bytes: PackedByteArray, baseline: Di
 	var present: Array[bool] = []
 	for f in fields:
 		present.append(r.read(1) == 1)
+	if not r.valid:
+		return {}
 	var out: Dictionary = baseline.duplicate()
 	for i in fields.size():
 		if present[i]:
 			var fd: Dictionary = fields[i]
 			out[fd["name"]] = _dequant(fd, _read_field(r, fd))
+			if not r.valid:
+				return {}
 	return out
 
 
