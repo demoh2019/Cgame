@@ -139,9 +139,9 @@ func run(t) -> void:
 		var road_z: float = float(roadside["z"])
 		traveler.position = Vector3(road_x - 1.0, world.height_at(road_x - 1.0, road_z), road_z)
 		var road_zone: int = int(roadside["zone"])
-		var expected_rng := RandomNumberGenerator.new()
-		expected_rng.seed = WorldGen.mix(int(roadside["id"]), int(travel_server.time), world.world_seed, 3)
-		var baseline: Dictionary = Combat.crate_loot(road_zone, expected_rng)
+		var road_rng := RandomNumberGenerator.new()
+		road_rng.seed = WorldGen.mix(int(roadside["id"]), int(travel_server.time), world.world_seed, 3)
+		var baseline: Dictionary = Combat.crate_loot(road_zone, road_rng)
 		var expected_supplies: Dictionary = Scavenging.exploration_bonus(road_zone, baseline, "roadside")
 		var before_scrap: int = traveler.inventory.count("scrap")
 		t.check(bool(travel_server.cmd_loot(912, int(roadside["id"])).get("ok", false)),
