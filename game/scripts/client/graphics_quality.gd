@@ -404,6 +404,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# quality changes reuse existing LOD meshes, not a destructive rebuild.
 	ChunkView.configure_terrain_mesh_budget(int(p["terrain_mesh_build_budget_usec"]))
 	ChunkView.configure_terrain_streaming_priority(int(p["terrain_mesh_streaming_priority"]))
+	ChunkView.configure_terrain_mesh_residency(_level)
 	ChunkView.configure_terrain_error_lod(_level)
 	if viewport != null:
 		for lod_terrain in viewport.get_tree().get_nodes_in_group(ChunkView.TERRAIN_LOD_GROUP):
@@ -413,6 +414,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 			ChunkView.apply_terrain_pixel_error(lod_terrain)
 			ChunkView.apply_terrain_mesh_budget(lod_terrain)
 			ChunkView.apply_terrain_streaming_priority(lod_terrain)
+			ChunkView.apply_terrain_mesh_residency(lod_terrain)
 			ChunkView.apply_terrain_error_lod(lod_terrain)
 	if viewport != null:
 		for terrain in viewport.get_tree().get_nodes_in_group(ChunkView.TERRAIN_GROUP):

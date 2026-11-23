@@ -235,6 +235,9 @@ static var terrain_screen_lod_quality := 1
 static var terrain_lod_pixel_error := 3.5
 static var terrain_mesh_build_budget_usec := 1500
 static var terrain_mesh_streaming_priority := 2
+# Keep only the most recently used mesh LODs on the GPU for each terrain tile.
+# Zero in the native engine remains unlimited for older scenes/tools.
+static var terrain_max_cached_lods := 2
 static var terrain_error_lod_quality := 1
 const TERRAIN_LOD_GROUP := "aa_chunked_terrain_lod"
 const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete", "brick", "plank"]
@@ -356,6 +359,17 @@ static func configure_terrain_streaming_priority(mode: int) -> void:
 static func apply_terrain_streaming_priority(node: Node) -> void:
 	if node is ChunkedTerrain3D and node.is_in_group(TERRAIN_LOD_GROUP):
 		node.mesh_streaming_priority = terrain_mesh_streaming_priority
+
+
+## Resident geometry, not just per-frame CPU building, needs a GPU budget.
+## All LODs are still generated on demand by the native streaming scheduler.
+static func configure_terrain_mesh_residency(quality: int) -> void:
+	terrain_max_cached_lods = [1, 2, 2, 3][clampi(quality, 0, 3)]
+
+
+static func apply_terrain_mesh_residency(node: Node) -> void:
+	if node is ChunkedTerrain3D and node.is_in_group(TERRAIN_LOD_GROUP):
+		node.max_cached_lods = terrain_max_cached_lods
 
 
 static func configure_terrain_geomorph(quality: int) -> void:
@@ -932,6 +946,7 @@ func _build_terrain(origin: Vector2) -> void:
 	# Must be set before add_child() triggers native initial mesh streaming.
 	_terrain.mesh_build_budget_usec = terrain_mesh_build_budget_usec
 	_terrain.mesh_streaming_priority = terrain_mesh_streaming_priority
+	_terrain.max_cached_lods = terrain_max_cached_lods
 	apply_terrain_error_lod(_terrain)
 	_terrain.lod_geomorph_enabled = terrain_geomorph_enabled
 	_terrain.skirt_depth = 3.0
