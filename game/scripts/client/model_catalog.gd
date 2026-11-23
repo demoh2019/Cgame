@@ -425,20 +425,22 @@ static func bake(path: String, node_name: String, kind: String, size: float, tex
 		texture = load(PACKS + texture_path) as Texture2D
 	for surface in source.mesh.get_surface_count():
 		var arrays: Array = source.mesh.surface_get_arrays(surface)
+		# Imported scenes can override materials per mesh instance.
+		var material: Material = source.get_surface_override_material(surface)
+		if material == null:
+			material = source.mesh.surface_get_material(surface)
+		# Generate MikkTSpace using original UVs, normals and model-space
+		# positions. Applying the scene transform first would rotate twice.
+		if texture == null and MeshPBR.needs_tangents(material):
+			MeshPBR.ensure_tangents(arrays)
 		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 		var moved := PackedVector3Array()
 		moved.resize(vertices.size())
 		for i in vertices.size():
 			moved[i] = ((transform * vertices[i]) + offset) * factor
 		arrays[Mesh.ARRAY_VERTEX] = moved
-		# Preserve the normal-map tangent space under arbitrary imported transforms.
-		# This runs once per cached model, not in the render loop.
 		var tangent_frame_valid: bool = MeshPBR.transform_frame(arrays, transform.basis)
 		baked.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], MeshLOD.copy_lods(source.mesh, surface, world_scale))
-		# Imported scenes can override materials per mesh instance.
-		var material: Material = source.get_surface_override_material(surface)
-		if material == null:
-			material = source.mesh.surface_get_material(surface)
 		if texture != null:
 			var painted := StandardMaterial3D.new()
 			painted.albedo_texture = texture
@@ -468,8 +470,14 @@ static func _fit_mesh(source: Mesh, kind: String, size: float) -> Mesh:
 		for i in vertices.size():
 			vertices[i] = (vertices[i] + offset) * factor
 		arrays[Mesh.ARRAY_VERTEX] = vertices
+		var material: Material = source.surface_get_material(surface)
+		if MeshPBR.needs_tangents(material):
+			# Baked .res meshes are a live path for rocks and world decoration.
+			# Never attach a normal-mapped material to tangentless geometry.
+			var valid_frame: bool = MeshPBR.ensure_tangents(arrays)
+			material = MeshPBR.material_for_bake(material, valid_frame)
 		fitted.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], MeshLOD.copy_lods(source, surface, factor))
-		fitted.surface_set_material(surface, source.surface_get_material(surface))
+		fitted.surface_set_material(surface, material)
 	return fitted
 
 

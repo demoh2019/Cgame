@@ -2,6 +2,7 @@ extends RefCounted
 ## Verify that authored PBR normals and shading data survive the game art bake.
 const MeshPBR = preload("res://scripts/client/mesh_pbr_preservation.gd")
 const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
+const MeshLOD = preload("res://scripts/client/mesh_lod_preservation.gd")
 
 
 static func _surface() -> Array:
@@ -92,3 +93,48 @@ func run(t) -> void:
 			"model catalog actually transforms tangents during baking")
 	t.check(scene_code.contains("MeshLOD.copy_lods(source.mesh, surface, world_scale)"),
 			"normal-map restoration keeps existing distance LODs")
+
+	t.current = "tangentless baked .res props recover valid normal mapped shading"
+	var missing: Array = _surface()
+	missing[Mesh.ARRAY_TANGENT] = null
+	var source_mesh := ArrayMesh.new()
+	source_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, missing, [],
+		{0.5: PackedInt32Array([0, 1, 2])})
+	source_mesh.surface_set_material(0, source)
+	var fixed: Mesh = ModelCatalog._fit_mesh(source_mesh, "length", 3.0)
+	var fixed_arrays: Array = fixed.surface_get_arrays(0)
+	var restored: Variant = fixed_arrays[Mesh.ARRAY_TANGENT]
+	var fixed_material := fixed.surface_get_material(0) as BaseMaterial3D
+	t.check(restored is PackedFloat32Array and restored.size() == 12,
+		"UV-mapped scenery recovers a complete per-vertex MikkTSpace frame")
+	t.check(fixed_material.normal_enabled,
+		"valid source normal maps remain visible on repaired stones")
+	t.check(fixed_material != source,
+		"repaired scenery never modifies the imported shared material")
+	t.check(MeshLOD.copy_lods(fixed, 0).size() == 1,
+		"tangent recovery retains exact imported LOD indices")
+	t.check(source_mesh.surface_get_arrays(0)[Mesh.ARRAY_TANGENT] == null,
+		"source mesh data is unchanged by repair")
+
+	t.current = "invalid UV meshes never bind tangent-dependent PBR materials"
+	var no_uv: Array = _surface()
+	no_uv[Mesh.ARRAY_TANGENT] = null
+	no_uv[Mesh.ARRAY_TEX_UV] = null
+	var untextured := ArrayMesh.new()
+	untextured.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, no_uv)
+	untextured.surface_set_material(0, source)
+	var safe: Mesh = ModelCatalog._fit_mesh(untextured, "height", 1.4)
+	var safe_material := safe.surface_get_material(0) as BaseMaterial3D
+	t.check(not safe_material.normal_enabled,
+		"no UV means no possible tangent-space normal map on the baked mesh")
+	t.check(source.normal_enabled,
+		"fallback disables normal map only on the copied material")
+	t.check(safe.surface_get_arrays(0)[Mesh.ARRAY_TANGENT] == null,
+		"no bogus tangents are synthesized for UV-less surfaces")
+	var bad_uvs: Array = _surface()
+	bad_uvs[Mesh.ARRAY_TANGENT] = PackedFloat32Array([NAN])
+	bad_uvs[Mesh.ARRAY_TEX_UV] = null
+	t.check(not MeshPBR.ensure_tangents(bad_uvs),
+		"invalid tangent buffers without UVs fail closed")
+	t.check(bad_uvs[Mesh.ARRAY_TANGENT] == null,
+		"corrupt tangent buffers are removed before rendering")

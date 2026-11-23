@@ -8,6 +8,80 @@ extends RefCounted
 const StoneMicrodetail = preload("res://scripts/client/graphics_stone_microdetail.gd")
 
 
+## Only normal/height/detail/anisotropy features need tangent-space geometry.
+## Never spend startup work generating frames for plain vertex-coloured props.
+static func needs_tangents(material: Material) -> bool:
+	if not (material is BaseMaterial3D):
+		return false
+	var pbr := material as BaseMaterial3D
+	return pbr.normal_enabled or pbr.anisotropy_enabled or pbr.heightmap_enabled or pbr.detail_enabled
+
+
+## Recover missing imported MikkTSpace frames without rebuilding the final mesh.
+## Copy ONLY the tangent channel: all original indices (including native LODs),
+## blend/skin/UV and custom vertex attributes must retain their exact positions.
+## Missing UVs or a generator that changes vertex order fail closed; the caller
+## then disables normal-mapped features on a private material copy.
+static func ensure_tangents(arrays: Array) -> bool:
+	if arrays.size() != Mesh.ARRAY_MAX:
+		return false
+	var vertices_data: Variant = arrays[Mesh.ARRAY_VERTEX]
+	var normals_data: Variant = arrays[Mesh.ARRAY_NORMAL]
+	if not (vertices_data is PackedVector3Array) or not (normals_data is PackedVector3Array):
+		arrays[Mesh.ARRAY_TANGENT] = null
+		return false
+	var vertices: PackedVector3Array = vertices_data
+	var normals: PackedVector3Array = normals_data
+	if vertices.is_empty() or normals.size() != vertices.size():
+		arrays[Mesh.ARRAY_TANGENT] = null
+		return false
+	var current_data: Variant = arrays[Mesh.ARRAY_TANGENT]
+	if current_data is PackedFloat32Array:
+		var current: PackedFloat32Array = current_data
+		if _finite_tangent_buffer(current, vertices.size()):
+			return true
+	arrays[Mesh.ARRAY_TANGENT] = null
+	var uvs_data: Variant = arrays[Mesh.ARRAY_TEX_UV]
+	if not (uvs_data is PackedVector2Array):
+		return false
+	var uvs: PackedVector2Array = uvs_data
+	if uvs.size() != vertices.size():
+		return false
+	for i in vertices.size():
+		if not vertices[i].is_finite() or not normals[i].is_finite() or not uvs[i].is_finite():
+			return false
+	# Godot uses MikkTSpace here, matching imported normal-map texture baking.
+	# Work is done once per cached model, not once per frame/instance.
+	var input_mesh := ArrayMesh.new()
+	input_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var surface := SurfaceTool.new()
+	surface.create_from(input_mesh, 0)
+	surface.generate_tangents()
+	var generated: Array = surface.commit_to_arrays()
+	if (generated.size() != Mesh.ARRAY_MAX or
+			generated[Mesh.ARRAY_VERTEX] != vertices or
+			generated[Mesh.ARRAY_INDEX] != arrays[Mesh.ARRAY_INDEX]):
+
+		return false
+	var tangent_data: Variant = generated[Mesh.ARRAY_TANGENT]
+	if not (tangent_data is PackedFloat32Array):
+		return false
+	var tangents: PackedFloat32Array = tangent_data
+	if not _finite_tangent_buffer(tangents, vertices.size()):
+		return false
+	arrays[Mesh.ARRAY_TANGENT] = tangents
+	return true
+
+
+static func _finite_tangent_buffer(tangents: PackedFloat32Array, vertex_count: int) -> bool:
+	if tangents.size() != vertex_count * 4:
+		return false
+	for component in tangents:
+		if not is_finite(component):
+			return false
+	return true
+
+
 ## Return true when a valid tangent frame remains after transformation.
 ## The caller owns the surface arrays; vertices are transformed separately.
 static func transform_frame(arrays: Array, basis: Basis) -> bool:
@@ -20,7 +94,7 @@ static func transform_frame(arrays: Array, basis: Basis) -> bool:
 		arrays[Mesh.ARRAY_TANGENT] = null
 		return false
 	var determinant: float = basis.determinant()
-	if absf(determinant) < 0.000001:
+	if not is_finite(determinant) or absf(determinant) < 0.000001:
 		arrays[Mesh.ARRAY_TANGENT] = null
 		return false
 	var normal_basis: Basis = basis.inverse().transposed()
@@ -46,7 +120,7 @@ static func transform_frame(arrays: Array, basis: Basis) -> bool:
 		var normal: Vector3 = transformed[i]
 		# Gram-Schmidt: keep the mapped tangent orthogonal to the normal.
 		tangent -= normal * tangent.dot(normal)
-		if tangent.length_squared() <= 0.00000001:
+		if not tangent.is_finite() or not normal.is_finite() or tangent.length_squared() <= 0.00000001:
 			# Invalid source tangent frame must never create NaNs or flicker.
 			arrays[Mesh.ARRAY_TANGENT] = null
 			return false
@@ -72,8 +146,13 @@ static func material_for_bake(source: Material, tangent_frame_valid: bool,
 	# Do not override intentionally pixelated or explicitly anisotropic art.
 	if result.texture_filter == BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS:
 		result.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
-	if result.normal_enabled and not tangent_frame_valid:
+	if not tangent_frame_valid:
+		# Each of these features can make the renderer request ARRAY_TANGENT.
+		# Disable them on the copied material only when UV tangent recovery fails.
 		result.normal_enabled = false
+		result.anisotropy_enabled = false
+		result.heightmap_enabled = false
+		result.detail_enabled = false
 	if dungeon_style:
 		# Keep the established hand-painted dungeon palette as an explicit exception.
 		result.albedo_color = Color(0.68, 0.64, 0.58)
