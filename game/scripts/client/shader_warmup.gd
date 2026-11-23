@@ -23,9 +23,19 @@ static func shader_paths() -> PackedStringArray:
 	return result
 
 
+## The directory index may retain .uid/.remap entries after the source shader is removed.
+## Filter by the resource loader, not FileAccess: exported shaders can be remapped.
+static func loadable_shader_paths(paths: PackedStringArray) -> PackedStringArray:
+	var result := PackedStringArray()
+	for path in paths:
+		if ResourceLoader.exists(path, "Shader"):
+			result.append(path)
+	return result
+
+
 static func spatial_shaders() -> Array[Shader]:
 	var shaders: Array[Shader] = []
-	for path in shader_paths():
+	for path in loadable_shader_paths(shader_paths()):
 		var shader := load(path) as Shader
 		if shader != null and shader.get_mode() == Shader.MODE_SPATIAL:
 			shaders.append(shader)
