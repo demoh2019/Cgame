@@ -4,6 +4,22 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const PackNeighborSelection = preload("res://scripts/shared/pack_neighbor_selection.gd")
+const ZombieWallAttackGrid = preload("res://scripts/shared/zombie_wall_attack_grid.gd")
+const HousePieces = preload("res://scripts/shared/house_pieces.gd")
+
+
+## Deliberately mirrors the old server-wide scan for exact parity testing.
+static func _brute_wall_targets(barricades: Dictionary, here: Vector2,
+		toward: Vector2, reach: float) -> Array[int]:
+	var ids: Array[int] = []
+	for wall_id in barricades:
+		var wall: Dictionary = barricades[wall_id]
+		if str(wall.get("piece", "")) != "" and not HousePieces.blocks(str(wall["piece"])):
+			continue
+		var offset := Vector2(float(wall["x"]), float(wall["z"])) - here
+		if offset.length() <= reach and offset.dot(toward) > 0.0:
+			ids.append(int(wall_id))
+	return ids
 
 
 func run(t) -> void:
@@ -162,3 +178,58 @@ func run(t) -> void:
 	survivor.survival.hurt(1000.0)
 	server._tick_zombies(0.05)
 	t.check(helper.target_id == -1 or helper.state == Zombie.State.IDLE, "dead target is dropped by recruited infected")
+
+	t.current = "stuck infected wall target spatial grid"
+	var walls: Dictionary = {
+		12: {"x": 1.0, "z": 0.0, "piece": "wall"},
+		14: {"x": 0.75, "z": 0.0, "piece": "wall"},
+		15: {"x": -1.0, "z": 0.0, "piece": "wall"},
+		16: {"x": 1.0, "z": 0.0, "piece": "floor"},
+		17: {"x": 0.0, "z": 1.0, "piece": "roof"},
+		18: {"x": 2.0, "z": 0.0, "piece": "door"},
+	}
+	var wall_index: Dictionary = ZombieWallAttackGrid.build(walls)
+	var toward_wall := Vector2.RIGHT
+	t.eq(ZombieWallAttackGrid.candidates(wall_index, Vector2.ZERO,
+		toward_wall, 1.75), [12, 14],
+		"closest attackers preserve wall insertion order, not distance ranking")
+	t.eq(ZombieWallAttackGrid.candidates(wall_index, Vector2.ZERO,
+		toward_wall, 2.0), [12, 14, 18],
+		"targets exactly at the melee reach boundary remain eligible")
+	t.eq(ZombieWallAttackGrid.candidates(wall_index, Vector2.ZERO,
+		Vector2.LEFT, 1.75), [15], "no wall behind an infected is attacked")
+	t.check(ZombieWallAttackGrid.candidates(wall_index, Vector2.ZERO,
+		Vector2.ZERO, 1.75).is_empty(), "zero pursuit direction never damages walls")
+	t.check(ZombieWallAttackGrid.candidates(wall_index, Vector2.ZERO,
+		toward_wall, NAN).is_empty(), "bad query radius is rejected")
+	t.check(ZombieWallAttackGrid.candidates(wall_index, Vector2(INF, 0.0),
+		toward_wall, 1.75).is_empty(), "nonfinite infected coordinates cannot hit walls")
+
+	t.current = "dense wall targets match the legacy full scan"
+	var random := RandomNumberGenerator.new()
+	random.seed = 902741
+	var packed_walls: Dictionary = {}
+	for n in 220:
+		var kind: String = "floor" if n % 17 == 0 else (
+			"door" if n % 11 == 0 else "wall")
+		packed_walls[1000 + n] = {
+			"x": random.randf_range(-120.0, 120.0),
+			"z": random.randf_range(-120.0, 120.0), "piece": kind}
+	var indexed: Dictionary = ZombieWallAttackGrid.build(packed_walls)
+	t.check((indexed["ids"] as Array).size() < packed_walls.size(),
+		"nonblocking flooring is skipped before building the lookup table")
+	for sample_index in 90:
+		var at := Vector2(random.randf_range(-125.0, 125.0),
+			random.randf_range(-125.0, 125.0))
+		var direction := Vector2.from_angle(random.randf_range(0.0, TAU)) * 20.0
+		var attack_reach: float = 1.75 if sample_index % 2 == 0 else 8.5
+		t.eq(ZombieWallAttackGrid.candidates(indexed, at, direction, attack_reach),
+			_brute_wall_targets(packed_walls, at, direction, attack_reach),
+			"indexed attack %d keeps same targets and winner as old scan" % sample_index)
+	packed_walls.erase(1000)
+	var still_indexed: Array[int] = ZombieWallAttackGrid.candidates(
+		indexed, Vector2.ZERO, Vector2.RIGHT, 80.0)
+	for target_id in still_indexed:
+		if not packed_walls.has(target_id):
+			t.eq(target_id, 1000,
+				"stale candidate IDs can only refer to already deleted walls")
