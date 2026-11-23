@@ -23,6 +23,10 @@ func run(t) -> void:
 	t.eq(WorldStreamingPolicy.lookahead_seconds(true, Vector3(48.0, 0.0, 0.0)),
 		WorldStreamingPolicy.RIDING_LOOKAHEAD,
 		"the conservative cap still accepts movement exactly at its boundary")
+	t.check(WorldStreamingPolicy.plausible_velocity(Vector3(18.0, 0.0, 0.0)),
+		"normal visual velocity is safe for prefetch")
+	t.check(not WorldStreamingPolicy.plausible_velocity(Vector3(75.0, 0.0, 0.0)),
+		"raw un-clamped teleport velocities are rejected")
 
 	t.current = "native world partition movement budget"
 	var streamer := WorldStreamer.new()
@@ -92,6 +96,8 @@ func run(t) -> void:
 		"networked world explicitly opts into forward chunk prioritization")
 	t.check(online.contains("streamer.velocity_hint = _stream_velocity"),
 		"displayed authoritative player movement drives the native queue")
+	t.check(online.contains("WorldStreamingPolicy.plausible_velocity(raw_velocity)"),
+		"real online client checks raw displacement before smoothing prefetch")
 	t.check(online.contains("moved.length_squared() < 576.0"),
 		"teleports and large server corrections reset motion prediction")
 	t.check(online.contains("_stream_velocity = Vector3.ZERO"),
