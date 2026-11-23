@@ -241,7 +241,11 @@ func run(t) -> void:
 	authored.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, source_arrays)
 	var authored_material := StandardMaterial3D.new()
 	authored.surface_set_material(0, authored_material)
-	var hierarchy: Dictionary = ClusterLOD.build_hierarchy(verts, indices, 4)
+	# Compare to Godot's uploaded surface arrays rather than the authoring
+	# floats: vertex colors and UVs may be quantized during mesh creation.
+	var canonical: Array = authored.surface_get_arrays(0)
+	var hierarchy: Dictionary = ClusterLOD.build_hierarchy(
+		canonical[Mesh.ARRAY_VERTEX], canonical[Mesh.ARRAY_INDEX], 4)
 	var cut_ids: PackedInt32Array = ClusterLOD.select_cut(
 		hierarchy, Vector3(0, 50, 150), 1.0471976, 1080.0, 1.0)
 	var output: ArrayMesh = MeshletRenderer.build_material_preserving_cut(
@@ -249,13 +253,13 @@ func run(t) -> void:
 	t.check(output != null, "real CPU mesh fallback rebuilds a selected LOD cut")
 	if output != null:
 		var output_arrays: Array = output.surface_get_arrays(0)
-		t.eq(output_arrays[Mesh.ARRAY_VERTEX], verts,
+		t.eq(output_arrays[Mesh.ARRAY_VERTEX], canonical[Mesh.ARRAY_VERTEX],
 			"the selected cut does not discard source vertex IDs")
-		t.eq(output_arrays[Mesh.ARRAY_TEX_UV], uv,
+		t.eq(output_arrays[Mesh.ARRAY_TEX_UV], canonical[Mesh.ARRAY_TEX_UV],
 			"UV seams and texture mappings remain unchanged")
-		t.eq(output_arrays[Mesh.ARRAY_COLOR], colors,
+		t.eq(output_arrays[Mesh.ARRAY_COLOR], canonical[Mesh.ARRAY_COLOR],
 			"scanned terrain vertex colors survive LOD construction")
-		t.eq(output_arrays[Mesh.ARRAY_NORMAL], normals,
+		t.eq(output_arrays[Mesh.ARRAY_NORMAL], canonical[Mesh.ARRAY_NORMAL],
 			"PBR lighting normals survive the cut")
 		t.check((output_arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() > 0,
 			"chosen clusters are built as indexed triangles")
