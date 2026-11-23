@@ -35,6 +35,7 @@
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
 #include "core/templates/hash_map.h"
+#include "core/templates/hash_set.h"
 #include "core/templates/local_vector.h"
 #include "scene/resources/mesh.h"
 
@@ -564,10 +565,57 @@ Array CgameClusterLOD::build_cut_arrays(const Array &p_source_arrays, const Dict
 	return result;
 }
 
+Array CgameClusterLOD::build_cut_surface(const Dictionary &p_hierarchy, const PackedInt32Array &p_cut, const Array &p_source_arrays) {
+	Array invalid;
+	ERR_FAIL_COND_V_MSG(p_source_arrays.size() != Mesh::ARRAY_MAX, invalid, "CgameClusterLOD: invalid source surface arrays.");
+	ERR_FAIL_COND_V_MSG(!p_hierarchy.has("vertices") || !p_hierarchy.has("clusters"), invalid, "CgameClusterLOD: incomplete hierarchy.");
+	ERR_FAIL_COND_V_MSG(p_hierarchy["vertices"].get_type() != Variant::PACKED_VECTOR3_ARRAY || p_hierarchy["clusters"].get_type() != Variant::ARRAY, invalid, "CgameClusterLOD: invalid hierarchy types.");
+	ERR_FAIL_COND_V_MSG(p_source_arrays[Mesh::ARRAY_VERTEX].get_type() != Variant::PACKED_VECTOR3_ARRAY || p_source_arrays[Mesh::ARRAY_INDEX].get_type() != Variant::PACKED_INT32_ARRAY, invalid, "CgameClusterLOD: requires indexed triangle source.");
+	const PackedVector3Array vertices = p_source_arrays[Mesh::ARRAY_VERTEX];
+	ERR_FAIL_COND_V_MSG(vertices != (PackedVector3Array)p_hierarchy["vertices"], invalid, "CgameClusterLOD: source vertices differ from hierarchy.");
+	const PackedInt32Array source_indices = p_source_arrays[Mesh::ARRAY_INDEX];
+	ERR_FAIL_COND_V_MSG(source_indices.is_empty() || source_indices.size() % 3 != 0, invalid, "CgameClusterLOD: source must be indexed triangles.");
+	const Array clusters = p_hierarchy["clusters"];
+	HashSet<int> seen;
+	int total = 0;
+	for (int i = 0; i < p_cut.size(); i++) {
+		const int id = p_cut[i];
+		ERR_FAIL_COND_V_MSG(id < 0 || id >= clusters.size() || seen.has(id), invalid, "CgameClusterLOD: duplicate or invalid cluster id.");
+		seen.insert(id);
+		ERR_FAIL_COND_V_MSG(clusters[id].get_type() != Variant::DICTIONARY, invalid, "CgameClusterLOD: invalid cluster.");
+		const Dictionary cluster = clusters[id];
+		ERR_FAIL_COND_V_MSG(!cluster.has("indices") || cluster["indices"].get_type() != Variant::PACKED_INT32_ARRAY, invalid, "CgameClusterLOD: missing triangle indices.");
+		const PackedInt32Array indices = cluster["indices"];
+		ERR_FAIL_COND_V_MSG(indices.is_empty() || indices.size() % 3 != 0 || indices.size() > source_indices.size() - total, invalid, "CgameClusterLOD: invalid selected triangle count.");
+		for (int j = 0; j < indices.size(); j++) {
+			ERR_FAIL_COND_V_MSG(indices[j] < 0 || indices[j] >= vertices.size(), invalid, "CgameClusterLOD: cluster index outside source.");
+		}
+		total += indices.size();
+	}
+	ERR_FAIL_COND_V_MSG(total == 0, invalid, "CgameClusterLOD: empty selected cut.");
+	PackedInt32Array new_indices;
+	new_indices.resize(total);
+	int32_t *dst = new_indices.ptrw();
+	int next = 0;
+	for (int i = 0; i < p_cut.size(); i++) {
+		const Dictionary cluster = clusters[p_cut[i]];
+		const PackedInt32Array indices = cluster["indices"];
+		for (int j = 0; j < indices.size(); j++) {
+			dst[next++] = indices[j];
+		}
+	}
+	// Reusing original vertex ids preserves UV seams, tangent handedness,
+	// custom shader attributes and skinning buffers without interpolation.
+	Array output = p_source_arrays.duplicate(false);
+	output[Mesh::ARRAY_INDEX] = new_indices;
+	return output;
+}
+
 void CgameClusterLOD::_bind_methods() {
 	ClassDB::bind_static_method("CgameClusterLOD", D_METHOD("build_hierarchy", "vertices", "indices", "levels"), &CgameClusterLOD::build_hierarchy, DEFVAL(4));
 	ClassDB::bind_static_method("CgameClusterLOD", D_METHOD("select_cut", "hierarchy", "camera_pos", "fov_y", "screen_height", "error_pixels"), &CgameClusterLOD::select_cut, DEFVAL(1.0));
 	ClassDB::bind_static_method("CgameClusterLOD", D_METHOD("triangle_count", "hierarchy", "cut"), &CgameClusterLOD::triangle_count);
+	ClassDB::bind_static_method("CgameClusterLOD", D_METHOD("build_cut_surface", "hierarchy", "cut", "source_arrays"), &CgameClusterLOD::build_cut_surface);
 	ClassDB::bind_static_method("CgameClusterLOD", D_METHOD("build_cut_arrays", "source_arrays", "hierarchy", "cut"), &CgameClusterLOD::build_cut_arrays);
 	ClassDB::bind_static_method("CgameClusterLOD",
 			D_METHOD("simplify_surface_arrays", "surface_arrays", "target_triangles", "normal_weight", "uv_weight"),

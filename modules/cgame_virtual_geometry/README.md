@@ -130,6 +130,25 @@ Relevant tests:
 
 In addition to the native `CgameMeshletPages` CPU serialization ABI, the canonical game has an experimental fixed-slot **GPU resident page pool** in `game/scripts/client/meshlet_renderer.gd` and `game/scripts/shared/meshlet_page_streaming.gd`. It uploads up to a configurable per-frame budget of logical pages and uses existing task/mesh shaders for GPU visibility. The CPU still selects coarse pages, and source meshes are CPU-resident. Normal game models keep their PBR/material fidelity; a separate explicitly enabled debug draw uses the actual game rock. This is **not** GPU indirect rendering or on-disk async streaming. See [GPU Meshlet Residency](../../game/docs/P1_GPU_MESHLET_RESIDENCY.md).
 
+## Draw-ready cluster cut preserving all vertex attributes
+
+`CgameClusterLOD.build_cut_surface(hierarchy, cut, surface_arrays)`
+combines a selected cut into an indexed triangle surface suitable for Godot's
+`ArrayMesh.add_surface_from_arrays`. It keeps original vertex indices
+and every imported vertex stream *unchanged* (normals, tangents, UVs,
+vertex colors, skinning and custom channels), so PBR materials do not
+lose their tangent space. It rejects malformed or mismatched sources,
+out-of-range cluster indices, repeated ids and oversized cuts.
+
+The game's `game/scripts/client/pcg_world_dressing.gd` uses this
+API for cached, medium-size distant PCG props where cluster reduction
+is substantial. A cheap box proxy remains for small, unsupported,
+oversized and non-simplifying assets or stock Godot.
+
+**Not yet Nanite:** this renders via the regular Godot GPU mesh
+pipeline; it does not GPU-cull meshlets, stream mesh pages, perform
+indirect draws or reduce original vertex-buffer residency.
+
 ## Limitations
 
 - No GPU path and no streaming; hierarchy building is single threaded and intended for offline or load-time use.

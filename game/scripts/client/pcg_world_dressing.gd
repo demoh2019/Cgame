@@ -8,6 +8,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const PcgGraphs = preload("res://scripts/shared/pcg_graphs.gd")
 const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 
 const CELL_SIZE := 64.0
@@ -15,7 +16,7 @@ const SETTLEMENT_KINDS := ["village", "farm", "outpost", "camp", "dock", "lighth
 const REGION_REACH := 13 # Regions -13..12 on both axes: the whole island (as WorldRoads).
 const HUB_CLEARANCE := 25.0 # Added to the hub's safe radius: no clutter on the plaza.
 ## The world's terrain functions are not thread-safe (cached region state), so the component bakes height, water and
-## biome into grids on the main thread (BAKE_STEP metres) and the graph then runs on the worker pool reading only the
+## biome into grids on the main thread (BAKE_STEP meters) and the graph then runs on the worker pool reading only the
 ## grids. Engines without baking (older pcg_graph) fall back to main-thread cells.
 const ASYNC_CELLS := true
 const BAKE_STEP := 2.0
@@ -45,7 +46,7 @@ var _user_data: Dictionary = {}
 var _exclusions: Array = []
 var _last_anchor := Vector3(1.0e9, 0.0, 1.0e9)
 static var _fallback_cache: Dictionary = {}
-## Runtime PCG debugging: crosses at every generated point, coloured by asset (toggle with set_debug_draw).
+## Runtime PCG debugging: crosses at every generated point, colored by asset (toggle with set_debug_draw).
 static var debug_draw := false
 static var _proxy_cache: Dictionary = {}
 var _start_ms := Time.get_ticks_msec()
@@ -157,7 +158,7 @@ func _make_component(key: String, graph, meshes: Array[Mesh], tier: Dictionary, 
 
 # --- Data from the world ------------------------------------------------------------------------------------------
 
-## Road polylines ("roads") and ruined-city centres ("ruins") as PCG user data.
+## Road polylines ("roads") and ruined-city centers ("ruins") as PCG user data.
 static func build_user_data(p_world) -> Dictionary:
 	var roads: Array = []
 	for road in p_world.roads.all_roads():
@@ -259,13 +260,62 @@ func set_debug_draw(enabled: bool) -> void:
 			c.clear()
 
 
-## Far stand-in for a mesh (HLOD level 1): a box with the mesh's bounds and the base colour of its first surface.
+## Native cluster HLOD for medium-size cosmetic props; gameplay/collisions stay untouched.
+## Existing box proxy remains the fallback on stock Godot and unsimplifiable art.
+static func cluster_proxy_for(mesh: Mesh) -> Mesh:
+	if mesh == null or not EngineFeatures.has("CgameClusterLOD"):
+		return null
+	if mesh.get_surface_count() != 1 or mesh.get_blend_shape_count() > 0:
+		return null
+	if mesh.surface_get_primitive_type(0) != Mesh.PRIMITIVE_TRIANGLES:
+		return null
+	var arrays: Array = mesh.surface_get_arrays(0)
+	if arrays.size() != Mesh.ARRAY_MAX or not arrays[Mesh.ARRAY_VERTEX] is PackedVector3Array:
+		return null
+	if not arrays[Mesh.ARRAY_INDEX] is PackedInt32Array:
+		return null
+	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	# Limit one-time simplification during streaming; tiny meshes stay boxes.
+	if indices.size() < 384 or indices.size() > 12000 or vertices.size() > 8000:
+		return null
+	var native: Object = EngineFeatures.make("CgameClusterLOD")
+	if native == null or not native.has_method("build_cut_surface"):
+		return null
+	var hierarchy: Dictionary = native.call("build_hierarchy", vertices, indices, 5)
+	if not hierarchy.has("roots"):
+		return null
+	var cut: PackedInt32Array = hierarchy["roots"]
+	var triangles: int = int(native.call("triangle_count", hierarchy, cut))
+	# Absolute budget and at least 40% fewer triangles than the source.
+	if triangles < 12 or triangles > 256 or triangles * 5 > indices.size():
+		return null
+	var selected: Array = native.call("build_cut_surface", hierarchy, cut, arrays)
+	if selected.size() != Mesh.ARRAY_MAX:
+		return null
+	var proxy := ArrayMesh.new()
+	# Original vertex format retains custom attributes, skinning and tangents.
+	proxy.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, selected, [], {}, mesh.surface_get_format(0))
+	if proxy.get_surface_count() == 0:
+		return null
+	var material: Material = mesh.surface_get_material(0)
+	if material != null:
+		proxy.surface_set_material(0, material)
+	proxy.resource_name = mesh.resource_name + "_ClusterHLOD"
+	return proxy
+
+
+## Far stand-in for a mesh (HLOD level 1); cached for each unique source asset.
 ## Shared per source mesh; null in, null out.
 static func proxy_for(mesh: Mesh) -> Mesh:
 	if mesh == null:
 		return null
 	if _proxy_cache.has(mesh):
 		return _proxy_cache[mesh]
+	var cluster_proxy: Mesh = cluster_proxy_for(mesh)
+	if cluster_proxy != null:
+		_proxy_cache[mesh] = cluster_proxy
+		return cluster_proxy
 	var bounds := mesh.get_aabb()
 	var box := BoxMesh.new()
 	box.size = Vector3(maxf(bounds.size.x, 0.05), maxf(bounds.size.y, 0.05), maxf(bounds.size.z, 0.05)) * 0.9
@@ -278,12 +328,12 @@ static func proxy_for(mesh: Mesh) -> Mesh:
 	material.albedo_color = colour
 	material.roughness = 1.0
 	box.material = material
-	# Boxes are centred on their origin; the source mesh sits where its AABB is, so offset via a one-surface ArrayMesh.
+	# Boxes are centered on their origin; the source mesh sits where its AABB is, so offset via a one-surface ArrayMesh.
 	var arrays := box.get_mesh_arrays()
 	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-	var centre := bounds.get_center()
+	var center := bounds.get_center()
 	for i in verts.size():
-		verts[i] += centre
+		verts[i] += center
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	var proxy := ArrayMesh.new()
 	proxy.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)

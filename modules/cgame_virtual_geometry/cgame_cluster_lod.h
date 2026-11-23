@@ -61,6 +61,8 @@ public:
 	static int triangle_count(const Dictionary &p_hierarchy, const PackedInt32Array &p_cut);
 	// Assemble a selected cluster cut using original vertex array channels.
 	// All selected triangles retain global vertex IDs; only indices change.
+	// Draw-ready alias used by Albion PBR HLOD; preserves all source vertex streams.
+	static Array build_cut_surface(const Dictionary &p_hierarchy, const PackedInt32Array &p_cut, const Array &p_source_arrays);
 	static Array build_cut_arrays(const Array &p_source_arrays, const Dictionary &p_hierarchy, const PackedInt32Array &p_cut);
 	// Attribute-aware meshoptimizer path for static imported triangle surfaces.
 	// Returns Mesh::ARRAY_MAX source arrays with ONLY the index buffer replaced.

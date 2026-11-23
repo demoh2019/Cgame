@@ -16,6 +16,7 @@ const SUITES := [
 	"res://tests/test_heightfield_gradients.gd",
 	"res://tests/test_world_sites.gd",
 	"res://tests/test_pcg_world.gd",
+	"res://tests/test_virtual_cluster_hlod.gd",
 	"res://tests/test_model_catalog.gd",
 	"res://tests/test_imported_mesh_lod.gd",
 	"res://tests/test_virtual_geometry_attribute_lod.gd",

@@ -426,6 +426,88 @@ TEST_CASE("[CgameClusterLOD] Determinism and edge cases") {
 	CHECK(CgameClusterLOD::triangle_count(flat, cut) == mesh.indices.size() / 3);
 }
 
+TEST_CASE("[CgameClusterLOD] Reconstructed cut keeps PBR vertex channels and validates source") {
+	const Mesh source = make_sphere(10, 20, 3.0);
+	const Dictionary hierarchy = CgameClusterLOD::build_hierarchy(source.vertices, source.indices, 5);
+	REQUIRE(!hierarchy.is_empty());
+	const PackedInt32Array cut = hierarchy["roots"];
+	REQUIRE(cut.size() > 0);
+	const int vertex_count = source.vertices.size();
+	PackedVector3Array normals;
+	PackedVector2Array uv, uv2;
+	PackedColorArray colors;
+	PackedFloat32Array tangents;
+	normals.resize(vertex_count);
+	uv.resize(vertex_count);
+	uv2.resize(vertex_count);
+	colors.resize(vertex_count);
+	tangents.resize(vertex_count * 4);
+	for (int i = 0; i < vertex_count; i++) {
+		normals.set(i, source.vertices[i].normalized());
+		uv.set(i, Vector2((i % 20) / 20.0, (i / 20) / 10.0));
+		uv2.set(i, Vector2((i % 13) / 13.0, (i % 17) / 17.0));
+		colors.set(i, Color(0.15, 0.35, 0.65, 1.0));
+		tangents.set(i * 4, 1.0);
+		tangents.set(i * 4 + 1, 0.0);
+		tangents.set(i * 4 + 2, 0.0);
+		tangents.set(i * 4 + 3, -1.0);
+	}
+	Array arrays;
+	arrays.resize(::Mesh::ARRAY_MAX);
+	arrays[::Mesh::ARRAY_VERTEX] = source.vertices;
+	arrays[::Mesh::ARRAY_INDEX] = source.indices;
+	arrays[::Mesh::ARRAY_NORMAL] = normals;
+	arrays[::Mesh::ARRAY_TEX_UV] = uv;
+	arrays[::Mesh::ARRAY_TEX_UV2] = uv2;
+	arrays[::Mesh::ARRAY_COLOR] = colors;
+	arrays[::Mesh::ARRAY_TANGENT] = tangents;
+	const Array surface = CgameClusterLOD::build_cut_surface(hierarchy, cut, arrays);
+	REQUIRE(surface.size() == ::Mesh::ARRAY_MAX);
+	CHECK((PackedVector3Array)surface[::Mesh::ARRAY_VERTEX] == source.vertices);
+	CHECK((PackedVector3Array)surface[::Mesh::ARRAY_NORMAL] == normals);
+	CHECK((PackedVector2Array)surface[::Mesh::ARRAY_TEX_UV] == uv);
+	CHECK((PackedVector2Array)surface[::Mesh::ARRAY_TEX_UV2] == uv2);
+	CHECK((PackedColorArray)surface[::Mesh::ARRAY_COLOR] == colors);
+	CHECK((PackedFloat32Array)surface[::Mesh::ARRAY_TANGENT] == tangents);
+	const PackedInt32Array selected = surface[::Mesh::ARRAY_INDEX];
+	CHECK(selected.size() == CgameClusterLOD::triangle_count(hierarchy, cut) * 3);
+	CHECK(selected.size() <= source.indices.size());
+	CHECK((PackedInt32Array)arrays[::Mesh::ARRAY_INDEX] == source.indices);
+	for (int i = 0; i < selected.size(); i++) {
+		CHECK(selected[i] >= 0);
+		CHECK(selected[i] < vertex_count);
+	}
+	// Create an actual RenderingServer-backed surface, not merely a dictionary.
+	Ref<ArrayMesh> draw_mesh;
+	draw_mesh.instantiate();
+	draw_mesh->add_surface_from_arrays(::Mesh::PRIMITIVE_TRIANGLES, surface);
+	CHECK(draw_mesh->get_surface_count() == 1);
+	CHECK(draw_mesh->surface_get_array_index_len(0) == selected.size());
+
+	Array extended = arrays.duplicate(false);
+	PackedByteArray custom_data;
+	custom_data.push_back(9);
+	custom_data.push_back(17);
+	extended[::Mesh::ARRAY_CUSTOM0] = custom_data;
+	const Array custom = CgameClusterLOD::build_cut_surface(hierarchy, cut, extended);
+	CHECK((PackedByteArray)custom[::Mesh::ARRAY_CUSTOM0] == custom_data);
+
+	ERR_PRINT_OFF;
+	PackedInt32Array duplicate = cut;
+	duplicate.push_back(cut[0]);
+	CHECK(CgameClusterLOD::build_cut_surface(hierarchy, duplicate, arrays).is_empty());
+	PackedInt32Array out_of_range;
+	out_of_range.push_back(-1);
+	CHECK(CgameClusterLOD::build_cut_surface(hierarchy, out_of_range, arrays).is_empty());
+	out_of_range.set(0, ((Array)hierarchy["clusters"]).size());
+	CHECK(CgameClusterLOD::build_cut_surface(hierarchy, out_of_range, arrays).is_empty());
+	Array mismatched = arrays.duplicate(false);
+	mismatched[::Mesh::ARRAY_VERTEX] = PackedVector3Array();
+	CHECK(CgameClusterLOD::build_cut_surface(hierarchy, cut, mismatched).is_empty());
+	CHECK(CgameClusterLOD::build_cut_surface(hierarchy, PackedInt32Array(), arrays).is_empty());
+	ERR_PRINT_ON;
+}
+
 static Ref<CgameOcclusionRaster> make_wall_raster() {
 	// Camera at the origin looking down -Z; wall 20x10 at z -11..-10.5.
 	Projection proj = Projection::create_perspective(70.0, 2.0, 0.1, 200.0);

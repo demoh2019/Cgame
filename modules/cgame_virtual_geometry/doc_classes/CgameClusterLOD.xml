@@ -4,8 +4,8 @@
 		Builds a Nanite-style cluster LOD hierarchy and selects a crack-free cut from it.
 	</brief_description>
 	<description>
-		[CgameClusterLOD] builds a directed acyclic graph of mesh clusters. Level 0 holds the [CgameMeshlets] of the source mesh. Each following level groups up to four neighbouring clusters, simplifies the merged triangles to half with meshoptimizer while locking the border of the group, and splits the result into new clusters. All clusters of a group share one error value and one LOD sphere, so every cut selected with [method select_cut] is watertight.
-		Vertices of the source mesh must be welded (shared by index) so that neighbouring clusters share vertex ids. All methods are static.
+		[CgameClusterLOD] builds a directed acyclic graph of mesh clusters. Level 0 holds the [CgameMeshlets] of the source mesh. Each following level groups up to four neighboring clusters, simplifies the merged triangles to half with meshoptimizer while locking the border of the group, and splits the result into new clusters. All clusters of a group share one error value and one LOD sphere, so every cut selected with [method select_cut] is watertight.
+		Vertices of the source mesh must be welded (shared by index) so that neighboring clusters share vertex ids. All methods are static.
 		The hierarchy is a [Dictionary] with the keys [code]vertices[/code], [code]clusters[/code] ([Array] of [Dictionary]), [code]levels[/code] ([int]) and [code]roots[/code] ([PackedInt32Array] of clusters without a parent). Each cluster has:
 		- [code]indices[/code], [code]vertex_ids[/code]: triangle list with global vertex ids and the vertices it uses.
 		- [code]center[/code], [code]radius[/code], [code]cone_axis[/code], [code]cone_cutoff[/code]: culling bounds, as in [CgameMeshlets].
@@ -59,6 +59,15 @@
 			<param index="4" name="error_pixels" type="float" default="1.0" />
 			<description>
 				Returns the ids of the clusters to draw for a perspective camera. [param fov_y] is the vertical field of view in radians and [param screen_height] is in pixels. A cluster is selected when its own projected error is at most [param error_pixels] and the projected error of its parent group is larger. Together the selected clusters cover the surface exactly once.
+			</description>
+		</method>
+		<method name="build_cut_surface" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="hierarchy" type="Dictionary" />
+			<param index="1" name="cut" type="PackedInt32Array" />
+			<param index="2" name="source_arrays" type="Array" />
+			<description>
+				Reconstructs the cut as a draw-ready surface for [method ArrayMesh.add_surface_from_arrays]. All source vertex streams are preserved unchanged, including normals, tangents, UV/UV2, colors, skinning and custom vertex attributes. Only the triangle index buffer is replaced. Requires identical source positions to those used by [method build_hierarchy] and unique, valid cluster ids; returns an empty array for invalid inputs. Does not compact vertices, allocate GPU pages or issue draw commands.
 			</description>
 		</method>
 		<method name="triangle_count" qualifiers="static">
