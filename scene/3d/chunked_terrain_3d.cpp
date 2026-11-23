@@ -1115,8 +1115,8 @@ void ChunkedTerrain3D::_invalidate_region(const Rect2i &p_region, bool p_geometr
 	}
 	const int first_x = CLAMP((grown.position.x - 1) / chunk_quads, 0, chunks_x - 1);
 	const int first_z = CLAMP((grown.position.y - 1) / chunk_quads, 0, chunks_z - 1);
-	const int last_x = CLAMP((grown.end.x - 1) / chunk_quads, 0, chunks_x - 1);
-	const int last_z = CLAMP((grown.end.y - 1) / chunk_quads, 0, chunks_z - 1);
+	const int last_x = CLAMP((grown.position.x + grown.size.x - 1) / chunk_quads, 0, chunks_x - 1);
+	const int last_z = CLAMP((grown.position.y + grown.size.y - 1) / chunk_quads, 0, chunks_z - 1);
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const Params params = _params();
 	for (int cz = first_z; cz <= last_z; cz++) {
