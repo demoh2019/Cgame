@@ -400,14 +400,20 @@ func contents(site: Dictionary) -> Dictionary:
 func _city_buildings(result: Dictionary, rng: RandomNumberGenerator, site: Dictionary, center: Vector2, taken: Array) -> void:
 	var layout: String = str(site["layout"])
 	var rotation: float = float(site["layout_rotation"])
-	var candidates: Array[Dictionary] = CityLayout.building_lots(int(site["seed"]), layout, float(site["radius"]), rotation)
+	var city_radius: float = float(site["radius"])
+	var candidates: Array[Dictionary] = CityLayout.building_lots(int(site["seed"]), layout, city_radius, rotation)
+	var paths: Array = CityLayout.streets(layout, city_radius, rotation)
 	var wanted: int = rng.randi_range(14, 22)
 	var placed := 0
 	for lot in candidates:
 		if placed >= wanted:
 			break
-		var p: Vector2 = center + Vector2(lot["offset"])
+		var offset: Vector2 = lot["offset"]
+		var p: Vector2 = center + offset
 		if not _usable(p, taken, 12.0):
+			continue
+		# Buildings must never block the painted roads, including at intersections.
+		if CityLayout.street_distance(offset, paths) < BUILDING_SCALE * 0.62 + 3.1:
 			continue
 		taken.append(p)
 		placed += 1
@@ -419,12 +425,17 @@ func _city_buildings(result: Dictionary, rng: RandomNumberGenerator, site: Dicti
 
 ## Keep rubble, loot and enemies inside the same footprint as the city blocks.
 func _trim_city_footprint(result: Dictionary, center: Vector2, layout: String, rotation: float, radius: float) -> void:
+	var paths: Array = CityLayout.streets(layout, radius, rotation)
 	for group in ["structures", "crates", "props", "spawns"]:
 		var inside: Array = []
 		for item in result[group]:
 			var offset := Vector2(float(item["x"]), float(item["z"])) - center
-			if CityLayout.contains(offset, layout, radius, rotation):
-				inside.append(item)
+			if not CityLayout.contains(offset, layout, radius, rotation):
+				continue
+			if group != "spawns" and bool(item.get("blocks", true)):
+				if CityLayout.street_distance(offset, paths) < float(item.get("radius", 0.0)) + 3.1:
+					continue
+			inside.append(item)
 		result[group] = inside
 
 
