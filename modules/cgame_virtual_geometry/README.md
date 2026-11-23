@@ -74,6 +74,12 @@ Tests:
 Source-level checks are not equivalent to successful native compilation
 or graphics-driver testing.
 
+## P1: GPU-resident meshlet pages (game rendering-device path)
+
+The canonical game's experimental `MeshletRenderer` now supports a **bounded GPU page pool** for Vulkan task/mesh shaders. Meshlets are partitioned into fixed groups of 32; the rendering-device path allocates only a configurable number of GPU resident page slots, uploads needed pages incrementally, remaps their vertex/triangle offsets to physical slots, and relies on the task shader for GPU frustum/cone culling without visibility readbacks. The CPU still owns source geometry and chooses which coarse pages to keep resident. This implementation lives in `game/scripts/client/meshlet_renderer.gd`, `game/scripts/shared/meshlet_page_streaming.gd` and `game/shaders/compute/`, rather than a new engine C++ class.
+
+A disabled-by-default debug experiment in the actual game uses its production rock mesh. Normal production models and their materials remain unchanged; Metal and other GPU backends without mesh shaders use the existing rendering path. See [GPU Meshlet Residency](../../game/docs/P1_GPU_MESHLET_RESIDENCY.md), including known missing material fidelity, disk-backed streaming, GPU indirect draw, GPU tests and fallback-on-page-miss.
+
 ## Limitations
 
 - No GPU path and no streaming; hierarchy building is single threaded and intended for offline or load-time use.
