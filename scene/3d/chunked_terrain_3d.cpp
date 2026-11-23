@@ -785,7 +785,7 @@ bool ChunkedTerrain3D::apply_color_patch(const Rect2i &p_region, const PackedCol
 		}
 	}
 	if (built) {
-		update_region(p_region);
+		_invalidate_region(p_region, false);
 	} else {
 		_queue_rebuild();
 	}
@@ -1098,6 +1098,10 @@ bool ChunkedTerrain3D::is_over_terrain(const Vector3 &p_world_position) const {
 }
 
 void ChunkedTerrain3D::update_region(const Rect2i &p_region) {
+	_invalidate_region(p_region, true);
+}
+
+void ChunkedTerrain3D::_invalidate_region(const Rect2i &p_region, bool p_geometry_changed) {
 	last_region_invalidated_chunks = 0;
 	if (!built || chunks.is_empty() || p_region.size.x <= 0 || p_region.size.y <= 0) {
 		return;
@@ -1128,8 +1132,13 @@ void ChunkedTerrain3D::update_region(const Rect2i &p_region) {
 		}
 		chunk.lod = -1;
 		chunk.morph = -1.0f;
-		chunk.geometric_error = -1.0f; // Height edits invalidate cached deviation.
 		chunk.visible = false;
+		if (!p_geometry_changed) {
+			// Vertex paint does not affect the ground shape, bounds, or LOD
+			// error. Keep collision RIDs alive while changing GPU colors.
+			continue;
+		}
+		chunk.geometric_error = -1.0f; // Height edits invalidate cached deviation.
 		_free_collision(chunk);
 
 		real_t low;
