@@ -1594,7 +1594,12 @@ func cmd_resource_hit(peer_id: int, node_id: int, dir_x: float, dir_z: float) ->
 		return {"ok": false, "reason": "swing_cooldown"}
 	var hits_needed: int = ResourceGathering.strikes_needed(kind)
 	var progress: Dictionary = resource_hit_progress.get(node_id, {})
-	var current_hits: int = int(progress.get("hits", 0)) if time < float(progress.get("expires", 0.0)) else 0
+	# An abandoned half-mined node must not reset and yield its first hits forever.
+	if not progress.is_empty() and time >= float(progress.get("expires", 0.0)):
+		resource_hit_progress.erase(node_id)
+		depleted[node_id] = time + float(Defs.node_info(kind)["respawn"])
+		return {"ok": false, "reason": "depleted"}
+	var current_hits: int = int(progress.get("hits", 0))
 	var hit: int = mini(current_hits + 1, hits_needed)
 	var amount: int = ResourceGathering.strike_yield(kind, hit)
 	var item_id: String = "%s_%d" % [str(Defs.node_info(kind)["yield"]), tier]
@@ -1604,7 +1609,8 @@ func cmd_resource_hit(peer_id: int, node_id: int, dir_x: float, dir_z: float) ->
 	var finished: bool = hit >= hits_needed
 	if not finished:
 		resource_hit_progress[node_id] = {"hits": hit,
-			"expires": time + ResourceGathering.PROGRESS_EXPIRE_SECONDS}
+			"expires": time + ResourceGathering.PROGRESS_EXPIRE_SECONDS,
+			"respawn": float(Defs.node_info(kind)["respawn"])}
 	_finish_gather(player, node, amount, finished, true)
 	return {"ok": true, "hit": hit, "total_hits": hits_needed,
 		"finished": finished, "item": item_id}
@@ -9877,6 +9883,7 @@ func _tick_world(delta: float) -> void:
 			depleted.erase(id)
 	for id in resource_hit_progress.keys():
 		if time >= float(resource_hit_progress[id]["expires"]):
+			depleted[id] = time + float(resource_hit_progress[id]["respawn"])
 			resource_hit_progress.erase(id)
 	for id in opened_crates.keys():
 		if time >= float(opened_crates[id]):
