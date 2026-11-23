@@ -579,14 +579,21 @@ TEST_CASE("[CgameClusterLOD] attribute aware surface simplification preserves au
 		CHECK(out_indices[i] >= 0);
 		CHECK(out_indices[i] < vertices.size());
 	}
-	CHECK(PackedVector3Array(reduced[Mesh::ARRAY_VERTEX]) == vertices);
-	CHECK(PackedVector3Array(reduced[Mesh::ARRAY_NORMAL]) == normals);
-	CHECK(PackedVector2Array(reduced[Mesh::ARRAY_TEX_UV]) == uvs);
-	CHECK(PackedVector2Array(reduced[Mesh::ARRAY_TEX_UV2]) == uv2);
-	CHECK(PackedColorArray(reduced[Mesh::ARRAY_COLOR]) == colors);
-	CHECK(PackedFloat32Array(reduced[Mesh::ARRAY_TANGENT]) == tangents);
+	const PackedVector3Array reduced_vertices = reduced[Mesh::ARRAY_VERTEX];
+	const PackedVector3Array reduced_normals = reduced[Mesh::ARRAY_NORMAL];
+	const PackedVector2Array reduced_uvs = reduced[Mesh::ARRAY_TEX_UV];
+	const PackedVector2Array reduced_uv2 = reduced[Mesh::ARRAY_TEX_UV2];
+	const PackedColorArray reduced_colors = reduced[Mesh::ARRAY_COLOR];
+	const PackedFloat32Array reduced_tangents = reduced[Mesh::ARRAY_TANGENT];
+	CHECK(reduced_vertices == vertices);
+	CHECK(reduced_normals == normals);
+	CHECK(reduced_uvs == uvs);
+	CHECK(reduced_uv2 == uv2);
+	CHECK(reduced_colors == colors);
+	CHECK(reduced_tangents == tangents);
 	// The original buffers remain unchanged (no destructive simplification).
-	CHECK(PackedInt32Array(arrays[Mesh::ARRAY_INDEX]) == indices);
+	const PackedInt32Array original_indices = arrays[Mesh::ARRAY_INDEX];
+	CHECK(original_indices == indices);
 	// Native attribute-less geometry can use the previous positional path.
 	Array position_only = arrays.duplicate();
 	position_only[Mesh::ARRAY_NORMAL] = Variant();
@@ -631,8 +638,8 @@ TEST_CASE("[CgameClusterLOD] attribute simplification rejects malformed late dat
 			Vector2(0, 0), Vector2(0, 1), Vector2(1, 0), Vector2(Math::INF, 1) });
 	CHECK(CgameClusterLOD::simplify_surface_arrays(bad, 1).is_empty());
 	// Validation must not mutate a valid request after a bad attempt.
-	CHECK(PackedInt32Array(arrays[Mesh::ARRAY_INDEX]) ==
-			PackedInt32Array({ 0, 1, 2, 2, 1, 3 }));
+	const PackedInt32Array unchanged = arrays[Mesh::ARRAY_INDEX];
+	CHECK(unchanged == PackedInt32Array({ 0, 1, 2, 2, 1, 3 }));
 	CHECK(arrays.size() == Mesh::ARRAY_MAX);
 }
 
