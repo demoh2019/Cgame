@@ -86,25 +86,25 @@ static func compute_links(places: Array, max_link: float = MAX_LINK,
 		# allocating and sorting every one of the island's other locations.
 		if wanted <= 0:
 			continue
-		var nearest: Array = [] # [squared distance, index], sorted ascending.
-		var max_distance_squared: float = max_link * max_link
+		var nearest: Array = [] # [distance, index], sorted ascending as before.
 		for j in positions.size():
 			if i == j:
 				continue
-			var distance_squared: float = positions[i].distance_squared_to(positions[j])
-			if distance_squared > max_distance_squared:
+			# Preserve distance_to's exact floating-point tie and range semantics.
+			var distance: float = positions[i].distance_to(positions[j])
+			if distance > max_link:
 				continue
 			if nearest.size() == wanted:
 				var tail: Array = nearest[nearest.size() - 1]
-				if distance_squared > float(tail[0]) or (distance_squared == float(tail[0]) and j >= int(tail[1])):
+				if distance > float(tail[0]) or (distance == float(tail[0]) and j >= int(tail[1])):
 					continue
 			var insertion := 0
 			while insertion < nearest.size():
 				var current: Array = nearest[insertion]
-				if distance_squared < float(current[0]) or (distance_squared == float(current[0]) and j < int(current[1])):
+				if distance < float(current[0]) or (distance == float(current[0]) and j < int(current[1])):
 					break
 				insertion += 1
-			nearest.insert(insertion, [distance_squared, j])
+			nearest.insert(insertion, [distance, j])
 			if nearest.size() > wanted:
 				nearest.pop_back()
 		for candidate in nearest:
