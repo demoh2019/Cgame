@@ -23,6 +23,9 @@ static func prepare(mesh: Mesh, max_pages: int = 16,
 	if vertices.is_empty() or indices.is_empty() or indices.size() % 3 != 0:
 		return null
 	var renderer := MeshletRenderer.new()
+	# Keep only source geometry + bounds on CPU. Pack/upload one page at a
+	# time instead of duplicating the full global GPU layout in host RAM.
+	renderer.gpu_streamed_source_only = true
 	renderer.max_resident_pages = clampi(max_pages, 1, 256)
 	renderer.max_page_uploads_per_frame = clampi(uploads_per_frame, 1, 64)
 	if not renderer.setup_from_mesh(vertices, indices):
