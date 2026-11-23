@@ -83,6 +83,7 @@ const SUITES := [
 	"res://tests/test_terrain_mesh_streaming.gd",
 	"res://tests/test_terrain_geometric_error_lod.gd",
 	"res://tests/test_terrain_live_patch.gd",
+	"res://tests/test_terrain_edit_bridge.gd",
 	"res://tests/test_terrain_geomorph.gd",
 	"res://tests/test_terrain_seam_normals.gd",
 	"res://tests/test_terrain_noise_lod.gd",
