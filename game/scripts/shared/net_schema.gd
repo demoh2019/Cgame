@@ -253,7 +253,10 @@ static func serialize(schema: Dictionary, state: Dictionary, baseline: Dictionar
 	return w.bytes
 
 
-static func deserialize(schema: Dictionary, bytes: PackedByteArray, baseline: Dictionary) -> Dictionary:
+## A valid empty delta and an invalid/truncated packet are not equivalent.
+## Keep the public legacy Dictionary decoder while allowing versioned callers
+## to fail closed instead of reporting "ok" for a damaged payload.
+static func _deserialize_checked(schema: Dictionary, bytes: PackedByteArray, baseline: Dictionary) -> Dictionary:
 	var fields: Array = schema["fields"]
 	var r := BitReader.new()
 	r.bytes = bytes
@@ -261,15 +264,20 @@ static func deserialize(schema: Dictionary, bytes: PackedByteArray, baseline: Di
 	for f in fields:
 		present.append(r.read(1) == 1)
 	if not r.valid:
-		return {}
+		return {"ok": false, "state": {}}
 	var out: Dictionary = baseline.duplicate()
 	for i in fields.size():
 		if present[i]:
 			var fd: Dictionary = fields[i]
 			out[fd["name"]] = _dequant(fd, _read_field(r, fd))
 			if not r.valid:
-				return {}
-	return out
+				return {"ok": false, "state": {}}
+	return {"ok": true, "state": out}
+
+
+static func deserialize(schema: Dictionary, bytes: PackedByteArray, baseline: Dictionary) -> Dictionary:
+	var decoded: Dictionary = _deserialize_checked(schema, bytes, baseline)
+	return decoded["state"] if bool(decoded["ok"]) else {}
 
 
 ## Versioned wrapper: 4-byte schema hash header followed by the payload.
@@ -281,8 +289,9 @@ static func serialize_versioned(schema: Dictionary, state: Dictionary, baseline:
 	return out
 
 
-## Returns {ok: bool, state: Dictionary}; ok is false on schema hash mismatch.
+## Returns {ok: bool, state: Dictionary}; invalid headers and incomplete
+## payloads are both rejected without mutating an existing baseline.
 static func deserialize_versioned(schema: Dictionary, bytes: PackedByteArray, baseline: Dictionary) -> Dictionary:
 	if bytes.size() < 4 or int(bytes.decode_u32(0)) != schema_hash(schema):
 		return {"ok": false, "state": {}}
-	return {"ok": true, "state": deserialize(schema, bytes.slice(4), baseline)}
+	return _deserialize_checked(schema, bytes.slice(4), baseline)
