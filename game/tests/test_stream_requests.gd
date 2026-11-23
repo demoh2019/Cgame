@@ -52,3 +52,18 @@ func run(t) -> void:
 		"five scheduled cells match a full deterministic priority sort")
 	t.eq(large.in_flight_count(), 5, "only selected top-five cells become in-flight")
 	t.eq(large.queued_count(), 115, "all other cells remain queued")
+ 
+	t.current = "invalid stream priorities leave generations and queues intact"
+	var guard := StreamRequests.new()
+	t.check(not guard.request(Vector2i(1, 0), NAN, 99),
+		"NaN priority is rejected")
+	t.check(not guard.request(Vector2i(1, 0), INF, 99),
+		"infinite priority is rejected")
+	t.eq(guard.newest_generation, 0,
+		"invalid requests cannot advance the generation and lock out future work")
+	t.eq(int(guard.stats()["rejected_invalid"]), 2,
+		"invalid scheduling attempts are counted")
+	t.check(guard.request(Vector2i(2, 0), 1.0, 1),
+		"valid finite priority still enters the queue")
+	t.eq(guard.next_batch(1), [Vector2i(2, 0)],
+		"valid world streaming still schedules after rejected inputs")

@@ -10200,6 +10200,12 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		infected_snares, player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_fish_traps: Array = ShoreFishTrap.visible(
 		fish_traps, player.position, time, Defs.INTEREST_RADIUS)
+	# Viewer-only rights let E target owned nets, without revealing account IDs.
+	for i in nearby_fish_traps.size():
+		var shown_trap: Dictionary = nearby_fish_traps[i]
+		var source_trap: Dictionary = fish_traps.get(int(shown_trap["id"]), {})
+		shown_trap["own"] = Structures.can_manage(source_trap, peer_id, player.user_id)
+		nearby_fish_traps[i] = shown_trap
 	var nearby_smoke: Array = FieldSmoke.visible(smoke_clouds,
 			player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_decoys: Array = []

@@ -379,15 +379,25 @@ func collect_fish_trap(trap_id: int) -> void:
 
 
 func nearest_fish_trap(position: Vector3, radius: float = 4.5) -> int:
-	var nearest := -1
-	var best: float = radius * radius
-	if not position.is_finite():
+	var nearest: int = -1
+	if not position.is_finite() or not is_finite(radius) or radius < 0.0:
 		return nearest
+	var best: float = radius * radius
 	for trap in fish_traps.values():
-		var distance: float = Vector2(position.x, position.z).distance_squared_to(
-			Vector2(float(trap["x"]), float(trap["z"])))
-		if distance <= best:
-			nearest = int(trap["id"])
+		# Current snapshots include viewer-only rights; older snapshots remain usable.
+		if not bool(trap.get("own", true)):
+			continue
+		var trap_id: int = int(trap.get("id", -1))
+		var x: float = float(trap.get("x", NAN))
+		var z: float = float(trap.get("z", NAN))
+		if trap_id < 0 or not is_finite(x) or not is_finite(z):
+			continue
+		var dx: float = x - position.x
+		var dz: float = z - position.z
+		var distance: float = dx * dx + dz * dz
+		# Stable tie breaks prevent selection flicker when nets overlap.
+		if distance <= best and (nearest < 0 or distance < best or trap_id < nearest):
+			nearest = trap_id
 			best = distance
 	return nearest
 

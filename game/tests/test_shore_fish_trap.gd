@@ -54,6 +54,11 @@ func run(t) -> void:
 	t.eq(public.size(), 1, "nearby buoy replicated")
 	t.check(not public[0].has("owner") and not public[0].has("owner_account"),
 		"account and peer identifiers do not leak")
+	t.check(not bool(public[0].get("own", true)),
+		"rival sees the net but cannot target it")
+	var owned: Array = sim.snapshot_for(541)["fish_traps"]
+	t.check(owned.size() == 1 and bool(owned[0].get("own", false)),
+		"owner receives a private selectable net flag")
 	t.check(not Persist.capture(sim).has("fish_traps"),
 		"temporary fishing nets are not persistent structures")
 	player.position = shore + Vector3(100.0, 0.0, 0.0)
@@ -76,6 +81,18 @@ func run(t) -> void:
 	t.eq(sim.cmd_collect_fish_trap(541, trap_id).get("reason", ""), "no_trap",
 		"duplicate claim denied")
 	t.check(sim.fish_traps.is_empty(), "claimed net disappears")
+	t.current = "corrupt temporary traps are never replicated"
+	var malformed: Dictionary = {
+		1001: {"id": 1001, "x": NAN, "y": 0.0, "z": 0.0,
+			"expires": sim.time + 100.0, "ready_at": sim.time + 10.0, "tier": 1},
+		1002: {"id": 1002, "x": shore.x, "y": INF, "z": shore.z,
+			"expires": sim.time + 100.0, "ready_at": sim.time + 10.0, "tier": 1},
+		1003: {"id": 1003, "x": shore.x, "y": 0.0, "z": shore.z,
+			"expires": sim.time + 100.0, "ready_at": NAN, "tier": 1},
+	}
+	t.eq(FishTrap.visible(malformed, shore, sim.time, 10.0), [],
+		"invalid geometry and timers cannot leak into snapshots")
+
 	t.current = "second trap and hard expiry"
 	var second: Dictionary = sim.cmd_place_fish_trap(541)
 	t.check(bool(second.get("ok", false)), "second paid net after first claim")

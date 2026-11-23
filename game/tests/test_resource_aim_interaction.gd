@@ -124,3 +124,27 @@ func run(t) -> void:
 		"large visible pebble is reachable from its model boundary")
 	t.check(client.nearest_pickup_node(Vector3(0.0, 0.0, INF), 2.6).is_empty(),
 		"nonfinite positions cannot trigger any chunk lookup")
+ 
+	t.current = "fishing net target respects ownership and stable reach"
+	client.fish_traps = {
+		30: {"id": 30, "x": 1.0, "z": 0.0, "own": true},
+		20: {"id": 20, "x": 1.0, "z": 0.0, "own": true},
+		10: {"id": 10, "x": 0.3, "z": 0.0, "own": false},
+		50: {"id": 50, "x": NAN, "z": 0.0, "own": true},
+	}
+	t.eq(client.nearest_fish_trap(Vector3.ZERO, 2.0), 20,
+		"other players' closer traps do not capture E interaction")
+	t.eq(client.nearest_fish_trap(Vector3.ZERO, 0.5), -1,
+		"owned nets outside reach cannot be selected")
+	t.eq(client.nearest_fish_trap(Vector3.ZERO, INF), -1,
+		"infinite search radius is rejected")
+	t.eq(client.nearest_fish_trap(Vector3.ZERO, -1.0), -1,
+		"negative search radius is rejected")
+	t.eq(client.nearest_fish_trap(Vector3(NAN, 0.0, 0.0)), -1,
+		"invalid player coordinates are rejected")
+	client.fish_traps.erase(20)
+	t.eq(client.nearest_fish_trap(Vector3.ZERO, 2.0), 30,
+		"remaining owned net is selectable after one disappears")
+	client.fish_traps[30].erase("own")
+	t.eq(client.nearest_fish_trap(Vector3.ZERO, 2.0), 30,
+		"legacy snapshots without rights flags remain compatible")

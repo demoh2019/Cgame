@@ -28,13 +28,17 @@ var _seq: int = 0
 var _completed: Array[Dictionary] = []
 var _stats: Dictionary = {
 	"requested": 0, "completed": 0, "cancelled_queued": 0, "cancelled_inflight": 0,
-	"dropped_late": 0, "rejected_stale": 0, "revived": 0,
+	"dropped_late": 0, "rejected_stale": 0, "rejected_invalid": 0, "revived": 0,
 }
 
 
 ## Queue (or re-prioritise) a cell. Higher priority is served first. Returns false when the
 ## request's generation is older than one already seen (stale, ignored).
 func request(cell: Vector2i, priority: float, generation: int) -> bool:
+	# Nonfinite priorities break strict, deterministic chunk ordering.
+	if not is_finite(priority):
+		_stats["rejected_invalid"] = int(_stats["rejected_invalid"]) + 1
+		return false
 	if generation < newest_generation:
 		_stats["rejected_stale"] = int(_stats["rejected_stale"]) + 1
 		return false
