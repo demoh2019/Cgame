@@ -1,5 +1,7 @@
 # Albion After — main game
 
+**P1 native terrain editing:** Cgame's chunked terrain now accepts sparse height/color patches with local LOD and physics cache invalidation. The live terrain editor uses non-destructive layers, and the main game updates horizon shading via color-only patches. See [Native Terrain Patch Streaming](docs/NATIVE_TERRAIN_PATCH_STREAMING.md).
+
 **This is the canonical game project at `game/`.** All new gameplay
 features belong here. It is the only game in the repository; `demo/` and `misc/` hold engine labs, not games.
 
