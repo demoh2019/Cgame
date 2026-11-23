@@ -33,6 +33,44 @@ func run(t) -> void:
 	t.check(has_fire, "the campfire beside you flattens its grass")
 	t.eq(PlantInteraction.pick_crushers(Vector2.ZERO, []).size(), 0, "nothing nearby, nothing flattened")
 
+	t.current = "crowded grass uses stable top-K without sorting every source"
+	var dense: Array = []
+	for i in 600:
+		dense.append(["zombie", {"x": float((i * 31) % 97) - 48.0,
+			"z": float((i * 17) % 83) - 41.0}])
+	var expected: Array = []
+	for i in dense.size():
+		var at := Vector2(float(dense[i][1]["x"]), float(dense[i][1]["z"]))
+		var d_sq: float = at.length_squared()
+		if d_sq <= PlantInteraction.CRUSH_RANGE * PlantInteraction.CRUSH_RANGE:
+			expected.append({"d": d_sq, "index": i,
+				"v": Vector4(at.x, at.y, 0.5, 0.75)})
+	expected.sort_custom(func(a, b):
+		if float(a["d"]) == float(b["d"]):
+			return int(a["index"]) < int(b["index"])
+		return float(a["d"]) < float(b["d"]))
+	var crowded: Array = PlantInteraction.pick_crushers(Vector2.ZERO, dense)
+	t.eq(crowded.size(), PlantInteraction.MAX_CRUSHERS, "crowded field only uploads eight closest objects")
+	for i in crowded.size():
+		t.eq(crowded[i], expected[i]["v"], "top-K agrees with full stable sorting at %d" % i)
+	var equal_distance: Array = []
+	for i in 12:
+		var axis: Vector2 = [Vector2.RIGHT, Vector2.UP, Vector2.LEFT, Vector2.DOWN][i % 4]
+		equal_distance.append(["zombie" if i < 8 else "bag",
+			{"x": axis.x, "z": axis.y}])
+	var tied: Array = PlantInteraction.pick_crushers(Vector2.ZERO, equal_distance)
+	t.eq(tied.size(), PlantInteraction.MAX_CRUSHERS, "equal distance still obeys eight slots")
+	for slot in tied:
+		t.eq((slot as Vector4).z, PlantInteraction.FOOTPRINTS["zombie"].x,
+			"later equal-distance sources do not replace earlier sources")
+	t.eq(PlantInteraction.pick_crushers(Vector2(INF, 0.0), dense).size(), 0,
+		"invalid camera position does not create shader footprints")
+	t.eq(PlantInteraction.pick_crushers(Vector2.ZERO,
+		[null, ["zombie"], ["zombie", {"x": NAN, "z": 0.0}]]).size(), 0,
+		"malformed and nonfinite sources cannot reach shader inputs")
+	t.eq(PlantInteraction.shake_envelope(0.1, INF), 0.0, "infinite shake cannot contaminate shader")
+	t.eq(PlantInteraction.shake_envelope(NAN, 0.5), 0.0, "invalid shake age is rejected")
+
 	t.current = "no grass grows out of static world objects"
 	var chunk := {"crates": [{"x": 5.0, "z": 5.0, "radius": 0.6}], "props": [{"x": 20.0, "z": 3.0, "radius": 1.2}],
 		"structures": [{"x": 40.0, "z": 40.0, "radius": 6.0}], "nodes": [{"x": 1.0, "z": 1.0}]}

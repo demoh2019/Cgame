@@ -41,6 +41,26 @@ func run(t) -> void:
 	t.check(ResourceGathering.swing_cooldown(4) < ResourceGathering.swing_cooldown(1),
 		"upgraded tools gather faster still")
 
+	t.current = "resource reach stays bounded for invalid model data and aim"
+	var large_rock: Dictionary = {"kind": "rock", "x": 3.3, "z": 0.0, "radius": 1.5}
+	t.check(ResourceGathering.aimed_at(Vector3.ZERO, large_rock, Vector2.RIGHT, 2.0),
+		"large mineable rock is reachable at the edge of its model")
+	t.check(not ResourceGathering.aimed_at(Vector3.ZERO, large_rock, Vector2.LEFT, 2.0),
+		"looking away cannot mine a distant model")
+	t.check(not ResourceGathering.aimed_at(Vector3.ZERO, large_rock, Vector2.ZERO, 2.0),
+		"zero aim cannot bypass a resource reach check")
+	t.check(not ResourceGathering.aimed_at(Vector3.ZERO, large_rock, Vector2.RIGHT, NAN),
+		"invalid reach cannot grant unlimited interaction")
+	var malformed_rock: Dictionary = large_rock.duplicate()
+	malformed_rock["radius"] = NAN
+	t.eq(ResourceGathering.reach_margin(malformed_rock), 0.0,
+		"nonfinite model radius does not expand interaction range")
+	t.check(not ResourceGathering.aimed_at(Vector3.ZERO, malformed_rock, Vector2.RIGHT, 2.0),
+		"malformed model bounds cannot extend mining reach")
+	malformed_rock["radius"] = -10.0
+	t.eq(ResourceGathering.reach_margin(malformed_rock), 0.0,
+		"negative model radius is ignored")
+
 	t.current = "server-validated mining with incremental grants and shared depletion"
 	var world := WorldGen.new(42)
 	var tree: Dictionary = _find(world, "tree")
