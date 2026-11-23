@@ -523,10 +523,25 @@ func _add_to_region(region: int, type: String, amount: int) -> void:
 # --- Promotion / demotion --------------------------------------------------------
 
 ## Regions whose centre is within promote_radius of any of `positions`.
+## Iterate occupied herd regions rather than scanning every map cell and then
+## scanning all herds again for each nearby region. Sorting preserves the
+## ascending region order expected by server promotion and reproducible tests.
 func regions_near(positions: PackedVector2Array) -> PackedInt32Array:
 	var out := PackedInt32Array()
-	for r in range(region_count()):
-		if _near_player(region_center(r), positions) and herd_region_count(r) > 0:
+	if positions.is_empty() or herds.is_empty():
+		return out
+	var population_by_region: Dictionary = {}
+	var limit: int = region_count()
+	for h in herds.values():
+		var region: int = int(h["region"])
+		if region < 0 or region >= limit:
+			continue
+		population_by_region[region] = int(population_by_region.get(region, 0)) + int(h["count"])
+	var occupied: Array = population_by_region.keys()
+	occupied.sort()
+	for region in occupied:
+		var r: int = int(region)
+		if int(population_by_region[r]) > 0 and _near_player(region_center(r), positions):
 			out.append(r)
 	return out
 
