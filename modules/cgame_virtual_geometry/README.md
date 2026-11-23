@@ -85,6 +85,10 @@ when choosing new triangles, while cluster hierarchy cuts currently use
 position-only simplification but preserve original vertex attributes.
 This step is CPU-side; no GPU cluster residency or mesh shading is implied.
 
+## P1: GPU-resident meshlet pages in the game rendering-device path
+
+The main game now includes an experimental bounded page pool for Vulkan task/mesh shaders in `game/scripts/client/meshlet_renderer.gd`, `game/scripts/shared/meshlet_page_streaming.gd` and its GPU shader resources. It uploads fixed-size resident meshlet pages with a per-frame transfer budget, and the GPU task stage culls individual meshlets without visibility readback. The CPU retains source meshes and schedules coarse pages. Production models remain on their original material-aware rendering path: only an explicitly enabled debug draw of the actual game rock exercises this feature. This is a **game rendering-device feature**, not an extra C++ class in `cgame_virtual_geometry`. Details: [GPU Meshlet Residency](../../game/docs/P1_GPU_MESHLET_RESIDENCY.md).
+
 ## Limitations
 
 - No GPU path and no streaming; hierarchy building is single threaded and intended for offline or load-time use.
