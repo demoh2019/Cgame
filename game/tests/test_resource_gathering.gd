@@ -20,6 +20,8 @@ func run(t) -> void:
 	t.current = "pickup/strike classification and exact resource conservation"
 	t.check(ResourceGathering.is_pickup("pebble") and ResourceGathering.is_pickup("branch"),
 		"ground stones and sticks are instant pickups")
+	t.check(ResourceGathering.is_pickup("bush") and ResourceGathering.is_pickup("berry"),
+		"wild fiber and berries are gathered immediately")
 	t.check(ResourceGathering.is_strike("tree") and ResourceGathering.is_strike("rock")
 		and ResourceGathering.is_strike("ore"), "all hard resources are mined by hitting")
 	t.check(not ResourceGathering.is_strike("pebble"), "small stones cannot require pickaxe hits")
