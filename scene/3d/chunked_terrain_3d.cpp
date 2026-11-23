@@ -687,6 +687,109 @@ void ChunkedTerrain3D::set_height_data(const PackedFloat32Array &p_heights, cons
 	_queue_rebuild();
 }
 
+
+bool ChunkedTerrain3D::apply_height_patch(const Rect2i &p_region, const PackedFloat32Array &p_heights,
+		const PackedVector3Array &p_normals) {
+	ERR_FAIL_COND_V_MSG(!data_from_script || data_width < 2 || data_depth < 2 ||
+			p_region.position.x < 0 || p_region.position.y < 0 ||
+			p_region.position.x >= data_width || p_region.position.y >= data_depth ||
+			p_region.size.x <= 0 || p_region.size.y <= 0 ||
+			p_region.size.x > data_width - p_region.position.x ||
+			p_region.size.y > data_depth - p_region.position.y,
+			false, "Height patches require an initialized script-supplied height grid and an in-bounds nonempty region.");
+	const int count = p_region.size.x * p_region.size.y;
+	ERR_FAIL_COND_V_MSG(p_heights.size() != count, false, "Height patch values must match the region dimensions.");
+	const bool custom_normals = !normal_data.is_empty();
+	ERR_FAIL_COND_V_MSG(custom_normals ? p_normals.size() != count : !p_normals.is_empty(),
+			false, "Height patches require exactly matching normal patches if custom normals are active.");
+	for (const float h : p_heights) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(h), false, "Height patch samples must be finite.");
+	}
+	for (const Vector3 &normal : p_normals) {
+		ERR_FAIL_COND_V_MSG(!normal.is_finite() || normal.length_squared() < real_t(1e-12),
+				false, "Patched terrain normals must be finite and nonzero.");
+	}
+	bool changed = false;
+	for (int z = 0; z < p_region.size.y && !changed; z++) {
+		for (int x = 0; x < p_region.size.x; x++) {
+			const int source = z * p_region.size.x + x;
+			const int destination = (p_region.position.y + z) * data_width + p_region.position.x + x;
+			if (height_data[destination] != real_t(p_heights[source]) ||
+					(custom_normals && normal_data[destination] != p_normals[source].normalized())) {
+				changed = true;
+				break;
+			}
+		}
+	}
+	if (!changed) {
+		last_region_invalidated_chunks = 0;
+		return true;
+	}
+	real_t *heights = height_data.ptrw();
+	Vector3 *normals = custom_normals ? normal_data.ptrw() : nullptr;
+	for (int z = 0; z < p_region.size.y; z++) {
+		for (int x = 0; x < p_region.size.x; x++) {
+			const int source = z * p_region.size.x + x;
+			const int destination = (p_region.position.y + z) * data_width + p_region.position.x + x;
+			heights[destination] = p_heights[source];
+			if (normals != nullptr) {
+				normals[destination] = p_normals[source].normalized();
+			}
+		}
+	}
+	if (built) {
+		update_region(p_region);
+	} else {
+		_queue_rebuild();
+	}
+	return true;
+}
+
+
+bool ChunkedTerrain3D::apply_color_patch(const Rect2i &p_region, const PackedColorArray &p_colors) {
+	ERR_FAIL_COND_V_MSG(data_width < 2 || data_depth < 2 ||
+			color_data.size() != data_width * data_depth ||
+			p_region.position.x < 0 || p_region.position.y < 0 ||
+			p_region.position.x >= data_width || p_region.position.y >= data_depth ||
+			p_region.size.x <= 0 || p_region.size.y <= 0 ||
+			p_region.size.x > data_width - p_region.position.x ||
+			p_region.size.y > data_depth - p_region.position.y,
+			false, "Color patches require initialized vertex colors and an in-bounds nonempty region.");
+	const int count = p_region.size.x * p_region.size.y;
+	ERR_FAIL_COND_V_MSG(p_colors.size() != count, false, "Color patch values must match the region dimensions.");
+	for (const Color &color : p_colors) {
+		ERR_FAIL_COND_V_MSG(!color.is_finite(), false, "Color patch samples must be finite.");
+	}
+	bool changed = false;
+	for (int z = 0; z < p_region.size.y && !changed; z++) {
+		for (int x = 0; x < p_region.size.x; x++) {
+			const int source = z * p_region.size.x + x;
+			const int destination = (p_region.position.y + z) * data_width + p_region.position.x + x;
+			if (color_data[destination] != p_colors[source]) {
+				changed = true;
+				break;
+			}
+		}
+	}
+	if (!changed) {
+		last_region_invalidated_chunks = 0;
+		return true;
+	}
+	Color *colors = color_data.ptrw();
+	for (int z = 0; z < p_region.size.y; z++) {
+		for (int x = 0; x < p_region.size.x; x++) {
+			colors[(p_region.position.y + z) * data_width + p_region.position.x + x] =
+					p_colors[z * p_region.size.x + x];
+		}
+	}
+	if (built) {
+		update_region(p_region);
+	} else {
+		_queue_rebuild();
+	}
+	return true;
+}
+
 void ChunkedTerrain3D::set_normal_data(const PackedVector3Array &p_normals) {
 	ERR_FAIL_COND_MSG(!p_normals.is_empty() && (data_width < 2 || data_depth < 2 ||
 			p_normals.size() != data_width * data_depth),
@@ -993,7 +1096,8 @@ bool ChunkedTerrain3D::is_over_terrain(const Vector3 &p_world_position) const {
 }
 
 void ChunkedTerrain3D::update_region(const Rect2i &p_region) {
-	if (!built || chunks.is_empty()) {
+	last_region_invalidated_chunks = 0;
+	if (!built || chunks.is_empty() || p_region.size.x <= 0 || p_region.size.y <= 0) {
 		return;
 	}
 	// Normals read one sample beyond a chunk, so include the neighbours of every touched chunk.
@@ -1005,6 +1109,7 @@ void ChunkedTerrain3D::update_region(const Rect2i &p_region) {
 		if (!chunk_samples.intersects(grown)) {
 			continue;
 		}
+		last_region_invalidated_chunks++;
 		for (int i = 0; i < MAX_LOD; i++) {
 			if (chunk.meshes[i].is_valid() && rs) {
 				if (chunk.lod == i && chunk.instance.is_valid()) {
@@ -1033,6 +1138,21 @@ void ChunkedTerrain3D::update_region(const Rect2i &p_region) {
 		const Vector3 a(params.origin.x + real_t(chunk.x0) * params.spacing.x, low * height_scale + height_offset, params.origin.y + real_t(chunk.z0) * params.spacing.y);
 		const Vector3 b(params.origin.x + real_t(x1) * params.spacing.x, high * height_scale + height_offset, params.origin.y + real_t(z1) * params.spacing.y);
 		chunk.bounds = AABB(a, b - a).abs();
+		// Height edits must refresh pixel-error LOD bounds too. Otherwise a
+		// sculpted cliff can keep its obsolete flat-ground coarse LOD.
+		chunk.lod_errors[0] = 0.0;
+		int previous_stride = 1;
+		for (int level = 1; level < MAX_LOD; level++) {
+			const int stride = lod_stride(level, chunk_quads);
+			if (stride == previous_stride) {
+				chunk.lod_errors[level] = chunk.lod_errors[level - 1];
+			} else {
+				const real_t error = chunk_lod_max_error(_field(), chunk.x0, chunk.z0,
+						chunk_quads, stride) * Math::abs(height_scale);
+				chunk.lod_errors[level] = MAX(error, chunk.lod_errors[level - 1]);
+			}
+			previous_stride = stride;
+		}
 	}
 	time_since_update = 1e9;
 }
@@ -1067,6 +1187,8 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_heightmap"), &ChunkedTerrain3D::get_heightmap);
 	ClassDB::bind_method(D_METHOD("set_height_data", "heights", "dimensions"), &ChunkedTerrain3D::set_height_data);
 	ClassDB::bind_method(D_METHOD("get_height_data"), &ChunkedTerrain3D::get_height_data);
+	ClassDB::bind_method(D_METHOD("apply_height_patch", "region", "heights", "normals"),
+			&ChunkedTerrain3D::apply_height_patch, DEFVAL(PackedVector3Array()));
 	ClassDB::bind_method(D_METHOD("set_normal_data", "normals"), &ChunkedTerrain3D::set_normal_data);
 	ClassDB::bind_method(D_METHOD("get_normal_data"), &ChunkedTerrain3D::get_normal_data);
 	ClassDB::bind_static_method("ChunkedTerrain3D",
@@ -1074,6 +1196,7 @@ void ChunkedTerrain3D::_bind_methods() {
 			&ChunkedTerrain3D::bake_horizon_visibility, DEFVAL(6));
 	ClassDB::bind_method(D_METHOD("set_color_data", "colors"), &ChunkedTerrain3D::set_color_data);
 	ClassDB::bind_method(D_METHOD("get_color_data"), &ChunkedTerrain3D::get_color_data);
+	ClassDB::bind_method(D_METHOD("apply_color_patch", "region", "colors"), &ChunkedTerrain3D::apply_color_patch);
 	ClassDB::bind_method(D_METHOD("get_height_dimensions"), &ChunkedTerrain3D::get_height_dimensions);
 	ClassDB::bind_method(D_METHOD("clear_height_data"), &ChunkedTerrain3D::clear_height_data);
 	ClassDB::bind_method(D_METHOD("set_size", "size"), &ChunkedTerrain3D::set_size);
@@ -1134,6 +1257,7 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_normal_at", "world_position"), &ChunkedTerrain3D::get_normal_at);
 	ClassDB::bind_method(D_METHOD("is_over_terrain", "world_position"), &ChunkedTerrain3D::is_over_terrain);
 	ClassDB::bind_method(D_METHOD("update_region", "region"), &ChunkedTerrain3D::update_region);
+	ClassDB::bind_method(D_METHOD("get_last_region_invalidated_chunks"), &ChunkedTerrain3D::get_last_region_invalidated_chunks);
 	ClassDB::bind_method(D_METHOD("get_chunk_count"), &ChunkedTerrain3D::get_chunk_count);
 	ClassDB::bind_method(D_METHOD("get_chunk_grid_size"), &ChunkedTerrain3D::get_chunk_grid_size);
 	ClassDB::bind_method(D_METHOD("get_visible_chunk_count"), &ChunkedTerrain3D::get_visible_chunk_count);
