@@ -501,6 +501,7 @@ const SUITES := [
 	"res://tests/test_market_board.gd",
 	"res://tests/test_contracts.gd",
 	"res://tests/test_story_campaign.gd",
+	"res://tests/test_story_chapter_two.gd",
 	"res://tests/test_daily_bounties.gd",
 	"res://tests/test_reputation.gd",
 	"res://tests/test_survival_radar.gd",
