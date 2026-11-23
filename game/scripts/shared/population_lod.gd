@@ -512,7 +512,14 @@ func _rules_pass(dt: float) -> void:
 		var h: Dictionary = herds[id]
 		if int(h["count"]) <= 0:
 			herds.erase(id)
-	# Respawn.
+	# Count each region once after decay. Multiple nests in one region share
+	# the same up-to-date cap, but no longer rescan every herd for every nest.
+	var region_totals: Dictionary = {}
+	if not _spawners.is_empty():
+		for h in herds.values():
+			var region: int = int(h["region"])
+			region_totals[region] = int(region_totals.get(region, 0)) + int(h["count"])
+	# Respawn. Iteration order and fractional accumulators are unchanged.
 	for s in _spawners:
 		var region: int = s["region"]
 		var cap: int = s["cap"]
@@ -523,12 +530,13 @@ func _rules_pass(dt: float) -> void:
 		s["acc"] = acc
 		if add <= 0:
 			continue
-		var room := cap - herd_region_count(region)
+		var room: int = cap - int(region_totals.get(region, 0))
 		add = mini(add, room)
 		if add <= 0:
 			s["acc"] = 0.0
 			continue
 		_add_to_region(region, str(s["type"]), add)
+		region_totals[region] = int(region_totals.get(region, 0)) + add
 		_stats["spawned"] = int(_stats["spawned"]) + add
 
 
