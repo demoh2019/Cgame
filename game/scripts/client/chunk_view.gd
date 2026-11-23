@@ -1009,6 +1009,14 @@ func _mesh_for(kind: String) -> Mesh:
 					if extended_tree != null:
 						return Foliage.swayed(extended_tree, "kenney_expanded_tree:%d" % variant, 0.18)
 				return Assets.tree_meshes()[variant % original_count]
+		"branch":
+			var stick := BoxMesh.new()
+			stick.size = Vector3(0.82, 0.07, 0.11)
+			var bark := StandardMaterial3D.new()
+			bark.albedo_color = Color(0.35, 0.23, 0.14)
+			bark.roughness = 1.0
+			stick.material = bark
+			return stick
 		"rock":
 			if ModelCatalog.has_scanned_rocks():
 				picked = ModelCatalog.scanned_rock(variant)
@@ -1066,6 +1074,10 @@ func _mesh_for(kind: String) -> Mesh:
 ## Size multiplier of one instance. Catalog meshes are baked to meters already, so this is only the variation between
 ## instances and the difference between a structure's own scale and the nominal one the mesh was baked for.
 func _size_for(kind: String, node: Dictionary, rng: RandomNumberGenerator) -> float:
+	if str(node.get("kind", "")) == "pebble":
+		return 0.22
+	if str(node.get("kind", "")) == "branch":
+		return 1.0
 	var base: String = kind.get_slice(":", 0)
 	var variant: int = int(kind.get_slice(":", 1)) if kind.contains(":") else 0
 	var baked: bool = _is_baked(base, variant)
@@ -1152,6 +1164,8 @@ func _build_objects(data: Dictionary) -> void:
 		var variant: int = WorldGen.mix(int(node["id"]), 3, 5)
 		if kind == "tree":
 			kind = _tree_key(node) if _use_nature else "tree:%d" % (variant % tree_variants)
+		elif kind == "pebble":
+			kind = "rock:%d" % (variant % rock_variants)
 		elif kind == "rock" and (_use_nature or rock_variants > Assets.ROCK_FILES.size() or ModelCatalog.has_scanned_rocks()):
 			kind = "rock:%d" % (variant % rock_variants)
 		elif kind == "ore" and crystal_count > 0:
