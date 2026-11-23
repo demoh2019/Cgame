@@ -184,6 +184,8 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	var next_resource_hits: Dictionary = {}
 	for entry in snapshot.get("resource_hits", []):
 		next_resource_hits[int(entry["id"])] = int(entry["hits"])
+	if resource_hits != next_resource_hits:
+		world_state_revision += 1
 	resource_hits = next_resource_hits
 	var next_depleted: Dictionary = {}
 	for id in snapshot["depleted"]:
