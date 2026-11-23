@@ -307,4 +307,52 @@ TEST_CASE("[CgamePopulationLOD] multiple native nests share their regional agent
 	CHECK(p->herd_region_count(44) <= 9);
 }
 
+TEST_CASE("[CgamePopulationLOD] sparse promotion regions match full-grid reference") {
+	Ref<CgamePopulationLOD> p;
+	p.instantiate();
+	p->setup(70, 56, 32.0, 812, Vector2(-600, -500));
+	p->set_promote_radius(128.0);
+	RandomPCG rng;
+	rng.seed(21891);
+	for (int i = 0; i < 180; i++) {
+		p->add_herd((int)(rng.randi() % p->region_count()), comp("walker", 1 + (int)(rng.randi() % 9)));
+	}
+	p->add_herd(987, comp("runner", 5));
+	PackedVector2Array probes;
+	probes.push_back(p->region_center(987));
+	probes.push_back(p->region_center(19));
+	probes.push_back(p->region_center(3400));
+	probes.push_back(Vector2(5000, 5000));
+	PackedInt32Array expected;
+	for (int region = 0; region < p->region_count(); region++) {
+		if (p->herd_region_count(region) <= 0) {
+			continue;
+		}
+		const Vector2 center = p->region_center(region);
+		bool near = false;
+		for (int i = 0; i < probes.size(); i++) {
+			if (center.distance_to(probes[i]) <= p->get_promote_radius() + p->get_cell_size() * 0.5) {
+				near = true;
+				break;
+			}
+		}
+		if (near) {
+			expected.push_back(region);
+		}
+	}
+	const PackedInt32Array actual = p->regions_near(probes);
+	CHECK(actual == expected);
+	CHECK(p->regions_near(PackedVector2Array()).is_empty());
+	CHECK(actual.has(987));
+	p->set_max_concrete_agents(2048);
+	PackedVector2Array one_player;
+	one_player.push_back(p->region_center(987));
+	const int initial = p->herd_region_count(987);
+	const Array specs = p->promote(987, one_player);
+	CHECK(specs.size() == initial);
+	CHECK(!p->regions_near(one_player).has(987));
+	p->demote(specs, 987);
+	CHECK(p->regions_near(one_player).has(987));
+}
+
 } // namespace TestCgamePopulationLOD
