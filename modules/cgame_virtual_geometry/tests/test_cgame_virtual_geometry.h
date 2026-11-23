@@ -36,6 +36,7 @@
 
 #include "core/math/math_funcs.h"
 #include "core/math/plane.h"
+#include "scene/resources/mesh.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
 #include "tests/test_macros.h"
@@ -448,6 +449,60 @@ static Ref<CgameOcclusionRaster> make_wall_raster() {
 	}
 	r->rasterize_occluder(tris);
 	return r;
+}
+
+TEST_CASE("[CgameClusterLOD] Indexed LOD cuts preserve source material attributes") {
+	const Mesh mesh = make_sphere(16, 22, 1.0f);
+	const Dictionary hierarchy = CgameClusterLOD::build_hierarchy(mesh.vertices, mesh.indices, 4);
+	const PackedInt32Array cut = CgameClusterLOD::select_cut(hierarchy, Vector3(0, 0, 300), FOV, SCREEN_H, 1.0);
+	REQUIRE(!cut.is_empty());
+	Array source;
+	source.resize(::Mesh::ARRAY_MAX);
+	source[::Mesh::ARRAY_VERTEX] = mesh.vertices;
+	source[::Mesh::ARRAY_INDEX] = mesh.indices;
+	PackedVector3Array normals;
+	PackedVector2Array uvs;
+	PackedColorArray colors;
+	PackedFloat32Array tangents;
+	normals.resize(mesh.vertices.size());
+	uvs.resize(mesh.vertices.size());
+	colors.resize(mesh.vertices.size());
+	tangents.resize(mesh.vertices.size() * 4);
+	for (int i = 0; i < mesh.vertices.size(); i++) {
+		normals.set(i, mesh.vertices[i].normalized());
+		uvs.set(i, Vector2(real_t(i % 11) / 11.0, real_t(i % 7) / 7.0));
+		colors.set(i, Color(real_t(i % 3) / 3.0, 0.65, 0.8));
+		tangents.set(i * 4, 1.0f);
+		tangents.set(i * 4 + 3, 1.0f);
+	}
+	source[::Mesh::ARRAY_NORMAL] = normals;
+	source[::Mesh::ARRAY_TEX_UV] = uvs;
+	source[::Mesh::ARRAY_COLOR] = colors;
+	source[::Mesh::ARRAY_TANGENT] = tangents;
+	const Array output = CgameClusterLOD::build_cut_arrays(source, hierarchy, cut);
+	REQUIRE(output.size() == ::Mesh::ARRAY_MAX);
+	CHECK(output[::Mesh::ARRAY_VERTEX] == source[::Mesh::ARRAY_VERTEX]);
+	CHECK(output[::Mesh::ARRAY_NORMAL] == source[::Mesh::ARRAY_NORMAL]);
+	CHECK(output[::Mesh::ARRAY_TEX_UV] == source[::Mesh::ARRAY_TEX_UV]);
+	CHECK(output[::Mesh::ARRAY_COLOR] == source[::Mesh::ARRAY_COLOR]);
+	CHECK(output[::Mesh::ARRAY_TANGENT] == source[::Mesh::ARRAY_TANGENT]);
+	const PackedInt32Array indices = output[::Mesh::ARRAY_INDEX];
+	CHECK(indices.size() == CgameClusterLOD::triangle_count(hierarchy, cut) * 3);
+	CHECK(indices.size() <= mesh.indices.size());
+	for (int i = 0; i < indices.size(); i++) {
+		CHECK(indices[i] >= 0 && indices[i] < mesh.vertices.size());
+	}
+	CHECK(source[::Mesh::ARRAY_INDEX] == mesh.indices); // Input cannot be mutated.
+
+	PackedInt32Array bad;
+	bad.push_back(1000000);
+	ERR_PRINT_OFF;
+	CHECK(CgameClusterLOD::build_cut_arrays(source, hierarchy, bad).is_empty());
+	CHECK(CgameClusterLOD::build_cut_arrays(source, hierarchy, PackedInt32Array()).is_empty());
+	Array mismatched = source.duplicate();
+	mismatched[::Mesh::ARRAY_VERTEX] = PackedVector3Array();
+	CHECK(CgameClusterLOD::build_cut_arrays(mismatched, hierarchy, cut).is_empty());
+	ERR_PRINT_ON;
 }
 
 TEST_CASE("[CgameOcclusionRaster] Wall culls the box behind it") {
