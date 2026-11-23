@@ -60,6 +60,28 @@ func run(t) -> void:
 	t.check(not public[0].has("raid_eligible_tokens") and not public[0].has("owner_account"),
 		"recipient account identities remain private")
 
+	t.current = "corrupt raid locks cannot release protected boss loot"
+	var corrupted: Dictionary = {"raid_reserved_until": NAN,
+		"raid_eligible_tokens": [RaidLoot.token(killer)]}
+	t.eq(RaidLoot.remaining(corrupted, server.time), RaidLoot.LOCK_SECONDS,
+		"invalid raid timer stays finite and locked")
+	t.check(not RaidLoot.can_open(corrupted, outsider, server.time),
+		"corrupt lock never grants outsiders raid loot")
+	t.check(RaidLoot.can_open(corrupted, killer, server.time),
+		"original contributor can still recover a corrupted reserved bag")
+	corrupted["raid_reserved_until"] = "invalid"
+	t.check(not RaidLoot.can_open(corrupted, outsider, server.time),
+		"nonnumeric lock stays private")
+	corrupted["raid_eligible_tokens"] = "not-an-array"
+	t.check(not RaidLoot.can_open(corrupted, killer, server.time),
+		"malformed roster denies even formerly allowed players")
+	t.check(not RaidLoot.can_open(bag, outsider, NAN),
+		"invalid clock cannot bypass raid entitlement")
+	t.check(not RaidLoot.can_open(bag, null, server.time),
+		"missing identity cannot take protected raid rewards")
+	t.check(RaidLoot.can_open({}, outsider, server.time),
+		"ordinary unreserved loot remains accessible")
+
 	t.current = "reconnection keeps authenticated earned loot rights"
 	server.remove_player(102)
 	var wrong = server.add_player(102, "Impostor", "different-account")

@@ -121,7 +121,9 @@ func sample_frame(delta: float, measured_gpu_ms: float = 0.0) -> bool:
 				# Rounding must not step under device minimum.
 				scale = maxf(scale, floor_scale)
 				return true
-	elif demand <= FAST_FRAME:
+	elif demand <= FAST_FRAME and delta <= FAST_FRAME:
+		# A fast GPU does not justify additional viewport reallocations
+		# while scripts, networking or physics are CPU-frame-bound.
 		_fast += delta
 		_slow = 0.0
 		if _fast >= RAISE_AFTER:
