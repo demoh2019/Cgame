@@ -18,6 +18,12 @@ var _detail: FastNoiseLite
 var _temperature: FastNoiseLite
 var _moisture: FastNoiseLite
 var _cache: Dictionary = {}
+var _cache_ages: Dictionary = {} # Last use of each live chunk; incremental LRU eviction.
+var _static_blockers: Dictionary = {} # Per-chunk solid-only broadphase, same lifetime as _cache.
+var _cache_clock: int = 0
+var _cache_hits: int = 0
+var _cache_misses: int = 0
+var _cache_evictions: int = 0
 var dynamic_blockers: Dictionary = {} # Session structures shared with movement and prediction.
 # Generated resource geometry remains immutable for deterministic world seeding.
 # Only its collision eligibility is mutable, matching server depletion and
@@ -357,13 +363,58 @@ static func entity_id(cell: Vector2i, index: int) -> int:
 ## Everything in a chunk, derived from the seed: gatherable nodes, ruins with loot crates and the
 ## places where zombies spawn. The same call always gives the same answer.
 func chunk(cell: Vector2i) -> Dictionary:
+	_cache_clock += 1
 	if _cache.has(cell):
+		_cache_hits += 1
+		_cache_ages[cell] = _cache_clock
 		return _cache[cell]
-	if _cache.size() > CACHE_LIMIT:
-		_cache.clear()
-	var data := _generate_chunk(cell)
+	_cache_misses += 1
+	# Evict only the least recently used chunk. Clearing the entire cache
+	# caused a burst of expensive world-generation work at the 256-cell edge.
+	if _cache.size() >= CACHE_LIMIT:
+		var oldest_cell: Vector2i = _cache_ages.keys()[0]
+		var oldest_age: int = int(_cache_ages[oldest_cell])
+		for cached_cell in _cache_ages:
+			var age: int = int(_cache_ages[cached_cell])
+			if age < oldest_age:
+				oldest_cell = cached_cell
+				oldest_age = age
+		_cache.erase(oldest_cell)
+		_cache_ages.erase(oldest_cell)
+		_static_blockers.erase(oldest_cell)
+		_cache_evictions += 1
+	var data: Dictionary = _generate_chunk(cell)
 	_cache[cell] = data
+	_cache_ages[cell] = _cache_clock
+	# Index only solid objects, preserving the original group iteration order.
+	# Depleted resource IDs are deliberately checked at query time.
+	var solids: Array = []
+	for group in ["nodes", "crates", "structures", "props"]:
+		for item in data[group]:
+			if bool(item.get("blocks", false)):
+				solids.append([item, group == "nodes"])
+	_static_blockers[cell] = solids
 	return data
+
+
+## Lightweight counters used by the in-game performance overlay and tests.
+func chunk_cache_stats() -> Dictionary:
+	return {"size": _cache.size(), "capacity": CACHE_LIMIT, "hits": _cache_hits,
+		"misses": _cache_misses, "evictions": _cache_evictions,
+		"collision_chunks": _static_blockers.size()}
+
+
+func chunk_cache_size() -> int:
+	return _cache.size()
+
+
+func chunk_cache_evictions() -> int:
+	return _cache_evictions
+
+
+func chunk_cache_hit_percent() -> float:
+	var total: int = _cache_hits + _cache_misses
+	return 0.0 if total == 0 else 100.0 * float(_cache_hits) / float(total)
 
 
 ## Sunken caches lie on the bottom of deep water; only a diver can open them. A separate
@@ -1025,16 +1076,20 @@ func blockers_near(x: float, z: float, radius: float) -> Array:
 	var cell_b := cell_of(x + radius, z + radius)
 	for cx in range(cell_a.x, cell_b.x + 1):
 		for cz in range(cell_a.y, cell_b.y + 1):
-			var data := chunk(Vector2i(cx, cz))
-			for group in ["nodes", "crates", "structures", "props"]:
-				for n in data[group]:
-					# Depletion affects actual collisions, not just MultiMesh
-					# visibility. A server-mined boulder cannot become an
-					# invisible barrier until it respawns.
-					if group == "nodes" and depleted_blockers.has(n["id"]):
-						continue
-					if n["blocks"] and absf(n["x"] - x) < radius + n["radius"] and absf(n["z"] - z) < radius + n["radius"]:
-						result.append(n)
+			var cell: Vector2i = Vector2i(cx, cz)
+			chunk(cell) # Ensures a matching solid-only index exists on cache miss.
+			for entry in _static_blockers[cell]:
+				var n: Dictionary = entry[0]
+				# Depletion affects actual collisions, not just MultiMesh
+				# visibility. The cached geometry must never become a
+				# ghost barrier when a model is mined or reappear too early.
+				if bool(entry[1]) and depleted_blockers.has(n["id"]):
+					continue
+				if bool(n["blocks"]) and (
+						absf(float(n["x"]) - x) < radius + float(n["radius"]) and
+						absf(float(n["z"]) - z) < radius + float(n["radius"])
+					):
+					result.append(n)
 	# Include built obstacles without erasing the procedural hub/terrain blockers.
 	for barricade in dynamic_blockers.values():
 		if absf(float(barricade["x"]) - x) <= radius + float(barricade["radius"]) and absf(float(barricade["z"]) - z) <= radius + float(barricade["radius"]):
