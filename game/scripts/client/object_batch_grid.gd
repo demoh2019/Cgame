@@ -34,19 +34,23 @@ static func partition(by_kind: Dictionary, origin: Vector2, chunk_size: float,
 		# The cell lookup uses an integer key while building; format the stable
 		# string batch id only once per occupied cell, not once per instance.
 		var side: int = maxi(subcells, 1)
+		var side_float: float = float(side)
 		var size: float = maxf(chunk_size, 0.01)
 		var local_buckets: Dictionary = {}
 		for node in nodes:
 			var world_position := Vector2(float(node["x"]), float(node["z"]))
 			var local: Vector2 = (world_position - origin) / size
 			var cell := Vector2i(
-				clampi(floori(local.x * float(side)), 0, side - 1),
-				clampi(floori(local.y * float(side)), 0, side - 1))
-			var members: Array = local_buckets.get(cell) as Array
-			if members == null:
+				clampi(floori(local.x * side_float), 0, side - 1),
+				clampi(floori(local.y * side_float), 0, side - 1))
+			var existing: Variant = local_buckets.get(cell)
+			var members: Array
+			if existing == null:
 				members = []
 				local_buckets[cell] = members
 				var batch_id: String = "%s|%d|%d" % [kind, cell.x, cell.y]
 				batches[batch_id] = {"kind": kind, "nodes": members}
+			else:
+				members = existing
 			members.append(node)
 	return batches
