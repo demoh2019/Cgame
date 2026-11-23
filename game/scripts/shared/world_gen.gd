@@ -412,6 +412,11 @@ func chunk_cache_evictions() -> int:
 	return _cache_evictions
 
 
+func chunk_cache_hit_percent() -> float:
+	var total: int = _cache_hits + _cache_misses
+	return 0.0 if total == 0 else 100.0 * float(_cache_hits) / float(total)
+
+
 ## Sunken caches lie on the bottom of deep water; only a diver can open them. A separate
 ## random stream keeps every other piece of the chunk exactly as it was before.
 const SUNKEN_MIN_DEPTH := 2.2
