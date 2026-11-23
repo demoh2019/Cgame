@@ -36,7 +36,7 @@
 // Nanite-style cluster DAG LOD hierarchy built with meshoptimizer.
 //
 // Level 0 holds the meshlets of the source mesh. Every following level groups up to
-// GROUP_SIZE neighbouring clusters, simplifies the merged triangles to half with the
+// GROUP_SIZE neighboring clusters, simplifies the merged triangles to half with the
 // group border locked (meshopt_SimplifyLockBorder) and re-splits the result into new
 // meshlets. All clusters of a group share one LOD sphere and one error value, so a cut
 // selected by select_cut() is crack free.

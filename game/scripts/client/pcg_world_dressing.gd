@@ -16,7 +16,7 @@ const SETTLEMENT_KINDS := ["village", "farm", "outpost", "camp", "dock", "lighth
 const REGION_REACH := 13 # Regions -13..12 on both axes: the whole island (as WorldRoads).
 const HUB_CLEARANCE := 25.0 # Added to the hub's safe radius: no clutter on the plaza.
 ## The world's terrain functions are not thread-safe (cached region state), so the component bakes height, water and
-## biome into grids on the main thread (BAKE_STEP metres) and the graph then runs on the worker pool reading only the
+## biome into grids on the main thread (BAKE_STEP meters) and the graph then runs on the worker pool reading only the
 ## grids. Engines without baking (older pcg_graph) fall back to main-thread cells.
 const ASYNC_CELLS := true
 const BAKE_STEP := 2.0
@@ -46,7 +46,7 @@ var _user_data: Dictionary = {}
 var _exclusions: Array = []
 var _last_anchor := Vector3(1.0e9, 0.0, 1.0e9)
 static var _fallback_cache: Dictionary = {}
-## Runtime PCG debugging: crosses at every generated point, coloured by asset (toggle with set_debug_draw).
+## Runtime PCG debugging: crosses at every generated point, colored by asset (toggle with set_debug_draw).
 static var debug_draw := false
 static var _proxy_cache: Dictionary = {}
 var _start_ms := Time.get_ticks_msec()
@@ -156,7 +156,7 @@ func _make_component(key: String, graph, meshes: Array[Mesh], tier: Dictionary, 
 
 # --- Data from the world ------------------------------------------------------------------------------------------
 
-## Road polylines ("roads") and ruined-city centres ("ruins") as PCG user data.
+## Road polylines ("roads") and ruined-city centers ("ruins") as PCG user data.
 static func build_user_data(p_world) -> Dictionary:
 	var roads: Array = []
 	for road in p_world.roads.all_roads():
@@ -326,12 +326,12 @@ static func proxy_for(mesh: Mesh) -> Mesh:
 	material.albedo_color = colour
 	material.roughness = 1.0
 	box.material = material
-	# Boxes are centred on their origin; the source mesh sits where its AABB is, so offset via a one-surface ArrayMesh.
+	# Boxes are centered on their origin; the source mesh sits where its AABB is, so offset via a one-surface ArrayMesh.
 	var arrays := box.get_mesh_arrays()
 	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-	var centre := bounds.get_center()
+	var center := bounds.get_center()
 	for i in verts.size():
-		verts[i] += centre
+		verts[i] += center
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	var proxy := ArrayMesh.new()
 	proxy.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)

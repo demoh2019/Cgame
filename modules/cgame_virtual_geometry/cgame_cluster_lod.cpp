@@ -388,7 +388,6 @@ int CgameClusterLOD::triangle_count(const Dictionary &p_hierarchy, const PackedI
 	return total;
 }
 
-
 Array CgameClusterLOD::build_cut_surface(const Dictionary &p_hierarchy, const PackedInt32Array &p_cut, const Array &p_source_arrays) {
 	Array invalid;
 	ERR_FAIL_COND_V_MSG(p_source_arrays.size() != Mesh::ARRAY_MAX, invalid, "CgameClusterLOD: invalid source surface arrays.");

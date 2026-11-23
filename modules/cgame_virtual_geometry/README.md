@@ -5,7 +5,7 @@ Native building blocks for Nanite-style virtualized geometry on the CPU. This is
 | Class | Purpose |
 |---|---|
 | `CgameMeshlets` | Splits an indexed mesh into meshlets (`meshopt_buildMeshlets`), bounding sphere and normal cone (`meshopt_computeMeshletBounds`), `cone_cull`, `frustum_cull`. |
-| `CgameClusterLOD` | Cluster DAG: group neighbouring clusters, simplify with `meshopt_simplify` + `meshopt_SimplifyLockBorder`, re-split into meshlets. `select_cut` picks a crack-free set by projected screen-space error; `triangle_count`. |
+| `CgameClusterLOD` | Cluster DAG: group neighboring clusters, simplify with `meshopt_simplify` + `meshopt_SimplifyLockBorder`, re-split into meshlets. `select_cut` picks a crack-free set by projected screen-space error; `triangle_count`. |
 | `CgameOcclusionRaster` | Low-resolution software depth rasterizer with a max-depth Hi-Z pyramid. `rasterize_occluder`, `is_visible`, `test_many`, `temporal_reproject`. Conservative: unsure means visible. |
 
 All classes mirror the GDScript reference implementations (`scripts/shared/meshlets.gd`, `cluster_lod.gd`, `occlusion_raster.gd`) and use the same dictionary keys and semantics. Meshlet and cluster methods are `static`.
@@ -17,7 +17,7 @@ Requires the `meshoptimizer` module (vendored in `thirdparty/meshoptimizer`). If
 ## Conventions
 
 - Godot winding (clockwise front faces). `cone_axis` is the outward normal, so `cone_cull` uses `dot(center - cam, axis) >= cutoff * |center - cam| + radius`.
-- Meshes passed to `CgameClusterLOD` must be welded (neighbouring triangles share vertex ids).
+- Meshes passed to `CgameClusterLOD` must be welded (neighboring triangles share vertex ids).
 - `CgameClusterLOD` error values are absolute object-space distances (meshoptimizer `meshopt_SimplifyErrorAbsolute`).
 - Occlusion depth is clip-space `w` (view distance); perspective projections only.
 

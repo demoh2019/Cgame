@@ -2,9 +2,9 @@
 
 Source-only tests: native doctests and real game runs are still required.
 """
+
 import unittest
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -42,7 +42,7 @@ class ClusterCutHLODContract(unittest.TestCase):
             'EngineFeatures.has("CgameClusterLOD")',
             'native.call("build_hierarchy", vertices, indices, 5)',
             'native.call("build_cut_surface", hierarchy, cut, arrays)',
-            "native.call(\"triangle_count\", hierarchy, cut)",
+            'native.call("triangle_count", hierarchy, cut)',
             "mesh.surface_get_format(0)",
             "mesh.surface_get_material(0)",
             "triangles * 5 > indices.size()",
@@ -56,9 +56,7 @@ class ClusterCutHLODContract(unittest.TestCase):
 
     def test_real_game_and_native_regressions_are_registered(self):
         game_tests = src("game/tests/test_virtual_cluster_hlod.gd")
-        native_tests = src(
-            "modules/cgame_virtual_geometry/tests/test_cgame_virtual_geometry.h"
-        )
+        native_tests = src("modules/cgame_virtual_geometry/tests/test_cgame_virtual_geometry.h")
         runner = src("game/tests/run_all.gd")
         for token in (
             "PcgWorldDressing.proxy_for",

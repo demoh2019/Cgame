@@ -426,7 +426,6 @@ TEST_CASE("[CgameClusterLOD] Determinism and edge cases") {
 	CHECK(CgameClusterLOD::triangle_count(flat, cut) == mesh.indices.size() / 3);
 }
 
-
 TEST_CASE("[CgameClusterLOD] Reconstructed cut keeps PBR vertex channels and validates source") {
 	const Mesh source = make_sphere(10, 20, 3.0);
 	const Dictionary hierarchy = CgameClusterLOD::build_hierarchy(source.vertices, source.indices, 5);
