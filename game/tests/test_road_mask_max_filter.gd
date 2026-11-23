@@ -28,6 +28,22 @@ func run(t) -> void:
 						expected = maxi(expected, mask[sy * size.x + sx])
 				t.eq(result[y * size.x + x], expected, "grayscale dilation matches brute force")
 	t.eq(mask, original, "max filter does not mutate source road mask")
+	t.current = "linear-time fallback matches scalar oracle on irregular road masks"
+	var irregular_size := Vector2i(19, 11)
+	var irregular := PackedByteArray()
+	irregular.resize(irregular_size.x * irregular_size.y)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 90215
+	for i in irregular.size():
+		irregular[i] = rng.randi_range(0, 255)
+	for radius in [1, 2, 4, 9, 24, 64]:
+		var fast: PackedByteArray = Filter._compute_linear(irregular, irregular_size, radius)
+		var expected: PackedByteArray = Filter.compute(irregular, irregular_size, radius, true)
+		t.eq(fast, expected, "linear fallback equals scalar radius %d" % radius)
+		t.eq(Filter.compute(irregular, irregular_size, radius), expected,
+			"game entry point matches scalar radius %d" % radius)
+	t.eq(irregular.size(), irregular_size.x * irregular_size.y,
+		"optimization does not resize the original road mask")
 	t.eq(Filter.compute(mask, Vector2i(4, 5), 2).size(), 0, "invalid raster length rejected")
 	t.eq(Filter.compute(mask, size, -1).size(), 0, "negative radius rejected")
 	t.eq(Filter.compute(mask, size, 65).size(), 0, "large radius rejected")

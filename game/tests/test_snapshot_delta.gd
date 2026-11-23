@@ -113,6 +113,22 @@ func run(t) -> void:
 	bl.forget(1)
 	t.check(bl.baseline_for(1).is_empty(), "forget clears baseline")
 
+	t.current = "snapshot IDs are immutable across retries and late sends"
+	var replay := SnapshotBaselines.new()
+	replay.record_sent(42, 5, {"unit": {"hp": 80}})
+	replay.record_sent(42, 5, {"unit": {"hp": 1}})
+	replay.acknowledge(42, 5)
+	t.eq((replay.baseline_for(42)["unit"] as Dictionary)["hp"], 80,
+		"same sequence keeps the original delivered snapshot")
+	replay.record_sent(42, 5, {"unit": {"hp": 1}})
+	replay.record_sent(42, 4, {"unit": {"hp": 1}})
+	var replay_pending: Dictionary = (replay._clients[42] as Dictionary)["pending"]
+	t.eq(replay_pending.size(), 0, "acked and older snapshot IDs cannot re-enter history")
+	replay.record_sent(42, 6, {"unit": {"hp": 60}})
+	replay.acknowledge(42, 6)
+	t.eq((replay.baseline_for(42)["unit"] as Dictionary)["hp"], 60,
+		"newer sequence is still acknowledged and applied normally")
+
 	var bl2 := SnapshotBaselines.new()
 	for i in 100:
 		bl2.record_sent(7, i, {i: {"v": i}})

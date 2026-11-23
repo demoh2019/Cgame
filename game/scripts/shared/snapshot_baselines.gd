@@ -20,9 +20,12 @@ func _slot(client_id: int) -> Dictionary:
 func record_sent(client_id: int, sequence: int, state: Dictionary) -> void:
 	var slot: Dictionary = _slot(client_id)
 	var pending: Dictionary = slot["pending"]
+	# Late/replayed sends cannot re-enter the pending window after an ACK.
+	# One sequence always names one immutable snapshot, even on retries.
+	if sequence <= int(slot["acked_seq"]) or pending.has(sequence):
+		return
 	var order: Array[int] = slot["order"]
-	if not pending.has(sequence):
-		order.append(sequence)
+	order.append(sequence)
 	pending[sequence] = state.duplicate(true)
 	while order.size() > MAX_UNACKED:
 		var oldest: int = order.pop_front()

@@ -165,6 +165,10 @@ func warmup_navmesh(cell: Vector2i, bake: Callable) -> void:
 	if not _cells.has(cell):
 		begin(cell, _now)
 	var c: CellState = _cells[cell]
+	# Repeated editor/runtime requests cannot schedule duplicate navmesh bakes.
+	# A ready cell should never restart a completed bake.
+	if c.warmup_queued or (ready_mask(cell) & Stage.NAVMESH_READY) != 0:
+		return
 	c.warmup_queued = true
 	_warmups.append({"cell": cell, "bake": bake, "attempts": 0})
 
@@ -182,12 +186,19 @@ func process_warmup(max_count: int, max_usec: int = 0) -> int:
 	for item: Dictionary in snapshot:
 		if ran >= max_count or (max_usec > 0 and Time.get_ticks_usec() - t0 >= max_usec):
 			break
+		# User callbacks can unload cells while this snapshot is being processed.
+		if not _warmups.has(item):
+			continue
 		var cell: Vector2i = item["cell"]
-		if (ready_mask(cell) & Stage.PHYSICS_READY) == 0:
+		var state: CellState = _cells.get(cell)
+		if state == null or (ready_mask(cell) & Stage.PHYSICS_READY) == 0:
 			continue
 		ran += 1
 		var bake: Callable = item["bake"]
 		var ok: bool = bake.is_valid() and bool(bake.call(cell))
+		# Never re-create a released cell (or touch a new cell using an old job).
+		if not _warmups.has(item) or _cells.get(cell) != state:
+			continue
 		if ok:
 			_warmups.erase(item)
 			mark(cell, Stage.NAVMESH_READY)
