@@ -117,6 +117,7 @@ private:
 	double time_since_update = 1e9;
 	bool built = false;
 	bool rebuild_queued = false;
+	int last_region_invalidated_chunks = 0; // Diagnostics for sparse edit throughput.
 
 	HeightmapTerrainGeometry::Params _params() const;
 	HeightmapTerrainGeometry::HeightField _field() const;
@@ -143,6 +144,10 @@ public:
 	// from noise. Replaces the heightmap texture until clear_height_data() is called.
 	void set_height_data(const PackedFloat32Array &p_heights, const Vector2i &p_dimensions);
 	PackedFloat32Array get_height_data() const;
+	// Applies a row-major rectangular edit without resetting unaffected chunk mesh RIDs.
+	// When custom normals are active, matching patch normals are mandatory to avoid stale frames.
+	bool apply_height_patch(const Rect2i &p_region, const PackedFloat32Array &p_heights,
+			const PackedVector3Array &p_normals = PackedVector3Array());
 	// Optional row-major unit normals for the active height grid, including borders.
 	void set_normal_data(const PackedVector3Array &p_normals);
 	PackedVector3Array get_normal_data() const { return normal_data; }
@@ -152,6 +157,8 @@ public:
 			const Vector2i &p_dimensions, real_t p_spacing, int p_radius_steps = 6);
 	void set_color_data(const PackedColorArray &p_colors);
 	PackedColorArray get_color_data() const { return color_data; }
+	// Edits existing per-sample vertex colors; the grid must first be initialized with set_color_data().
+	bool apply_color_patch(const Rect2i &p_region, const PackedColorArray &p_colors);
 	Vector2i get_height_dimensions() const { return Vector2i(data_width, data_depth); }
 	void clear_height_data();
 
@@ -216,6 +223,7 @@ public:
 	bool is_over_terrain(const Vector3 &p_world_position) const;
 	// Recomputes meshes and collision after the samples inside `p_region` (sample coordinates) changed.
 	void update_region(const Rect2i &p_region);
+	int get_last_region_invalidated_chunks() const { return last_region_invalidated_chunks; }
 
 	int get_chunk_count() const { return int(chunks.size()); }
 	Vector2i get_chunk_grid_size() const { return Vector2i(chunks_x, chunks_z); }
