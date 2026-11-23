@@ -43,6 +43,25 @@ func run(t) -> void:
 		"repeated trap deployment is limited")
 	t.eq(player.inventory.count(FishTrap.ITEM_ID), 1,
 		"rejected deployment spends nothing")
+	t.current = "fish net collection is distance- and elevation-aware"
+	var placed: Dictionary = sim.fish_traps[trap_id]
+	t.check(FishTrap.collectable(player.position, placed),
+		"owner can collect a nearby buoy at the same height")
+	var upstairs: Vector3 = player.position + Vector3(0.0, FishTrap.COLLECT_HEIGHT + 1.0, 0.0)
+	t.check(not FishTrap.collectable(upstairs, placed),
+		"owner cannot collect a shoreline net from another floor")
+	var lower: Vector3 = player.position - Vector3(0.0, FishTrap.COLLECT_HEIGHT + 1.0, 0.0)
+	t.check(not FishTrap.collectable(lower, placed),
+		"owner cannot collect a buoy from far below")
+	t.check(not FishTrap.collectable(Vector3(INF, 0.0, 0.0), placed),
+		"nonfinite collector position is rejected")
+	t.check(not FishTrap.collectable(player.position,
+		{"x": NAN, "y": player.position.y, "z": player.position.z}),
+		"nonfinite net coordinates cannot bypass the reach gate")
+	t.check(not FishTrap.collectable(player.position,
+		{"x": player.position.x, "z": player.position.z}),
+		"missing net height cannot silently disable vertical reach")
+
 	t.current = "owner-only time-gated harvest, tier and experience"
 	t.eq(sim.cmd_collect_fish_trap(541, trap_id).get("reason", ""), "not_ready",
 		"cannot claim before two minutes")

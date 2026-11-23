@@ -6,6 +6,7 @@ const CATCH_SECONDS := 120.0
 const LIFETIME_SECONDS := 600.0
 const COUNT := 2
 const COLLECT_RANGE := 4.5
+const COLLECT_HEIGHT := 3.0
 const MIN_SEPARATION := 4.0
 const MAX_GLOBAL := 80
 
@@ -28,8 +29,15 @@ static func site(world, position: Vector3, traps: Dictionary, now: float) -> Dic
 static func collectable(position: Vector3, trap: Dictionary) -> bool:
 	if not position.is_finite() or trap.is_empty():
 		return false
+	var x: float = float(trap.get("x", NAN))
+	var y: float = float(trap.get("y", NAN))
+	var z: float = float(trap.get("z", NAN))
+	if not is_finite(x) or not is_finite(y) or not is_finite(z):
+		return false
+	if absf(position.y - y) > COLLECT_HEIGHT:
+		return false
 	return Vector2(position.x, position.z).distance_squared_to(
-		Vector2(float(trap["x"]), float(trap["z"]))) <= COLLECT_RANGE * COLLECT_RANGE
+		Vector2(x, z)) <= COLLECT_RANGE * COLLECT_RANGE
 
 
 static func visible(traps: Dictionary, position: Vector3, now: float, radius: float) -> Array:
