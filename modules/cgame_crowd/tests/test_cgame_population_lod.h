@@ -225,4 +225,86 @@ TEST_CASE("[CgamePopulationLOD] decay and spawner rules are accounted") {
 	CHECK(sp->herd_region_count(12) == 6);
 }
 
+TEST_CASE("[CgamePopulationLOD] dynamic sources refresh without multiplying signals") {
+	Ref<CgamePopulationLOD> p = make_lod(706);
+	const Vector2 first = p->region_center(44);
+	const Vector2 second = p->region_center(77);
+	p->add_attractor("loot", first, 1.0, 20.0);
+	p->set_source_attractor("noise", 4, first, 2.0, 100.0, 0.5);
+	for (int i = 0; i < 80; i++) {
+		p->set_source_attractor("noise", 4, second, 4.0, 90.0, 0.5);
+	}
+	CHECK(p->active_attractor_count() == 2);
+	CHECK(p->attraction(77) > p->attraction(44));
+	p->set_source_attractor("noise", 5, first, 1.0, 30.0, 0.5);
+	p->set_source_attractor("night", 4, second, 6.0, 30.0, 0.5);
+	CHECK(p->active_attractor_count() == 4);
+	const real_t day_pull = p->attraction(77);
+	p->set_night(true);
+	CHECK(p->attraction(77) > day_pull);
+	p->set_night(false);
+	CHECK(Math::is_equal_approx(p->attraction(77), day_pull));
+	p->tick(0.25);
+	CHECK(p->active_attractor_count() == 4);
+	p->tick(0.26);
+	CHECK(p->active_attractor_count() == 1);
+	p->set_source_attractor("noise", 4, first, 2.0, 30.0, 0.5);
+	CHECK(p->active_attractor_count() == 2);
+	p->clear_attractors();
+	CHECK(p->active_attractor_count() == 0);
+	p->set_source_attractor("noise", 4, second, 1.0, 30.0, 0.5);
+	CHECK(p->active_attractor_count() == 1);
+	p->setup(10, 10, 64.0, 706);
+	CHECK(p->active_attractor_count() == 0);
+}
+
+TEST_CASE("[CgamePopulationLOD] localized attraction retains exact full-grid semantics") {
+	Ref<CgamePopulationLOD> p;
+	p.instantiate();
+	p->setup(48, 36, 32.0, 91, Vector2(-400, -300));
+	p->set_night(true);
+	LocalVector<real_t> reference;
+	reference.resize((uint32_t)p->region_count());
+	for (uint32_t r = 0; r < reference.size(); r++) {
+		reference[r] = 0.0;
+	}
+	for (int i = 0; i < 48; i++) {
+		const Vector2 centre(-600.0 + (i * 173) % 2100, -500.0 + (i * 251) % 1600);
+		const real_t radius = 1.0 + (i * 47) % 460;
+		const real_t strength = 0.1 + i * 0.17;
+		const String kind = i % 7 == 0 ? "night" : "noise";
+		const real_t weight = p->get_kind_weight(kind);
+		p->add_attractor(kind, centre, strength, radius);
+		for (uint32_t r = 0; r < reference.size(); r++) {
+			const real_t distance = p->region_center((int)r).distance_to(centre);
+			if (distance < radius) {
+				reference[r] += strength * weight * (1.0 - distance / radius);
+			}
+		}
+	}
+	real_t max_error = 0.0;
+	for (uint32_t r = 0; r < reference.size(); r++) {
+		max_error = MAX(max_error, Math::abs(p->attraction((int)r) - reference[r]));
+	}
+	CHECK(max_error < (real_t)0.0001);
+}
+
+TEST_CASE("[CgamePopulationLOD] multiple native nests share their regional agent cap") {
+	Ref<CgamePopulationLOD> p = make_lod(772);
+	// Block all exits so migration cannot change the tested region mid-tick.
+	for (int region = 0; region < p->region_count(); region++) {
+		if (region != 44) {
+			p->set_blocked(region, true);
+		}
+	}
+	p->add_herd(44, comp("walker", 2));
+	p->add_spawner(44, "walker", 4.0, 9);
+	p->add_spawner(44, "runner", 4.0, 9);
+	p->tick(1.0);
+	CHECK(p->herd_region_count(44) == 9);
+	CHECK(int(p->stats()["spawned"]) == 7);
+	p->tick(1.0);
+	CHECK(p->herd_region_count(44) <= 9);
+}
+
 } // namespace TestCgamePopulationLOD

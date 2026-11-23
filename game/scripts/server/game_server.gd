@@ -9592,11 +9592,24 @@ func _tick_herds(player_positions: Array[Vector2], presence) -> void:
 			continue
 		var at := Vector2(player.position.x, player.position.z)
 		if player.noise_timer > 0.0 and player.noise_radius > 0.0:
-			# Gunfire and other loud actions carry much farther for an abstract herd.
-			_herds.add_attractor("noise", at, clampf(player.noise_radius / 20.0, 0.2, 3.0),
-				maxf(player.noise_radius * 3.0, 96.0), 20.0)
+			# Gunfire carries far through the abstract world. One active signal
+			# per living player prevents repeated pulses from growing without
+			# bound while the player is moving and making noise.
+			var loudness: float = clampf(player.noise_radius / 20.0, 0.2, 3.0)
+			var reach: float = maxf(player.noise_radius * 3.0, 96.0)
+			if _herds.has_method("set_source_attractor"):
+				_herds.call("set_source_attractor", "noise", player.id, at,
+					loudness, reach, 20.0)
+			else:
+				# Older native Cgame builds keep their original signal API.
+				_herds.add_attractor("noise", at, loudness, reach, 20.0)
 		if night and not _is_safe(player.position):
-			_herds.add_attractor("night", at, 0.5, 256.0, maxf(dt, 1.0) * 1.5)
+			var night_ttl: float = maxf(dt, 1.0) * 1.5
+			if _herds.has_method("set_source_attractor"):
+				_herds.call("set_source_attractor", "night", player.id, at,
+					0.5, 256.0, night_ttl)
+			else:
+				_herds.add_attractor("night", at, 0.5, 256.0, night_ttl)
 	var packed := PackedVector2Array(player_positions)
 	_herds.tick(dt, packed)
 	var promoted := 0

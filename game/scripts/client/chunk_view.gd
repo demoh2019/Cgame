@@ -1657,6 +1657,15 @@ static func _service_decor(host: Node3D) -> void:
 	if _decor_pending.is_empty():
 		return
 	var camera: Camera3D = host.get_viewport().get_camera_3d()
+	var camera_xz := Vector2.ZERO
+	var forward_xz := Vector2.ZERO
+	if camera != null:
+		var eye: Vector3 = camera.global_position
+		camera_xz = Vector2(eye.x, eye.z)
+		var front: Vector3 = -camera.global_transform.basis.z
+		var horizontal := Vector2(front.x, front.z)
+		if horizontal.length_squared() > 0.0001:
+			forward_xz = horizontal.normalized()
 	var candidates: Array[Dictionary] = []
 	var alive: Array[WeakRef] = []
 	for reference in _decor_pending:
@@ -1666,16 +1675,11 @@ static func _service_decor(host: Node3D) -> void:
 		alive.append(reference)
 		var score := 0.0
 		if camera != null:
-			var center: Vector3 = view.global_position + Vector3(
-				Defs.CHUNK_SIZE * 0.5, 0.0, Defs.CHUNK_SIZE * 0.5)
-			var delta: Vector3 = center - camera.global_position
-			var forward: Vector3 = -camera.global_transform.basis.z
-			forward.y = 0.0
-			delta.y = 0.0
-			var facing := 0.0
-			if forward.length_squared() > 0.0001 and delta.length_squared() > 0.0001:
-				facing = delta.normalized().dot(forward.normalized())
-			score = DecorStreamingPolicy.rank(delta.length(), facing)
+			var center: Vector3 = view.global_position
+			var delta_xz := Vector2(
+				center.x + Defs.CHUNK_SIZE * 0.5 - camera_xz.x,
+				center.z + Defs.CHUNK_SIZE * 0.5 - camera_xz.y)
+			score = DecorStreamingPolicy.rank_ground(delta_xz, forward_xz)
 		candidates.append({"view": view, "score": score, "cell": view.cell})
 	_decor_pending = alive
 	candidates.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
