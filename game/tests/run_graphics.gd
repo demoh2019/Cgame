@@ -22,6 +22,7 @@ const SUITES := [
 	"res://tests/test_water_caustics.gd",
 	"res://tests/test_water_sun_glitter.gd",
 	"res://tests/test_weather_cloud_advection.gd",
+	"res://tests/test_graphics_frame_features.gd",
 	"res://tests/test_graphics_quality.gd",
 	"res://tests/test_user_grass_assets.gd",
 	"res://tests/test_world_map_focus.gd",
