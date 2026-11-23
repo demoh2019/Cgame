@@ -3987,10 +3987,12 @@ func _process(_delta: float) -> void:
 		var chapter_objective: String = str(story_data.get("objective", ""))
 		_contract_label.text += "\nSTORY: " + chapter_objective
 		if _story_journal != null:
-			_story_journal.text = str(story_data.get("title", StoryCampaign.TITLE)) \
+			var transcript_text: String = str(story_data.get("title", StoryCampaign.TITLE)) \
 				+ "\nOBJECTIVE: " + chapter_objective
 			for recovered_line in story_data.get("transcript", []):
-				_story_journal.text += "\n\n" + str(recovered_line)
+				transcript_text += "\n\n" + str(recovered_line)
+			if _story_journal.text != transcript_text:
+				_story_journal.text = transcript_text
 	_info_label.text += "  Rest %.0fs" % float(client.you.get("rest_cooldown", 0.0))
 	var combat_tag: float = float(client.you.get("combat_tag_seconds", 0.0))
 	if combat_tag > 0.0:
