@@ -28,6 +28,20 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="apply_color_patch">
+			<return type="bool" />
+			<param index="0" name="region" type="Rect2i" />
+			<param index="1" name="colors" type="PackedColorArray" />
+			<description>
+				Atomically updates a rectangle of existing vertex colors in sample-grid coordinates. Initialize a complete per-vertex color grid with [method set_color_data] first. Nonfinite RGBA values, wrong lengths, empty or out-of-bounds regions return false without modifying the terrain. Unchanged patches are no-ops. A changed patch invalidates only nearby render meshes while retaining existing heightmap collision shapes, cached LOD errors, and bounds. Rendering meshes are refreshed during the next terrain update, or via [method force_update].
+			</description>
+		</method>
+		<method name="get_last_region_invalidated_chunks" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of cached mesh chunks invalidated by the last height or color region update. Identical patches report zero; this is a locality diagnostic rather than a measured GPU throughput metric.
+			</description>
+		</method>
 		<method name="apply_height_patch">
 			<return type="bool" />
 			<param index="0" name="region" type="Rect2i" />
