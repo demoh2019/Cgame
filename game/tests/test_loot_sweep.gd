@@ -63,6 +63,43 @@ func run(t) -> void:
 		[1, 2079, 0, 2078, 2077],
 		"equal distances use ID, but a slightly nearer drop beats lower IDs")
 
+	t.current = "dense drops keep nearest five with deterministic ID ties"
+	var dense: Dictionary = {}
+	var reference: Array[Dictionary] = []
+	for i in 260:
+		var id: int = 10000 + 259 - i # Inverse insertion order checks stable ID ties.
+		var ox: float = float((i * 17) % 31 - 15) * 0.14
+		var oz: float = float((i * 19) % 29 - 14) * 0.13
+		dense[id] = {"id": id, "x": owner.position.x + ox,
+			"z": owner.position.z + oz, "items": {"fiber_1": 1},
+			"allowed_tokens": [], "reserved_until": 0.0,
+			"expires": server.time + 20.0}
+		var bag_at := Vector2(float(dense[id]["x"]), float(dense[id]["z"]))
+		var distance: float = Vector2(owner.position.x, owner.position.z).distance_squared_to(bag_at)
+		if distance <= Sweep.RADIUS * Sweep.RADIUS:
+			reference.append({"id": id, "distance": distance})
+	reference.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+		if is_equal_approx(float(left["distance"]), float(right["distance"])):
+			return int(left["id"]) < int(right["id"])
+		return float(left["distance"]) < float(right["distance"]))
+	var expected: Array[int] = []
+	for i in mini(reference.size(), Sweep.MAX_BAGS):
+		expected.append(int(reference[i]["id"]))
+	t.eq(Sweep.candidates(dense, owner.position, owner, server.time), expected,
+		"bounded nearest search agrees with full sorting of a crowded drop area")
+	var tied: Dictionary = {}
+	for id in [21, 15, 40, 8, 31, 2, 17]:
+		tied[id] = {"id": id, "x": owner.position.x + 1.0,
+			"z": owner.position.z, "items": {"fiber_1": 1},
+			"allowed_tokens": [], "reserved_until": 0.0,
+			"expires": server.time + 20.0}
+	t.eq(Sweep.candidates(tied, owner.position, owner, server.time), [2, 8, 15, 17, 21],
+		"equidistant bags use stable server IDs even when inserted out of order")
+	dense[99999] = {"id": 99999, "x": NAN, "z": owner.position.z,
+		"items": {"fiber_1": 1}, "allowed_tokens": [], "expires": server.time + 20.0}
+	t.eq(Sweep.candidates(dense, owner.position, owner, server.time), expected,
+		"invalid drop coordinates cannot contaminate the top-five ranking")
+
 	t.current = "one command uses actual item transfers and preserves exclusions"
 	var got: Dictionary = server.cmd_loot_sweep(owner.id)
 	t.check(got.get("ok", false), "owner can collect eligible drops")
