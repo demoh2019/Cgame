@@ -27,6 +27,28 @@ static func sealed_compartment_loot(zone: int, rng: RandomNumberGenerator) -> Di
 	return loot
 
 
+## Extra mundane supplies for newly discovered world caches. Caller must pass a
+## verified server-side crate category, not a client request or map marker.
+## The small fixed bonus does not consume extra RNG rolls, alter legendary loot,
+## or bypass the existing one-time crate opening and lockpick restrictions.
+static func exploration_bonus(zone: int, base: Dictionary, category: String) -> Dictionary:
+	var loot: Dictionary = base.duplicate(true)
+	if zone < 0 or zone >= XP_BY_ZONE.size():
+		return loot
+	match category:
+		"roadside":
+			# Travel supplies reward stopping to search beside the road.
+			loot["scrap"] = int(loot.get("scrap", 0)) + 1 + zone
+		"urban":
+			# Dangerous city courtyards hold modest extra salvage, with a
+			# single matching-tier ingot only in red/black territories.
+			loot["scrap"] = int(loot.get("scrap", 0)) + 2 + zone
+			if zone >= 2:
+				var ingot: String = "bar_%d" % (zone + 1)
+				loot[ingot] = int(loot.get(ingot, 0)) + 1
+	return loot
+
+
 static func xp_for_zone(zone: int) -> int:
 	if zone < 0 or zone >= XP_BY_ZONE.size():
 		return 0
