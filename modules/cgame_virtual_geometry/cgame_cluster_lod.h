@@ -59,4 +59,7 @@ public:
 	static Dictionary build_hierarchy(const PackedVector3Array &p_vertices, const PackedInt32Array &p_indices, int p_levels = 4);
 	static PackedInt32Array select_cut(const Dictionary &p_hierarchy, const Vector3 &p_camera_pos, real_t p_fov_y, real_t p_screen_height, real_t p_error_pixels = 1.0);
 	static int triangle_count(const Dictionary &p_hierarchy, const PackedInt32Array &p_cut);
+	// Copies every source vertex stream unchanged; replaces just triangle indices.
+	// Does not compact vertices or stream GPU pages.
+	static Array build_cut_surface(const Dictionary &p_hierarchy, const PackedInt32Array &p_cut, const Array &p_source_arrays);
 };

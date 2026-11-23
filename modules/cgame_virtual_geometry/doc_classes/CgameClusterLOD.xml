@@ -40,6 +40,15 @@
 				Returns the ids of the clusters to draw for a perspective camera. [param fov_y] is the vertical field of view in radians and [param screen_height] is in pixels. A cluster is selected when its own projected error is at most [param error_pixels] and the projected error of its parent group is larger. Together the selected clusters cover the surface exactly once.
 			</description>
 		</method>
+		<method name="build_cut_surface" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="hierarchy" type="Dictionary" />
+			<param index="1" name="cut" type="PackedInt32Array" />
+			<param index="2" name="source_arrays" type="Array" />
+			<description>
+				Reconstructs the cut as a draw-ready surface for [method ArrayMesh.add_surface_from_arrays]. All source vertex streams are preserved unchanged, including normals, tangents, UV/UV2, colors, skinning and custom vertex attributes. Only the triangle index buffer is replaced. Requires identical source positions to those used by [method build_hierarchy] and unique, valid cluster ids; returns an empty array for invalid inputs. Does not compact vertices, allocate GPU pages or issue draw commands.
+			</description>
+		</method>
 		<method name="triangle_count" qualifiers="static">
 			<return type="int" />
 			<param index="0" name="hierarchy" type="Dictionary" />

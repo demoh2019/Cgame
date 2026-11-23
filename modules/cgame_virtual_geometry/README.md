@@ -35,6 +35,25 @@ Use `game_facade/cgame_virtual_geometry_facade.gd` to call the native classes wi
 
 `tests/test_cgame_virtual_geometry.h` (doctest) mirrors `test_virtual_geometry.gd` and `test_occlusion_culling.gd`: meshlet limits and coverage, cone/frustum culling, monotonic cluster errors, far cut has fewer triangles, watertight cuts, determinism, and an occluded box behind a wall. Run with `./bin/godot.<platform>.editor.<arch> --test --test-case="*Cgame*"`.
 
+## Draw-ready cluster cut preserving all vertex attributes
+
+`CgameClusterLOD.build_cut_surface(hierarchy, cut, surface_arrays)`
+combines a selected cut into an indexed triangle surface suitable for Godot's
+`ArrayMesh.add_surface_from_arrays`. It keeps original vertex indices
+and every imported vertex stream *unchanged* (normals, tangents, UVs,
+vertex colors, skinning and custom channels), so PBR materials do not
+lose their tangent space. It rejects malformed or mismatched sources,
+out-of-range cluster indices, repeated ids and oversized cuts.
+
+The game's `game/scripts/client/pcg_world_dressing.gd` uses this
+API for cached, medium-size distant PCG props where cluster reduction
+is substantial. A cheap box proxy remains for small, unsupported,
+oversized and non-simplifying assets or stock Godot.
+
+**Not yet Nanite:** this renders via the regular Godot GPU mesh
+pipeline; it does not GPU-cull meshlets, stream mesh pages, perform
+indirect draws or reduce original vertex-buffer residency.
+
 ## Limitations
 
 - No GPU path and no streaming; hierarchy building is single threaded and intended for offline or load-time use.
