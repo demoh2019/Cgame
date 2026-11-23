@@ -85,6 +85,19 @@ func run(t) -> void:
 	t.eq(server.cmd_repair(101, wall_id).get("reason"), "out_of_range", "distant owner cannot remotely repair")
 	player.position = Vector3(player_pos.x, world.height_at(player_pos.x, player_pos.y), player_pos.y)
 
+	t.current = "private infected siege warning and expiry"
+	server._wall_infected_attack_until[wall_id] = server.time + server.WALL_ATTACK_WARNING_SECONDS
+	var warned_owner: Dictionary = server.snapshot_for(101)["you"]["base_upkeep"]
+	var warned_intruder: Dictionary = server.snapshot_for(102)["you"]["base_upkeep"]
+	t.eq(int(warned_owner.get("under_attack", 0)), 1,
+		"only the owning survivor receives a recent infected wall attack warning")
+	t.eq(int(warned_intruder.get("under_attack", 0)), 0,
+		"unrelated players receive no private base siege warning")
+	server.time += server.WALL_ATTACK_WARNING_SECONDS
+	t.eq(int(server.snapshot_for(101)["you"]["base_upkeep"]["under_attack"]), 0,
+		"under-attack warning expires without additional damage")
+	server._wall_infected_attack_until.erase(wall_id)
+
 	t.current = "interest filtering and authoritative replication"
 	var snapshot: Dictionary = server.snapshot_for(101)
 	t.eq(snapshot.get("barricades", []).size(), 1, "nearby owner sees structure in authoritative snapshot")
@@ -104,6 +117,11 @@ func run(t) -> void:
 		if not server.barricades.has(wall_id):
 			break
 	t.check(not server.barricades.has(wall_id) or float(server.barricades[wall_id]["hp"]) < before, "stuck infected damages barrier while pursuing survivor")
+	if server._wall_infected_attack_until.has(wall_id):
+		t.check(float(server._wall_infected_attack_until[wall_id]) > server.time,
+			"server-authorized infected attacks activate the temporary siege warning")
+	t.check(int(server.last_zombie_wall_query_stats.get("matches", 0)) >= 0,
+		"authoritative AI exposes a bounded spatial wall query diagnostic")
 	if server.barricades.has(wall_id):
 		t.check(server.damage_barricade(wall_id, 500.0), "excess damage destroys barrier")
 	t.check(not world.dynamic_blockers.has(wall_id), "destroyed structure leaves collision broadphase")
