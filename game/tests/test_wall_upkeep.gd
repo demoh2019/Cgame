@@ -3,6 +3,7 @@ extends RefCounted
 ## past their upkeep, and carry facing and upkeep through a server restart.
 
 const Structures = preload("res://scripts/shared/structures.gd")
+const WallUpkeepIndex = preload("res://scripts/shared/wall_upkeep_index.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const WorldPersistence = preload("res://scripts/server/world_persistence.gd")
@@ -71,3 +72,90 @@ func run(t) -> void:
 	var forged: Dictionary = checkpoint.duplicate(true)
 	forged["barricades"][0]["upkeep"] = Structures.UPKEEP_SECONDS * 10.0
 	t.check(WorldPersistence.validate(forged, GameServer.new(WorldGen.new(214), 216)).is_empty(), "endless upkeep is refused")
+
+
+	t.current = "owner lookup preserves account rights and ignores strangers"
+	var guarded := GameServer.new(WorldGen.new(214), 217)
+	var owner = guarded.add_player(71, "Owner", "owner-acc")
+	var stranger = guarded.add_player(72, "Stranger", "other-acc")
+	var guest = guarded.add_player(73, "Guest")
+	var watch_pos := Vector2(220.0, 220.0)
+	var close: Vector3 = Vector3(watch_pos.x, 0.0, watch_pos.y)
+	owner.position = Vector3(0.0, 0.0, 0.0)
+	stranger.position = close
+	guest.position = Vector3(0.0, 0.0, 0.0)
+	var account_wall: Dictionary = {"id": 8101, "x": watch_pos.x, "y": 0.0, "z": watch_pos.y,
+		"hp": Structures.MAX_HEALTH, "tier": 1, "owner": owner.id,
+		"owner_account": "owner-acc", "upkeep_until": guarded.time - 1.0}
+	var guest_wall: Dictionary = {"id": 8102, "x": watch_pos.x + 40.0, "y": 0.0, "z": watch_pos.y,
+		"hp": Structures.MAX_HEALTH, "tier": 1, "owner": guest.id,
+		"owner_account": "", "upkeep_until": guarded.time - 1.0}
+	guarded.barricades[8101] = account_wall
+	guarded.barricades[8102] = guest_wall
+	guarded._tick_barricade_upkeep(60.0)
+	t.check(float(account_wall["hp"]) < Structures.MAX_HEALTH,
+		"stranger near a private wall cannot keep it alive")
+	t.check(float(guest_wall["hp"]) < Structures.MAX_HEALTH,
+		"distant guest cannot keep session-owned walls")
+	var renewed: float = float(account_wall["hp"])
+	owner.position = Vector3(watch_pos.x + Structures.UPKEEP_RANGE, 0.0, watch_pos.y)
+	guarded._tick_barricade_upkeep(60.0)
+	t.eq(float(account_wall["hp"]), renewed,
+		"authenticated owner at exact 15m reach prevents more decay")
+	t.eq(float(account_wall["upkeep_until"]), guarded.time + Structures.UPKEEP_SECONDS,
+		"owner index renews real authoritative upkeep")
+	var account_index: Dictionary = WallUpkeepIndex.live_owners(guarded.players,
+		func(p) -> bool: return p.survival.health > 0.0)
+	t.check(WallUpkeepIndex.owner_near(account_wall, account_index),
+		"account lookup includes alive signed-in owners")
+	t.check(not WallUpkeepIndex.owner_near(guest_wall, account_index),
+		"guest owner lookup is keyed by peer ID, not account")
+	owner.position = Vector3(0.0, 0.0, 0.0)
+	var same_account = guarded.add_player(74, "Relogged owner", "owner-acc")
+	same_account.position = close
+	account_wall["upkeep_until"] = guarded.time - 1.0
+	var before_relog: float = float(account_wall["hp"])
+	guarded._tick_barricade_upkeep(60.0)
+	t.eq(float(account_wall["hp"]), before_relog,
+		"reconnected account prevents decay despite a different network peer")
+	t.eq(float(account_wall["upkeep_until"]), guarded.time + Structures.UPKEEP_SECONDS,
+		"same authenticated account can maintain a wall after peer ID changes")
+	same_account.position = Vector3(0.0, 0.0, 0.0)
+	guest.position = Vector3(watch_pos.x + 40.0, 0.0,
+		watch_pos.y + Structures.UPKEEP_RANGE + 0.01)
+	var guest_before: float = float(guest_wall["hp"])
+	guarded._tick_barricade_upkeep(60.0)
+	t.check(float(guest_wall["hp"]) < guest_before,
+		"outside the exact guest upkeep range the wall continues to decay")
+	guest.position = Vector3(watch_pos.x + 40.0, 0.0, watch_pos.y)
+	var guest_after: float = float(guest_wall["hp"])
+	guarded._tick_barricade_upkeep(60.0)
+	t.eq(float(guest_wall["hp"]), guest_after, "the legitimate guest can renew their own wall")
+
+	t.current = "owner-only early warnings and critical durability"
+	account_wall["upkeep_until"] = guarded.time + WallUpkeepIndex.WARNING_SECONDS - 5.0
+	account_wall["hp"] = Structures.MAX_HEALTH * 0.4
+	var owner_view: Dictionary = guarded.snapshot_for(owner.id)["you"]["base_upkeep"]
+	var stranger_view: Dictionary = guarded.snapshot_for(stranger.id)["you"]["base_upkeep"]
+	t.eq(int(owner_view["at_risk"]), 1, "private snapshot warns about the owner's distant wall")
+	t.eq(int(owner_view["damaged"]), 1, "private snapshot reports own badly damaged defenses")
+	t.near(float(owner_view["soonest_seconds"]), WallUpkeepIndex.WARNING_SECONDS - 5.0,
+		0.01, "warning includes exact server countdown")
+	t.eq(int(stranger_view["at_risk"]), 0, "a different account never sees owner's upkeep alarm")
+	t.eq(int(stranger_view["damaged"]), 0, "a different account cannot infer wall durability")
+	t.check(not Structures.public_state(account_wall).has("owner_account"),
+		"public wall metadata never leaks account identifiers")
+	t.check(not Structures.public_state(account_wall).has("upkeep_until"),
+		"public wall metadata does not broadcast private upkeep countdown")
+	t.check(not WallUpkeepIndex.needs_attention(
+		{"upkeep_until": guarded.time + WallUpkeepIndex.WARNING_SECONDS + 1.0}, guarded.time),
+		"healthy upkeep does not notify owners too early")
+	t.check(not WallUpkeepIndex.needs_attention({"upkeep_until": NAN}, guarded.time),
+		"invalid upkeep timestamps never show a fabricated countdown")
+	t.check(WallUpkeepIndex.needs_attention(
+		{"upkeep_until": guarded.time}, guarded.time), "expired walls remain warned")
+	account_wall["upkeep_until"] = guarded.time + Structures.UPKEEP_SECONDS
+	account_wall["hp"] = Structures.MAX_HEALTH
+	var healed_view: Dictionary = guarded.snapshot_for(owner.id)["you"]["base_upkeep"]
+	t.eq(int(healed_view["at_risk"]), 0, "repairing upkeep clears the risk indicator")
+	t.eq(int(healed_view["damaged"]), 0, "repaired defenses clear the damage indicator")

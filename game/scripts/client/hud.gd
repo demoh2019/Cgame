@@ -3815,6 +3815,18 @@ func _process(_delta: float) -> void:
 			_info_label.text += "\nLOST BACKPACK: %dm %s | %.0fs until public loot expires (open map to track)" % [
 				distance, TravelNavigation.compass(here, destination),
 				float(dropped.get("remaining", 0.0))]
+	# These counts come from the authenticated owner's wall set, including
+	# distant bases. Never infer ownership from the public wall snapshots.
+	var base_upkeep: Dictionary = client.you.get("base_upkeep", {})
+	var upkeep_at_risk: int = int(base_upkeep.get("at_risk", 0))
+	if upkeep_at_risk > 0:
+		var minutes_remaining: int = ceili(maxf(0.0,
+			float(base_upkeep.get("soonest_seconds", 0.0))) / 60.0)
+		_info_label.text += "\nBASE UPKEEP: %d structure(s) need a visit (nearest expiry %d min)" % [
+			upkeep_at_risk, minutes_remaining]
+	var damaged_walls: int = int(base_upkeep.get("damaged", 0))
+	if damaged_walls > 0:
+		_info_label.text += "\nBASE DEFENSE: %d structure(s) below half durability" % damaged_walls
 	var mud_traction: float = float(client.you.get("storm_mud_factor", 1.0))
 	if mud_traction < 0.999:
 		_info_label.text += "\nSTORM MUD: ground travel -%.0f%% | roads reduce the penalty." % [

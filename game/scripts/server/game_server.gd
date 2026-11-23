@@ -129,6 +129,7 @@ const ProspectingChart = preload("res://scripts/shared/prospecting_chart.gd")
 const SurveySignal = preload("res://scripts/shared/survey_signal.gd")
 const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
+const WallUpkeepIndex = preload("res://scripts/shared/wall_upkeep_index.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
 const RaidTempo = preload("res://scripts/shared/raid_tempo.gd")
@@ -7431,15 +7432,14 @@ func tick(delta: float) -> void:
 ## Walls whose owner comes by stay kept; walls left alone past their upkeep crumble and are gone at zero health.
 func _tick_barricade_upkeep(seconds: float) -> void:
 	var crumbled: Array = []
+	# Index connected owners just once for all structures in this upkeep pass.
+	# Account rights and guest peer IDs keep their original authoritative rules.
+	var active_owners: Dictionary = WallUpkeepIndex.live_owners(
+		players, func(survivor) -> bool: return _alive(survivor))
 	for id in barricades:
 		var wall: Dictionary = barricades[id]
-		var at := Vector2(float(wall["x"]), float(wall["z"]))
-		for survivor in players.values():
-			if not _alive(survivor) or not Structures.can_manage(wall, survivor.id, survivor.user_id):
-				continue
-			if at.distance_to(Vector2(survivor.position.x, survivor.position.z)) <= Structures.UPKEEP_RANGE:
-				wall["upkeep_until"] = time + Structures.UPKEEP_SECONDS
-				break
+		if WallUpkeepIndex.owner_near(wall, active_owners):
+			wall["upkeep_until"] = time + Structures.UPKEEP_SECONDS
 		if time <= float(wall.get("upkeep_until", time + 1.0)):
 			continue
 		wall["hp"] = float(wall["hp"]) - Structures.decay_per_second(Structures.tier_of(wall)) * seconds
@@ -8870,24 +8870,30 @@ func _prepare_passive_target_candidates(cohort: Array, info: Dictionary,
 
 func _tick_zombies(delta: float) -> void:
 	var info: Dictionary = {}
+	# Day/night and detection multipliers are global for this server tick.
+	# Reuse each survivor's server-verified status for noise, firelight and
+	# blood scent; those checks were previously repeated several times.
+	var night: bool = WorldCycle.is_night(time)
+	var notice: float = WorldCycle.notice_multiplier(time)
 	for player in players.values():
-		info[player.id] = {"position": player.position, "alive": _alive(player),
+		var alive: bool = _alive(player)
+		var safe: bool = _is_safe(player.position)
+		var weather_here: Dictionary = Weather.conditions(
+			world, player.position.x, player.position.z, time)
+		info[player.id] = {"position": player.position, "alive": alive,
 			"health_fraction": player.survival.health / maxf(1.0, player.survival.max_health),
-			"safe": _is_safe(player.position), "noise": player.noise_radius if player.noise_timer > 0.0 else 0.0,
+			"safe": safe, "noise": player.noise_radius if player.noise_timer > 0.0 else 0.0,
 			"wind": Weather.wind_at(world, player.position.x, player.position.z, time),
-			"notice_multiplier": WorldCycle.notice_multiplier(time),
-			"weather_sight": Weather.sight_multiplier(
-				Weather.conditions(world, player.position.x, player.position.z, time)),
+			"notice_multiplier": notice,
+			"weather_sight": Weather.sight_multiplier(weather_here),
 			"firelight": maxf(BikeLantern.reveal_radius(player.inventory, player.mounted,
-				_alive(player), WorldCycle.is_night(time), player.bike_lamp_enabled),
-				maxf(CampfireThreat.reveal_radius(campfires,
-					player.position, time, WorldCycle.is_night(time)),
-					HandFlare.infected_radius(player.flare_seconds, _alive(player),
-						WorldCycle.is_night(time), _is_safe(player.position)))),
+				alive, night, player.bike_lamp_enabled),
+				maxf(CampfireThreat.reveal_radius(campfires, player.position, time, night),
+					HandFlare.infected_radius(player.flare_seconds, alive, night, safe))),
 			"visual_signature": _visual_signature_for(player),
 			# Only actual server wounds contribute; never trust client input.
 			"scent": BloodScent.detection_radius(player.survival.bleeding,
-				_alive(player), _is_safe(player.position), FieldScentMask.active(player.survival))}
+				alive, safe, FieldScentMask.active(player.survival))}
 	# One server-owned claim table for the entire infected pack; simulation
 	# delta expires abandoned leases, including dead and despawned agents.
 	if _flank_slot_reservations == null:
@@ -10151,7 +10157,19 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				Vector2(float(field["x"]), float(field["z"]))) <= Defs.INTEREST_RADIUS:
 			nearby_ember_pools.append(EmberFlask.public_state(field, time))
 	var nearby_barricades: Array = []
+	var owner_upkeep_at_risk: int = 0
+	var owner_upkeep_damaged: int = 0
+	var owner_upkeep_soonest: float = INF
 	for wall in barricades.values():
+		# Reuse this existing interest scan: reminders are derived from the
+		# full authoritative wall set and sent only to its owning survivor.
+		if Structures.can_manage(wall, player.id, player.user_id):
+			if WallUpkeepIndex.needs_attention(wall, time):
+				owner_upkeep_at_risk += 1
+				owner_upkeep_soonest = minf(owner_upkeep_soonest,
+					maxf(0.0, float(wall["upkeep_until"]) - time))
+			if float(wall["hp"]) < Structures.max_health(Structures.tier_of(wall)) * 0.5:
+				owner_upkeep_damaged += 1
 		if Structures.within_range(here, Vector2(float(wall["x"]), float(wall["z"])), Defs.INTEREST_RADIUS):
 			var public_wall: Dictionary = Structures.public_state(wall)
 			public_wall["blast_brace_seconds"] = maxf(0.0,
@@ -10255,6 +10273,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"tick": tick_count, "time": time, "ack": player.last_input_seq,
 		"outposts": siege_contracts.public_state(territory.public_state(time, players, parties), time),
 		"you": {
+			"base_upkeep": {"at_risk": owner_upkeep_at_risk, "damaged": owner_upkeep_damaged,
+				"soonest_seconds": owner_upkeep_soonest if owner_upkeep_at_risk > 0 else 0.0},
 			"party": _party_state_for(peer_id),
 			"raid_aggro": raid_aggro_state,
 			"party_flank_hint": party_flank_hint,
