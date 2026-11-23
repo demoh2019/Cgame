@@ -5,6 +5,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
+const CrossTraining = preload("res://scripts/shared/cross_training.gd")
 
 
 func run(t) -> void:
@@ -93,3 +94,71 @@ func run(t) -> void:
 	advanced.skills.xp["medic"] = Skills.MAX_XP
 	server._award(advanced, "medic", 20.0)
 	t.eq(advanced.rested_xp_credit, 58, "XP capped skill cannot consume bonus reserve")
+
+	t.current = "cross-training: distinct skill branches, not repeat farming"
+	t.eq(CrossTraining.branches_count({}, 10.0), 0, "new survivor starts without practice")
+	var practice: Dictionary = {}
+	practice = CrossTraining.record(practice, "woodcutting", 10.0, 10.0)
+	practice = CrossTraining.record(practice, "mining", 10.0, 11.0)
+	t.eq(CrossTraining.branches_count(practice, 11.0), 1, "two gathering skills count as one branch")
+	practice = CrossTraining.record(practice, "medic", 3.0, 12.0)
+	t.eq(CrossTraining.branches_count(practice, 12.0), 1, "tiny XP is ineligible")
+	practice = CrossTraining.record(practice, "medic", 6.0, 12.0)
+	practice = CrossTraining.record(practice, "crafting", 6.0, 13.0)
+	t.eq(CrossTraining.branches_count(practice, 13.0), 3, "three branches unlock diverse practice")
+	t.check(CrossTraining.active_for(practice, "mining", 20.0, 13.0),
+		"fourth substantial action receives cross-training boost")
+	t.check(not CrossTraining.active_for(practice, "mining", 1.0, 13.0),
+		"tick-based or trivial XP does not get extra rate")
+	t.eq(Training.bonus_for(20.0, 100, 1, true), 19, "novice practice raises rate to 95 percent")
+	t.eq(Training.bonus_for(20.0, 100, 10, true), 16, "intermediate practice adds 20 percent")
+	t.eq(Training.bonus_for(20.0, 100, 25, true), 14, "expert practice adds 20 percent")
+	t.eq(Training.bonus_for(20.0, 3, 1, true), 3, "cross-training cannot overspend reserve")
+	var refreshed: Dictionary = CrossTraining.record(practice, "woodcutting", 10.0, 14.0)
+	t.eq(refreshed["gathering"], 10.0, "repeated branch cannot refresh before cooldown")
+	refreshed = CrossTraining.record(refreshed, "woodcutting", 10.0, 25.0)
+	t.eq(refreshed["gathering"], 25.0, "eligible practice can refresh after cooldown")
+	t.eq(CrossTraining.branches_count(refreshed, 205.1), 0, "practice ages out after 180 seconds")
+	t.eq(CrossTraining.branches_count({"unknown": 20.0, "craft": NAN, "combat": INF}, 30.0),
+		0, "forged or malformed practice entries are ignored")
+	t.eq(CrossTraining.branches_count({"combat": 31.0}, 30.0), 0,
+		"future timestamps cannot keep training active")
+	t.eq(CrossTraining.branches_count(practice, NAN), 0, "invalid clock never activates practice")
+
+	t.current = "confirmed server XP activates cross-training, private and reconnect-safe"
+	var varied = server.add_player(804, "Varied")
+	varied.rested_xp_credit = 120
+	server.time = 10.0
+	server._award(varied, "woodcutting", 10.0)
+	server._award(varied, "medic", 10.0)
+	server._award(varied, "crafting", 10.0)
+	t.eq(int(server.snapshot_for(varied.id)["you"]["practice_branches"]), 3,
+		"server confirms three independent skill branches")
+	t.check(bool(server.snapshot_for(varied.id)["you"]["cross_training_active"]),
+		"training status is visible to the owner")
+	var xp_before: int = int(varied.skills.xp["mining"])
+	server._award(varied, "mining", 20.0)
+	t.eq(int(varied.skills.xp["mining"]) - xp_before, 39,
+		"verified cross-trained action gets 95 percent extra XP")
+	t.eq(varied.rested_xp_credit, 77, "reserve pays for each real bonus")
+	var varied_saved: Dictionary = server.character_data(varied)
+	t.check(not varied_saved.has("practice_state"), "session practice never enters persistent saves")
+	var new_session = server.add_player(806, "Varied again", "varied-account", varied_saved)
+	t.eq(int(server.snapshot_for(new_session.id)["you"]["practice_branches"]), 0,
+		"reconnect starts without unearned practice")
+	server.time = 191.0
+	t.eq(int(server.snapshot_for(varied.id)["you"]["practice_branches"]), 0,
+		"expired practice disappears from client snapshot")
+
+	t.current = "XP credit is spent only on bonus XP that actually fits below the cap"
+	var capped = server.add_player(805, "Capped")
+	capped.rested_xp_credit = 60
+	capped.skills.xp["medic"] = Skills.MAX_XP - 23
+	server._award(capped, "medic", 20.0)
+	t.eq(int(capped.skills.xp["medic"]), Skills.MAX_XP, "training reaches XP cap exactly")
+	t.eq(capped.rested_xp_credit, 57, "only three credited bonus XP are charged")
+	server._award(capped, "medic", 20.0)
+	t.eq(capped.rested_xp_credit, 57, "no charge on capped skill")
+	capped.skills.xp["medic"] = Skills.MAX_XP - 5
+	server._award(capped, "medic", 20.0)
+	t.eq(capped.rested_xp_credit, 57, "base action XP alone reaches the cap")

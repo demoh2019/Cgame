@@ -176,6 +176,7 @@ const Progression = preload("res://scripts/shared/progression.gd")
 const WorldDiscovery = preload("res://scripts/shared/world_discovery.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const RestedTraining = preload("res://scripts/shared/rested_training.gd")
+const CrossTraining = preload("res://scripts/shared/cross_training.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const StormproofBriquette = preload("res://scripts/shared/stormproof_briquette.gd")
@@ -269,6 +270,7 @@ class Player:
 	var prospect_mark: Dictionary = {} # One paid, session-only resource waypoint.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var rested_xp_credit: int = 0 # Paid rest creates a capped, persistent training XP reserve.
+	var practice_state: Dictionary = {} # Recent verified skill branches, session-only.
 	var party_aid_timer: float = 0.0 # Shared medical/provisions support cooldown.
 	var medic_cover_cooldown: float = 0.0 # Server-only healer aggro rescue cooldown.
 	var supply_request_last_at: float = -INF # Session-only anti-spam for supply distress signals.
@@ -6691,13 +6693,23 @@ func _apply_skill_bonuses(player: Player) -> void:
 
 ## The one place XP is granted. Callers pass what the action was worth; refused actions never call it.
 func _award(player: Player, skill: String, amount: float) -> void:
-	# The only place that consumes rested credit. Refused actions never call
-	# this method; no extra reward is spent when the skill is already maxed.
-	var extra: int = RestedTraining.bonus_for(amount, player.rested_xp_credit, player.skills.level(skill))
-	var result: Dictionary = player.skills.add_xp(skill, amount + float(extra))
-	if int(result["gained"]) <= 0:
+	# Only confirmed server skill awards qualify for cross-training. Credits
+	# buy XP that actually fits below the skill cap, not the discarded excess.
+	if not Skills.SKILLS.has(skill) or not is_finite(amount) or amount <= 0.0:
 		return
-	player.rested_xp_credit = maxi(0, player.rested_xp_credit - extra)
+	var old_xp: int = int(player.skills.xp[skill])
+	var base_scaled: int = clampi(roundi(amount * (1.0 + player.skills.bonus("xp_gain"))), 1, 100000)
+	var base_gained: int = maxi(0, mini(Skills.MAX_XP - old_xp, base_scaled))
+	var cross_active: bool = CrossTraining.active_for(player.practice_state, skill, amount, time)
+	var extra: int = RestedTraining.bonus_for(amount, player.rested_xp_credit,
+		player.skills.level(skill), cross_active)
+	var result: Dictionary = player.skills.add_xp(skill, amount + float(extra))
+	var gained: int = int(result["gained"])
+	if gained <= 0:
+		return
+	var bonus_gained: int = maxi(0, gained - base_gained)
+	player.rested_xp_credit = maxi(0, player.rested_xp_credit - mini(extra, bonus_gained))
+	player.practice_state = CrossTraining.record(player.practice_state, skill, amount, time)
 	player.pending_xp[skill] = int(player.pending_xp.get(skill, 0)) + int(result["gained"])
 	player.dirty_skills = true
 	player.dirty_character = true
@@ -10333,6 +10345,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"arcane_cooldown": player.arcane_cooldown, "ultimate_cooldown": player.ultimate_cooldown,
 			"rest_cooldown": player.rest_cooldown,
 			"rested_xp_credit": player.rested_xp_credit,
+			"practice_branches": CrossTraining.branches_count(player.practice_state, time),
+			"cross_training_active": CrossTraining.branches_count(player.practice_state, time) >= CrossTraining.REQUIRED_BRANCHES,
 			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,
 			"medic_cover_cooldown": player.medic_cover_cooldown,
 			"stim_cooldown": player.stim_cooldown, "flare_seconds": player.flare_seconds,
