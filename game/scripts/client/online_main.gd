@@ -254,6 +254,12 @@ var _attack_cooldown := 0.0
 var _resource_weakspot: MeshInstance3D # One reusable marker, never one object per resource.
 var _resource_marker_rescan_at: int = 0
 var _resource_marker_target: Dictionary = {}
+var _hold_pickup_since_ms: int = -1 # -1 unless the initial E press collected a loose resource.
+var _hold_pickup_next_ms: int = 0
+var _hold_pickup_pending: Dictionary = {} # node id -> retry-until milliseconds
+const HOLD_PICKUP_DELAY_MS := 360
+const HOLD_PICKUP_INTERVAL_MS := 260
+const HOLD_PICKUP_RETRY_MS := 1500
 var _charge_msec := -1 # Melee attack held since (ms); release = light swing or power blow.
 const CHARGE_START_MS := 220 # A shorter press is a quick swing.
 const CHARGE_FULL_MS := 850
@@ -1843,6 +1849,7 @@ func _physics_process(delta: float) -> void:
 	var aim := _aim_direction()
 	var yaw: float = atan2(aim.x, aim.y) if aim != Vector2.ZERO else float(client.yaw)
 	client.send_input(move, sprint, yaw, delta, crouch)
+	_update_held_pickups()
 	var can_swing: bool = alive and not _build_mode and not hud.is_menu_open() and not _access.is_open() and aim != Vector2.ZERO
 	var hit_node: Dictionary = {}
 	if can_swing and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
@@ -2093,23 +2100,30 @@ func _process(delta: float) -> void:
 
 
 func _apply_world_state() -> void:
-	# Rescanning every node of every loaded chunk each frame cost ~1.2 ms; only chunks that have not seen
-	# the current server revision (new chunks, or after a gather/crate change) need it.
+	# Depletion changes geometry and terrain contact; strike progress changes
+	# only GPU instance tint. Never rescan every resource on an ordinary hit.
 	var revision: int = client.world_state_revision
+	var damage_revision: int = client.resource_damage_revision
 	var hidden: Dictionary = {}
 	for cell in streamer.get_loaded_cells():
 		var chunk := streamer.get_chunk(cell)
 		if chunk == null or not chunk.has_method("apply_state"):
 			continue
-		if chunk.has_meta("aa_state_revision") and int(chunk.get_meta("aa_state_revision")) == revision:
+		var geometry_dirty: bool = not chunk.has_meta("aa_state_revision") \
+			or int(chunk.get_meta("aa_state_revision")) != revision
+		var damage_dirty: bool = not chunk.has_meta("aa_damage_revision") \
+			or int(chunk.get_meta("aa_damage_revision")) != damage_revision
+		if not geometry_dirty and not damage_dirty:
 			continue
-		if hidden.is_empty():
-			hidden.merge(client.depleted)
-			hidden.merge(client.crates_used)
-		chunk.apply_state(hidden)
-		if chunk.has_method("apply_resource_damage"):
+		if geometry_dirty:
+			if hidden.is_empty():
+				hidden.merge(client.depleted)
+				hidden.merge(client.crates_used)
+			chunk.apply_state(hidden)
+			chunk.set_meta("aa_state_revision", revision)
+		if damage_dirty and chunk.has_method("apply_resource_damage"):
 			chunk.apply_resource_damage(client.resource_hits)
-		chunk.set_meta("aa_state_revision", revision)
+			chunk.set_meta("aa_damage_revision", damage_revision)
 
 
 ## Announces the settlement or the region you walk into.
@@ -2432,7 +2446,7 @@ func _update_prompt() -> void:
 				"bush": "Gather fibers",
 				"berry": "Pick berries",
 			}.get(resource_kind, "Collect resources"))
-			text = "[E] %s" % pickup_label
+			text = "[E] %s (hold E for nearby resources)" % pickup_label
 		elif ResourceGathering.is_strike(resource_kind):
 			var hits_done: int = int(client.resource_hits.get(int(node["id"]), 0))
 			var total_hits: int = ResourceGathering.strikes_needed(resource_kind)
@@ -3185,6 +3199,35 @@ func _cycle_weapon() -> void:
 	client.use_item(owned[(current + 1) % owned.size()])
 
 
+## Holding E after a loose-resource pickup collects nearby sticks, pebbles,
+## fiber and berries one by one. A single initial press still has all its old
+## door/loot/dungeon semantics; only a verified pickup starts this mode.
+func _update_held_pickups() -> void:
+	if _hold_pickup_since_ms < 0:
+		return
+	if not Input.is_key_pressed(KEY_E) or Input.is_key_pressed(KEY_SHIFT) \
+			or _typing() or _build_mode or hud.is_menu_open() or _access.is_open() \
+			or not bool(client.you.get("alive", false)) \
+			or bool(client.you.get("mounted", false)):
+		_hold_pickup_since_ms = -1
+		_hold_pickup_pending.clear()
+		return
+	var now_ms: int = Time.get_ticks_msec()
+	if now_ms < _hold_pickup_since_ms + HOLD_PICKUP_DELAY_MS \
+			or now_ms < _hold_pickup_next_ms:
+		return
+	_hold_pickup_next_ms = now_ms + HOLD_PICKUP_INTERVAL_MS
+	for id in _hold_pickup_pending.keys():
+		if client.depleted.has(id) or now_ms >= int(_hold_pickup_pending[id]):
+			_hold_pickup_pending.erase(id)
+	var nearby: Dictionary = client.nearest_pickup_node(
+		client.predicted, Defs.REACH + 0.5, _hold_pickup_pending)
+	if not nearby.is_empty():
+		var node_id: int = int(nearby["id"])
+		_hold_pickup_pending[node_id] = now_ms + HOLD_PICKUP_RETRY_MS
+		client.resource_pickup(node_id)
+
+
 func _interact() -> void:
 	var p: Vector3 = client.predicted
 	# The hatch of a bunker leads down into its dungeon; the stairs of the first room lead back up.
@@ -3205,7 +3248,11 @@ func _interact() -> void:
 	var node: Dictionary = client.nearest_node(p, Defs.REACH)
 	if not node.is_empty():
 		if ResourceGathering.is_pickup(str(node["kind"])):
-			client.resource_pickup(int(node["id"]))
+			var pickup_id: int = int(node["id"])
+			client.resource_pickup(pickup_id)
+			_hold_pickup_since_ms = Time.get_ticks_msec()
+			_hold_pickup_next_ms = _hold_pickup_since_ms + HOLD_PICKUP_DELAY_MS
+			_hold_pickup_pending = {pickup_id: _hold_pickup_since_ms + HOLD_PICKUP_RETRY_MS}
 		elif ResourceGathering.is_strike(str(node["kind"])):
 			var facing: Vector2 = _aim_direction()
 			if facing == Vector2.ZERO:
