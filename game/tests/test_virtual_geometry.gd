@@ -292,3 +292,30 @@ func run(t) -> void:
 	t.check(same, "rebuild gives identical clusters and errors")
 	var cut_b: PackedInt32Array = ClusterLod.select_cut(h2, Vector3(0, 0, 3), FOV, SCREEN_H, 1.0)
 	t.check(cut_b == near_cut, "same cut for the same camera")
+
+	t.current = "CPU cut assembly preserves full source vertex streams"
+	var source_arrays: Array = []
+	source_arrays.resize(Mesh.ARRAY_MAX)
+	source_arrays[Mesh.ARRAY_VERTEX] = verts
+	source_arrays[Mesh.ARRAY_INDEX] = idx
+	var uv := PackedVector2Array()
+	var colors := PackedColorArray()
+	var normals := PackedVector3Array()
+	for i in verts.size():
+		uv.append(Vector2(float(i % 11) / 11.0, float(i % 7) / 7.0))
+		colors.append(Color(float(i % 3) / 3.0, 0.65, 0.8))
+		normals.append(verts[i].normalized())
+	source_arrays[Mesh.ARRAY_TEX_UV] = uv
+	source_arrays[Mesh.ARRAY_COLOR] = colors
+	source_arrays[Mesh.ARRAY_NORMAL] = normals
+	var selected: Array = ClusterLod.build_cut_arrays(source_arrays, h, far_cut)
+	t.eq(selected.size(), Mesh.ARRAY_MAX, "selected cut returns complete Mesh arrays")
+	if selected.size() == Mesh.ARRAY_MAX:
+		t.eq(selected[Mesh.ARRAY_TEX_UV], uv, "UV coordinates survive indexed simplification")
+		t.eq(selected[Mesh.ARRAY_NORMAL], normals, "normals remain linked to original vertex IDs")
+		t.eq(selected[Mesh.ARRAY_COLOR], colors, "material vertex colors survive")
+		t.eq(selected[Mesh.ARRAY_INDEX].size(), far_tris * 3,
+			"assembled material-preserving cut has the exact selected triangle count")
+	t.eq(ClusterLod.build_cut_arrays(source_arrays, h, PackedInt32Array()), [],
+		"an empty cut fails closed")
+	t.eq(source_arrays[Mesh.ARRAY_INDEX], idx, "original triangle source is unchanged")
