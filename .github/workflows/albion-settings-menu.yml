@@ -1,0 +1,87 @@
+name: Albion After live graphics and audio settings
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'game/scripts/client/ui_pause_menu.gd'
+      - 'game/scripts/client/ui_display_settings.gd'
+      - 'game/scripts/client/audio_mix.gd'
+      - 'game/scripts/client/ui_localization.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/tests/test_ui_parity.gd'
+      - 'game/docs/SETTINGS_MENU.md'
+      - 'tests/scene/test_albion_settings_menu_contract.py'
+      - '.github/workflows/albion-settings-menu.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'game/scripts/client/ui_pause_menu.gd'
+      - 'game/scripts/client/ui_display_settings.gd'
+      - 'game/scripts/client/audio_mix.gd'
+      - 'game/scripts/client/ui_localization.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/tests/test_ui_parity.gd'
+      - 'game/docs/SETTINGS_MENU.md'
+      - 'tests/scene/test_albion_settings_menu_contract.py'
+      - '.github/workflows/albion-settings-menu.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check settings integration source contracts
+        run: python3 -m unittest tests/scene/test_albion_settings_menu_contract.py -v
+
+  headless-game:
+    needs: contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Import Albion After assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee settings-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' settings-import.log; then exit 1; fi
+      - name: Focused UI audio and graphics regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_one.gd -- test_ui_parity test_audio_parity test_graphics_quality 2>&1 | tee settings-focused.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' settings-focused.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' settings-focused.log; then exit 1; fi
+      - name: Full Albion After headless suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 600s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee settings-full.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' settings-full.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' settings-full.log; then exit 1; fi
+      - name: Archive settings game logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: albion-settings-game-tests
+          if-no-files-found: ignore
+          path: |
+            settings-import.log
+            settings-focused.log
+            settings-full.log

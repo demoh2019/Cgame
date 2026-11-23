@@ -310,7 +310,7 @@ func _exit_tree() -> void:
 func _ready() -> void:
 	Engine.physics_ticks_per_second = 30
 	# Prefer the native Godot scheduler when the fork exposes it. Standard
-	# Godot builds retain the same pure GDScript behaviour automatically.
+	# Godot builds retain the same pure GDScript behavior automatically.
 	if EngineFeatures.has("FrameUpdateBudget"):
 		var native_budget: Object = EngineFeatures.make("FrameUpdateBudget")
 		if native_budget != null and native_budget.has_method("record_cost") \
@@ -366,11 +366,14 @@ func _ready() -> void:
 	GraphicsQuality.load_preference()
 	_access = UiAccessibilityLayer.new() # Loads settings, language and key bindings; must precede the menus below.
 	add_child(_access)
+	# Both graphics selectors use the same renderer and budget application.
+	_access.menu.connect("graphics_selected", Callable(self, "_apply_graphics_selection"))
 	var graphics_config := ConfigFile.new()
 	if graphics_config.load(GraphicsQuality.SETTINGS_PATH) == OK:
 		_auto_graphics = bool(graphics_config.get_value("rendering", "auto", false))
 	if _auto_graphics:
 		GraphicsQuality.set_level(_auto_quality.level, false)
+	_access.menu.call("set_graphics_choice", GraphicsQuality.level(), _auto_graphics)
 	_adaptive_resolution.configure(GraphicsQuality.level(),
 		GraphicsQuality.metalfx_resolution_floor())
 	_update_gpu_measurements()
@@ -771,18 +774,16 @@ func _build_connect_screen() -> void:
 	quality_picker.add_item("Auto (GPU-aware 3D + details)", GraphicsQuality.NAMES.size())
 	quality_picker.select(GraphicsQuality.NAMES.size() if _auto_graphics else GraphicsQuality.level())
 	quality_picker.item_selected.connect(func(index: int) -> void:
-		var selected: int = quality_picker.get_item_id(index)
-		_set_auto_graphics(selected == GraphicsQuality.NAMES.size())
-		if _auto_graphics:
-			_auto_quality.set_mode("auto")
-			GraphicsQuality.set_level(_auto_quality.level, false)
-		else:
-			GraphicsQuality.set_level(selected)
-		_adaptive_resolution.configure(GraphicsQuality.level(),
-		GraphicsQuality.metalfx_resolution_floor())
-		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
-			streamer, _adaptive_resolution.scale if _auto_graphics else -1.0, _auto_graphics))
+		_apply_graphics_selection(quality_picker.get_item_id(index)))
 	box.add_child(quality_picker)
+	# The same Settings window is available from the connection screen.
+	var settings_button := Button.new()
+	settings_button.text = "Settings"
+	settings_button.custom_minimum_size = Vector2(0, 40)
+	settings_button.pressed.connect(func() -> void:
+		if _access != null and is_instance_valid(_access.menu):
+			_access.menu.open())
+	box.add_child(settings_button)
 	var gap2 := Control.new()
 	gap2.custom_minimum_size = Vector2(0, 8)
 	box.add_child(gap2)
@@ -2542,6 +2543,26 @@ func _update_gpu_measurements() -> void:
 		RenderingServer.get_current_rendering_method() == "forward_plus")
 
 
+## Common graphics path for the title picker and in-game Settings.
+## Preserves native renderer, world streamer and GPU resolution behavior.
+func _apply_graphics_selection(index: int) -> void:
+	var selected: int = clampi(index, 0, GraphicsQuality.NAMES.size())
+	_set_auto_graphics(selected == GraphicsQuality.NAMES.size())
+	if _auto_graphics:
+		_auto_quality.set_mode("auto")
+		GraphicsQuality.set_level(_auto_quality.level, false)
+	else:
+		GraphicsQuality.set_level(selected)
+	_adaptive_resolution.configure(GraphicsQuality.level(),
+		GraphicsQuality.metalfx_resolution_floor())
+	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
+		streamer, _adaptive_resolution.scale if _auto_graphics else -1.0, _auto_graphics)
+	if is_instance_valid(_quality_picker):
+		_quality_picker.select(selected)
+	if _access != null and is_instance_valid(_access.menu):
+		_access.menu.call("set_graphics_choice", GraphicsQuality.level(), _auto_graphics)
+
+
 func _set_auto_graphics(enabled: bool) -> void:
 	_auto_graphics = enabled
 	_update_gpu_measurements()
@@ -2818,7 +2839,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_profiler.visible = not _profiler.visible
 		get_viewport().set_input_as_handled()
 		return
-	# Ctrl+Shift+F9: PCG debugging — crosses at every procedurally placed point, coloured by asset.
+	# Ctrl+Shift+F9: PCG debugging — crosses at every procedurally placed point, colored by asset.
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.shift_pressed \
 			and event.keycode == KEY_F9 and _pcg_dressing != null:
 		_pcg_dressing.set_debug_draw(not PcgWorldDressing.debug_draw)
@@ -2827,14 +2848,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_F11:
-		_set_auto_graphics(false)
-		GraphicsQuality.cycle()
-		_adaptive_resolution.configure(GraphicsQuality.level(),
-		GraphicsQuality.metalfx_resolution_floor())
-		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
-		streamer, _adaptive_resolution.scale if _auto_graphics else -1.0, _auto_graphics)
-		if is_instance_valid(_quality_picker):
-			_quality_picker.select(GraphicsQuality.level())
+		_apply_graphics_selection((GraphicsQuality.level() + 1) % GraphicsQuality.NAMES.size())
 		var message := "Graphics: %s (Ctrl+F11 to change)" % GraphicsQuality.get_name()
 		if hud != null:
 			hud.say(message)

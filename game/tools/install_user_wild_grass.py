@@ -4,10 +4,11 @@
 Usage:
     python3 game/tools/install_user_wild_grass.py /path/to/wild_grass_vlkhcbxia_ue_low.zip
 
-The source pack is not checked into Git: Fab/Quixel asset licences do not
+The source pack is not checked into Git: Fab/Quixel asset licenses do not
 generally allow redistributing standalone source asset files publicly.
 Only fixed expected archive paths are extracted (no ZIP path traversal).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,9 +38,7 @@ def install(archive: Path) -> Path:
             raise ValueError("Missing files in archive: " + ", ".join(missing))
         gltf = json.loads(source.read(FILES[0]))
         mesh_names = {m.get("name", "") for m in gltf.get("meshes", [])}
-        required = {
-            f"SM_vlkhcbxia_Var{variant}_LOD1" for variant in "ABCDEFGH"
-        }
+        required = {f"SM_vlkhcbxia_Var{variant}_LOD1" for variant in "ABCDEFGH"}
         if not required.issubset(mesh_names):
             raise ValueError("The archive does not contain all eight LOD1 grass variants")
         # Never call ZipFile.extractall() on an untrusted ZIP.
