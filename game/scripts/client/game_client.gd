@@ -848,10 +848,8 @@ func nearest_node(point: Vector3, radius: float) -> Dictionary:
 				if depleted.has(node["id"]):
 					continue
 				var center_distance: float = Vector2(float(node["x"]) - point.x, float(node["z"]) - point.z).length()
-				# A modeled rock is interactable from its visible edge. Trees and
-				# foliage keep their original centre-based distance checks.
-				var margin: float = minf(float(node.get("radius", 0.0)), 1.8) if \
-					str(node["kind"]) in ["rock", "ore", "pebble"] else 0.0
+				# Mineable logs and large stones are reachable from their edge.
+				var margin: float = ResourceGathering.reach_margin(node)
 				var distance: float = maxf(0.0, center_distance - margin)
 				if distance < best_distance:
 					best = node
@@ -873,7 +871,7 @@ func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Def
 					continue
 				var center_distance: float = Vector2(float(node["x"]) - point.x,
 					float(node["z"]) - point.z).length()
-				var margin: float = minf(float(node.get("radius", 0.0)), 1.8) if str(node["kind"]) in ["rock", "ore"] else 0.0
+				var margin: float = ResourceGathering.reach_margin(node)
 				var distance: float = maxf(0.0, center_distance - margin)
 				if distance < best_distance:
 					best_distance = distance
