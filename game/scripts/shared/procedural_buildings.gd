@@ -15,7 +15,11 @@ extends RefCounted
 @warning_ignore_start("integer_division")
 
 const MIN_ROOM := 3
+const MAX_BUILDING_SIDE := 64
+const MAX_BUILDING_FLOORS := 8
 const MIN_LOT := 4
+const MAX_SETTLEMENT_LOTS := 96
+const MAX_SETTLEMENT_RADIUS := 2048.0
 const MIN_LOT_SPACING := 6.0
 const LOOP_CHANCE := 0.25
 const BRIDSON_TRIES := 30
@@ -28,8 +32,12 @@ const BRIDSON_TRIES := 30
 ##  "windows": [{"floor", "room", "cell": Vector2i, "normal": Vector2i}],
 ##  "entrance": {"room", "cell": Vector2i, "normal": Vector2i}}
 static func building(seed: int, footprint: Vector2i, floors: int) -> Dictionary:
-	var fp := Vector2i(maxi(footprint.x, MIN_ROOM), maxi(footprint.y, MIN_ROOM))
-	var nfloors: int = maxi(floors, 1)
+	# Procedural inputs can come from generated POI data. Clamp them before
+	# the per-floor O(room_count^2) doorway graph is constructed.
+	var fp := Vector2i(
+		clampi(footprint.x, MIN_ROOM, MAX_BUILDING_SIDE),
+		clampi(footprint.y, MIN_ROOM, MAX_BUILDING_SIDE))
+	var nfloors: int = clampi(floors, 1, MAX_BUILDING_FLOORS)
 	var rooms: Array = []
 	var doors: Array = []
 	var windows: Array = []
@@ -213,15 +221,20 @@ static func _windows_for_floor(f: int, fr: Array, fp: Vector2i, entrance: Dictio
 ##  "floors": int, "seed": int}. Lots never overlap each other or the plaza and
 ## lie completely inside the settlement circle. At most `count` lots.
 static func settlement(seed: int, center: Vector2, radius: float, count: int) -> Array:
+	var out: Array = []
+	# Reject invalid geometry before sampling and cap the requested lots so a
+	# malformed POI cannot allocate an unbounded candidate grid or lot list.
+	if not center.is_finite() or not is_finite(radius) or radius <= 0.0 or \
+			radius > MAX_SETTLEMENT_RADIUS or count < 0:
+		return out
+	var bounded_count: int = mini(count, MAX_SETTLEMENT_LOTS)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
-	var out: Array = []
-	if radius <= 0.0:
-		return out
-	var d: float = maxf(MIN_LOT_SPACING, radius * sqrt(2.0 / float(maxi(count, 1))))
+	var d: float = maxf(MIN_LOT_SPACING,
+		radius * sqrt(2.0 / float(maxi(bounded_count, 1))))
 	var plaza_r: float = d * 0.6
 	out.append({"kind": "plaza", "center": center, "radius": plaza_r})
-	if count <= 0:
+	if bounded_count <= 0:
 		return out
 	var min_r: float = plaza_r + 0.5 * d
 	var max_r: float = radius - 0.5 * d
@@ -244,7 +257,7 @@ static func settlement(seed: int, center: Vector2, radius: float, count: int) ->
 	pts.append(first)
 	active.append(0)
 	grid[Vector2i(int(floor(first.x / cell)), int(floor(first.y / cell)))] = 0
-	while not active.is_empty() and pts.size() < count:
+	while not active.is_empty() and pts.size() < bounded_count:
 		var ai: int = rng.randi_range(0, active.size() - 1)
 		var base: Vector2 = pts[active[ai]]
 		var found: bool = false
@@ -273,7 +286,7 @@ static func settlement(seed: int, center: Vector2, radius: float, count: int) ->
 		var pos: Vector2 = center + off
 		out.append({"kind": "lot", "center": pos, "rect": Rect2(pos - size * 0.5, size),
 			"footprint": Vector2i(fx, fy), "floors": rng.randi_range(1, 3), "seed": rng.randi()})
-		if out.size() > count:
+		if out.size() > bounded_count:
 			break
 	return out
 

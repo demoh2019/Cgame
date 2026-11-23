@@ -123,6 +123,20 @@ func _buildings(t) -> void:
 	t.check(wall_ok, "windows only on exterior walls")
 	var tiny: Dictionary = Buildings.building(1, Vector2i(2, 2), 1)
 	t.eq((tiny["rooms"] as Array).size(), 1, "tiny footprint is one room")
+	t.current = "hostile POI dimensions cannot create unbounded room graphs"
+	var oversized: Dictionary = Buildings.building(77,
+		Vector2i(1000000, 1000000), 1000000)
+	t.eq(oversized["footprint"], Vector2i(
+		Buildings.MAX_BUILDING_SIDE, Buildings.MAX_BUILDING_SIDE),
+		"oversized footprint is clamped to a predictable maximum")
+	t.eq(int(oversized["floors"]), Buildings.MAX_BUILDING_FLOORS,
+		"floor count is clamped before per-floor layout")
+	var negative: Dictionary = Buildings.building(77, Vector2i(-100, 0), -8)
+	t.eq(negative["footprint"], Vector2i(3, 3),
+		"negative dimensions recover to the minimum legal room")
+	t.eq(int(negative["floors"]), 1, "invalid floor count recovers to one")
+	t.check(negative == Buildings.building(77, Vector2i(3, 3), 1),
+		"clamped invalid geometry remains deterministic")
 
 
 func _settlement(t) -> void:
@@ -159,6 +173,22 @@ func _settlement(t) -> void:
 	t.check(clear_of_plaza, "lots avoid the plaza")
 	t.check(not overlap, "lots do not overlap")
 	t.eq((Buildings.settlement(1, center, radius, 0) as Array).size(), 1, "zero count gives plaza only")
+	t.current = "settlement generation rejects malformed geometry and caps work"
+	t.eq(Buildings.settlement(1, Vector2(INF, 0.0), radius, 10), [],
+		"nonfinite settlement center is rejected")
+	t.eq(Buildings.settlement(1, center, NAN, 10), [],
+		"NaN radius is rejected before Poisson sampling")
+	t.eq(Buildings.settlement(1, center, INF, 10), [],
+		"infinite radius cannot create invalid lot rectangles")
+	t.eq(Buildings.settlement(1, center, Buildings.MAX_SETTLEMENT_RADIUS + 1.0, 10), [],
+		"unsupported world-scale radius is rejected")
+	var bounded: Array = Buildings.settlement(818, center, radius, 1000000)
+	t.check(bounded.size() <= Buildings.MAX_SETTLEMENT_LOTS + 1,
+		"lot count is bounded even when a POI requests one million")
+	t.check(bounded == Buildings.settlement(818, center, radius, 1000000),
+		"bounded settlement stays deterministic")
+	var invalid_count: Array = Buildings.settlement(1, center, radius, -1)
+	t.eq(invalid_count, [], "negative lot requests do not create phantom plazas")
 
 
 func _roads(t) -> void:
