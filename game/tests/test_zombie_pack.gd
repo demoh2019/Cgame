@@ -204,6 +204,17 @@ func run(t) -> void:
 		toward_wall, NAN).is_empty(), "bad query radius is rejected")
 	t.check(ZombieWallAttackGrid.candidates(wall_index, Vector2(INF, 0.0),
 		toward_wall, 1.75).is_empty(), "nonfinite infected coordinates cannot hit walls")
+	# A wall can break after the grid is prepared; later infected must
+	# skip its stale ID without accidentally attacking a dead object.
+	walls.erase(12)
+	var first_surviving_wall: int = -1
+	for candidate_id in ZombieWallAttackGrid.candidates(
+			wall_index, Vector2.ZERO, toward_wall, 1.75):
+		if walls.has(candidate_id):
+			first_surviving_wall = candidate_id
+			break
+	t.eq(first_surviving_wall, 14,
+		"same-tick demolished walls are skipped while preserving survivor order")
 
 	t.current = "dense wall targets match the legacy full scan"
 	var random := RandomNumberGenerator.new()
