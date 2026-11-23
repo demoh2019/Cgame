@@ -60,7 +60,7 @@ func set_auto_warmup(bake: Callable) -> void:
 	for cell: Vector2i in _cells.keys():
 		var c: CellState = _cells[cell]
 		var ready: int = _effective(c.marked)
-		if (ready & Stage.PHYSICS_READY) != 0 and 				(ready & Stage.NAVMESH_READY) == 0:
+		if (ready & Stage.PHYSICS_READY) != 0 and (ready & Stage.NAVMESH_READY) == 0:
 			warmup_navmesh(cell, bake)
 
 
