@@ -105,7 +105,7 @@ func run(t) -> void:
 			"actual game mesh uses the native triangle budget")
 		for key in [Mesh.ARRAY_VERTEX, Mesh.ARRAY_NORMAL, Mesh.ARRAY_TANGENT,
 				Mesh.ARRAY_TEX_UV, Mesh.ARRAY_TEX_UV2, Mesh.ARRAY_COLOR]:
-			t.eq(arrays[key], original[key], "game mesh retains imported vertex attributes")
+			t.eq(arrays[key], original[key], "real game mesh retains imported vertex attributes")
 		var baked_pbr := budgeted.surface_get_material(0) as StandardMaterial3D
 		t.check(baked_pbr == source.surface_get_material(0),
 			"real game mesh keeps its original material reference and textures")
