@@ -10,6 +10,7 @@ const WorldPoi = preload("res://scripts/shared/world_poi.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 const StoneResources = preload("res://scripts/shared/stone_resources.gd")
 const StaticBlockerGrid = preload("res://scripts/shared/static_blocker_grid.gd")
+const DynamicBlockerGrid = preload("res://scripts/shared/dynamic_blocker_grid.gd")
 const SolidScenery = preload("res://scripts/shared/solid_scenery.gd")
 
 var world_seed: int
@@ -26,6 +27,7 @@ var _cache_hits: int = 0
 var _cache_misses: int = 0
 var _cache_evictions: int = 0
 var dynamic_blockers: Dictionary = {} # Session structures shared with movement and prediction.
+var _dynamic_index := DynamicBlockerGrid.new() # Exact incremental broadphase for built obstacles.
 # Generated resource geometry remains immutable for deterministic world seeding.
 # Only its collision eligibility is mutable, matching server depletion and
 # client snapshot state (the renderer hides the same node IDs).
@@ -1028,7 +1030,11 @@ func sync_depleted_nodes(nodes: Dictionary) -> void:
 ## Static things that block movement near a point, for both the server and client prediction.
 func add_dynamic_blocker(id: int, x: float, z: float, radius: float) -> void:
 	if is_finite(x) and is_finite(z) and is_finite(radius) and radius > 0.0:
-		dynamic_blockers[id] = {"id": id, "x": x, "z": z, "radius": radius, "blocks": true}
+		if _structure_parts.has(id):
+			remove_dynamic_blocker(id)
+		var entry: Dictionary = {"id": id, "x": x, "z": z, "radius": radius, "blocks": true}
+		dynamic_blockers[id] = entry
+		_dynamic_index.upsert(id, entry)
 
 
 ## A structure made of several circles (house walls, doorways). Tagged so house placement can
@@ -1044,25 +1050,39 @@ func add_structure_blockers(id: int, circles: Array) -> void:
 		if not (is_finite(float(c[0])) and is_finite(float(c[1])) and float(c[2]) > 0.0):
 			continue
 		var key := "%d:%d" % [id, k]
-		dynamic_blockers[key] = {"id": id, "x": float(c[0]), "z": float(c[1]), "radius": float(c[2]), "blocks": true, "piece_owner": str(id)}
+		var entry: Dictionary = {"id": id, "x": float(c[0]), "z": float(c[1]), "radius": float(c[2]), "blocks": true, "piece_owner": str(id)}
+		dynamic_blockers[key] = entry
+		_dynamic_index.upsert(key, entry)
 		keys.append(key)
 	_structure_parts[id] = keys
 
 
 func remove_dynamic_blocker(id: int) -> void:
 	dynamic_blockers.erase(id)
+	_dynamic_index.remove(id)
 	for key in _structure_parts.get(id, []):
 		dynamic_blockers.erase(key)
+		_dynamic_index.remove(key)
 	_structure_parts.erase(id)
+
+
+func dynamic_blocker_stats() -> Dictionary:
+	return _dynamic_index.stats()
+
+
+func dynamic_blocker_count() -> int:
+	return dynamic_blockers.size()
+
+
+func dynamic_blocker_query_candidates() -> int:
+	return _dynamic_index.last_candidates
 
 
 func blockers_near(x: float, z: float, radius: float) -> Array:
 	var result: Array = []
 	if Dungeon.is_underground(x, z):
 		result = Dungeon.blockers_near(world_seed, x, z, radius)
-		for barricade in dynamic_blockers.values():
-			if absf(float(barricade["x"]) - x) <= radius + float(barricade["radius"]) and absf(float(barricade["z"]) - z) <= radius + float(barricade["radius"]):
-				result.append(barricade)
+		result.append_array(_dynamic_index.query(dynamic_blockers, x, z, radius))
 		return result
 	if Vector2(x, z).length() < 60.0 + radius:
 		for structure in hub_structures():
@@ -1078,7 +1098,5 @@ func blockers_near(x: float, z: float, radius: float) -> Array:
 				_static_blockers[cell], cell_origin(cell), x, z, radius,
 				depleted_blockers))
 	# Include built obstacles without erasing the procedural hub/terrain blockers.
-	for barricade in dynamic_blockers.values():
-		if absf(float(barricade["x"]) - x) <= radius + float(barricade["radius"]) and absf(float(barricade["z"]) - z) <= radius + float(barricade["radius"]):
-			result.append(barricade)
+	result.append_array(_dynamic_index.query(dynamic_blockers, x, z, radius))
 	return result
