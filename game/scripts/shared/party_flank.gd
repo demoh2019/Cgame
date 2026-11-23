@@ -51,7 +51,8 @@ static func qualifies(attacker, infected, players: Dictionary, parties, world) -
 		attacker.position.z - infected.position.z)
 	var front_length: float = from_enemy_to_tank.length_squared()
 	var flank_length: float = from_enemy_to_attacker.length_squared()
-	if front_length < 0.04 or front_length > MAX_TANK_DISTANCE * MAX_TANK_DISTANCE or \
+	if not is_finite(front_length) or not is_finite(flank_length) or \
+			front_length < 0.04 or front_length > MAX_TANK_DISTANCE * MAX_TANK_DISTANCE or \
 			flank_length < 0.04 or flank_length > MAX_MELEE_DISTANCE * MAX_MELEE_DISTANCE:
 		return false
 	return from_enemy_to_tank.normalized().dot(

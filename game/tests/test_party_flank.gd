@@ -79,6 +79,11 @@ func run(t) -> void:
 	t.check(not PartyFlank.qualifies(flanker, infected, sim.players, sim.parties, world),
 		"invalid spatial coordinates cannot claim combat synergy")
 	flanker.position = own_position
+	var original_enemy_position: Vector3 = infected.position
+	infected.position = Vector3(-1.0e30, infected.position.y, 0.0)
+	t.check(not PartyFlank.qualifies(flanker, infected, sim.players, sim.parties, world),
+		"extreme finite infected coordinates cannot grant a melee flank bonus")
+	infected.position = original_enemy_position
 	tank.position = _at(world, 325.0, 0.0)
 	t.check(not PartyFlank.qualifies(flanker, infected, sim.players, sim.parties, world),
 		"target ally must be close to the actual infected")

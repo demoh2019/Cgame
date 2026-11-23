@@ -15,7 +15,8 @@ static func can_reach(source: Vector3, target: Vector3) -> bool:
 	if absf(source.y - target.y) > MAX_HEIGHT_DIFF:
 		return false
 	var offset := Vector2(source.x - target.x, source.z - target.z)
-	return offset.length_squared() <= RANGE * RANGE
+	var distance_squared: float = offset.length_squared()
+	return is_finite(distance_squared) and distance_squared <= RANGE * RANGE
 
 
 ## Only plain provisions can be handed over. Special meals and potions retain
@@ -23,13 +24,23 @@ static func can_reach(source: Vector3, target: Vector3) -> bool:
 static func supported_item(item_id: String, item_data: Dictionary) -> bool:
 	match item_id:
 		"berries", "canned_food":
-			return str(item_data.get("kind", "")) == "food" and float(item_data.get("food", 0.0)) > 0.0
+			return str(item_data.get("kind", "")) == "food" and \
+				_positive_stat(item_data, "food")
 		"water_bottle":
-			return str(item_data.get("kind", "")) == "drink" and float(item_data.get("drink", 0.0)) > 0.0
+			return str(item_data.get("kind", "")) == "drink" and \
+				_positive_stat(item_data, "drink")
 		_:
 			if item_id == WoundSealant.ITEM_ID:
 				return str(item_data.get("kind", "")) == "wound_seal"
 			return str(item_data.get("kind", "")) == "medical"
+
+
+static func _positive_stat(data: Dictionary, key: String) -> bool:
+	var raw: Variant = data.get(key, 0.0)
+	if not (raw is int or raw is float):
+		return false
+	var value: float = float(raw)
+	return is_finite(value) and value > 0.0
 
 
 static func has_effect(item_data: Dictionary, health: float, infection: float,
@@ -43,17 +54,15 @@ static func has_effect(item_data: Dictionary, health: float, infection: float,
 		return false
 	match str(item_data.get("kind", "")):
 		"food":
-			return float(item_data.get("food", 0.0)) > 0.0 and hunger < 100.0
+			return _positive_stat(item_data, "food") and hunger < 100.0
 		"drink":
-			return float(item_data.get("drink", 0.0)) > 0.0 and thirst < 100.0
+			return _positive_stat(item_data, "drink") and thirst < 100.0
 		"medical":
-			var heal_amount: float = float(item_data.get("heal", 0.0))
-			var cure_amount: float = float(item_data.get("cure", 0.0))
-			return (heal_amount > 0.0 and health < max_health) or (
-				cure_amount > 0.0 and infection > 0.0) or (
+			return (_positive_stat(item_data, "heal") and health < max_health) or (
+				_positive_stat(item_data, "cure") and infection > 0.0) or (
 				bool(item_data.get("stop_bleeding", false)) and bleeding > 0.0) or (
-				float(item_data.get("fracture_treatment", 0.0)) > 0.0 and fracture > 0.0) or (
-				float(item_data.get("food_poison_treatment", 0.0)) > 0.0 and food_poisoning > 0.0)
+				_positive_stat(item_data, "fracture_treatment") and fracture > 0.0) or (
+				_positive_stat(item_data, "food_poison_treatment") and food_poisoning > 0.0)
 	return false
 
 
