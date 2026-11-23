@@ -100,18 +100,22 @@ static func _user_grass_mesh(variant: String) -> Mesh:
 	if not user_grass_available() or not (variant in USER_GRASS_VARIANTS):
 		return null
 	var scene: Node = _user_grass_scene.instantiate()
-	var name_to_find := "SM_vlkhcbxia_Var%s_LOD1" % variant
 	var result: Mesh = null
-	for node in scene.find_children("*", "MeshInstance3D", true, false):
-		if str(node.name) != name_to_find:
-			continue
-		var model := node as MeshInstance3D
-		if model.mesh != null:
-			result = _foliage_ready(model.mesh, null)
-			# glTF model vertices are in centimetres, and source nodes rotate X->Y.
-			# Apply the authored node basis when setting each MultiMesh transform.
-			result.set_meta("source_grass_basis", model.transform.basis)
-		break
+	# Some Godot importer versions merge authored _LOD1 nodes into the base
+	# mesh. Try explicit LOD1 first, then the full-detail variant as fallback.
+	for suffix in ["_LOD1", ""]:
+		var name_to_find := "SM_vlkhcbxia_Var%s%s" % [variant, suffix]
+		for node in scene.find_children("*", "MeshInstance3D", true, false):
+			if str(node.name) != name_to_find:
+				continue
+			var model := node as MeshInstance3D
+			if model.mesh != null:
+				result = _foliage_ready(model.mesh, null)
+				# Original glTF vertices are in centimetres and rotate X->Y.
+				result.set_meta("source_grass_basis", model.transform.basis)
+			break
+		if result != null:
+			break
 	scene.free()
 	return result
 
@@ -386,7 +390,8 @@ static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted
 				s = float(info["scale"][1]) * rng.randf_range(1.0, 1.8) # The odd huge clump or boulder.
 			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s * rng.randf_range(0.85, 1.15), s))
 			if plant_mesh.has_meta("source_grass_basis"):
-				basis = basis * (plant_mesh.get_meta("source_grass_basis") as Basis)
+				var asset_basis: Basis = plant_mesh.get_meta("source_grass_basis")
+				basis = basis * asset_basis
 			var h: float = float(here["h"])
 			var sink: float = 0.03
 			if info.has("embed"):
@@ -418,7 +423,8 @@ static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted
 		# No fade: a fading range forces the whole multimesh into the slow transparent pass.
 		var bounds: AABB = plant_mesh.get_aabb()
 		if plant_mesh.has_meta("source_grass_basis"):
-			bounds = Transform3D(plant_mesh.get_meta("source_grass_basis") as Basis, Vector3.ZERO) * bounds
+			var asset_basis: Basis = plant_mesh.get_meta("source_grass_basis")
+			bounds = Transform3D(asset_basis, Vector3.ZERO) * bounds
 		var top: float = bounds.size.y * float(info["scale"][1]) * 1.8 + 0.5
 		instance.custom_aabb = AABB(Vector3(tile_x - 1.0, low - 0.3, tile_z - 1.0), Vector3(TILE + 2.0, high - low + top, TILE + 2.0))
 		return instance
