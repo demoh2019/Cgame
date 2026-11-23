@@ -27,6 +27,23 @@ func run(t) -> void:
 	t.check(not PartyAid.has_effect(Defs.item("bandage"), 100.0, 0.0, NAN),
 			"invalid wound severity is refused")
 
+	t.current = "invalid aid potency and overflowed reach never authorize supplies"
+	t.check(not PartyAid.can_reach(Vector3(-1.0e30, 0.0, 0.0),
+		Vector3(1.0e30, 0.0, 0.0)),
+		"overflowing horizontal separation cannot allow remote treatment")
+	t.check(not PartyAid.supported_item("canned_food",
+		{"kind": "food", "food": "50"}),
+		"numeric strings cannot masquerade as authoritative food effects")
+	t.check(not PartyAid.supported_item("water_bottle",
+		{"kind": "drink", "drink": INF}),
+		"non-finite water restoration cannot be shared")
+	t.check(not PartyAid.has_effect({"kind": "medical", "heal": INF},
+		50.0, 0.0), "non-finite healing cannot qualify for item consumption")
+	t.check(not PartyAid.has_effect({"kind": "medical", "cure": "30"},
+		100.0, 25.0), "textual cure potency cannot qualify as medicine")
+	t.check(PartyAid.has_effect(Defs.item("bandage"), 50.0, 0.0),
+		"real medical healing remains eligible")
+
 	var world := WorldGen.new(733)
 	var server := GameServer.new(world, 733)
 	var medic = server.add_player(11, "Medic")
