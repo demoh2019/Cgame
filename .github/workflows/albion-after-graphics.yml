@@ -66,7 +66,12 @@ jobs:
             servers/rendering/renderer_rd/effects
             thirdparty/amd-fsr2
             tests/servers/rendering
+            tests/scene
           sparse-checkout-cone-mode: true
+
+      - name: Validate in-game Settings wiring and persistence contracts
+        shell: bash
+        run: python3 -m unittest tests/scene/test_albion_settings_menu_contract.py -v
 
       - name: Validate native SSR half-resolution reconstruction
         shell: bash
@@ -119,6 +124,14 @@ jobs:
           grep -E '^GRAPHICS TOTAL: [0-9]+ checks, 0 failures$' graphics-tests.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' graphics-tests.log; then exit 1; fi
 
+      - name: Focused Settings, audio and graphics regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 240s ./godot --headless --path game --script res://tests/run_one.gd -- test_ui_parity test_audio_parity test_graphics_quality 2>&1 | tee ui-settings-tests.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' ui-settings-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' ui-settings-tests.log; then exit 1; fi
+
       - name: Upload graphics regression logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -128,6 +141,7 @@ jobs:
           path: |
             graphics-import.log
             graphics-tests.log
+            ui-settings-tests.log
             ssr-engine-tests.log
             fsr2-history-tests.log
             pbr-reflection-tests.log
