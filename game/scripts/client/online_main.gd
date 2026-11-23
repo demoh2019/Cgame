@@ -2083,6 +2083,8 @@ func _apply_world_state() -> void:
 			hidden.merge(client.depleted)
 			hidden.merge(client.crates_used)
 		chunk.apply_state(hidden)
+		if chunk.has_method("apply_resource_damage"):
+			chunk.apply_resource_damage(client.resource_hits)
 		chunk.set_meta("aa_state_revision", revision)
 
 
