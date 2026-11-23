@@ -37,6 +37,17 @@ static func strike_yield(kind: String, strike: int) -> int:
 
 ## Reject remote hits through walls of distance and hits aimed behind the player.
 ## A very close target is forgiving so touching a stone is not frustrating.
+## Interaction reach extends to the edge of large fallen logs and rocks.
+## Normal upright trees keep their short centre-based reach.
+static func reach_margin(node: Dictionary) -> float:
+	var radius: float = float(node.get("radius", 0.0))
+	if node.has("solid_model"):
+		return minf(radius, 3.0)
+	if str(node.get("kind", "")) in ["rock", "ore", "pebble"]:
+		return minf(radius, 1.8)
+	return 0.0
+
+
 static func aimed_at(player_pos: Vector3, node: Dictionary, direction: Vector2, reach: float = Defs.REACH + 0.5) -> bool:
 	if not player_pos.is_finite() or not direction.is_finite() or direction.length_squared() < 0.01:
 		return false
@@ -44,7 +55,7 @@ static func aimed_at(player_pos: Vector3, node: Dictionary, direction: Vector2, 
 		float(node.get("z", INF)) - player_pos.z)
 	if not offset.is_finite():
 		return false
-	var margin: float = minf(float(node.get("radius", 0.0)), 1.8) if str(node.get("kind", "")) in ["rock", "ore"] else 0.0
+	var margin: float = reach_margin(node)
 	if offset.length() > reach + margin:
 		return false
 	return offset.length() <= 0.8 + margin or offset.normalized().dot(direction.normalized()) >= 0.35
