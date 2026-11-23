@@ -50,6 +50,9 @@ var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var _next_id: int = 1
 var _time: float = 0.0
 var _attractors: Array[Dictionary] = []
+# Server-owned moving sources update one signal in place instead of
+# accumulating dozens of noise/night impulses per player each population pass.
+var _attractor_sources: Dictionary = {}    ## "kind:peer" -> shared attractor Dictionary
 var _attr: PackedFloat32Array = PackedFloat32Array()
 var _attr_dirty: bool = true
 var _blocked: Dictionary = {}              ## region -> true
@@ -70,6 +73,7 @@ func setup(p_cols: int, p_rows: int, p_cell_size: float, seed_value: int, p_orig
 	_rng.seed = seed_value
 	herds.clear()
 	_attractors.clear()
+	_attractor_sources.clear()
 	_blocked.clear()
 	_decay.clear()
 	_spawners.clear()
@@ -127,8 +131,43 @@ func add_attractor(kind: String, pos: Vector2, strength: float, radius: float, t
 	_attr_dirty = true
 
 
+## Dynamic signals from one authoritative source (such as a player) replace
+## their old values instead of stacking a new copy every server population pass.
+## Different types and different players are independent; ordinary event
+## attractors created by add_attractor() retain their original semantics.
+func set_source_attractor(kind: String, source_id: int, pos: Vector2,
+		strength: float, radius: float, ttl: float) -> void:
+	if not pos.is_finite() or not is_finite(strength) or not is_finite(radius) or \
+			not is_finite(ttl) or radius <= 0.0 or ttl <= 0.0:
+		return
+	var key: String = "%s:%d" % [kind, source_id]
+	var signal: Dictionary = _attractor_sources.get(key, {})
+	if signal.is_empty():
+		signal = {"kind": kind, "pos": pos, "strength": strength,
+			"radius": maxf(1.0, radius), "ttl": ttl, "source": key}
+		_attractor_sources[key] = signal
+		_attractors.append(signal)
+	else:
+		# A moving gunshot/noise source follows the player and reflects their
+		# current volume. TTL only changes lifetime, not attraction strength.
+		if signal["pos"] != pos or float(signal["strength"]) != strength or \
+				float(signal["radius"]) != maxf(1.0, radius):
+			signal["pos"] = pos
+			signal["strength"] = strength
+			signal["radius"] = maxf(1.0, radius)
+			_attr_dirty = true
+		signal["ttl"] = ttl
+		return
+	_attr_dirty = true
+
+
+func active_attractor_count() -> int:
+	return _attractors.size()
+
+
 func clear_attractors() -> void:
 	_attractors.clear()
+	_attractor_sources.clear()
 	_attr_dirty = true
 
 
@@ -282,6 +321,9 @@ func _age_attractors(dt: float) -> void:
 		if ttl >= 0.0:
 			ttl -= dt
 			if ttl <= 0.0:
+				var signal: Dictionary = _attractors[i]
+				if signal.has("source"):
+					_attractor_sources.erase(signal["source"])
 				_attractors.remove_at(i)
 				_attr_dirty = true
 			else:
