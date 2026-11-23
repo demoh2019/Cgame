@@ -898,7 +898,13 @@ func _refresh_terrain_horizon() -> void:
 				var pixel: Color = colors[i]
 				pixel.b = _horizon_cached[i]
 				colors[i] = pixel
-	_terrain.set_color_data(colors)
+	# After initial color allocation, live lighting-quality toggles only
+	# invalidate render meshes. Native color patches preserve collision and
+	# all unchanged world chunks; old engine builds retain the safe fallback.
+	if _terrain.has_method("apply_color_patch") and _terrain.get_color_data().size() == colors.size():
+		_terrain.apply_color_patch(Rect2i(0, 0, SAMPLES, SAMPLES), colors)
+	else:
+		_terrain.set_color_data(colors)
 	_horizon_state = desired
 
 
