@@ -6604,7 +6604,7 @@ func _apply_skill_bonuses(player: Player) -> void:
 func _award(player: Player, skill: String, amount: float) -> void:
 	# The only place that consumes rested credit. Refused actions never call
 	# this method; no extra reward is spent when the skill is already maxed.
-	var extra: int = RestedTraining.bonus_for(amount, player.rested_xp_credit)
+	var extra: int = RestedTraining.bonus_for(amount, player.rested_xp_credit, player.skills.level(skill))
 	var result: Dictionary = player.skills.add_xp(skill, amount + float(extra))
 	if int(result["gained"]) <= 0:
 		return
