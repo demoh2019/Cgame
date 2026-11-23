@@ -178,6 +178,24 @@ static func plan_waypoint_route(streamer: WorldStreamer, waypoint: Vector2,
 	return result
 
 
+## Reuse an existing waypoint route only while it remains valid and
+## shortest with respect to the *current* obstacle set. A previously
+## blocked detour must be rebuilt when the last obstacle disappears.
+## This also prevents rebuilding AStar grids every render frame merely
+## because an unchanged hazard list is nonempty.
+static func can_reuse_waypoint_route(cached: Array, first: Vector3i,
+		last: Vector3i, blocked_cells: Array[Vector3i] = []) -> bool:
+	if cached.is_empty() or cached[0] != first or cached[cached.size() - 1] != last:
+		return false
+	for blocked in blocked_cells:
+		if blocked.y == 0 and cached.has(blocked):
+			return false
+	if blocked_cells.is_empty():
+		var shortest: int = absi(last.x - first.x) + absi(last.z - first.z) + 1
+		return cached.size() == shortest
+	return true
+
+
 ## Called from the existing private map-waypoint update, with an optional
 ## game-owned hazard map. Never trusts remote players or creates new chunks.
 ## Do not rerun AStar each render frame when both endpoint cells are stable.
@@ -193,8 +211,7 @@ static func apply_waypoint_route(streamer: WorldStreamer, waypoint: Vector2,
 		return
 	var first: Vector3i = streamer.world_to_cell(player)
 	var last: Vector3i = streamer.world_to_cell(Vector3(waypoint.x, 0.0, waypoint.y))
-	if blocked_cells.is_empty() and not cached.is_empty() and cached[0] == first and \
-			cached[cached.size() - 1] == last:
+	if can_reuse_waypoint_route(cached, first, last, blocked_cells):
 		return
 	var planned: Array[Vector3i] = plan_waypoint_route(streamer, waypoint, player, blocked_cells)
 	if planned.is_empty():

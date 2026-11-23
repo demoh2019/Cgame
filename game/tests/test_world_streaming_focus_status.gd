@@ -25,6 +25,30 @@ func run(t) -> void:
 		"total": 10, "pending": 1, "progress": INF
 	}).contains("0%"), "invalid fractional progress is sanitized")
 
+	t.current = "waypoint route cache detects new hazards and cleared detours"
+	var start := Vector3i(0, 0, 0)
+	var finish := Vector3i(3, 0, 0)
+	var direct: Array = [
+		start, Vector3i(1, 0, 0), Vector3i(2, 0, 0), finish]
+	var detour: Array = [
+		start, Vector3i(0, 0, 1), Vector3i(1, 0, 1),
+		Vector3i(2, 0, 1), Vector3i(3, 0, 1), finish]
+	var obstacle: Array[Vector3i] = [Vector3i(1, 0, 0)]
+	var clear: Array[Vector3i] = []
+	t.check(Policy.can_reuse_waypoint_route(direct, start, finish, clear),
+		"unchanged direct route avoids per-frame AStar work")
+	t.check(not Policy.can_reuse_waypoint_route(direct, start, finish, obstacle),
+		"new obstacle on route forces replanning")
+	t.check(Policy.can_reuse_waypoint_route(detour, start, finish, obstacle),
+		"valid detour remains cached while obstacle exists")
+	t.check(not Policy.can_reuse_waypoint_route(detour, start, finish, clear),
+		"removing an obstacle rebuilds shorter direct path")
+	t.check(not Policy.can_reuse_waypoint_route(direct,
+		Vector3i(-1, 0, 0), finish, clear),
+		"moving between cells invalidates previous starting cell")
+	t.check(not Policy.can_reuse_waypoint_route([], start, finish, clear),
+		"empty cache cannot suppress initial path planning")
+
 	t.current = "native focus readiness query when available"
 	var streamer := WorldStreamer.new()
 	streamer.cell_size = 64.0
