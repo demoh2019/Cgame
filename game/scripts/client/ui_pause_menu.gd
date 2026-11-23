@@ -9,6 +9,7 @@ const UiInputRebind = preload("res://scripts/client/ui_input_rebind.gd")
 const UiLocalization = preload("res://scripts/client/ui_localization.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const AudioMix = preload("res://scripts/client/audio_mix.gd")
+const DisplaySettings = preload("res://scripts/client/ui_display_settings.gd")
 
 signal changed(key: String)
 signal graphics_selected(index: int)
@@ -19,6 +20,7 @@ var _bind_buttons: Dictionary = {}
 var _notice: Label
 var _tabs: TabContainer
 var _graphics_picker: OptionButton
+var _display_pickers: Dictionary = {}
 var _audio_sliders: Dictionary = {} # Existing AudioMix buses, not another settings store.
 
 
@@ -191,10 +193,31 @@ func _build_graphics() -> void:
 	_graphics_picker.item_selected.connect(func(index: int) -> void:
 		graphics_selected.emit(_graphics_picker.get_item_id(index)))
 	_row(page, "Quality preset", _graphics_picker)
+	DisplaySettings.load_all()
+	_display_option(page, "Window mode", "window_mode",
+		[0, 1], DisplaySettings.WINDOW_MODES)
+	_display_option(page, "Vertical sync", "vsync",
+		[0, 1], DisplaySettings.VSYNC_MODES)
+	_display_option(page, "FPS limit", "fps_limit",
+		DisplaySettings.FPS_LIMITS, ["Unlimited", "30 FPS", "60 FPS",
+		"120 FPS", "144 FPS", "240 FPS"])
 	var hint := Label.new()
 	hint.text = "Auto adjusts 3D resolution and details to GPU load."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	page.add_child(hint)
+
+
+func _display_option(parent: Control, caption: String, key: String,
+		allowed: Array, labels: Array) -> void:
+	var choice := OptionButton.new()
+	for i in allowed.size():
+		choice.add_item(labels[i], allowed[i])
+	choice.select(maxi(allowed.find(DisplaySettings.get_value(key)), 0))
+	choice.item_selected.connect(func(index: int) -> void:
+		DisplaySettings.set_value(key, choice.get_item_id(index))
+		DisplaySettings.apply(get_window()))
+	_display_pickers[key] = choice
+	_row(parent, caption, choice)
 
 
 ## Source-of-truth: AudioMix. The audio bus responds immediately, but mouse

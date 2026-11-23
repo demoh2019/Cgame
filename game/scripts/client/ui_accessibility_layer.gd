@@ -12,6 +12,7 @@ const UiGamepad = preload("res://scripts/client/ui_gamepad.gd")
 const UiAccess = preload("res://scripts/client/ui_access.gd")
 const GraphicsResolution = preload("res://scripts/client/graphics_resolution.gd")
 const PauseMenu = preload("res://scripts/client/ui_pause_menu.gd")
+const DisplaySettings = preload("res://scripts/client/ui_display_settings.gd")
 
 var menu: Control
 var captions
@@ -51,6 +52,8 @@ func _ready() -> void:
 	UiLocalization.apply_saved()
 	UiInputRebind.install()
 	menu = PauseMenu.new()
+	# Apply persisted display mode, V-Sync and frame limit on first load.
+	DisplaySettings.apply(get_window())
 	menu.changed.connect(func(_key: String) -> void: apply_all())
 	add_child(menu)
 	captions = UiCaptions.CaptionView.new()
