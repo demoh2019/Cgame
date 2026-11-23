@@ -74,6 +74,17 @@ Tests:
 Source-level checks are not equivalent to successful native compilation
 or graphics-driver testing.
 
+## Cluster cut surface attribute fidelity
+
+The separate `CgameClusterLOD.build_cut_arrays(source_arrays, hierarchy, cut)` API
+returns the chosen indexed cluster cut while retaining **all original source
+vertex streams** (normals, tangents, UVs, colors, skin and custom channels).
+It validates that the hierarchy was built from those exact vertex positions.
+It complements `simplify_surface_arrays`: the latter weights normals/UVs
+when choosing new triangles, while cluster hierarchy cuts currently use
+position-only simplification but preserve original vertex attributes.
+This step is CPU-side; no GPU cluster residency or mesh shading is implied.
+
 ## Limitations
 
 - No GPU path and no streaming; hierarchy building is single threaded and intended for offline or load-time use.
