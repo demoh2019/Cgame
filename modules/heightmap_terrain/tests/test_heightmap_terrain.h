@@ -31,6 +31,9 @@
 
 #include "../heightmap_terrain_3d.h"
 #include "../terrain_heightmap.h"
+#ifndef PHYSICS_3D_DISABLED
+#include "scene/resources/3d/concave_polygon_shape_3d.h"
+#endif
 
 #include "core/io/image.h"
 #include "tests/test_macros.h"
@@ -461,5 +464,83 @@ TEST_CASE("[Terrain] Import accepts constant height range") {
     CHECK(data->get_height(0, 1) == doctest::Approx(7));
     CHECK(data->get_height(1, 1) == doctest::Approx(7));
 }
+
+
+#ifndef PHYSICS_3D_DISABLED
+TEST_CASE("[Terrain] Opt-in collision follows sculpt, scaling and display-independent mesh") {
+    HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+    terrain->get_heightmap()->set_dimensions(3, 3);
+    CHECK(!terrain->is_auto_collision_enabled());
+    CHECK(terrain->get_auto_collision_triangle_count() == 0);
+    terrain->set_auto_collision_enabled(true);
+    CHECK(terrain->is_auto_collision_enabled());
+    CHECK(terrain->get_auto_collision_triangle_count() == 8);
+    Ref<Shape3D> initial = terrain->get_auto_collision_shape();
+    REQUIRE(initial.is_valid());
+    ConcavePolygonShape3D *concave = Object::cast_to<ConcavePolygonShape3D>(initial.ptr());
+    REQUIRE(concave != nullptr);
+    CHECK(concave->get_faces().size() == 24);
+
+    terrain->get_heightmap()->set_height(1, 1, 7);
+    Ref<Shape3D> raised = terrain->get_auto_collision_shape();
+    REQUIRE(raised.is_valid());
+    CHECK(raised != initial);
+    ConcavePolygonShape3D *raised_shape = Object::cast_to<ConcavePolygonShape3D>(raised.ptr());
+    REQUIRE(raised_shape != nullptr);
+    bool found_raised_point = false;
+    for (const Vector3 &p : raised_shape->get_faces()) {
+        if (p == Vector3(1, 7, 1)) {
+            found_raised_point = true;
+        }
+    }
+    CHECK(found_raised_point);
+
+    terrain->get_heightmap()->apply_color_brush(Vector2(1, 1), 2, Color(0, 1, 0), 1);
+    CHECK(terrain->get_auto_collision_shape() == raised); // No unnecessary physics-server rebuild.
+    Ref<Material> material;
+    terrain->set_terrain_material(material);
+    CHECK(terrain->get_auto_collision_shape() == raised);
+    terrain->set_cell_size(2.0);
+    Ref<Shape3D> scaled = terrain->get_auto_collision_shape();
+    REQUIRE(scaled.is_valid());
+    CHECK(scaled != raised);
+    CHECK(terrain->get_auto_collision_triangle_count() == 8);
+
+    terrain->set_auto_collision_step(2);
+    CHECK(terrain->get_auto_collision_triangle_count() == 2);
+    const Ref<Shape3D> coarse = terrain->get_auto_collision_shape();
+    terrain->set_auto_collision_enabled(false);
+    CHECK(terrain->get_auto_collision_triangle_count() == 0);
+    CHECK(terrain->get_auto_collision_shape() == coarse);
+    terrain->set_auto_collision_enabled(true);
+    CHECK(terrain->get_auto_collision_triangle_count() == 2);
+    CHECK(terrain->get_auto_collision_shape() == coarse);
+    ERR_PRINT_OFF;
+    terrain->set_auto_collision_step(0);
+    terrain->set_auto_collision_step(17);
+    ERR_PRINT_ON;
+    CHECK(terrain->get_auto_collision_step() == 2);
+    memdelete(terrain);
+}
+
+TEST_CASE("[Terrain] Large editor heightfields auto-cap collision at 8192 triangles") {
+    HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+    terrain->get_heightmap()->set_dimensions(129, 129);
+    terrain->set_auto_collision_enabled(true);
+    CHECK(terrain->get_auto_collision_step() == 1);
+    CHECK(terrain->get_auto_collision_triangle_count() == 8192);
+    Ref<Shape3D> shape = terrain->get_auto_collision_shape();
+    REQUIRE(shape.is_valid());
+    ConcavePolygonShape3D *concave = Object::cast_to<ConcavePolygonShape3D>(shape.ptr());
+    REQUIRE(concave != nullptr);
+    CHECK(concave->get_faces().size() == 8192 * 3);
+    Ref<Mesh> visual = terrain->get_mesh();
+    REQUIRE(visual.is_valid());
+    CHECK(visual->surface_get_array_index_len(0) == 128 * 128 * 6);
+    terrain->set_auto_collision_step(16);
+    CHECK(terrain->get_auto_collision_triangle_count() == 128);
+    memdelete(terrain);
+}
+#endif // PHYSICS_3D_DISABLED
 
 } // namespace TestHeightmapTerrain
