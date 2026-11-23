@@ -122,6 +122,39 @@ void CgamePopulationLOD::add_attractor(const String &p_kind, const Vector2 &p_po
 	attr_dirty = true;
 }
 
+// One moving noise/night source per player. Event pulses created through
+// add_attractor() remain independent, as in the script fallback.
+void CgamePopulationLOD::set_source_attractor(const String &p_kind, int p_source_id, const Vector2 &p_pos, real_t p_strength, real_t p_radius, real_t p_ttl) {
+	if (!p_pos.is_finite() || !Math::is_finite(p_strength) || !Math::is_finite(p_radius) || !Math::is_finite(p_ttl) || p_radius <= 0.0 || p_ttl <= 0.0) {
+		return;
+	}
+	const real_t radius = MAX((real_t)1.0, p_radius);
+	for (uint32_t i = 0; i < attractors.size(); i++) {
+		Attractor &a = attractors[i];
+		if (!a.sourced || a.source_id != p_source_id || a.kind != p_kind) {
+			continue;
+		}
+		if (a.pos != p_pos || a.strength != p_strength || a.radius != radius) {
+			a.pos = p_pos;
+			a.strength = p_strength;
+			a.radius = radius;
+			attr_dirty = true;
+		}
+		a.ttl = p_ttl;
+		return;
+	}
+	Attractor a;
+	a.kind = p_kind;
+	a.pos = p_pos;
+	a.strength = p_strength;
+	a.radius = radius;
+	a.ttl = p_ttl;
+	a.source_id = p_source_id;
+	a.sourced = true;
+	attractors.push_back(a);
+	attr_dirty = true;
+}
+
 void CgamePopulationLOD::clear_attractors() {
 	attractors.clear();
 	attr_dirty = true;
@@ -166,10 +199,19 @@ void CgamePopulationLOD::_refresh_attraction() {
 		if (a.kind == "night" && !night) {
 			continue;
 		}
-		for (uint32_t r = 0; r < attr.size(); r++) {
-			const real_t d = region_center((int)r).distance_to(a.pos);
-			if (d < a.radius) {
-				attr[r] += a.strength * w * (1.0 - d / a.radius);
+		// Only grid cells whose centres can intersect this signal need
+		// evaluation. Rows retain the original ascending region order.
+		const int low_x = MAX(0, (int)Math::floor((a.pos.x - a.radius - origin.x) / cell_size - 0.5));
+		const int high_x = MIN(cols - 1, (int)Math::ceil((a.pos.x + a.radius - origin.x) / cell_size - 0.5));
+		const int low_y = MAX(0, (int)Math::floor((a.pos.y - a.radius - origin.y) / cell_size - 0.5));
+		const int high_y = MIN(rows - 1, (int)Math::ceil((a.pos.y + a.radius - origin.y) / cell_size - 0.5));
+		for (int cy = low_y; cy <= high_y; cy++) {
+			for (int cx = low_x; cx <= high_x; cx++) {
+				const int r = cy * cols + cx;
+				const real_t d = region_center(r).distance_to(a.pos);
+				if (d < a.radius) {
+					attr[r] += a.strength * w * (1.0 - d / a.radius);
+				}
 			}
 		}
 	}
@@ -695,6 +737,8 @@ void CgamePopulationLOD::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_kind_weight", "kind", "weight"), &CgamePopulationLOD::set_kind_weight);
 	ClassDB::bind_method(D_METHOD("get_kind_weight", "kind"), &CgamePopulationLOD::get_kind_weight);
 	ClassDB::bind_method(D_METHOD("add_attractor", "kind", "pos", "strength", "radius", "ttl"), &CgamePopulationLOD::add_attractor, DEFVAL(-1.0));
+	ClassDB::bind_method(D_METHOD("set_source_attractor", "kind", "source_id", "pos", "strength", "radius", "ttl"), &CgamePopulationLOD::set_source_attractor);
+	ClassDB::bind_method(D_METHOD("active_attractor_count"), &CgamePopulationLOD::active_attractor_count);
 	ClassDB::bind_method(D_METHOD("clear_attractors"), &CgamePopulationLOD::clear_attractors);
 	ClassDB::bind_method(D_METHOD("set_night", "night"), &CgamePopulationLOD::set_night);
 	ClassDB::bind_method(D_METHOD("is_night"), &CgamePopulationLOD::is_night);
