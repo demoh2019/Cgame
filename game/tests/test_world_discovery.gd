@@ -58,6 +58,25 @@ func run(t) -> void:
 	t.check(WorldDiscovery.from_saved(records, WorldGen.new(1338)).is_empty(),
 		"same site record cannot be imported into foreign world seed")
 
+	t.current = "journal serialization is canonical independent of insertion order"
+	var first_journal: Dictionary = {
+		Vector2i(2, 0): 8, Vector2i(-1, 1): 8, Vector2i(2, -1): 8,
+		Vector2i(0, 0): 3,
+	}
+	var second_journal: Dictionary = {
+		Vector2i(0, 0): 3, Vector2i(2, -1): 8,
+		Vector2i(-1, 1): 8, Vector2i(2, 0): 8,
+	}
+	var canonical: Array = WorldDiscovery.to_saved(first_journal)
+	t.eq(canonical, WorldDiscovery.to_saved(second_journal),
+		"reordered journals persist in the same byte-stable record order")
+	t.eq(canonical[0], {"rx": 0, "rz": 0, "id": 3},
+		"site IDs remain the primary ordering field")
+	t.eq(canonical[1], {"rx": -1, "rz": 1, "id": 8},
+		"equal IDs sort by region coordinates")
+	t.eq(canonical[2], {"rx": 2, "rz": -1, "id": 8},
+		"equal-region X sorts by Z without relying on dictionary order")
+
 	t.current = "live rewards only once and owner-only map status"
 	var sim := GameServer.new(world, 1337)
 	var explorer = sim.add_player(777, "Cartographer", "account-777")

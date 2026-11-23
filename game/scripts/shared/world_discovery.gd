@@ -47,7 +47,14 @@ static func to_saved(journal: Dictionary) -> Array:
 	for region in journal:
 		var key: Vector2i = region
 		result.append({"rx": key.x, "rz": key.y, "id": int(journal[region])})
-	result.sort_custom(func(a, b): return int(a["id"]) < int(b["id"]))
+	# A canonical tie-breaker keeps saves identical even if insertion order
+	# differs (e.g. merging recovered journals with duplicate site IDs).
+	result.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if int(a["id"]) != int(b["id"]):
+			return int(a["id"]) < int(b["id"])
+		if int(a["rx"]) != int(b["rx"]):
+			return int(a["rx"]) < int(b["rx"])
+		return int(a["rz"]) < int(b["rz"]))
 	return result
 
 

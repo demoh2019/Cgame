@@ -52,6 +52,9 @@ func try_sprint(seconds: float) -> bool:
 
 ## Advances the clock. Returns the damage taken from hunger or thirst this step.
 func tick(delta: float) -> float:
+	# Reject corrupt or reversed simulation time before changing any vital.
+	if not is_finite(delta) or delta <= 0.0:
+		return 0.0
 	_tick_gear_effects(delta)
 	if not alive:
 		return 0.0
@@ -119,7 +122,7 @@ func weather_tick(delta: float, severity: float) -> float:
 
 ## Returns the damage that was applied (after clamping at 0 health).
 func hurt(amount: float) -> float:
-	if not alive or amount <= 0.0:
+	if not alive or not is_finite(amount) or amount <= 0.0:
 		return 0.0
 	if guard_seconds > 0.0:
 		amount *= 1.0 - clampf(guard_reduction, 0.0, 0.5)
@@ -132,16 +135,18 @@ func hurt(amount: float) -> float:
 
 
 func heal(amount: float) -> void:
-	if alive and amount > 0.0:
+	if alive and is_finite(amount) and amount > 0.0:
 		health = minf(health + amount, max_health)
 
 
 func eat(amount: float) -> void:
-	hunger = minf(hunger + amount, 100.0)
+	if is_finite(amount) and amount > 0.0:
+		hunger = minf(hunger + amount, 100.0)
 
 
 func drink(amount: float) -> void:
-	thirst = minf(thirst + amount, 100.0)
+	if is_finite(amount) and amount > 0.0:
+		thirst = minf(thirst + amount, 100.0)
 
 
 func add_food_poisoning(amount: float) -> bool:

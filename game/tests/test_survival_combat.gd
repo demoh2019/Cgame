@@ -88,6 +88,36 @@ func run(t) -> void:
 	t.near(dead.health, 0.0, 0.0001, "the dead cannot be healed")
 	t.near(dead.hurt(10.0), 0.0, 0.0001, "the dead cannot be hurt again")
 
+	t.current = "invalid simulation inputs never corrupt persistent vitals"
+	var validated := Survival.new()
+	validated.health = 60.0
+	validated.hunger = 50.0
+	validated.thirst = 40.0
+	validated.bleeding = 10.0
+	var before: Dictionary = validated.to_dict()
+	for invalid_delta in [-1.0, NAN, INF]:
+		t.eq(validated.tick(invalid_delta), 0.0,
+			"invalid clock cannot apply starvation or recovery")
+		t.eq(validated.to_dict(), before,
+			"invalid clock must leave all saved vitals unchanged")
+	for invalid_amount in [NAN, INF, -INF, -10.0]:
+		t.eq(validated.hurt(invalid_amount), 0.0,
+			"invalid damage does not alter health")
+		validated.heal(invalid_amount)
+		validated.eat(invalid_amount)
+		validated.drink(invalid_amount)
+		t.eq(validated.to_dict(), before,
+			"invalid healing and consumption cannot poison state")
+	t.near(validated.hurt(7.0), 7.0, 0.001,
+		"valid damage still applies after rejection")
+	validated.heal(4.0)
+	t.near(validated.health, 57.0, 0.001,
+		"valid healing still works after rejection")
+	validated.eat(3.0)
+	validated.drink(2.0)
+	t.near(validated.hunger, 53.0, 0.001, "valid food restores hunger")
+	t.near(validated.thirst, 42.0, 0.001, "valid water restores thirst")
+
 	t.current = "armour"
 	t.near(Combat.apply_armor(100.0, ""), 100.0, 0.0001, "no armour")
 	t.near(Combat.apply_armor(100.0, "jacket_1"), 92.0, 0.0001, "tier 1 jacket takes 8 percent")

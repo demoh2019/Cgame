@@ -50,6 +50,21 @@ func run(t) -> void:
 	t.eq(Director.respite_seconds(NAN, 0, 1.0), 0.0,
 		"nonfinite timers cannot escape the guard")
 
+	t.current = "invalid encounter inputs are rejected before native dispatch"
+	for invalid_health in [NAN, INF, -INF]:
+		t.eq(Director.spawn_budget(0, 0, invalid_health, 2), 0,
+			"nonfinite health cannot create a wave")
+		t.eq(Director.respite_seconds(90.0, 8, invalid_health), 0.0,
+			"nonfinite health cannot change the encounter cooldown")
+	t.eq(Director.spawn_budget(0, -1, 1.0, 3), 0,
+		"negative nearby population cannot request a wave")
+	t.eq(Director.respite_seconds(INF, 8, 1.0), 0.0,
+		"infinite cooldown cannot poison encounter pacing")
+	t.eq(Director.respite_seconds(-1.0, 8, 1.0), 0.0,
+		"negative cooldown is rejected")
+	t.eq(Director.respite_seconds(NAN, 8, 1.0), 0.0,
+		"NaN cooldown is rejected")
+
 	t.current = "native encounter pacing and stock Godot parity"
 	var native_budget: bool = Director.has_native_budget()
 	t.eq(native_budget, ClassDB.class_exists("AIEncounterBudget"),
