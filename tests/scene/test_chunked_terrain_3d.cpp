@@ -483,4 +483,85 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Mesh streaming priority stays optional"
 	memdelete(terrain);
 }
 
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Partial height patches keep far chunks and refresh geometric LOD errors") {
+	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
+	SceneTree::get_singleton()->get_root()->add_child(terrain);
+	terrain->force_update();
+	CHECK(terrain->get_chunk_grid_size() == Vector2i(2, 2));
+	CHECK(terrain->get_chunk_count() == 4);
+	const real_t before_far = terrain->get_chunk_lod_error(Vector2i(1, 1), 1);
+	const real_t before_near = terrain->get_chunk_lod_error(Vector2i(0, 0), 1);
+	CHECK(before_near >= 0.0);
+	CHECK(terrain->get_chunk_lod_error(Vector2i(-1, 0), 1) == -1.0);
+	CHECK(terrain->get_chunk_lod_error(Vector2i(0, 0), -1) == -1.0);
+	CHECK(terrain->get_chunk_lod_error(Vector2i(0, 0), 8) == -1.0);
+
+	const PackedFloat32Array brush = { 0.95f };
+	CHECK(terrain->apply_height_patch(Rect2i(7, 7, 1, 1), brush));
+	CHECK(terrain->get_height_data()[7 * 65 + 7] == doctest::Approx(0.95));
+	CHECK(terrain->get_chunk_lod_error(Vector2i(0, 0), 1) > before_near + 1.0);
+	CHECK(terrain->get_chunk_lod_error(Vector2i(1, 1), 1) == doctest::Approx(before_far));
+	CHECK(terrain->get_chunk_count() == 4); // No full-world mesh/physics rebuild.
+	terrain->force_update();
+	CHECK(terrain->get_chunk_count() == 4);
+	CHECK(terrain->get_collision_chunk_count() > 0);
+	const real_t increased = terrain->get_chunk_lod_error(Vector2i(0, 0), 1);
+	CHECK(terrain->apply_height_patch(Rect2i(7, 7, 1, 1), brush));
+	CHECK(terrain->get_chunk_lod_error(Vector2i(0, 0), 1) == doctest::Approx(increased));
+	const PackedFloat32Array original = { 7.0f / 64.0f };
+	CHECK(terrain->apply_height_patch(Rect2i(7, 7, 1, 1), original));
+	CHECK(terrain->get_chunk_lod_error(Vector2i(0, 0), 1) == doctest::Approx(before_near));
+	terrain->force_update();
+	CHECK(terrain->get_collision_chunk_count() > 0);
+	memdelete(terrain);
+}
+
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Bad late patch samples reject the entire terrain transaction") {
+	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 5.0);
+	SceneTree::get_singleton()->get_root()->add_child(terrain);
+	terrain->force_update();
+	const PackedFloat32Array initial = terrain->get_height_data();
+	const real_t initial_error = terrain->get_chunk_lod_error(Vector2i(0, 0), 1);
+	CHECK_FALSE(terrain->apply_height_patch(Rect2i(0, 0, 0, 1), { 1.0f }));
+	CHECK_FALSE(terrain->apply_height_patch(Rect2i(-1, 0, 1, 1), { 1.0f }));
+	CHECK_FALSE(terrain->apply_height_patch(Rect2i(64, 64, 2, 2), { 1.0f, 1.0f, 1.0f, 1.0f }));
+	CHECK_FALSE(terrain->apply_height_patch(Rect2i(0, 0, 2, 2), { 1.0f }));
+	CHECK_FALSE(terrain->apply_height_patch(Rect2i(0, 0, 65, 65), initial));
+	const PackedFloat32Array late_nan = { 0.5f, 0.5f, 0.5f, float(Math::NaN) };
+	const PackedFloat32Array late_inf = { 0.5f, 0.5f, 0.5f, float(Math::INF) };
+	CHECK_FALSE(terrain->apply_height_patch(Rect2i(0, 0, 2, 2), late_nan));
+	CHECK_FALSE(terrain->apply_height_patch(Rect2i(0, 0, 2, 2), late_inf));
+	CHECK(terrain->get_height_data() == initial);
+	CHECK(terrain->get_chunk_lod_error(Vector2i(0, 0), 1) == doctest::Approx(initial_error));
+
+	// A wide but bounded 64x64 patch is legal; an extra row is rejected.
+	PackedFloat32Array maximum;
+	maximum.resize(4096);
+	maximum.fill(0.25f);
+	CHECK(terrain->apply_height_patch(Rect2i(0, 0, 64, 64), maximum));
+	terrain->force_update();
+	CHECK(terrain->get_chunk_count() == 4);
+	CHECK(terrain->get_height_data()[0] == doctest::Approx(0.25));
+	memdelete(terrain);
+}
+
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Partial patch updates custom normals near dirty samples") {
+	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
+	PackedVector3Array normals;
+	normals.resize(65 * 65);
+	normals.fill(Vector3.UP);
+	terrain->set_normal_data(normals);
+	SceneTree::get_singleton()->get_root()->add_child(terrain);
+	terrain->force_update();
+	const PackedVector3Array originally = terrain->get_normal_data();
+	CHECK(terrain->apply_height_patch(Rect2i(7, 7, 1, 1), { 1.0f }));
+	const PackedVector3Array changed = terrain->get_normal_data();
+	CHECK(changed.size() == originally.size());
+	CHECK(changed[7 * 65 + 6] != Vector3.UP);
+	CHECK(changed[7 * 65 + 8] != Vector3.UP);
+	CHECK(changed[7 * 65 + 7] == Vector3.UP);
+	CHECK(changed[20 * 65 + 20] == Vector3.UP);
+	memdelete(terrain);
+}
+
 } // namespace TestChunkedTerrain3D
