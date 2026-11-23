@@ -87,6 +87,8 @@ static func deserialize(buf: PackedByteArray) -> Dictionary:
 
 ## Client side: tracks ready cells and builds delta reports.
 class Client extends RefCounted:
+	## Limit retained snapshots when ACKs are lost for a long time.
+	const MAX_PENDING_REPORTS: int = 32
 	var radius: int = 6
 	var version: int = 0
 	var acked_version: int = 0
@@ -128,6 +130,8 @@ class Client extends RefCounted:
 				toggled[cell] = true
 		version += 1
 		_pending[version] = snap
+		while _pending.size() > MAX_PENDING_REPORTS:
+			_pending.erase(_pending.keys().min())
 		_force_full = false
 		return {
 			"v": version, "base": 0 if full else acked_version, "center": center, "radius": radius,
@@ -180,7 +184,12 @@ func remove_client(client: Variant) -> void:
 func apply_report(client: Variant, packet: Dictionary) -> Dictionary:
 	var s := _state(client)
 	var res := {"ok": false, "ack": s.version, "reason": "", "need_full": false, "stripped": 0}
-	if packet.is_empty() or not packet.has("bits"):
+	# Validate untrusted network data before typed reads and array indexing.
+	if typeof(packet.get("bits")) != TYPE_PACKED_BYTE_ARRAY \
+			or typeof(packet.get("center")) != TYPE_VECTOR2I \
+			or typeof(packet.get("radius")) != TYPE_INT \
+			or typeof(packet.get("v")) != TYPE_INT \
+			or typeof(packet.get("base")) != TYPE_INT:
 		res["reason"] = "malformed"
 		return _violate(s, res)
 	var radius: int = int(packet["radius"])
@@ -188,7 +197,8 @@ func apply_report(client: Variant, packet: Dictionary) -> Dictionary:
 	var bits: PackedByteArray = packet["bits"]
 	var version: int = int(packet["v"])
 	var base: int = int(packet["base"])
-	if radius < 0 or radius > max_report_radius or bits.size() != bytes_for(radius):
+	if radius < 0 or radius > max_report_radius or bits.size() != bytes_for(radius) \
+			or version <= 0 or base < 0 or base >= version:
 		res["reason"] = "malformed"
 		return _violate(s, res)
 	if version <= s.version:
