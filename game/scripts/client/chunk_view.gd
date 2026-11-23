@@ -6,6 +6,7 @@ extends Node3D
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const StoneResources = preload("res://scripts/shared/stone_resources.gd")
+const SolidScenery = preload("res://scripts/shared/solid_scenery.gd")
 const GroundPlants = preload("res://scripts/client/ground_plants.gd")
 const TerrainRvt = preload("res://scripts/client/terrain_rvt.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
@@ -980,6 +981,22 @@ func _tree_key(node: Dictionary) -> String:
 ## Mesh of a group. Kinds with a number ("tree:3", "building:5") are variants; the catalog picks the model installed for it,
 ## and each branch falls back to the Kenney or procedural models when its packs are missing.
 func _mesh_for(kind: String) -> Mesh:
+	if kind.begins_with("solid_wood:"):
+		var variant: int = int(kind.get_slice(":", 1))
+		if variant >= 0 and variant < SolidScenery.MODELS.size():
+			var entry: Dictionary = SolidScenery.MODELS[variant]
+			if ModelCatalog.exists(str(entry["path"])):
+				var wood_mesh: Mesh = ModelCatalog.entry_mesh(entry)
+				if wood_mesh != null:
+					return wood_mesh
+			# No downloaded pack: the same physical node is still visible.
+			var fallback := BoxMesh.new()
+			fallback.size = Vector3(float(entry["size"]), 0.55, 0.65)
+			var material := StandardMaterial3D.new()
+			material.albedo_color = Color(0.34, 0.23, 0.14)
+			fallback.material = material
+			return fallback
+		return Meshes.get_mesh("tree")
 	if kind.begins_with("stone:"):
 		var model_index: int = int(kind.get_slice(":", 1))
 		if model_index >= 0 and model_index < StoneResources.MODELS.size():
@@ -1088,6 +1105,8 @@ func _mesh_for(kind: String) -> Mesh:
 ## Size multiplier of one instance. Catalog meshes are baked to meters already, so this is only the variation between
 ## instances and the difference between a structure's own scale and the nominal one the mesh was baked for.
 func _size_for(kind: String, node: Dictionary, rng: RandomNumberGenerator) -> float:
+	if kind.begins_with("solid_wood:"):
+		return float(node.get("scale", 1.0))
 	if str(node.get("kind", "")) == "pebble" and not node.has("stone_model"):
 		return 0.22
 	if str(node.get("kind", "")) == "branch":
@@ -1178,7 +1197,9 @@ func _build_objects(data: Dictionary) -> void:
 	for node in data["nodes"]:
 		var kind: String = node["kind"]
 		var variant: int = WorldGen.mix(int(node["id"]), 3, 5)
-		if node.has("stone_model"):
+		if node.has("solid_model"):
+			kind = "solid_wood:%d" % int(node["solid_model"])
+		elif node.has("stone_model"):
 			kind = "stone:%d" % int(node["stone_model"])
 		elif kind == "tree":
 			kind = _tree_key(node) if _use_nature else "tree:%d" % (variant % tree_variants)
@@ -1245,7 +1266,7 @@ func _build_objects(data: Dictionary) -> void:
 			continue
 		var instance := MultiMeshInstance3D.new()
 		instance.multimesh = multimesh
-		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if (kind.begins_with("tree:") or kind.begins_with("building:") or kind.begins_with("wall") or kind.begins_with("tower") or kind.begins_with("ruin:") or kind.begins_with("monument:")) else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if (kind.begins_with("tree:") or kind.begins_with("building:") or kind.begins_with("wall") or kind.begins_with("tower") or kind.begins_with("ruin:") or kind.begins_with("monument:") or kind.begins_with("solid_wood:")) else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if _use_nature and kind.begins_with("ore:") and crystal_count == 0:
 			instance.material_override = _ore_material(multimesh.mesh)
 		register_scenery(instance, kind)
@@ -1940,6 +1961,8 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary)
 				continue # Replaced by server-authoritative pickup stone instances.
 			_decor_tasks.append({"type": "nature", "entry": entry})
 	for entry in ModelCatalog.available("decor", ModelCatalog.DECOR_EXTRA):
+		if SolidScenery.is_promoted_path(str(entry["path"])):
+			continue # Fallen logs now have shared collision, harvest IDs and save state.
 		if StoneResources.is_loose_stone_entry(entry):
 			continue # No inert stone meshes; all loose stones are resource nodes.
 		_decor_tasks.append({"type": "extra", "entry": entry})
