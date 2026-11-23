@@ -84,10 +84,10 @@ func run(t) -> void:
 	owner.position = Vector3(0.0, 0.0, 0.0)
 	stranger.position = close
 	guest.position = Vector3(0.0, 0.0, 0.0)
-	var account_wall: Dictionary = {"id": 8101, "x": watch_pos.x, "z": watch_pos.y,
+	var account_wall: Dictionary = {"id": 8101, "x": watch_pos.x, "y": 0.0, "z": watch_pos.y,
 		"hp": Structures.MAX_HEALTH, "tier": 1, "owner": owner.id,
 		"owner_account": "owner-acc", "upkeep_until": guarded.time - 1.0}
-	var guest_wall: Dictionary = {"id": 8102, "x": watch_pos.x + 40.0, "z": watch_pos.y,
+	var guest_wall: Dictionary = {"id": 8102, "x": watch_pos.x + 40.0, "y": 0.0, "z": watch_pos.y,
 		"hp": Structures.MAX_HEALTH, "tier": 1, "owner": guest.id,
 		"owner_account": "", "upkeep_until": guarded.time - 1.0}
 	guarded.barricades[8101] = account_wall
