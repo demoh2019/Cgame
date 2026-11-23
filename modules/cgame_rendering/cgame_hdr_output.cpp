@@ -31,6 +31,7 @@
 #include "cgame_hdr_output.h"
 
 #include "core/object/class_db.h"
+#include "core/os/os.h"
 
 #include "servers/display/display_server.h"
 
@@ -53,7 +54,8 @@ bool CgameHDROutput::apply(int p_level, const String &p_rendering_method) {
 	}
 	const bool on = wanted(p_level, p_rendering_method, supported());
 	ds->window_request_hdr_output(on);
-	if (on) {
+	// Apple devices expose reference white through their brightness control, not this API.
+	if (on && OS::get_singleton()->get_name() != "macOS") {
 		// UI and diffuse white stay comfortable; highlights (sun, fire, lightning) use the headroom.
 		ds->window_set_hdr_output_reference_luminance(PAPER_WHITE_NITS);
 	}

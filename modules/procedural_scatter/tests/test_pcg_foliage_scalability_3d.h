@@ -1,37 +1,11 @@
 /**************************************************************************/
-/*  test_pcg_foliage_scalability_3d.h                                     */
+/*  test_pcg_foliage_scalability_3d.h                                       */
+/*                         This file is part of: GODOT ENGINE              */
+/* SPDX-License-Identifier: MIT                                            */
 /**************************************************************************/
-/*                         This file is part of:                          */
-/*                             GODOT ENGINE                               */
-/*                        https://godotengine.org                         */
-/**************************************************************************/
-/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
-/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
-/*                                                                        */
-/* Permission is hereby granted, free of charge, to any person obtaining  */
-/* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
-/* without limitation the rights to use, copy, modify, merge, publish,    */
-/* distribute, sublicense, and/or sell copies of the Software, and to     */
-/* permit persons to whom the Software is furnished to do so, subject to  */
-/* the following conditions:                                              */
-/*                                                                        */
-/* The above copyright notice and this permission notice shall be         */
-/* included in all copies or substantial portions of the Software.        */
-/*                                                                        */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
-/**************************************************************************/
-
 #pragma once
 
 #include "../pcg_foliage_scalability_3d.h"
-
 #include "core/math/math_funcs.h"
 #include "tests/test_macros.h"
 
@@ -90,8 +64,8 @@ TEST_CASE("[PCGFoliageScalability3D] atomic validation and bounded cluster count
 	CHECK(budget->plan_visible_counts({ 1, 1 }, { 1 }, 0).is_empty());
 	CHECK(budget->plan_visible_counts({ 1 }, { 1 }, -1).is_empty());
 	CHECK(budget->plan_visible_counts({ 1 }, { 1 }, 4).is_empty());
-	CHECK(budget->plan_visible_counts({ 1 }, { Math::NaN }, 1).is_empty());
-	CHECK(budget->plan_visible_counts({ 1 }, { float(Math::INF) }, 1).is_empty());
+	CHECK(budget->plan_visible_counts({ 1 }, { static_cast<float>(Math::NaN) }, 1).is_empty());
+	CHECK(budget->plan_visible_counts({ 1 }, { static_cast<float>(Math::INF) }, 1).is_empty());
 	CHECK(budget->plan_visible_counts({ 1 }, { -1 }, 1).is_empty());
 	CHECK(budget->plan_visible_counts({ 1 }, { 10000001 }, 1).is_empty());
 	CHECK(budget->plan_visible_counts({ -1 }, { 1 }, 1).is_empty());
@@ -150,7 +124,7 @@ TEST_CASE("[PCGFoliageScalability3D] stable planner validates all prior rows ato
 	CHECK(planner->plan_visible_counts_stable({ 10, 20 }, { 18, 19 }, { -1, -2 }, 1).is_empty());
 	CHECK(planner->plan_visible_counts_stable({ 10 }, { 18 }, { -1 }, 1, -1).is_empty());
 	CHECK(planner->plan_visible_counts_stable({ 10 }, { 18 }, { -1 }, 1, 9).is_empty());
-	CHECK(planner->plan_visible_counts_stable({ 10 }, { Math::NaN }, { -1 }, 1).is_empty());
+	CHECK(planner->plan_visible_counts_stable({ 10 }, { static_cast<float>(Math::NaN) }, { -1 }, 1).is_empty());
 	CHECK(planner->plan_visible_counts_stable({ 10 }, { 18 }, { -1 }, 4).is_empty());
 	CHECK(planner->plan_visible_counts_stable({ 10 }, { 18 }, { -1 }, 1, 2, 20, 20).is_empty());
 	CHECK(planner->plan_visible_counts_stable({}, {}, {}, 1).is_empty());
@@ -303,16 +277,16 @@ TEST_CASE("[PCGFoliageScalability3D] screen-space foliage depends on projected p
 	const Vector3 forward = Vector3(0, 0, -1);
 	const PackedInt32Array performance = { 42, 31, 20, 100, 0 };
 	CHECK(budget->plan_projected_visible_counts(counts, centers, mesh_diameters,
-				  camera, forward, 220.0, false, 0) == performance);
+			camera, forward, 220.0, false, 0) == performance);
 	const PackedInt32Array balanced = { 68, 55, 42, 100, 0 };
 	CHECK(budget->plan_projected_visible_counts(counts, centers, mesh_diameters,
-				  camera, forward, 220.0, false, 1) == balanced);
+			camera, forward, 220.0, false, 1) == balanced);
 	CHECK(budget->plan_projected_visible_counts(counts, centers, mesh_diameters,
-				  camera, forward, 220.0, false, 3) == counts);
+			camera, forward, 220.0, false, 3) == counts);
 	// Orthographic scale is independent of perspective depth.
 	const PackedInt32Array ortho = { 31, 31, 31, 100, 0 };
 	CHECK(budget->plan_projected_visible_counts(counts, centers, mesh_diameters,
-				  camera, forward, 11.0, true, 0) == ortho);
+			camera, forward, 11.0, true, 0) == ortho);
 	// Higher pixel resolution or narrower FOV increases preserved detail.
 	const PackedInt32Array zoomed = budget->plan_projected_visible_counts(
 			counts, centers, mesh_diameters, camera, forward, 440.0, false, 0);
@@ -323,7 +297,7 @@ TEST_CASE("[PCGFoliageScalability3D] screen-space foliage depends on projected p
 	// Behind-camera nodes are left at full count, never culled manually.
 	CHECK(performance[3] == counts[3]);
 	CHECK(budget->plan_projected_visible_counts(counts, centers, mesh_diameters,
-				  camera, forward, 220.0, false, 0) == performance);
+			camera, forward, 220.0, false, 0) == performance);
 }
 
 TEST_CASE("[PCGFoliageScalability3D] screen-space validation rejects invalid late groups") {
@@ -334,48 +308,34 @@ TEST_CASE("[PCGFoliageScalability3D] screen-space validation rejects invalid lat
 	const PackedFloat32Array diameters = { 1, 2 };
 	const Vector3 forward(0, 0, -1);
 	CHECK(budget->plan_projected_visible_counts(counts, centers, { 1 },
-						Vector3(), forward, 220, false, 0)
-					.is_empty());
+			Vector3(), forward, 220, false, 0).is_empty());
 	CHECK(budget->plan_projected_visible_counts(counts, {}, diameters,
-						Vector3(), forward, 220, false, 0)
-					.is_empty());
+			Vector3(), forward, 220, false, 0).is_empty());
 	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
-						Vector3(), Vector3(), 220, false, 0)
-					.is_empty());
+			Vector3(), Vector3(), 220, false, 0).is_empty());
 	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
-						Vector3(Math::NaN, 0, 0), forward, 220, false, 0)
-					.is_empty());
+			Vector3(Math::NaN, 0, 0), forward, 220, false, 0).is_empty());
 	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
-						Vector3(), forward, Math::NaN, false, 0)
-					.is_empty());
+			Vector3(), forward, Math::NaN, false, 0).is_empty());
 	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
-						Vector3(), forward, 0, false, 0)
-					.is_empty());
+			Vector3(), forward, 0, false, 0).is_empty());
 	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
-						Vector3(), forward, 220, false, -1)
-					.is_empty());
+			Vector3(), forward, 220, false, -1).is_empty());
 	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
-						Vector3(), forward, 220, false, 4)
-					.is_empty());
+			Vector3(), forward, 220, false, 4).is_empty());
 	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
-						Vector3(), forward, 220, false, 0, 2, 2)
-					.is_empty());
+			Vector3(), forward, 220, false, 0, 2, 2).is_empty());
 	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
-						Vector3(), forward, 220, false, 0, 20, -1)
-					.is_empty());
+			Vector3(), forward, 220, false, 0, 20, -1).is_empty());
 	CHECK(budget->plan_projected_visible_counts(counts,
-						{ Vector3(0, 0, -10), Vector3(Math::INF, 0, -20) }, diameters,
-						Vector3(), forward, 220, false, 0)
-					.is_empty());
+			{ Vector3(0, 0, -10), Vector3(Math::INF, 0, -20) }, diameters,
+			Vector3(), forward, 220, false, 0).is_empty());
 	CHECK(budget->plan_projected_visible_counts(counts, centers,
-						{ 1, Math::NaN }, Vector3(), forward, 220, false, 0)
-					.is_empty());
+			{ 1.0f, static_cast<float>(Math::NaN) }, Vector3(), forward, 220, false, 0).is_empty());
 	CHECK(budget->plan_projected_visible_counts(counts, centers,
-						{ 1, -1 }, Vector3(), forward, 220, false, 0)
-					.is_empty());
+			{ 1, -1 }, Vector3(), forward, 220, false, 0).is_empty());
 	CHECK(budget->plan_projected_visible_counts({ 10, 65537 }, centers, diameters,
-						Vector3(), forward, 220, false, 0)
-					.is_empty());
+			Vector3(), forward, 220, false, 0).is_empty());
 	PackedInt32Array many_counts;
 	PackedVector3Array many_centers;
 	PackedFloat32Array many_diameters;
@@ -385,8 +345,7 @@ TEST_CASE("[PCGFoliageScalability3D] screen-space validation rejects invalid lat
 		many_diameters.push_back(1);
 	}
 	CHECK(budget->plan_projected_visible_counts(many_counts, many_centers,
-						many_diameters, Vector3(), forward, 220, false, 0)
-					.is_empty());
+			many_diameters, Vector3(), forward, 220, false, 0).is_empty());
 	many_counts.resize(4096);
 	many_centers.resize(4096);
 	many_diameters.resize(4096);
@@ -397,6 +356,7 @@ TEST_CASE("[PCGFoliageScalability3D] screen-space validation rejects invalid lat
 	CHECK(bounded[0] == 21);
 	CHECK(bounded[4095] == 21);
 }
+
 
 TEST_CASE("[PCGFoliageScalability3D] dirty geometry tier masks update only the affected mesh groups") {
 	Ref<PCGFoliageScalability3D> planner;
@@ -427,7 +387,8 @@ TEST_CASE("[PCGFoliageScalability3D] dirty flags support valid empty scenes and 
 	const PackedByteArray none = { 0, 0, 0, 0, 0, 0 };
 	CHECK(planner->plan_dirty_variant_lod_groups({}, {}, {}, 3) == none);
 	const PackedByteArray pair_dirty = { 1, 1 };
-	CHECK(planner->plan_dirty_variant_lod_groups({ 0, 0 }, { 0, 1 }, { 1, 0 }, 1) == pair_dirty);
+	CHECK(planner->plan_dirty_variant_lod_groups({ 0, 0 }, { 0, 1 }, { 1, 0 }, 1)
+			== pair_dirty);
 	CHECK(planner->plan_dirty_variant_lod_groups({ 0, 1 }, { 0, 1 }, { 1 }, 2).is_empty());
 	CHECK(planner->plan_dirty_variant_lod_groups({ 0, 1 }, { 0 }, { 1, 0 }, 2).is_empty());
 	CHECK(planner->plan_dirty_variant_lod_groups({ 0, 2 }, { 0, 1 }, { 1, 0 }, 2).is_empty());

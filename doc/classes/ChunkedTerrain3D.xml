@@ -28,6 +28,15 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="apply_height_patch">
+			<return type="bool" />
+			<param index="0" name="region" type="Rect2i" />
+			<param index="1" name="heights" type="PackedFloat32Array" />
+			<description>
+				Atomically replaces the height samples in [param region] of an existing, script-provided heightfield. [param region] uses source-grid coordinates; the [param heights] array is row-major, containing exactly width × height entries for the rectangle. Every new height must be finite. The patch must lie entirely within the current grid and contain at most 4096 samples. Invalid requests return false and leave the existing terrain unchanged. Identical patches are no-ops.
+				When the values change, only render and collision chunks intersecting the edited samples (plus a one-sample normal-derivative margin) are invalidated. If externally supplied source normals exist, the dirty one-ring normals are recalculated from the edited heights. Bounds and geometric LOD error are recomputed for affected chunks. Rendering meshes and nearby physics collision are refreshed on the normal update cadence; call [method force_update] when immediate synchronous refresh is needed. Unlike [method set_height_data], this does not rebuild the full terrain or discard its color layers and unaffected normal overrides. This is a CPU/main-thread incremental editing API, not GPU mesh-page streaming, threaded collision cooking, or a complete landscape editor.
+			</description>
+		</method>
 		<method name="bake_horizon_visibility" qualifiers="static">
 			<return type="PackedFloat32Array" />
 			<param index="0" name="heights" type="PackedFloat32Array" />
@@ -60,6 +69,14 @@
 			<return type="Vector2i" />
 			<description>
 				Returns the number of chunks along x and z.
+			</description>
+		</method>
+		<method name="get_chunk_lod_error" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="chunk" type="Vector2i" />
+			<param index="1" name="lod" type="int" />
+			<description>
+				Returns the cached geometric height deviation for the requested chunk and LOD (0 to 7), in world vertical units. A negative result indicates invalid chunk coordinates or LOD. The value is recalculated for affected chunks after [method apply_height_patch] and [method update_region], so screen-space LOD decisions do not use stale error from before sculpting.
 			</description>
 		</method>
 		<method name="get_chunk_lod" qualifiers="const">
@@ -184,7 +201,7 @@
 			<return type="void" />
 			<param index="0" name="region" type="Rect2i" />
 			<description>
-				Rebuilds the meshes and collision of the chunks touched by [param region], given in sample coordinates. Use it after changing the samples of an existing terrain to avoid rebuilding all of it.
+				Invalidates the meshes and nearby collision of chunks touched by [param region], given in source-grid sample coordinates, including one extra sample for vertex normals. Also recalculates their bounds and geometric LOD errors. The invalidation is applied on the next chunk update or with [method force_update]. For direct script-side sample edits, prefer [method apply_height_patch] which validates and commits the data before invalidation.
 			</description>
 		</method>
 	</methods>

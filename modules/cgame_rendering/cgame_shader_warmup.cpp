@@ -78,6 +78,10 @@ PackedStringArray CgameShaderWarmup::shader_paths(const PackedStringArray &p_dir
 TypedArray<Shader> CgameShaderWarmup::spatial_shaders(const PackedStringArray &p_dirs) {
 	TypedArray<Shader> shaders;
 	for (const String &path : shader_paths(p_dirs)) {
+		// Directory indexes can outlive deleted shader sources (.uid/.remap).
+		if (!ResourceLoader::exists(path, "Shader")) {
+			continue;
+		}
 		Ref<Shader> shader = ResourceLoader::load(path);
 		if (shader.is_valid() && shader->get_mode() == Shader::MODE_SPATIAL) {
 			shaders.push_back(shader);

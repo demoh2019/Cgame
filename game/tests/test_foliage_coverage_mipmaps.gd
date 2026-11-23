@@ -67,3 +67,37 @@ func run(t) -> void:
 			Foliage.configure_alpha_mipmaps(0, "forward_plus")
 			t.check(material.get_shader_parameter("albedo_tex") == imported,
 				"return to low graphics restores original source texture")
+
+	t.current = "foliage shader never requires missing tangents"
+	Foliage.configure_antialiasing(false)
+	var leaf_source := BoxMesh.new()
+	var leaf_material := StandardMaterial3D.new()
+	var normal_pixels := Image.create(2, 2, false, Image.FORMAT_RGB8)
+	normal_pixels.fill(Color(0.5, 0.5, 1.0))
+	leaf_material.normal_texture = ImageTexture.create_from_image(normal_pixels)
+	leaf_material.normal_enabled = true
+	leaf_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	leaf_source.material = leaf_material
+	var without_tangents := ArrayMesh.new()
+	var mesh_arrays: Array = leaf_source.surface_get_arrays(0)
+	mesh_arrays[Mesh.ARRAY_TANGENT] = null
+	without_tangents.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh_arrays)
+	without_tangents.surface_set_material(0, leaf_material)
+	var fallback := Foliage.swayed(without_tangents, "test:tangentless_leaf", 0.1) as ArrayMesh
+	var fallback_mat := fallback.surface_get_material(0) as ShaderMaterial
+	t.check(not bool(fallback_mat.get_shader_parameter("use_normal_map")),
+		"missing tangents disable the foliage normal texture")
+	t.check(not fallback_mat.shader.code.contains("#define AA_FOLIAGE_HAS_TANGENTS"),
+		"tangentless foliage compiles the shader without tangent-space normal mapping")
+	var mapped := Foliage.swayed(leaf_source, "test:tangent_mapped_leaf", 0.1) as ArrayMesh
+	var mapped_mat := mapped.surface_get_material(0) as ShaderMaterial
+	t.check(bool(mapped_mat.get_shader_parameter("use_normal_map")),
+		"mesh with tangents preserves its PBR normal texture")
+	t.check(mapped_mat.shader.code.contains("#define AA_FOLIAGE_HAS_TANGENTS"),
+		"valid tangent frames use the normal-mapped shader variant")
+	Foliage.configure_antialiasing(true)
+	t.check(not fallback_mat.shader.code.contains("#define AA_FOLIAGE_HAS_TANGENTS"),
+		"MSAA coverage switch keeps tangentless foliage tangent-free")
+	t.check(mapped_mat.shader.code.contains("#define AA_FOLIAGE_HAS_TANGENTS"),
+		"MSAA coverage switch retains normal maps on tangent-bearing leaves")
+	Foliage.configure_antialiasing(false)
