@@ -11,6 +11,8 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const CityLayout = preload("res://scripts/shared/city_layout.gd")
 
 const REGION_SIZE := 256.0
+const REGION_CACHE_LIMIT := 256
+const LEVELLER_CACHE_LIMIT := 256
 const MIN_HUB_DISTANCE := 150.0
 const SITE_CHANCE := 0.82
 const STATION_RANGE := 6.0
@@ -74,6 +76,8 @@ const ROLES := {
 var world
 var _regions: Dictionary = {}
 var _leveller_cache: Dictionary = {}
+var _region_lru: Array[Vector2i] = []
+var _leveller_lru: Array[Vector2i] = []
 
 
 func _init(p_world) -> void:
@@ -86,6 +90,7 @@ func sites_in_region(rx: int, rz: int) -> Array:
 	var key := Vector2i(rx, rz)
 	if not _regions.has(key):
 		_regions[key] = _build_region(rx, rz)
+	_touch_cache(_regions, _region_lru, key, REGION_CACHE_LIMIT)
 	return _regions[key]
 
 
@@ -142,6 +147,7 @@ func station_near(x: float, z: float, reach: float = STATION_RANGE) -> bool:
 func levellers(rx: int, rz: int) -> Array:
 	var key := Vector2i(rx, rz)
 	if _leveller_cache.has(key):
+		_touch_cache(_leveller_cache, _leveller_lru, key, LEVELLER_CACHE_LIMIT)
 		return _leveller_cache[key]
 	var list: Array = []
 	var region_rect := Rect2(Vector2(rx, rz) * REGION_SIZE, Vector2.ONE * REGION_SIZE)
@@ -152,7 +158,20 @@ func levellers(rx: int, rz: int) -> Array:
 				if region_rect.grow(reach).has_point(Vector2(float(site["x"]), float(site["z"]))):
 					list.append({"x": float(site["x"]), "z": float(site["z"]), "y": float(site["y"]), "inner": float(site["radius"]) * 0.6, "outer": reach})
 	_leveller_cache[key] = list
+	_touch_cache(_leveller_cache, _leveller_lru, key, LEVELLER_CACHE_LIMIT)
 	return list
+
+
+## Keep hot regions resident while bounding memory during long-distance exploration.
+## Both POI and terrain-leveller records are deterministic and can be rebuilt after eviction.
+func _touch_cache(cache: Dictionary, order: Array[Vector2i], key: Vector2i, limit: int) -> void:
+	var previous: int = order.find(key)
+	if previous >= 0:
+		order.remove_at(previous)
+	order.append(key)
+	while order.size() > limit:
+		var evicted: Vector2i = order.pop_front()
+		cache.erase(evicted)
 
 
 func _build_region(rx: int, rz: int) -> Array:

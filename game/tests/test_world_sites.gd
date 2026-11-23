@@ -23,6 +23,7 @@ func run(t) -> void:
 	_chunks(t)
 	_stations(t)
 	_determinism(t)
+	_cache_bounds(t)
 
 
 func _island(t) -> void:
@@ -371,3 +372,23 @@ func _determinism(t) -> void:
 		lines_b.append(backward.chunk(Vector2i(i, 3))["structures"].size())
 	lines_b.reverse()
 	t.eq(lines_a, lines_b, "chunk contents do not depend on the order they are built in")
+
+
+func _cache_bounds(t) -> void:
+	t.current = "POI region and leveller caches remain bounded during exploration"
+	var world := WorldGen.new(90123)
+	var original: Array = world.poi.sites_in_region(-2, 3).duplicate(true)
+	for index in range(WorldPoi.REGION_CACHE_LIMIT + 32):
+		world.poi.sites_in_region(1000 + index, -1000 - index)
+	t.check(world.poi._regions.size() <= WorldPoi.REGION_CACHE_LIMIT,
+		"visited POI regions never exceed the LRU capacity")
+	t.eq(world.poi._region_lru.size(), world.poi._regions.size(),
+		"region LRU has exactly one key per cached region")
+	t.eq(world.poi.sites_in_region(-2, 3), original,
+		"evicted seeded regions rebuild with identical deterministic content")
+	for index in range(WorldPoi.LEVELLER_CACHE_LIMIT + 16):
+		world.poi.levellers(500 + index, -750 - index)
+	t.check(world.poi._leveller_cache.size() <= WorldPoi.LEVELLER_CACHE_LIMIT,
+		"terrain leveller records never exceed the LRU capacity")
+	t.eq(world.poi._leveller_lru.size(), world.poi._leveller_cache.size(),
+		"leveller LRU has exactly one key per cached record")
