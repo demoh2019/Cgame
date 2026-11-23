@@ -567,7 +567,7 @@ void CgamePopulationLOD::_rules_pass(real_t p_dt) {
 	// Populate each region's total once after decay. Multiple nests share
 	// current capacity instead of rescanning the full herd map per nest.
 	RBMap<int, int> region_totals;
-	if (!spawners.is_empty()) {
+	if (spawners.size() > 0) {
 		for (const KeyValue<int, Herd> &kv : herds) {
 			region_totals[kv.value.region] += kv.value.count;
 		}
