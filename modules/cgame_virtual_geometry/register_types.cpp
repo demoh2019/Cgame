@@ -40,6 +40,7 @@
 void initialize_cgame_virtual_geometry_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
 		GDREGISTER_CLASS(CgameMeshlets);
+		GDREGISTER_CLASS(CgameMeshletPages);
 		GDREGISTER_CLASS(CgameClusterLOD);
 		GDREGISTER_CLASS(CgameOcclusionRaster);
 	}
