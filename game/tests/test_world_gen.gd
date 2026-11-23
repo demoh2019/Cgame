@@ -356,6 +356,49 @@ func run(t) -> void:
 	built_grid.upsert(42, {"id": 42, "x": NAN, "z": 1.0, "radius": 1.0})
 	t.eq(int(built_grid.stats()["entries"]), index_size, "invalid geometry is not indexed")
 
+	t.current = "indexed dynamic collisions agree with exhaustive deterministic queries"
+	var seeded := RandomNumberGenerator.new()
+	seeded.seed = 812719
+	var many: Dictionary = {}
+	var spatial := DynamicBlockerGrid.new()
+	for i in 120:
+		var key: int = 2000 + i
+		var bx: float = seeded.randf_range(-300.0, 300.0)
+		var bz: float = seeded.randf_range(-300.0, 300.0)
+		var br: float = seeded.randf_range(0.2, 11.0)
+		var blocker: Dictionary = {"id": key, "x": bx, "z": bz, "radius": br}
+		many[key] = blocker
+		spatial.upsert(key, blocker)
+	for sample in 48:
+		var qx: float = seeded.randf_range(-310.0, 310.0)
+		var qz: float = seeded.randf_range(-310.0, 310.0)
+		var reach: float = seeded.randf_range(0.0, 30.0)
+		var expected: Array[int] = []
+		for item in many.values():
+			var r: float = reach + float(item["radius"])
+			if absf(float(item["x"]) - qx) <= r and absf(float(item["z"]) - qz) <= r:
+				expected.append(int(item["id"]))
+		var actual: Array[int] = []
+		for item in spatial.query(many, qx, qz, reach):
+			actual.append(int(item["id"]))
+		t.eq(actual, expected, "spatial query %d matches exhaustive ordered lookup" % sample)
+	for i in range(10):
+		var stale_key: int = 2000 + i
+		spatial.remove(stale_key)
+		many.erase(stale_key)
+	for sample in 24:
+		var qx: float = seeded.randf_range(-310.0, 310.0)
+		var qz: float = seeded.randf_range(-310.0, 310.0)
+		var expected: Array[int] = []
+		for item in many.values():
+			if absf(float(item["x"]) - qx) <= 18.0 + float(item["radius"]) \
+					and absf(float(item["z"]) - qz) <= 18.0 + float(item["radius"]):
+				expected.append(int(item["id"]))
+		var actual: Array[int] = []
+		for item in spatial.query(many, qx, qz, 18.0):
+			actual.append(int(item["id"]))
+		t.eq(actual, expected, "index remains accurate after removals %d" % sample)
+
 	t.current = "world build events update spatial collision index immediately"
 	var construction := WorldGen.new(139)
 	var building_id: int = 900077
