@@ -90,6 +90,10 @@ func is_tracked(cell: Vector2i) -> bool:
 
 
 func mark(cell: Vector2i, stage: int, now: float = -1.0) -> void:
+	# Invalid stage masks must not accidentally reveal a cell. A bad clock
+	# must not prevent begin() from creating state before the typed lookup.
+	if not is_finite(now) or stage <= 0 or (stage & ALL) != stage:
+		return
 	if now >= 0.0:
 		_now = now
 	if not _cells.has(cell):

@@ -5,6 +5,28 @@ const Replication = preload("res://scripts/shared/stream_state_replication.gd")
 
 
 func run(t) -> void:
+	t.current = "malformed streaming bitsets cannot be decoded or allocated"
+	var empty_bits := PackedByteArray()
+	t.eq(Replication.decode_cells(Vector2i.ZERO, 1, empty_bits), {},
+		"short bitset cannot index past the received payload")
+	t.eq(Replication.decode_cells(Vector2i.ZERO, -1, empty_bits), {},
+		"negative window radius is rejected")
+	t.eq(Replication.encode_cells(Vector2i.ZERO, -1, {}), empty_bits,
+		"invalid client window does not allocate an invalid bitset")
+	var huge_packet := PackedByteArray()
+	huge_packet.resize(Replication.HEADER_BYTES)
+	huge_packet.encode_u8(16, 255)
+	t.eq(Replication.deserialize(huge_packet), {},
+		"wire decoder drops oversized malicious radii before expansion")
+	var cells: Dictionary = {Vector2i(-1, 1): true, Vector2i(0, 0): true}
+	var encoded: PackedByteArray = Replication.encode_cells(Vector2i.ZERO, 1, cells)
+	t.eq(Replication.decode_cells(Vector2i.ZERO, 1, encoded), cells,
+		"ordinary compact ready-cell roundtrip remains exact")
+	var ordinary_report: Dictionary = {
+		"v": 1, "base": 0, "center": Vector2i.ZERO, "radius": 1, "bits": encoded}
+	t.eq(Replication.deserialize(Replication.serialize(ordinary_report)), ordinary_report,
+		"normal on-wire readiness report survives serialization unchanged")
+
 	t.current = "ACK losses do not cause unbounded streaming memory"
 	var client := Replication.Client.new(1)
 	client.set_ready(Vector2i.ZERO, true)

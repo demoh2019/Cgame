@@ -15,7 +15,43 @@ func _site(world) -> Dictionary:
 	return {}
 
 
+class TestDiscoveryPoi:
+	extends RefCounted
+	var site: Dictionary = {}
+
+	func site_at(_x: float, _z: float) -> Dictionary:
+		return site
+
+
+class TestDiscoveryWorld:
+	extends RefCounted
+	var poi: RefCounted
+
+
 func run(t) -> void:
+	t.current = "malformed generated POIs cannot corrupt discovery rewards"
+	var broken_world := TestDiscoveryWorld.new()
+	var fake_poi := TestDiscoveryPoi.new()
+	broken_world.poi = fake_poi
+	var fake_journal: Dictionary = {}
+	for invalid_site in [
+		{"id": 17, "x": NAN, "z": 256.0},
+		{"id": 17, "x": 256.0, "z": INF},
+		{"id": -1, "x": 256.0, "z": 256.0},
+		{"id": WorldDiscovery.MAX_SITE_ID + 1, "x": 256.0, "z": 256.0},
+		{"id": "17", "x": 256.0, "z": 256.0},
+		{"id": 17, "x": "256", "z": 256.0},
+		{"id": 17, "x": 256.0},
+	]:
+		fake_poi.site = invalid_site
+		t.eq(WorldDiscovery.reveal(broken_world, Vector3.ZERO, fake_journal), {},
+			"malformed generated site cannot be rewarded")
+		t.check(fake_journal.is_empty(), "rejected site leaves explorer progress unchanged")
+	fake_poi.site = {"id": 17, "x": 256.0, "z": 256.0}
+	t.eq(WorldDiscovery.reveal(broken_world, Vector3.ZERO, fake_journal).get("id", -1), 17,
+		"valid generated site still enters the explorer journal")
+	t.eq(fake_journal.size(), 1, "one valid discovery is credited exactly once")
+
 	t.current = "arrival at a real landmark; no free discoveries"
 	var world := WorldGen.new(1337)
 	var site: Dictionary = _site(world)
