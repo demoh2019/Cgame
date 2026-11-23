@@ -149,11 +149,14 @@ func _city_layouts(t) -> void:
 		if first_city.is_empty():
 			first_city = site
 		var center := Vector2(float(site["x"]), float(site["z"]))
-		var content: Dictionary = world.poi.contents(site)
-		t.check(site.has("city_plan"), "a generated city caches its plan for reuse")
 		var plan: Dictionary = world.poi.city_plan(site)
+		t.check(site.has("city_plan"), "a generated city caches its street paths for reuse")
+		t.check(not plan.has("index") and not plan.has("lots"),
+				"unvisited cities do not retain an obstacle grid or lot candidates")
+		var content: Dictionary = world.poi.contents(site)
 		var paths: Array = plan["paths"]
-		t.check(plan["index"]["segments"].size() > 0, "the cached city plan holds its road index")
+		t.check(not plan.has("index") and not plan.has("lots"),
+				"populated cities release their transient spatial grid and lot candidates")
 		for group in ["structures", "crates", "props", "spawns"]:
 			for item in content[group]:
 				var offset := Vector2(float(item["x"]), float(item["z"])) - center
