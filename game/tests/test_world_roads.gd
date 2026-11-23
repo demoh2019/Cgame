@@ -7,6 +7,29 @@ const WorldPoi = preload("res://scripts/shared/world_poi.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 
 
+## Brute-force reference retained in tests so nearest-K optimization cannot
+## silently change link topology or the deterministic equal-distance tie break.
+static func _reference_links(places: Array, max_link: float, regular: int, hub: int) -> Dictionary:
+	var links: Dictionary = {}
+	for i in places.size():
+		var wanted: int = hub if i == 0 else regular
+		var nearest: Array = []
+		var point := Vector2(float(places[i]["x"]), float(places[i]["z"]))
+		for j in places.size():
+			if i == j:
+				continue
+			var other := Vector2(float(places[j]["x"]), float(places[j]["z"]))
+			var distance: float = point.distance_to(other)
+			if distance <= max_link:
+				nearest.append([distance, j])
+		nearest.sort_custom(func(a, b) -> bool:
+			return a[0] < b[0] or (a[0] == b[0] and a[1] < b[1]))
+		for k in mini(wanted, nearest.size()):
+			var target: int = int(nearest[k][1])
+			links[Vector2i(mini(i, target), maxi(i, target))] = true
+	return links
+
+
 func run(t) -> void:
 	var world := WorldGen.new(1337)
 	t.current = "procedural road nearest-neighbor graph"
@@ -25,6 +48,19 @@ func run(t) -> void:
 	t.check(generated_links.has(Vector2i(0, 3)), "a point on the radius boundary connects")
 	t.eq(generated_links.size(), 3, "distant sites do not create out-of-range road edges")
 	t.eq(WorldRoads.compute_links(sample_places, 0.0, 2, 4).size(), 0, "zero radius excludes separated sites")
+	var stress_places: Array = []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 823913
+	for i in 96:
+		stress_places.append({"x": rng.randi_range(-500, 500), "z": rng.randi_range(-500, 500)})
+	stress_places.append(stress_places[0].duplicate()) # Colocated sites exercise equal-distance ties.
+	for max_distance in [0.0, 100.0, 650.0, 1100.0]:
+		for neighbors in [0, 1, 2, 4, 8]:
+			var reference: Dictionary = _reference_links(stress_places, float(max_distance), neighbors, neighbors + 1)
+			var optimized: Dictionary = WorldRoads.compute_links(stress_places,
+					float(max_distance), neighbors, neighbors + 1, true)
+			t.eq(optimized, reference, "bounded scalar links preserve complete graph ordering and ties")
+	t.eq(WorldRoads.compute_links([], 720.0, 2, 4, true).size(), 0, "empty graph needs no links")
 	if Geometry2D.has_method("get_nearest_neighbors"):
 		var points := PackedVector2Array([Vector2.ZERO, Vector2(2.0, 0.0),
 				Vector2(-2.0, 0.0), Vector2(0.0, 4.0)])
@@ -72,6 +108,17 @@ func run(t) -> void:
 	# Authoritative road speed/grip uses the new native geometry API when available,
 	# while stock Godot continues to use the original scalar implementation.
 	t.current = "road coverage parity"
+	var empty_road_cells := 0
+	for cx in range(-13, 14, 2):
+		for cz in range(-13, 14, 2):
+			var cell := Vector2i(cx, cz)
+			if not world.roads.pieces_in_cell(cell).is_empty():
+				continue
+			var point := Vector2(cell) * Defs.CHUNK_SIZE + Vector2.ONE * 17.0
+			t.eq(world.roads.coverage_at(point.x, point.y), 0.0,
+					"roadless cells skip terrain work and have zero road coverage")
+			empty_road_cells += 1
+	t.check(empty_road_cells > 0, "unoccupied road cells exist on the island")
 	var sample_count := 0
 	for cell_x in range(-8, 9):
 		for cell_z in range(-8, 9):

@@ -875,11 +875,76 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 	_add_outposts(cell, origin, zone, ruin, structures, crates, props, sites)
 	_add_ground_pickups(cell, origin, nodes, sites)
 	_add_loose_stones(cell, origin, tier, nodes, sites)
+	_add_roadside_caches(cell, origin, tier, nodes, structures, crates, props, sites)
 	_add_fallen_wood(cell, origin, tier, nodes, structures, crates, props, sites)
 	var generated := {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
 	if spawn_extender != null:
 		spawn_extender.extend(cell, generated)
 	return generated
+
+
+## Abandoned traveller supply crates appear beside some roads, never on the road.
+## Each cache is an ordinary persistent/authoritative crate for the existing loot system.
+## Separate seeded RNG and reserved 820..829 IDs preserve all existing node IDs.
+const ROADSIDE_CACHE_ID_BASE := 820
+const ROADSIDE_CACHE_CHANCE := 0.24
+
+
+func _add_roadside_caches(cell: Vector2i, origin: Vector2, tier: int, nodes: Array,
+		structures: Array, crates: Array, props: Array, sites: Array) -> void:
+	if roads == null:
+		return
+	var pieces: Array = roads.pieces_in_cell(cell)
+	if pieces.is_empty():
+		return
+	var center: Vector2 = origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
+	if center.length() < Defs.HUB_SAFE_RADIUS + 24.0:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = mix(cell.x, cell.y, world_seed, 251)
+	if rng.randf() > ROADSIDE_CACHE_CHANCE:
+		return
+	for _attempt in 12:
+		var piece: Array = pieces[rng.randi_range(0, pieces.size() - 1)]
+		var a: Vector2 = piece[0]
+		var b: Vector2 = piece[1]
+		var along: Vector2 = b - a
+		if along.length_squared() < 0.0001:
+			continue
+		var side: Vector2 = Vector2(-along.y, along.x).normalized()
+		var bank: float = rng.randf_range(5.5, 9.0) * (-1.0 if rng.randf() < 0.5 else 1.0)
+		var p: Vector2 = a.lerp(b, rng.randf_range(0.2, 0.8)) + side * bank
+		# Both neighbors can spawn caches without creating collision at the seam.
+		var local: Vector2 = p - origin
+		if local.x < 6.0 or local.y < 6.0:
+			continue
+		if local.x >= Defs.CHUNK_SIZE - 6.0 or local.y >= Defs.CHUNK_SIZE - 6.0:
+			continue
+		if is_water(p.x, p.y) or is_safe(p.x, p.y) or _in_site_clearing(p, sites):
+			continue
+		if roads.coverage_at(p.x, p.y) > 0.01:
+			continue
+		var blocked := false
+		for group in [nodes, structures, crates, props]:
+			for object in group:
+				if not bool(object.get("blocks", false)):
+					continue
+				var reach: float = float(object.get("radius", 0.5)) + 1.8
+				var other := Vector2(float(object["x"]), float(object["z"]))
+				if p.distance_squared_to(other) < reach * reach:
+					blocked = true
+					break
+			if blocked:
+				break
+		if blocked:
+			continue
+		crates.append({
+			"id": entity_id(cell, ROADSIDE_CACHE_ID_BASE), "kind": "crate",
+			"roadside_cache": true, "tier": tier,
+			"x": p.x, "z": p.y, "y": height_at(p.x, p.y),
+			"radius": 0.6, "blocks": true,
+		})
+		return
 
 
 ## Large fallen trunks use the same world IDs on the server and every client.

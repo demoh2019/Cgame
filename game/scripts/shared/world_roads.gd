@@ -82,18 +82,33 @@ static func compute_links(places: Array, max_link: float = MAX_LINK,
 				var neighbor: int = matches[k]
 				links[Vector2i(mini(i, neighbor), maxi(i, neighbor))] = true
 			continue
-		var nearest: Array = []
+		# Stock Godot fallback: track only the nearest K candidates rather than
+		# allocating and sorting every one of the island's other locations.
+		if wanted <= 0:
+			continue
+		var nearest: Array = [] # [distance, index], sorted ascending as before.
 		for j in positions.size():
 			if i == j:
 				continue
+			# Preserve distance_to's exact floating-point tie and range semantics.
 			var distance: float = positions[i].distance_to(positions[j])
-			if distance <= max_link:
-				nearest.append([distance, j])
-		# Equal-distance site ties are deterministic on all script runtimes.
-		nearest.sort_custom(func(a, b) -> bool:
-			return a[0] < b[0] or (a[0] == b[0] and a[1] < b[1]))
-		for k in mini(wanted, nearest.size()):
-			var neighbor: int = int(nearest[k][1])
+			if distance > max_link:
+				continue
+			if nearest.size() == wanted:
+				var tail: Array = nearest[nearest.size() - 1]
+				if distance > float(tail[0]) or (distance == float(tail[0]) and j >= int(tail[1])):
+					continue
+			var insertion := 0
+			while insertion < nearest.size():
+				var current: Array = nearest[insertion]
+				if distance < float(current[0]) or (distance == float(current[0]) and j < int(current[1])):
+					break
+				insertion += 1
+			nearest.insert(insertion, [distance, j])
+			if nearest.size() > wanted:
+				nearest.pop_back()
+		for candidate in nearest:
+			var neighbor: int = int(candidate[1])
 			links[Vector2i(mini(i, neighbor), maxi(i, neighbor))] = true
 	return links
 
@@ -274,11 +289,14 @@ static func coverage_on_segments(point: Vector2, segments: Array) -> float:
 	return closest
 
 func coverage_at(x: float, z: float) -> float:
-	if not is_finite(x) or not is_finite(z) or world.is_water(x, z):
+	if not is_finite(x) or not is_finite(z):
 		return 0.0
 	var cell := Vector2i(floori(x / Defs.CHUNK_SIZE), floori(z / Defs.CHUNK_SIZE))
-	# Populate the existing per-cell index before a native lookup.
+	# Reject roadless cells before sampling multi-octave water/terrain noise.
+	# The spatial cell index is populated once by the native/scalar road graph.
 	var pieces: Array = pieces_in_cell(cell)
+	if pieces.is_empty() or world.is_water(x, z):
+		return 0.0
 	if _native_nearest_segments:
 		var packed: PackedVector2Array = _packed_pieces_by_cell.get(cell, PackedVector2Array())
 		if not packed.is_empty():
