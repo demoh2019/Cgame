@@ -6824,9 +6824,9 @@ func cmd_perk(peer_id: int, perk_id: String) -> Dictionary:
 
 # --- Helpers ----------------------------------------------------------------------------------------------
 
-## Large rock models can be approached from their edge, not only the mesh origin.
+## Legacy helper shared by mining and tree chopping, including fallen logs.
 func _stone_reach_margin(node: Dictionary) -> float:
-	return minf(float(node.get("radius", 0.0)), 1.8) if str(node.get("kind", "")) in ["rock", "ore", "pebble"] else 0.0
+	return ResourceGathering.reach_margin(node)
 
 
 func _distance_xz(position: Vector3, thing: Dictionary) -> float:
