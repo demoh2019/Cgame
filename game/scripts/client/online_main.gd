@@ -250,6 +250,8 @@ var _breath_label: Label # Air left while diving.
 var _dof_elapsed := 0.35 # Coalesce cinematic focus updates to ~3 Hz.
 var _attack_cooldown := 0.0
 var _resource_weakspot: MeshInstance3D # One reusable marker, never one object per resource.
+var _resource_marker_rescan_at: int = 0
+var _resource_marker_target: Dictionary = {}
 var _charge_msec := -1 # Melee attack held since (ms); release = light swing or power blow.
 const CHARGE_START_MS := 220 # A shorter press is a quick swing.
 const CHARGE_FULL_MS := 850
