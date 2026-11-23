@@ -28,6 +28,7 @@ const FirstSteps = preload("res://scripts/client/first_steps.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const StoryCampaign = preload("res://scripts/shared/story_campaign.gd")
 const StoryChapterTwo = preload("res://scripts/shared/story_chapter_two.gd")
+const StoryChapterThree = preload("res://scripts/shared/story_chapter_three.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
@@ -51,6 +52,7 @@ var _radar
 var _contract_label: Label
 var _story_journal: Label # Chapter transcripts in the inventory's mission section.
 var _story2_journal: Label # New chapter is independent of Chapter I saves.
+var _story3_journal: Label # Branch-aware missing convoy radio records.
 var _caravan_status: Label
 var _prompt: Label
 var _log: Label
@@ -839,6 +841,35 @@ func _build() -> void:
 	_story2_journal.text = "Complete Chapter I to unlock the underground story."
 	_story2_journal.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	inventory_box.add_child(_story2_journal)
+
+	var chapter_three_heading := Label.new()
+	chapter_three_heading.text = StoryChapterThree.TITLE + " (requires Chapter II)"
+	inventory_box.add_child(chapter_three_heading)
+	var chapter_three_actions := HBoxContainer.new()
+	inventory_box.add_child(chapter_three_actions)
+	var trace_convoy := Button.new()
+	trace_convoy.name = "StoryTraceConvoy"
+	trace_convoy.text = "Trace missing convoy"
+	trace_convoy.tooltip_text = "After Chapter II, find the convoy frequency at a real workbench."
+	trace_convoy.pressed.connect(func() -> void: client.story("trace"))
+	chapter_three_actions.add_child(trace_convoy)
+	var guide_convoy := Button.new()
+	guide_convoy.name = "StoryGuideConvoy"
+	guide_convoy.text = "Guide convoy to safety"
+	guide_convoy.tooltip_text = "Final choice: reveal the safe route. ASH may hear the signal."
+	guide_convoy.pressed.connect(func() -> void: client.story("guide"))
+	chapter_three_actions.add_child(guide_convoy)
+	var mask_convoy := Button.new()
+	mask_convoy.name = "StoryMaskConvoy"
+	mask_convoy.text = "Mask convoy route"
+	mask_convoy.tooltip_text = "Final choice: send false coordinates and hide the survivors."
+	mask_convoy.pressed.connect(func() -> void: client.story("mask"))
+	chapter_three_actions.add_child(mask_convoy)
+	_story3_journal = Label.new()
+	_story3_journal.name = "StoryChapterThreeJournal"
+	_story3_journal.text = "Finish Chapter II to reveal the missing convoy."
+	_story3_journal.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	inventory_box.add_child(_story3_journal)
 
 	var cache_heading := Label.new()
 	cache_heading.text = "Frontier cache (capture a red/black outpost)"
@@ -2389,6 +2420,10 @@ func _on_event(event: Dictionary) -> void:
 		"story2":
 			if int(event.get("peer", -1)) == client.peer_id:
 				banner("CHAPTER II / THE DEEP SIGNAL", Color(0.5, 0.85, 0.96))
+				say(str(event.get("line", "")))
+		"story3":
+			if int(event.get("peer", -1)) == client.peer_id:
+				banner("CHAPTER III / THE MISSING CONVOY", Color(0.96, 0.72, 0.5))
 				say(str(event.get("line", "")))
 		# Territory and sieges: the server tells everyone, so the world hears when an outpost falls.
 		"outpost_taken":
@@ -4039,6 +4074,17 @@ func _process(_delta: float) -> void:
 				chapter_two_text += "\n\n" + str(entry)
 			if _story2_journal.text != chapter_two_text:
 				_story2_journal.text = chapter_two_text
+	var convoy_story: Dictionary = client.you.get("story3", {})
+	if not convoy_story.is_empty():
+		var convoy_objective: String = str(convoy_story.get("objective", ""))
+		_contract_label.text += "\nCHAPTER III: " + convoy_objective
+		if _story3_journal != null:
+			var convoy_text: String = str(convoy_story.get("title", StoryChapterThree.TITLE)) \
+				+ "\nOBJECTIVE: " + convoy_objective
+			for entry in convoy_story.get("transcript", []):
+				convoy_text += "\n\n" + str(entry)
+			if _story3_journal.text != convoy_text:
+				_story3_journal.text = convoy_text
 	_info_label.text += "  Rest %.0fs" % float(client.you.get("rest_cooldown", 0.0))
 	var combat_tag: float = float(client.you.get("combat_tag_seconds", 0.0))
 	if combat_tag > 0.0:
