@@ -108,6 +108,41 @@ static func triangle_count(hierarchy: Dictionary, cut: PackedInt32Array) -> int:
 	return total
 
 
+## Keep all source attributes, including UV seams, normals, colors, tangents,
+## skin and custom channels; simplifying a cluster changes only its indices.
+## This is the non-native fallback for a material-preserving CPU LOD cut.
+static func build_cut_arrays(source_arrays: Array, hierarchy: Dictionary, cut: PackedInt32Array) -> Array:
+	if source_arrays.size() != Mesh.ARRAY_MAX or not (source_arrays[Mesh.ARRAY_VERTEX] is PackedVector3Array):
+		return []
+	if not hierarchy.has("vertices") or not hierarchy.has("clusters"):
+		return []
+	var vertices: PackedVector3Array = source_arrays[Mesh.ARRAY_VERTEX]
+	if vertices.is_empty() or hierarchy["vertices"] != vertices or not (hierarchy["clusters"] is Array):
+		return []
+	var clusters: Array = hierarchy["clusters"]
+	var out_indices := PackedInt32Array()
+	var visited := {}
+	for id in cut:
+		if id < 0 or id >= clusters.size() or visited.has(id) or not (clusters[id] is Dictionary):
+			return []
+		visited[id] = true
+		var cluster: Dictionary = clusters[id]
+		if not cluster.has("indices") or not (cluster["indices"] is PackedInt32Array):
+			return []
+		var part: PackedInt32Array = cluster["indices"]
+		if part.is_empty() or part.size() % 3 != 0:
+			return []
+		for index in part:
+			if index < 0 or index >= vertices.size():
+				return []
+		out_indices.append_array(part)
+	if out_indices.is_empty():
+		return []
+	var arrays: Array = source_arrays.duplicate()
+	arrays[Mesh.ARRAY_INDEX] = out_indices
+	return arrays
+
+
 static func _projected(err: float, center: Vector3, radius: float, cam: Vector3, scale: float) -> float:
 	if is_inf(err):
 		return INF
