@@ -141,22 +141,22 @@ func set_source_attractor(kind: String, source_id: int, pos: Vector2,
 			not is_finite(ttl) or radius <= 0.0 or ttl <= 0.0:
 		return
 	var key: String = "%s:%d" % [kind, source_id]
-	var signal: Dictionary = _attractor_sources.get(key, {})
-	if signal.is_empty():
-		signal = {"kind": kind, "pos": pos, "strength": strength,
+	var source_signal: Dictionary = _attractor_sources.get(key, {})
+	if source_signal.is_empty():
+		source_signal = {"kind": kind, "pos": pos, "strength": strength,
 			"radius": maxf(1.0, radius), "ttl": ttl, "source": key}
-		_attractor_sources[key] = signal
-		_attractors.append(signal)
+		_attractor_sources[key] = source_signal
+		_attractors.append(source_signal)
 	else:
 		# A moving gunshot/noise source follows the player and reflects their
 		# current volume. TTL only changes lifetime, not attraction strength.
-		if signal["pos"] != pos or float(signal["strength"]) != strength or \
-				float(signal["radius"]) != maxf(1.0, radius):
-			signal["pos"] = pos
-			signal["strength"] = strength
-			signal["radius"] = maxf(1.0, radius)
+		if source_signal["pos"] != pos or float(source_signal["strength"]) != strength or \
+				float(source_signal["radius"]) != maxf(1.0, radius):
+			source_signal["pos"] = pos
+			source_signal["strength"] = strength
+			source_signal["radius"] = maxf(1.0, radius)
 			_attr_dirty = true
-		signal["ttl"] = ttl
+		source_signal["ttl"] = ttl
 		return
 	_attr_dirty = true
 
@@ -321,9 +321,9 @@ func _age_attractors(dt: float) -> void:
 		if ttl >= 0.0:
 			ttl -= dt
 			if ttl <= 0.0:
-				var signal: Dictionary = _attractors[i]
-				if signal.has("source"):
-					_attractor_sources.erase(signal["source"])
+				var source_signal: Dictionary = _attractors[i]
+				if source_signal.has("source"):
+					_attractor_sources.erase(source_signal["source"])
 				_attractors.remove_at(i)
 				_attr_dirty = true
 			else:
