@@ -129,6 +129,7 @@ const ProspectingChart = preload("res://scripts/shared/prospecting_chart.gd")
 const SurveySignal = preload("res://scripts/shared/survey_signal.gd")
 const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
+const WallUpkeepIndex = preload("res://scripts/shared/wall_upkeep_index.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
 const RaidTempo = preload("res://scripts/shared/raid_tempo.gd")
@@ -7429,15 +7430,14 @@ func tick(delta: float) -> void:
 ## Walls whose owner comes by stay kept; walls left alone past their upkeep crumble and are gone at zero health.
 func _tick_barricade_upkeep(seconds: float) -> void:
 	var crumbled: Array = []
+	# Index connected owners just once for all structures in this upkeep pass.
+	# Account rights and guest peer IDs keep their original authoritative rules.
+	var active_owners: Dictionary = WallUpkeepIndex.live_owners(players, func(survivor) -> bool:
+		return _alive(survivor))
 	for id in barricades:
 		var wall: Dictionary = barricades[id]
-		var at := Vector2(float(wall["x"]), float(wall["z"]))
-		for survivor in players.values():
-			if not _alive(survivor) or not Structures.can_manage(wall, survivor.id, survivor.user_id):
-				continue
-			if at.distance_to(Vector2(survivor.position.x, survivor.position.z)) <= Structures.UPKEEP_RANGE:
-				wall["upkeep_until"] = time + Structures.UPKEEP_SECONDS
-				break
+		if WallUpkeepIndex.owner_near(wall, active_owners):
+			wall["upkeep_until"] = time + Structures.UPKEEP_SECONDS
 		if time <= float(wall.get("upkeep_until", time + 1.0)):
 			continue
 		wall["hp"] = float(wall["hp"]) - Structures.decay_per_second(Structures.tier_of(wall)) * seconds
@@ -10149,7 +10149,19 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				Vector2(float(field["x"]), float(field["z"]))) <= Defs.INTEREST_RADIUS:
 			nearby_ember_pools.append(EmberFlask.public_state(field, time))
 	var nearby_barricades: Array = []
+	var owner_upkeep_at_risk: int = 0
+	var owner_upkeep_damaged: int = 0
+	var owner_upkeep_soonest: float = INF
 	for wall in barricades.values():
+		# Reuse this existing interest scan: reminders are derived from the
+		# full authoritative wall set and sent only to its owning survivor.
+		if Structures.can_manage(wall, player.id, player.user_id):
+			if WallUpkeepIndex.needs_attention(wall, time):
+				owner_upkeep_at_risk += 1
+				owner_upkeep_soonest = minf(owner_upkeep_soonest,
+					maxf(0.0, float(wall["upkeep_until"]) - time))
+			if float(wall["hp"]) < Structures.max_health(Structures.tier_of(wall)) * 0.5:
+				owner_upkeep_damaged += 1
 		if Structures.within_range(here, Vector2(float(wall["x"]), float(wall["z"])), Defs.INTEREST_RADIUS):
 			var public_wall: Dictionary = Structures.public_state(wall)
 			public_wall["blast_brace_seconds"] = maxf(0.0,
@@ -10253,6 +10265,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"tick": tick_count, "time": time, "ack": player.last_input_seq,
 		"outposts": siege_contracts.public_state(territory.public_state(time, players, parties), time),
 		"you": {
+			"base_upkeep": {"at_risk": owner_upkeep_at_risk, "damaged": owner_upkeep_damaged,
+				"soonest_seconds": owner_upkeep_soonest if owner_upkeep_at_risk > 0 else 0.0},
 			"party": _party_state_for(peer_id),
 			"raid_aggro": raid_aggro_state,
 			"party_flank_hint": party_flank_hint,
