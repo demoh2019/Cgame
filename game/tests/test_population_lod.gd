@@ -159,6 +159,65 @@ func run(t) -> void:
 	t.check(largest_error < 0.0001,
 			"bounded attraction matches complete-grid reference (max error %f)" % largest_error)
 
+	t.current = "per-player signals refresh without piling up"
+	var signals := _make(706)
+	var first_center: Vector2 = signals.region_center(44)
+	var second_center: Vector2 = signals.region_center(77)
+	signals.add_attractor("loot", first_center, 1.0, 20.0)
+	signals.set_source_attractor("noise", 4, first_center, 2.0, 100.0, 0.5)
+	t.eq(signals.active_attractor_count(), 2,
+			"independent loot event and one sourced noise signal coexist")
+	for i in 80:
+		signals.set_source_attractor("noise", 4, second_center, 4.0, 90.0, 0.5)
+	t.eq(signals.active_attractor_count(), 2,
+			"eighty updates from one player cannot accumulate overlapping signals")
+	t.check(signals.attraction(77) > signals.attraction(44),
+			"the source follows the player position and updates signal strength")
+	signals.set_source_attractor("noise", 5, first_center, 1.0, 30.0, 0.5)
+	signals.set_source_attractor("night", 4, second_center, 6.0, 30.0, 0.5)
+	t.eq(signals.active_attractor_count(), 4,
+			"different sources and different event kinds remain independent")
+	signals.set_night(true)
+	t.check(signals.attraction(77) > 4.0, "a refreshed nighttime signal attracts herds")
+	signals.tick(0.25)
+	t.eq(signals.active_attractor_count(), 4, "live signals survive partial TTL decay")
+	signals.tick(0.26)
+	t.eq(signals.active_attractor_count(), 1, "expired player signals are all evicted")
+	signals.set_source_attractor("noise", 4, first_center, 3.0, 30.0, 1.0)
+	t.eq(signals.active_attractor_count(), 2,
+			"an expired source can be registered again without using stale references")
+	signals.clear_attractors()
+	t.eq(signals.active_attractor_count(), 0, "clearing attractors forgets their source keys")
+	signals.set_source_attractor("noise", 4, second_center, 1.0, 30.0, 0.5)
+	t.eq(signals.active_attractor_count(), 1,
+			"cleared source keys do not conceal freshly active effects")
+	signals.setup(10, 10, 64.0, 706)
+	t.eq(signals.active_attractor_count(), 0, "reinitialization drops all previous signals")
+	signals.set_source_attractor("noise", 4, first_center, 1.0, 30.0, 0.5)
+	t.eq(signals.active_attractor_count(), 1, "source identifiers can be reused after reset")
+	signals.set_source_attractor("noise", 4, Vector2.INF, 1.0, 30.0, 1.0)
+	signals.set_source_attractor("noise", 4, first_center, 1.0, INF, 1.0)
+	t.eq(signals.active_attractor_count(), 1, "nonfinite network-derived positions and radii are rejected")
+
+	t.current = "independent nests honor shared regional cap"
+	var nests := _make(772)
+	nests.add_herd(44, {"walker": 2})
+	nests.add_spawner(44, "walker", 4.0, 9)
+	nests.add_spawner(44, "runner", 4.0, 9)
+	nests._rules_pass(1.0)
+	t.eq(nests.herd_region_count(44), 9,
+			"two spawners share one cap rather than each filling it separately")
+	t.eq(int(nests.stats()["spawned"]), 7,
+			"spawn accounting reflects only new agents accepted by regional cap")
+	nests._rules_pass(2.0)
+	t.eq(nests.herd_region_count(44), 9, "a capped region cannot overfill on later passes")
+	nests.set_decay(44, 2.0)
+	nests._rules_pass(1.0)
+	t.eq(nests.herd_region_count(44), 9,
+			"newly opened capacity from decay is replenished without exceeding cap")
+	t.eq(nests.abstract_count() + int(nests.stats()["decayed"]),
+			2 + int(nests.stats()["spawned"]), "decay and shared spawn caps conserve accounting")
+
 	t.current = "determinism"
 	var p1 := _make(99)
 	var p2 := _make(99)
