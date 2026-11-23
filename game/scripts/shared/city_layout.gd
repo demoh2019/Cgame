@@ -50,8 +50,8 @@ static func building_lots(seed: int, layout: String, radius: float, rotation: fl
 					candidates.append(Vector2(float(ix) + 0.5, float(iy) + 0.5) * radius * 0.185)
 		"radial":
 			for ring in 3:
-				var distance: float = radius * [0.31, 0.54, 0.78][ring]
-				var count: int = [10, 16, 22][ring]
+				var distance: float = radius * float([0.31, 0.54, 0.78][ring])
+				var count: int = int([10, 16, 22][ring])
 				for i in count:
 					var theta: float = TAU * (float(i) + 0.5) / float(count)
 					if absf(sin(theta * 2.0)) < 0.20:
@@ -59,25 +59,25 @@ static func building_lots(seed: int, layout: String, radius: float, rotation: fl
 					candidates.append(Vector2.from_angle(theta) * distance)
 		"oval":
 			for ring in 2:
-				var rx: float = radius * [0.35, 0.72][ring]
-				var ry: float = radius * [0.22, 0.41][ring]
-				var count: int = [12, 26][ring]
+				var rx: float = radius * float([0.35, 0.72][ring])
+				var ry: float = radius * float([0.22, 0.41][ring])
+				var count: int = int([12, 26][ring])
 				for i in count:
 					var theta: float = TAU * (float(i) + 0.5) / float(count)
 					candidates.append(Vector2(cos(theta) * rx, sin(theta) * ry))
 		"hexagonal":
 			for ring in 2:
-				var distance: float = radius * [0.34, 0.69][ring]
-				var steps: int = [2, 3][ring]
+				var distance: float = radius * float([0.34, 0.69][ring])
+				var steps: int = int([2, 3][ring])
 				for side in 6:
 					var first: Vector2 = Vector2.from_angle(TAU * float(side) / 6.0) * distance
 					var last: Vector2 = Vector2.from_angle(TAU * float(side + 1) / 6.0) * distance
 					for i in steps:
 						candidates.append(first.lerp(last, float(i) / float(steps)))
 		"organic":
-			for ring in 3:
-				var count: int = [9, 16, 22][ring]
-				var base: float = [0.29, 0.47, 0.60][ring]
+			for ring in 2:
+				var count: int = int([12, 24][ring])
+				var base: float = float([0.27, 0.60][ring])
 				for i in count:
 					var theta: float = TAU * (float(i) + 0.45 * float(ring)) / float(count)
 					var warp: float = 0.06 * sin(theta * 3.0) + 0.04 * cos(theta * 5.0)
@@ -139,7 +139,7 @@ static func streets(layout: String, radius: float, rotation: float) -> Array:
 			var contour: Array[Vector2] = []
 			for i in 65:
 				var theta: float = TAU * float(i) / 64.0
-				var r: float = radius * (0.52 + 0.06 * sin(theta * 3.0) + 0.035 * cos(theta * 5.0))
+				var r: float = radius * (0.42 + 0.06 * sin(theta * 3.0) + 0.04 * cos(theta * 5.0))
 				contour.append(Vector2.from_angle(theta) * r)
 			result.append(_path(contour, rotation))
 			for side in 5:
