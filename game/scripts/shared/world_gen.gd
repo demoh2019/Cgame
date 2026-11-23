@@ -623,9 +623,13 @@ func _add_ground_pickups(cell: Vector2i, origin: Vector2, nodes: Array, sites: A
 		var p: Vector2 = origin + Vector2(prng.randf(), prng.randf()) * Defs.CHUNK_SIZE
 		if is_water(p.x, p.y) or is_safe(p.x, p.y) or _in_site_clearing(p, sites):
 			continue
+		# Small collectables should not appear in the middle of a road.
+		# Dry land is already verified, so avoid a second terrain sample.
+		if roads != null and roads.coverage_on_land(p.x, p.y) > 0.0:
+			continue
 		var too_close: bool = false
 		for existing in nodes:
-			if Vector2(float(existing["x"]), float(existing["z"])).distance_to(p) < 1.5:
+			if Vector2(float(existing["x"]), float(existing["z"])).distance_squared_to(p) < 2.25:
 				too_close = true
 				break
 		if too_close:
@@ -1194,6 +1198,10 @@ func dynamic_blocker_query_candidates() -> int:
 
 func blockers_near(x: float, z: float, radius: float) -> Array:
 	var result: Array = []
+	# Reject invalid queries before floori()/range() and before asking the
+	# procedural world to generate chunks. Network positions are untrusted.
+	if not is_finite(x) or not is_finite(z) or not is_finite(radius) or radius < 0.0:
+		return result
 	if Dungeon.is_underground(x, z):
 		result = Dungeon.blockers_near(world_seed, x, z, radius)
 		result.append_array(_dynamic_index.query(dynamic_blockers, x, z, radius))
