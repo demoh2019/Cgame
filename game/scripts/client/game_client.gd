@@ -873,7 +873,7 @@ func nearest_node(point: Vector3, radius: float) -> Dictionary:
 
 
 ## Select a mineable node in front of the player's actual swing, ignoring ground pickups.
-func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Defs.REACH) -> Dictionary:
+func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Defs.REACH + 0.5) -> Dictionary:
 	var best: Dictionary = {}
 	var best_distance: float = radius
 	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
