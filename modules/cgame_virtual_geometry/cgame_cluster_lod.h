@@ -59,4 +59,7 @@ public:
 	static Dictionary build_hierarchy(const PackedVector3Array &p_vertices, const PackedInt32Array &p_indices, int p_levels = 4);
 	static PackedInt32Array select_cut(const Dictionary &p_hierarchy, const Vector3 &p_camera_pos, real_t p_fov_y, real_t p_screen_height, real_t p_error_pixels = 1.0);
 	static int triangle_count(const Dictionary &p_hierarchy, const PackedInt32Array &p_cut);
+	// Preserve the source mesh's per-vertex normal/UV/color/tangent/skin/custom
+	// buffers exactly: the simplified cluster cut only replaces triangle indices.
+	static Array build_cut_arrays(const Array &p_source_arrays, const Dictionary &p_hierarchy, const PackedInt32Array &p_cut);
 };
