@@ -8,6 +8,10 @@ const NODE_NAME := &"LootBeam"
 
 ## Beam colour for a bag; alpha 0 means no beam (ordinary public loot).
 static func color_for(bag: Dictionary) -> Color:
+	# World geometry still represents protected loot; valuable beams only
+	# advertise rewards to people permitted to claim them.
+	if bool(bag.get("reserved", false)) and not bool(bag.get("can_loot", false)):
+		return Color(0, 0, 0, 0)
 	if bool(bag.get("raid", false)):
 		return Color(1.0, 0.55, 0.12, 1.0) # Legendary orange.
 	if bool(bag.get("horde_cache", false)):

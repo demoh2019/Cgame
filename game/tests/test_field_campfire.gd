@@ -139,6 +139,31 @@ func run(t) -> void:
 		"infinite interest radius cannot request unbounded camp data")
 	t.eq(FieldCampfire.visible(malformed_fires, camper.position, NAN, 50.0), [],
 		"nonfinite server time cannot create bogus countdowns")
+	t.current = "campfire heat and refueling respect building floors"
+	var ground_camp: Dictionary = {"id": 702, "x": camper.position.x,
+		"y": camper.position.y, "z": camper.position.z,
+		"expires": sim.time + 120.0}
+	var above: Vector3 = camper.position + Vector3(0.0, FieldCampfire.WARM_HEIGHT + 1.0, 0.0)
+	t.check(FieldCampfire.has_warmth({702: ground_camp}, camper.position, sim.time),
+		"normal ground-floor campfire warms the survivor")
+	t.check(not FieldCampfire.has_warmth({702: ground_camp}, above, sim.time),
+		"campfire cannot heat someone several metres above")
+	t.eq(FieldCampfire.refuel_reason(ground_camp, above, sim.time), "out_of_range",
+		"upstairs player cannot spend wood on a downstairs fire")
+	t.eq(FieldCampfire.refuel_reason(ground_camp, camper.position, sim.time), "",
+		"same-level fire still accepts donated wood")
+	var invalid_height: Dictionary = ground_camp.duplicate()
+	invalid_height.erase("y")
+	t.check(not FieldCampfire.has_warmth({702: invalid_height}, camper.position, sim.time),
+		"missing campfire height does not create warmth")
+	t.eq(FieldCampfire.refuel_reason(invalid_height, camper.position, sim.time),
+		"invalid_position", "unknown campfire height rejects remote refueling")
+	invalid_height["y"] = NAN
+	t.check(not FieldCampfire.has_warmth({702: invalid_height}, camper.position, sim.time),
+		"nonfinite campfire height cannot give warmth")
+	t.eq(FieldCampfire.refuel_reason(invalid_height, camper.position, sim.time),
+		"invalid_position", "nonfinite campfire height cannot charge wood")
+
 	var good_camp: Dictionary = {"id": 701, "x": camper.position.x,
 		"y": camper.position.y, "z": camper.position.z, "expires": sim.time + 120.0}
 	t.check(FieldCampfire.has_warmth({701: good_camp}, camper.position, sim.time),

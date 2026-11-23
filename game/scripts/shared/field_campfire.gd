@@ -8,8 +8,10 @@ const REFUEL_COST := {"wood_1": 2}
 const REFUEL_SECONDS := 120.0
 const MAX_REMAINING_SECONDS := 600.0
 const REFUEL_RANGE := 3.2
+const REFUEL_HEIGHT := 2.5
 const DURATION := 300.0
 const WARM_RADIUS := 5.0
+const WARM_HEIGHT := 3.5
 const BUILD_RANGE := 4.0
 const MIN_DISTANCE := 1.7
 const MIN_SEPARATION := 2.5
@@ -63,11 +65,13 @@ static func refuel_reason(camp: Dictionary, position: Vector3, now: float) -> St
 		return "expired"
 	var point := Vector2(position.x, position.z)
 	var site := Vector2(float(camp.get("x", NAN)), float(camp.get("z", NAN)))
-	# A corrupted camp location must never bypass the distance check and
+	var camp_y: float = float(camp.get("y", NAN))
+	# A corrupted location must never bypass the distance check or
 	# charge wood for a remote refuel.
-	if not site.is_finite():
+	if not site.is_finite() or not is_finite(camp_y):
 		return "invalid_position"
-	if point.distance_squared_to(site) > REFUEL_RANGE * REFUEL_RANGE:
+	if absf(position.y - camp_y) > REFUEL_HEIGHT or \
+			point.distance_squared_to(site) > REFUEL_RANGE * REFUEL_RANGE:
 		return "out_of_range"
 	if expiry - now > MAX_REMAINING_SECONDS - REFUEL_SECONDS:
 		return "full_duration"
@@ -83,7 +87,10 @@ static func has_warmth(campfires: Dictionary, position: Vector3, now: float) -> 
 		if not is_finite(expiry) or expiry <= now:
 			continue
 		var site := Vector2(float(camp.get("x", NAN)), float(camp.get("z", NAN)))
-		if site.is_finite() and at.distance_squared_to(site) <= WARM_RADIUS * WARM_RADIUS:
+		var camp_y: float = float(camp.get("y", NAN))
+		if site.is_finite() and is_finite(camp_y) and \
+				absf(position.y - camp_y) <= WARM_HEIGHT and \
+				at.distance_squared_to(site) <= WARM_RADIUS * WARM_RADIUS:
 			return true
 	return false
 
