@@ -21,7 +21,8 @@ static func site_reason(world, position: Vector3, world_seconds: float) -> Strin
 		return "sheltered"
 	if world.is_water(position.x, position.z):
 		return "in_water"
-	if world.normal_at(position.x, position.z).y < MIN_SLOPE_NORMAL_Y:
+	var ground_normal: Vector3 = world.normal_at(position.x, position.z)
+	if not ground_normal.is_finite() or ground_normal.y < MIN_SLOPE_NORMAL_Y:
 		return "bad_terrain"
 	var conditions: Dictionary = Weather.conditions(world, position.x, position.z, world_seconds)
 	if conditions.is_empty() or bool(conditions.get("sheltered", true)) or (

@@ -66,6 +66,12 @@ func run(t) -> void:
 	fake.slope = 0.4
 	t.eq(RainHarvest.site_reason(fake, position, storm_time), "bad_terrain",
 		"steep terrain is not eligible")
+	fake.slope = NAN
+	t.eq(RainHarvest.site_reason(fake, position, storm_time), "bad_terrain",
+		"NaN terrain normal must not produce free stormwater")
+	fake.slope = INF
+	t.eq(RainHarvest.site_reason(fake, position, storm_time), "bad_terrain",
+		"infinite terrain normal must not produce free stormwater")
 	fake.slope = 1.0
 	fake.biome = "swamp"
 	t.check(RainHarvest.needs_filter(fake, position), "swamp runoff needs a filter")

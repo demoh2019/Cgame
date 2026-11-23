@@ -27,15 +27,20 @@ func run(t) -> void:
 			t.eq(batch[index], expected[index]["cell"],
 				"small and large budgets use the same stable priority ordering")
 
-	t.current = "non-finite priorities cannot overtake regular chunk loads"
+	t.current = "non-finite priorities are rejected without changing the generation"
 	var invalid := StreamRequests.new()
-	invalid.request(Vector2i(0, 0), NAN, 1)
-	invalid.request(Vector2i(1, 0), INF, 1)
-	invalid.request(Vector2i(2, 0), 2.0, 1)
-	var chosen: Array[Vector2i] = invalid.next_batch(3)
-	t.eq(chosen[0], Vector2i(2, 0), "finite priority is served first")
-	t.eq(chosen[1], Vector2i(0, 0), "NaN normalizes to a stable zero priority")
-	t.eq(chosen[2], Vector2i(1, 0), "infinite priority normalizes to a stable zero priority")
+	t.check(not invalid.request(Vector2i(0, 0), NAN, 1),
+		"NaN priority is rejected")
+	t.check(not invalid.request(Vector2i(1, 0), INF, 1),
+		"infinite priority is rejected")
+	t.check(not invalid.request(Vector2i(4, 0), NAN, 99),
+		"invalid future generation cannot supersede legitimate loads")
+	t.check(invalid.request(Vector2i(2, 0), 2.0, 1),
+		"finite priority from current generation is accepted")
+	t.eq(int(invalid.stats()["rejected_invalid"]), 3,
+		"rejected priorities are counted in diagnostics")
+	t.eq(invalid.next_batch(3), [Vector2i(2, 0)],
+		"invalid requests never enter the load queue")
 
 	t.current = "in-flight cap still bounds small priority batches"
 	var capped := StreamRequests.new()
