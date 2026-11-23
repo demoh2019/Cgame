@@ -75,12 +75,68 @@ func _init(p_net) -> void:
 
 
 func on_welcome(world_seed: int, _tick_rate: int) -> void:
+	# A new welcome may refer to a different server/world. Do not replay the
+	# previous character's inputs or display stale resources and party data.
+	_reset_session_state()
 	world = WorldGen.new(world_seed)
 	PcgSpawns.attach(world) # Same deterministic crate list as the server; only presentation (the server stays authoritative).
 	welcomed = true
 	peer_id = net.multiplayer.get_unique_id()
+
+
+func _reset_session_state() -> void:
+	welcomed = false
+	peer_id = 0
+	you.clear()
+	players.clear()
+	zombies.clear()
+	barricades.clear()
+	campfires.clear()
+	farm_plots.clear()
+	shelters.clear()
+	decoys.clear()
+	smoke_clouds.clear()
+	infected_snares.clear()
+	fish_traps.clear()
+	lightning_telegraph.clear()
+	raid_telegraph.clear()
+	raid_interrupt.clear()
+	raid_cone_telegraph.clear()
+	spit_zones.clear()
+	acid_pools.clear()
+	ember_pools.clear()
+	outposts.clear()
+	bags.clear()
+	depleted.clear()
+	resource_hits.clear()
+	crates_used.clear()
+	supply_beacon.clear()
+	last_results.clear()
+	events.clear()
+	# Do not show the previous character's data before the first new snapshot.
+	inventory = Inventory.new()
+	stash = Inventory.new(Defs.STASH_SLOTS)
+	skills = Skills.new()
+	skill_points = 0
+	server_time = 0.0
+	snapshots_received = 0
+	_seq = 0
+	_pending.clear()
+	predicted = Vector3.ZERO
 	predicted_stamina = Defs.MAX_STAMINA
-	supply_beacon = {} # A reconnect must not reveal previous party markers.
+	correction = Vector3.ZERO
+	yaw = 0.0
+	total_corrections = 0
+	worst_error = 0.0
+	_outpost_provision_request_id = 0
+	_outpost_fortify_request_id = 0
+	_outpost_breach_request_id = 0
+	_siege_declare_request_id = 0
+	_market_buy_request_id = 0
+	# Chunk visibility and mining tint caches belong to the previous world.
+	world_state_revision += 1
+	resource_damage_revision += 1
+
 
 
 func on_result(kind: String, data: Dictionary) -> void:
@@ -947,10 +1003,11 @@ func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Def
 ## The held-E collector skips already sent requests until depletion arrives.
 func nearest_pickup_node(point: Vector3, radius: float,
 		skip_ids: Dictionary = {}) -> Dictionary:
-	if world == null:
+	if world == null or not point.is_finite() or not (radius > 0.0 and radius < INF):
 		return {}
 	var best: Dictionary = {}
-	var best_distance: float = radius
+	# Held-E runs frequently: compare squared distances to avoid a square root per node.
+	var best_distance_squared: float = radius * radius
 	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
 	for dx in range(-1, 2):
 		for dz in range(-1, 2):
@@ -961,32 +1018,39 @@ func nearest_pickup_node(point: Vector3, radius: float,
 					continue
 				var offset := Vector2(float(node["x"]) - point.x,
 					float(node["z"]) - point.z)
-				var distance: float = offset.length()
-				if distance < best_distance:
-					best_distance = distance
+				var distance_squared: float = offset.length_squared()
+				if distance_squared < best_distance_squared:
+					best_distance_squared = distance_squared
 					best = node
 	return best
 
 
 func nearest_loot(point: Vector3, radius: float) -> Dictionary:
+	if world == null or not point.is_finite() or not (radius > 0.0 and radius < INF):
+		return {}
 	var best: Dictionary = {}
-	var best_distance := radius
+	var best_distance_squared: float = radius * radius
 	for bag in bags.values():
-		var distance := Vector2(bag["x"] - point.x, bag["z"] - point.z).length()
-		if distance < best_distance:
+		var dx: float = float(bag["x"]) - point.x
+		var dz: float = float(bag["z"]) - point.z
+		var distance_squared: float = dx * dx + dz * dz
+		if distance_squared < best_distance_squared:
 			best = {"id": bag["id"], "kind": "bag", "x": bag["x"], "z": bag["z"]}
-			best_distance = distance
-	var cell := WorldGen.cell_of(point.x, point.z)
+			best_distance_squared = distance_squared
+	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
 	for dx in range(-1, 2):
 		for dz in range(-1, 2):
 			for crate in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["crates"]:
 				if crates_used.has(crate["id"]):
 					continue
-				var distance := Vector2(crate["x"] - point.x, crate["z"] - point.z).length()
-				if distance < best_distance:
+				var offset := Vector2(float(crate["x"]) - point.x,
+					float(crate["z"]) - point.z)
+				var distance_squared: float = offset.length_squared()
+				if distance_squared < best_distance_squared:
 					best = {"id": crate["id"], "kind": "crate", "x": crate["x"], "z": crate["z"]}
-					best_distance = distance
+					best_distance_squared = distance_squared
 	return best
+
 
 
 ## Albion-style buy orders (escrowed silver; sellers fill them at the hub).

@@ -13,9 +13,13 @@ class NetStub:
 class ChunkStub:
 	extends RefCounted
 	var nodes: Array = []
+	var crates: Array = []
 
 	func chunk(cell: Vector2i) -> Dictionary:
-		return {"nodes": nodes if cell == Vector2i.ZERO else []}
+		if cell == Vector2i.ZERO:
+			return {"nodes": nodes, "crates": crates}
+		return {"nodes": [], "crates": []}
+
 
 
 func run(t) -> void:
@@ -44,3 +48,55 @@ func run(t) -> void:
 	client.depleted[1] = true
 	t.check(client.nearest_aimed_node(at, Vector2.RIGHT, 2.6).is_empty(),
 		"no phantom target when all nearby models have disappeared")
+
+	t.current = "held-E pickup and loot use bounded squared-distance queries"
+	client.depleted.clear()
+	client.crates_used.clear()
+	stub.crates = [{"id": 3, "x": 1.5, "z": 0.0}, {"id": 4, "x": 2.5, "z": 0.0}]
+	t.eq(int(client.nearest_loot(Vector3.ZERO, 2.0).get("id", -1)), 3,
+		"nearest crate is selectable inside radius")
+	client.crates_used[3] = true
+	t.check(client.nearest_loot(Vector3.ZERO, 2.0).is_empty(),
+		"used crate is ignored and distant crates stay out of range")
+	client.bags[5] = {"id": 5, "x": 0.7, "z": 0.0}
+	t.eq(int(client.nearest_loot(Vector3.ZERO, 2.0).get("id", -1)), 5,
+		"reachable player loot remains selectable")
+	t.check(client.nearest_loot(Vector3(INF, 0.0, 0.0), 2.0).is_empty(),
+		"invalid predicted position must not query world chunks")
+	t.check(client.nearest_pickup_node(Vector3.ZERO, INF).is_empty(),
+		"non-finite pickup range cannot trigger unbounded collection")
+	t.check(client.nearest_pickup_node(Vector3.ZERO, 0.0).is_empty(),
+		"zero pickup range selects nothing")
+
+	t.current = "new session clears previous character and replicated world state"
+	client.players[101] = {"id": 101}
+	client.depleted[1] = true
+	client.resource_hits[2] = 3
+	client.crates_used[3] = true
+	client.you = {"x": 10.0}
+	client.outposts.append({"id": 7})
+	client.events.append({"type": "gathered"})
+	client.last_results["market"] = {"ok": true}
+	client.supply_beacon = {"expires": 999.0}
+	client.inventory.add("wood_1", 2)
+	client._seq = 14
+	client._pending.append({"seq": 14})
+	client.correction = Vector3.ONE
+	var old_world_revision: int = client.world_state_revision
+	var old_damage_revision: int = client.resource_damage_revision
+	client._reset_session_state()
+	t.check(client.players.is_empty() and client.bags.is_empty()
+		and client.outposts.is_empty(), "old entities and player loot are discarded")
+	t.check(client.depleted.is_empty() and client.resource_hits.is_empty()
+		and client.crates_used.is_empty(), "old world's resource IDs do not leak across sessions")
+	t.check(client.events.is_empty() and client.last_results.is_empty()
+		and client.supply_beacon.is_empty(), "old notifications, results and party data disappear")
+	t.check(client.you.is_empty() and client.inventory.count("wood_1") == 0,
+		"previous character's inventory stays hidden until the first snapshot")
+	t.eq(client._seq, 0, "input sequence restarts on the new connection")
+	t.check(client._pending.is_empty() and client.correction == Vector3.ZERO,
+		"unacknowledged movement and smoothing from old server are dropped")
+	t.eq(client.world_state_revision, old_world_revision + 1,
+		"new world invalidates visible geometry cache")
+	t.eq(client.resource_damage_revision, old_damage_revision + 1,
+		"new world invalidates mining damage tints")
