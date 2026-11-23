@@ -43,13 +43,11 @@ func run(t) -> void:
 		if float(a["priority"]) != float(b["priority"]):
 			return float(a["priority"]) > float(b["priority"])
 		return int(a["seq"]) < int(b["seq"]))
-	for index in 128:
-		var actual: Array[Vector2i] = [] if index != 0 else many.next_batch(128)
-		if index == 0:
-			t.eq(actual.size(), 128, "medium-size streaming batch uses bounded heap")
-			for j in 128:
-				t.eq(actual[j], reference[j]["cell"],
-					"large bounded top-K matches full priority order")
+	var actual: Array[Vector2i] = many.next_batch(128)
+	t.eq(actual.size(), 128, "medium-size streaming batch uses bounded heap")
+	for j in actual.size():
+		t.eq(actual[j], reference[j]["cell"],
+			"large bounded top-K matches full priority order")
 	# Remaining cells still sort consistently beyond the heap threshold.
 	var remaining: Array[Vector2i] = many.next_batch(201)
 	for j in remaining.size():
