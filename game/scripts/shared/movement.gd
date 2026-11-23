@@ -179,10 +179,16 @@ static func overlaps_blocker(point: Vector2, blocker: Dictionary) -> bool:
 	return offset.length_squared() < combined * combined
 
 
-static func _is_free(world, point: Vector2, allow_swim: bool, nearby: Array) -> bool:
+## Shared point-collision test used by locomotion, raid-boss spawns and
+## supply-drop guards. The public two-argument form performs its own lookup;
+## movement passes its cached swept-path array (including a valid empty array)
+## to avoid repeated queries for every substep.
+static func _is_free(world, point: Vector2, allow_swim: bool = false, nearby = null) -> bool:
 	# Wading is allowed until the water is deeper than a meter; beyond that only swimmers.
 	if not allow_swim and world.height_at(point.x, point.y) < Defs.WATER_LEVEL - 1.0:
 		return false
+	if nearby == null:
+		nearby = world.blockers_near(point.x, point.y, Defs.PLAYER_RADIUS + 1.0)
 	for blocker in nearby:
 		if overlaps_blocker(point, blocker):
 			return false
