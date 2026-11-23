@@ -11,6 +11,7 @@ const NOVICE_RATE := 0.75
 const NOVICE_UNTIL := 10
 const DEVELOPING_UNTIL := 25
 const CROSS_TRAINING_RATE := 0.20
+const DEEP_PRACTICE_RATE := 0.10
 
 
 static func valid_credit(value: Variant) -> bool:
@@ -43,10 +44,12 @@ static func rate_for_level(skill_level: int) -> float:
 ## Credit is measured in *additional*, not base, skill XP. Invalid input,
 ## fractional spam and exhausted reserves cannot mint a bonus.
 static func bonus_for(amount: float, credit: int, skill_level: int = DEVELOPING_UNTIL,
-		cross_training: bool = false) -> int:
+		cross_training: bool = false, deep_practice: bool = false) -> int:
 	if not is_finite(amount) or amount <= 0.0 or credit <= 0 or credit > MAX_CREDIT or skill_level <= 0:
 		return 0
 	var rate: float = rate_for_level(skill_level)
 	if cross_training:
-		rate = minf(1.0, rate + CROSS_TRAINING_RATE)
-	return mini(credit, maxi(0, roundi(minf(amount, 100000.0) * rate)))
+		rate += CROSS_TRAINING_RATE
+	if deep_practice:
+		rate += DEEP_PRACTICE_RATE
+	return mini(credit, maxi(0, roundi(minf(amount, 100000.0) * minf(1.0, rate))))
