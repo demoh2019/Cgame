@@ -273,7 +273,46 @@ TEST_CASE("[CgamePathTracer] Image render and progressive accumulation") {
 	prog->accumulate(scene, cam, 50.0f, 1, light);
 	CHECK(prog->get_passes() == 2);
 	CHECK(prog->get_samples() == 2);
-	CHECK(prog->to_image()->get_size() == Vector2i(8, 6));
+	const Ref<Image> preview = prog->to_image();
+	CHECK(preview->get_size() == Vector2i(8, 6));
+
+	Ref<Image> reference = Image::create_empty(8, 6, false, Image::FORMAT_RGB8);
+	for (int y = 0; y < 6; y++) {
+		for (int x = 0; x < 8; x++) {
+			const Vector3 c = prog->get_pixel(x, y).clamp(Vector3(), Vector3(1, 1, 1));
+			reference->set_pixel(x, y, Color(Math::pow(float(c.x), 0.4545f), Math::pow(float(c.y), 0.4545f), Math::pow(float(c.z), 0.4545f)));
+		}
+	}
+	CHECK(preview->get_data() == reference->get_data());
+}
+
+TEST_CASE("[CgamePathTracer] Progressive linear image preserves HDR radiance") {
+	Ref<CgamePathTracer> tracer;
+	tracer.instantiate();
+	CHECK(tracer->to_linear_image()->get_size() == Vector2i(1, 1));
+
+	tracer->begin_progressive(Vector2i(3, 0));
+	CHECK(tracer->to_image()->get_size() == Vector2i(3, 1));
+	CHECK(tracer->to_linear_image()->get_size() == Vector2i(3, 1));
+
+	tracer->begin_progressive(Vector2i(3, 2));
+	CHECK(tracer->to_image()->get_pixel(2, 1) == Color(0, 0, 0));
+	CHECK(tracer->to_linear_image()->get_pixel(2, 1) == Color(0, 0, 0));
+
+	Ref<CgameBVH> empty_scene;
+	empty_scene.instantiate();
+	const Color sky(2.5f, 0.25f, 1.5f);
+	tracer->accumulate(empty_scene, Transform3D(), 50.0f, 2, CgamePathTracer::make_light(Vector3(), Color(), sky));
+	tracer->accumulate(empty_scene, Transform3D(), 50.0f, 1, CgamePathTracer::make_light(Vector3(), Color(), Color(1, 1, 0)));
+
+	const Ref<Image> linear = tracer->to_linear_image();
+	CHECK(linear->get_format() == Image::FORMAT_RGBF);
+	CHECK(linear->get_size() == Vector2i(3, 2));
+	CHECK(linear->get_pixel(0, 0) == Color(2, 0.5f, 1));
+	CHECK(linear->get_pixel(2, 1) == Color(2, 0.5f, 1));
+	const Ref<Image> preview = tracer->to_image();
+	CHECK(preview->get_format() == Image::FORMAT_RGB8);
+	CHECK(preview->get_pixel(2, 1).r == 1.0f);
 }
 
 } // namespace TestCgameRaytrace

@@ -3,6 +3,7 @@ extends Node
 ## and on every client (Godot needs that), and `role` decides which half of it does anything.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const ResourceGathering = preload("res://scripts/shared/resource_gathering.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const CaravanEscort = preload("res://scripts/shared/caravan_escort.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
@@ -20,6 +21,7 @@ var shutting_down := false
 var sim # GameServer, on the server.
 var client # GameClient, on the client.
 var allow_debug: bool = false
+var _bad_result_packet_warned := false
 var _command_counts: Dictionary = {} # peer -> commands in the current second
 var _count_clock: float = 0.0
 const MAX_COMMANDS_PER_SECOND := 80
@@ -544,7 +546,25 @@ func c_fish(baited: bool = false, storm_cast: bool = false) -> void:
 func c_gather(node_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
-		s_result.rpc_id(peer, "gather", sim.cmd_gather(peer, node_id))
+		var node: Dictionary = sim._find_node(node_id)
+		if ResourceGathering.is_strike(str(node.get("kind", ""))):
+			s_result.rpc_id(peer, "gather", {"ok": false, "reason": "use_strikes"})
+		else:
+			s_result.rpc_id(peer, "gather", sim.cmd_gather(peer, node_id))
+
+
+@rpc("any_peer", "reliable")
+func c_resource_pickup(node_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "resource_pickup", sim.cmd_resource_pickup(peer, node_id))
+
+
+@rpc("any_peer", "reliable")
+func c_resource_hit(node_id: int, dir_x: float, dir_z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "resource_hit", sim.cmd_resource_hit(peer, node_id, dir_x, dir_z))
 
 
 @rpc("any_peer", "reliable")
@@ -834,8 +854,8 @@ func c_contract(action: String) -> void:
 	if _allowed(peer):
 		s_result.rpc_id(peer, "contract", sim.cmd_contract(peer, str(action)))
 
-## The client chooses only listen/transmit; the server owns every story
-## milestone and refuses all invented stage, kill, reward or cache values.
+## The client chooses only a chapter radio action; the server owns every
+## stage, branch, evidence check and reward.
 @rpc("any_peer", "reliable")
 func c_story(action: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
@@ -1362,11 +1382,36 @@ func s_events(list: Array) -> void:
 		client.on_events(list)
 
 
+## Validate result RPC packets before forwarding them to gameplay. The current
+## protocol sends (String kind, Dictionary payload); some older servers send a
+## single envelope. Do not invent a kind when a legacy packet is ambiguous.
+static func normalize_result_packet(kind: Variant, data: Variant = null) -> Dictionary:
+	if kind is String and data is Dictionary and not str(kind).is_empty():
+		return {"kind": str(kind), "data": data}
+	if kind is Dictionary and data == null:
+		var envelope: Dictionary = kind
+		if envelope.get("kind") is String and not str(envelope["kind"]).is_empty() \
+				and envelope.get("data") is Dictionary:
+			return {"kind": str(envelope["kind"]), "data": envelope["data"]}
+	return {}
+
+
 @rpc("authority", "reliable")
-func s_result(kind: String, data: Dictionary) -> void:
+func s_result(kind: Variant, data: Variant = null) -> void:
+	# An optional second parameter lets Object.callp() accept old one-arg
+	# replies; valid current two-arg replies retain their original behavior.
+	var packet: Dictionary = normalize_result_packet(kind, data)
+	if packet.is_empty():
+		if not _bad_result_packet_warned:
+			_bad_result_packet_warned = true
+			push_warning("Incompatible s_result RPC from server: expected command kind and result. " \
+				+ "Restart both the Albion After server and client from the same build.")
+		return
+	var command_kind: String = packet["kind"]
+	var payload: Dictionary = packet["data"]
 	if client != null:
-		client.on_result(kind, data)
-	result_received.emit(kind, data)
+		client.on_result(command_kind, payload)
+	result_received.emit(command_kind, payload)
 
 
 # --- Server tick helper ------------------------------------------------------------------------------------
@@ -1448,7 +1493,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"story", "site_discovered", "caravan_escort_paid", "caravan_defended", "recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "party_flank", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "barricade_shot", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "parried", "stagger_finisher", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
+		"story", "story2", "story3", "site_discovered", "caravan_escort_paid", "caravan_defended", "recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "party_flank", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "barricade_shot", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "parried", "stagger_finisher", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
 			return event.get("peer", -1) == peer
 		"camp_alarm":
 			# A former ally, distant player, enemy, or recycled peer ID

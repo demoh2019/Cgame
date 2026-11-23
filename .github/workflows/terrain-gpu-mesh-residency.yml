@@ -1,0 +1,76 @@
+name: Native terrain GPU mesh residency
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "scene/3d/chunked_terrain_3d.*"
+      - "game/scripts/client/chunk_view.gd"
+      - "game/scripts/client/graphics_quality.gd"
+      - "game/tests/test_terrain_mesh_residency.gd"
+      - "game/tests/run_terrain_mesh_residency.gd"
+      - ".github/workflows/terrain-gpu-mesh-residency.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "scene/3d/chunked_terrain_3d.*"
+      - "game/scripts/client/chunk_view.gd"
+      - "game/scripts/client/graphics_quality.gd"
+      - "game/tests/test_terrain_mesh_residency.gd"
+      - "game/tests/run_terrain_mesh_residency.gd"
+      - ".github/workflows/terrain-gpu-mesh-residency.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-terrain-residency-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-terrain-residency:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-terrain-gpu-residency
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-terrain-gpu-residency
+        continue-on-error: true
+      - name: Import Albion After resources and catch parse errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee terrain-residency-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' terrain-residency-import.log; then exit 1; fi
+      - name: Headless native terrain LOD cache and game integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_terrain_mesh_residency.gd 2>&1 | tee terrain-residency-test.log
+          grep -E '^TERRAIN GPU RESIDENCY TOTAL: [0-9]+ checks, 0 failures$' terrain-residency-test.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' terrain-residency-test.log; then exit 1; fi
+      - name: Save failure logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-terrain-gpu-residency-logs
+          if-no-files-found: ignore
+          path: |
+            terrain-residency-import.log
+            terrain-residency-test.log

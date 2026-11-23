@@ -28,6 +28,29 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="apply_color_patch">
+			<return type="bool" />
+			<param index="0" name="region" type="Rect2i" />
+			<param index="1" name="colors" type="PackedColorArray" />
+			<description>
+				Atomically updates a rectangle of existing vertex colors in sample-grid coordinates. Initialize a complete per-vertex color grid with [method set_color_data] first. Nonfinite RGBA values, wrong lengths, empty or out-of-bounds regions return false without modifying the terrain. Unchanged patches are no-ops. A changed patch invalidates only nearby render meshes while retaining existing heightmap collision shapes, cached LOD errors, and bounds. Rendering meshes are refreshed during the next terrain update, or via [method force_update].
+			</description>
+		</method>
+		<method name="get_last_region_invalidated_chunks" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of cached mesh chunks invalidated by the last height or color region update. Identical patches report zero; this is a locality diagnostic rather than a measured GPU throughput metric.
+			</description>
+		</method>
+		<method name="apply_height_patch">
+			<return type="bool" />
+			<param index="0" name="region" type="Rect2i" />
+			<param index="1" name="heights" type="PackedFloat32Array" />
+			<description>
+				Atomically replaces the height samples in [param region] of an existing, script-provided heightfield. [param region] uses source-grid coordinates; the [param heights] array is row-major, containing exactly width × height entries for the rectangle. Every new height must be finite. The patch must lie entirely within the current grid and contain at most 4096 samples. Invalid requests return false and leave the existing terrain unchanged. Identical patches are no-ops.
+				When the values change, only render and collision chunks intersecting the edited samples (plus a one-sample normal-derivative margin) are invalidated. If externally supplied source normals exist, the dirty one-ring normals are recalculated from the edited heights. Bounds and geometric LOD error are recomputed for affected chunks. Rendering meshes and nearby physics collision are refreshed on the normal update cadence; call [method force_update] when immediate synchronous refresh is needed. Unlike [method set_height_data], this does not rebuild the full terrain or discard its color layers and unaffected normal overrides. This is a CPU/main-thread incremental editing API, not GPU mesh-page streaming, threaded collision cooking, or a complete landscape editor.
+			</description>
+		</method>
 		<method name="bake_horizon_visibility" qualifiers="static">
 			<return type="PackedFloat32Array" />
 			<param index="0" name="heights" type="PackedFloat32Array" />
@@ -50,6 +73,19 @@
 				Rebuilds the terrain if its settings changed and applies the distance based detail and collision selection immediately, instead of at the next [member update_interval].
 			</description>
 		</method>
+		<method name="get_cached_mesh_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of resident RenderingServer mesh RIDs across all terrain chunks and LODs. Use with [member max_cached_lods] to inspect GPU geometry residency. This counts mesh resources, not their GPU byte sizes.
+			</description>
+		</method>
+		<method name="get_chunk_cached_lod_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="chunk" type="Vector2i" />
+			<description>
+				Returns the number of resident mesh LODs for the chunk at [param chunk]. Returns 0 for an out-of-range chunk. An active rendered chunk keeps at least its current LOD when residency eviction is enabled.
+			</description>
+		</method>
 		<method name="get_chunk_count" qualifiers="const">
 			<return type="int" />
 			<description>
@@ -60,6 +96,14 @@
 			<return type="Vector2i" />
 			<description>
 				Returns the number of chunks along x and z.
+			</description>
+		</method>
+		<method name="get_chunk_lod_error" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="chunk" type="Vector2i" />
+			<param index="1" name="lod" type="int" />
+			<description>
+				Returns the cached geometric height deviation for the requested chunk and LOD (0 to 7), in world vertical units. A negative result indicates invalid chunk coordinates or LOD. The value is recalculated for affected chunks after [method apply_height_patch] and [method update_region], so screen-space LOD decisions do not use stale error from before sculpting.
 			</description>
 		</method>
 		<method name="get_chunk_lod" qualifiers="const">
@@ -144,6 +188,13 @@
 				Returns [code]true[/code] if the x and z of [param world_position] lie over the terrain.
 			</description>
 		</method>
+		<method name="set_max_cached_lods">
+			<return type="void" />
+			<param index="0" name="limit" type="int" />
+			<description>
+				Sets the per-chunk resident GPU mesh LOD cap. Zero retains the original unlimited cache; values 1 through 8 retain the currently rendered LOD plus the most recently used available levels, evicting older unused mesh RIDs. Reducing the cap trims existing chunks immediately where safe, without changing height samples, collision, materials, or LOD selection. Evicted LOD meshes are regenerated on demand under the existing [member mesh_build_budget_usec] CPU budget. Setting this too low can increase mesh rebuilding while the camera oscillates across LOD thresholds.
+			</description>
+		</method>
 		<method name="set_mesh_streaming_priority">
 			<return type="void" />
 			<param index="0" name="mode" type="int" />
@@ -184,7 +235,7 @@
 			<return type="void" />
 			<param index="0" name="region" type="Rect2i" />
 			<description>
-				Rebuilds the meshes and collision of the chunks touched by [param region], given in sample coordinates. Use it after changing the samples of an existing terrain to avoid rebuilding all of it.
+				Invalidates the meshes and nearby collision of chunks touched by [param region], given in source-grid sample coordinates, including one extra sample for vertex normals. Also recalculates their bounds and geometric LOD errors. The invalidation is applied on the next chunk update or with [method force_update]. For direct script-side sample edits, prefer [method apply_height_patch] which validates and commits the data before invalidation.
 			</description>
 		</method>
 	</methods>
@@ -230,6 +281,9 @@
 		</member>
 		<member name="mesh_streaming_priority" type="int" setter="set_mesh_streaming_priority" getter="get_mesh_streaming_priority" default="0">
 			Controls priority within a budgeted terrain node: [code]0[/code] is the original row-major order, [code]1[/code] fills missing visible geometry nearest to the focus before spending time on LOD upgrades, and [code]2[/code] additionally favors chunks in the current camera direction. This is bounded priority, not frustum culling: offscreen chunks will still be generated as time allows. Requires [member mesh_build_budget_usec] greater than zero. A value of zero keeps existing Godot scenes backward-compatible.
+		</member>
+		<member name="max_cached_lods" type="int" setter="set_max_cached_lods" getter="get_max_cached_lods" default="0">
+			Maximum number of resident mesh LOD RIDs per chunk. Zero preserves unlimited legacy caching. Values 1 to 8 enable LRU-based GPU resource eviction after the new active mesh has been bound. The value is independent of [member lod_count].
 		</member>
 		<member name="mesh_build_budget_usec" type="int" setter="set_mesh_build_budget_usec" getter="get_mesh_build_budget_usec" default="0">
 			Main-thread CPU budget, in microseconds, for newly generated heightfield LOD meshes. When positive, generation is time-sliced over multiple process frames; the current visible LOD remains in use while a new one is built. This is a soft budget, not a hard deadline, because one mesh cannot be interrupted halfway through building. Nodes share the same per-frame clock, so the limit applies to the terrain streamer rather than separately multiplying for every loaded world chunk. The default of zero retains existing Godot scene behavior.

@@ -5,17 +5,24 @@ extends Control
 
 const MAP_RADIUS := 6 # Cells each way.
 const CELL_PX := 9.0
+const FRAME_HISTORY := 120
+const FRAME_BUDGET_MS := 16.7
 
 var streamer
 var client
 var far_field
 var sea
 var _history: PackedFloat32Array = PackedFloat32Array()
+var _history_head: int = 0
+var _history_count: int = 0
 var _refresh := 0.0
 var _lines: PackedStringArray = PackedStringArray()
 
 
 func _init() -> void:
+	# The circular frame history is allocated once, not sliced and copied
+	# every rendered frame after the first two seconds.
+	_history.resize(FRAME_HISTORY)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	position = Vector2(-330, 70)
@@ -24,16 +31,50 @@ func _init() -> void:
 
 
 func _process(delta: float) -> void:
-	if not visible:
+	if not visible or not is_finite(delta) or delta <= 0.0:
 		return
-	_history.append(delta * 1000.0)
-	if _history.size() > 120:
-		_history = _history.slice(_history.size() - 120)
+	_history[_history_head] = delta * 1000.0
+	_history_head = (_history_head + 1) % FRAME_HISTORY
+	_history_count = mini(_history_count + 1, FRAME_HISTORY)
 	_refresh -= delta
 	if _refresh <= 0.0:
 		_refresh = 0.25
 		_collect()
-	queue_redraw()
+		# Counters update at 4 Hz; drawing the same graph 60+ times
+		# per second added UI CPU work without showing new information.
+		queue_redraw()
+
+
+## Summary of the latest bounded frame window. It never includes unused
+## preallocated entries, and can be queried by tests or other diagnostics.
+func frame_history_summary() -> Dictionary:
+	var samples := PackedFloat32Array()
+	samples.resize(_history_count)
+	var total: float = 0.0
+	var worst: float = 0.0
+	var slow: int = 0
+	for i in _history_count:
+		var value: float = _history[(_history_head - _history_count + FRAME_HISTORY + i) % FRAME_HISTORY]
+		samples[i] = value
+		total += value
+		worst = maxf(worst, value)
+		if value > FRAME_BUDGET_MS:
+			slow += 1
+	samples.sort()
+	var p95: float = 0.0
+	var p99: float = 0.0
+	if _history_count > 0:
+		var rank95: float = 0.95 * float(_history_count - 1)
+		var rank99: float = 0.99 * float(_history_count - 1)
+		p95 = lerpf(samples[int(floorf(rank95))],
+			samples[int(ceilf(rank95))], rank95 - floorf(rank95))
+		p99 = lerpf(samples[int(floorf(rank99))],
+			samples[int(ceilf(rank99))], rank99 - floorf(rank99))
+	return {
+		"samples": _history_count, "avg_ms": total / float(maxi(_history_count, 1)),
+		"worst_ms": worst, "p95_ms": p95, "p99_ms": p99,
+		"slow_frames": slow,
+	}
 
 
 func _count(method: String) -> String:
@@ -42,14 +83,13 @@ func _count(method: String) -> String:
 
 func _collect() -> void:
 	_lines = PackedStringArray()
-	var worst := 0.0
-	var total := 0.0
-	for v in _history:
-		worst = maxf(worst, v)
-		total += v
-	var avg: float = total / maxf(float(_history.size()), 1.0)
+	var frames: Dictionary = frame_history_summary()
 	_lines.append("WORLD STREAMING")
-	_lines.append("frame %.1f ms avg, %.1f ms worst (2 s)" % [avg, worst])
+	_lines.append("frame %.1f ms avg, %.1f ms worst (2 s)" % [
+		float(frames["avg_ms"]), float(frames["worst_ms"])])
+	_lines.append("p95 %.1f ms  p99 %.1f ms  >16.7: %d/%d" % [
+		float(frames["p95_ms"]), float(frames["p99_ms"]),
+		int(frames["slow_frames"]), int(frames["samples"])])
 	_lines.append("fps %d   draw calls %d" % [Engine.get_frames_per_second(),
 		int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))])
 	_lines.append("loaded cells %s" % (str(streamer.get_loaded_cells().size()) if streamer != null else "-"))
@@ -81,10 +121,12 @@ func _draw() -> void:
 	draw_rect(graph, Color(1, 1, 1, 0.06))
 	var limit_y: float = graph.end.y - graph.size.y * clampf(16.7 / 40.0, 0.0, 1.0)
 	draw_line(Vector2(graph.position.x, limit_y), Vector2(graph.end.x, limit_y), Color(0.4, 1, 0.4, 0.4))
-	for i in _history.size():
-		var h: float = graph.size.y * clampf(_history[i] / 40.0, 0.0, 1.0)
-		var x: float = graph.position.x + graph.size.x * float(i) / 120.0
-		draw_line(Vector2(x, graph.end.y), Vector2(x, graph.end.y - h), Color(1, 0.4, 0.3) if _history[i] > 16.7 else Color(0.5, 0.85, 1.0))
+	for i in _history_count:
+		var value: float = _history[(_history_head - _history_count + FRAME_HISTORY + i) % FRAME_HISTORY]
+		var h: float = graph.size.y * clampf(value / 40.0, 0.0, 1.0)
+		var x: float = graph.position.x + graph.size.x * float(i) / float(FRAME_HISTORY)
+		draw_line(Vector2(x, graph.end.y), Vector2(x, graph.end.y - h),
+			Color(1, 0.4, 0.3) if value > FRAME_BUDGET_MS else Color(0.5, 0.85, 1.0))
 	# Cell mini-map around the player.
 	if streamer == null or client == null:
 		return

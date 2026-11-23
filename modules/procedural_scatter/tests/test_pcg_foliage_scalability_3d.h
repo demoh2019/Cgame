@@ -64,8 +64,8 @@ TEST_CASE("[PCGFoliageScalability3D] atomic validation and bounded cluster count
 	CHECK(budget->plan_visible_counts({ 1, 1 }, { 1 }, 0).is_empty());
 	CHECK(budget->plan_visible_counts({ 1 }, { 1 }, -1).is_empty());
 	CHECK(budget->plan_visible_counts({ 1 }, { 1 }, 4).is_empty());
-	CHECK(budget->plan_visible_counts({ 1 }, { Math::NaN }, 1).is_empty());
-	CHECK(budget->plan_visible_counts({ 1 }, { float(Math::INF) }, 1).is_empty());
+	CHECK(budget->plan_visible_counts({ 1 }, { static_cast<float>(Math::NaN) }, 1).is_empty());
+	CHECK(budget->plan_visible_counts({ 1 }, { static_cast<float>(Math::INF) }, 1).is_empty());
 	CHECK(budget->plan_visible_counts({ 1 }, { -1 }, 1).is_empty());
 	CHECK(budget->plan_visible_counts({ 1 }, { 10000001 }, 1).is_empty());
 	CHECK(budget->plan_visible_counts({ -1 }, { 1 }, 1).is_empty());
@@ -124,7 +124,7 @@ TEST_CASE("[PCGFoliageScalability3D] stable planner validates all prior rows ato
 	CHECK(planner->plan_visible_counts_stable({ 10, 20 }, { 18, 19 }, { -1, -2 }, 1).is_empty());
 	CHECK(planner->plan_visible_counts_stable({ 10 }, { 18 }, { -1 }, 1, -1).is_empty());
 	CHECK(planner->plan_visible_counts_stable({ 10 }, { 18 }, { -1 }, 1, 9).is_empty());
-	CHECK(planner->plan_visible_counts_stable({ 10 }, { Math::NaN }, { -1 }, 1).is_empty());
+	CHECK(planner->plan_visible_counts_stable({ 10 }, { static_cast<float>(Math::NaN) }, { -1 }, 1).is_empty());
 	CHECK(planner->plan_visible_counts_stable({ 10 }, { 18 }, { -1 }, 4).is_empty());
 	CHECK(planner->plan_visible_counts_stable({ 10 }, { 18 }, { -1 }, 1, 2, 20, 20).is_empty());
 	CHECK(planner->plan_visible_counts_stable({}, {}, {}, 1).is_empty());
@@ -331,7 +331,7 @@ TEST_CASE("[PCGFoliageScalability3D] screen-space validation rejects invalid lat
 			{ Vector3(0, 0, -10), Vector3(Math::INF, 0, -20) }, diameters,
 			Vector3(), forward, 220, false, 0).is_empty());
 	CHECK(budget->plan_projected_visible_counts(counts, centers,
-			{ 1, Math::NaN }, Vector3(), forward, 220, false, 0).is_empty());
+			{ 1.0f, static_cast<float>(Math::NaN) }, Vector3(), forward, 220, false, 0).is_empty());
 	CHECK(budget->plan_projected_visible_counts(counts, centers,
 			{ 1, -1 }, Vector3(), forward, 220, false, 0).is_empty());
 	CHECK(budget->plan_projected_visible_counts({ 10, 65537 }, centers, diameters,

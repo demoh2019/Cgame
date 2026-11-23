@@ -35,8 +35,99 @@ Use `game_facade/cgame_virtual_geometry_facade.gd` to call the native classes wi
 
 `tests/test_cgame_virtual_geometry.h` (doctest) mirrors `test_virtual_geometry.gd` and `test_occlusion_culling.gd`: meshlet limits and coverage, cone/frustum culling, monotonic cluster errors, far cut has fewer triangles, watertight cuts, determinism, and an occluded box behind a wall. Run with `./bin/godot.<platform>.editor.<arch> --test --test-case="*Cgame*"`.
 
+## P1: Attribute-fidelity meshoptimizer surface simplification
+
+The native static method `CgameClusterLOD.simplify_surface_arrays(surface_arrays,
+target_triangles, normal_weight=0.6, uv_weight=0.6)` now offers an **opt-in**
+normal/UV-weighted simplification path for a *complete Godot surface*. The
+algorithm passes positions and available normals/UVs to
+`meshopt_simplifyWithAttributes` with locked borders. It never modifies
+the source vertex array: output differs **only in `Mesh.ARRAY_INDEX`**.
+This preserves original normals, tangent frames and bitangent signs, UV1/2,
+vertex colors, bones and weights, and custom vertex channels. The source
+material is retained by the caller when constructing its new `ArrayMesh`.
+
+The API rejects invalid array shape, out-of-range indices, a nonfinite
+vertex/normal/UV, mismatched attribute length, oversized data, or
+nonfinite/unbounded weights. If the target cannot be reached due to
+topological restrictions, the caller receives a valid *reduced* index
+list or an empty result if no reduction was possible. Callers must
+check actual triangle count before adoption. Vertices are not compacted,
+and there is no GPU geometry streaming/residency in this feature.
+
+**Real Albion After integration:** the production
+`game/scripts/client/model_catalog.gd` calls
+`MeshLodPreservation.with_triangle_budget(...)` while loading/caching
+small scattered meshes. In `game/scripts/client/mesh_lod_preservation.gd`,
+a single-surface static mesh with no blend shapes or pre-authored LODs
+now tries the new native weighted pass first. If it cannot hit the
+triangular draw budget, if no native Cgame method is present, or for
+multi-surface/animated meshes, the previous importer simplification is
+used. This runs once per source mesh, never per frame. No gameplay
+collision, server data, audio, skin deformation or network state changes.
+
+Tests:
+`modules/cgame_virtual_geometry/tests/test_cgame_virtual_geometry.h`,
+`game/tests/test_virtual_geometry_attribute_lod.gd`,
+`tests/scene/test_virtual_geometry_attribute_contract.py`, and the
+`.github/workflows/native-virtual-geometry-attribute-lod.yml` workflow.
+Source-level checks are not equivalent to successful native compilation
+or graphics-driver testing.
+
+## Cluster cut surface attribute fidelity
+
+The separate `CgameClusterLOD.build_cut_arrays(source_arrays, hierarchy, cut)` API
+returns the chosen indexed cluster cut while retaining **all original source
+vertex streams** (normals, tangents, UVs, colors, skin and custom channels).
+It validates that the hierarchy was built from those exact vertex positions.
+It complements `simplify_surface_arrays`: the latter weights normals/UVs
+when choosing new triangles, while cluster hierarchy cuts currently use
+position-only simplification but preserve original vertex attributes.
+This step is CPU-side; no GPU cluster residency or mesh shading is implied.
+
+## P1 meshlet page payloads (new)
+
+`CgameMeshletPages.build_pages(vertices, indices, page_bytes=16384)` packs
+the existing native meshoptimizer meshlets into **bounded binary pages**
+(1 KiB–64 KiB) with a stable little-endian v1 layout:
+
+- 32-byte header (CGMP magic, version, first meshlet, count, three
+  stream offsets, total page bytes);
+- 48-byte descriptors (global vertex reference and local triangle stream
+  offsets/counts, bounding sphere, normal cone);
+- original uint32 **vertex IDs** into the unchanged imported source mesh,
+  followed by uint8 **local triangle vertex indices**.
+
+Meshlets never straddle page boundaries; at most 128 descriptors are
+packed per page. This is the asset serialization format required before
+building physical GPU residency, GPU page feedback, indirect meshlet
+draws, and material vertex-stream decoding. It is *not* GPU-driven
+rendering, a GPU texture/page cache, or a claim of faster rendering.
+Full source normals, tangents, UV, vertex colors, weights and materials
+stay in the original vertex buffers; pages reference them via original
+vertex IDs, without lossy repacking or parallel shading reconstruction.
+
+`CgameMeshletPages.inspect_page(page)` validates the complete binary
+layout and returns decoded meshlet descriptors for import tests, offline
+quality checks and future software fallback. Out-of-range references,
+bad offsets, corrupt headers and malformed stream lengths fail closed.
+
+**Actual Albion After integration:** in debug builds,
+**Ctrl+Shift+F8** inspects up to 8 distinct meshes from *loaded*
+`aa_scenery_multimeshes` (`MultiMeshInstance3D` instances), builds
+these pages only on demand, strictly reads them back and reports page,
+meshlet, triangle and byte counts in game. No page allocation, GDScript
+scene walk or upload occurs in the normal render frame. The existing
+scenery MultiMeshes keep their current native LOD, PBR and materials.
+
+Relevant tests:
+`modules/cgame_virtual_geometry/tests/test_cgame_meshlet_pages.h`,
+`game/tests/test_virtual_geometry_meshlet_pages.gd`,
+`tests/scene/test_meshlet_page_contract.py` and
+`.github/workflows/native-meshlet-page-serialization.yml`.
+
 ## Limitations
 
 - No GPU path and no streaming; hierarchy building is single threaded and intended for offline or load-time use.
-- Simplification ignores normals, UVs and other attributes (positions only).
+- The legacy cluster DAG `build_hierarchy` simplification is still positions-only. The new standalone native surface helper considers normals/UV1 and retains all original vertex channels, but does not yet feed attribute penalties into the cluster DAG or produce compact GPU meshlet pages.
 - The occlusion rasterizer is scalar C++ written so that compilers can auto-vectorize the row loops; there is no explicit SIMD or tile binning yet.

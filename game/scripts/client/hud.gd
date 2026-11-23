@@ -27,6 +27,8 @@ const Vendor = preload("res://scripts/shared/vendor.gd")
 const FirstSteps = preload("res://scripts/client/first_steps.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const StoryCampaign = preload("res://scripts/shared/story_campaign.gd")
+const StoryChapterTwo = preload("res://scripts/shared/story_chapter_two.gd")
+const StoryChapterThree = preload("res://scripts/shared/story_chapter_three.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
@@ -49,6 +51,8 @@ var _vendor_food_button: Button
 var _radar
 var _contract_label: Label
 var _story_journal: Label # Chapter transcripts in the inventory's mission section.
+var _story2_journal: Label # New chapter is independent of Chapter I saves.
+var _story3_journal: Label # Branch-aware missing convoy radio records.
 var _caravan_status: Label
 var _prompt: Label
 var _log: Label
@@ -808,6 +812,64 @@ func _build() -> void:
 	_story_journal.text = "Waiting for an encrypted survivor radio channel..."
 	_story_journal.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	inventory_box.add_child(_story_journal)
+
+	var chapter_two_heading := Label.new()
+	chapter_two_heading.text = StoryChapterTwo.TITLE + " (requires Chapter I)"
+	inventory_box.add_child(chapter_two_heading)
+	var chapter_two_actions := HBoxContainer.new()
+	inventory_box.add_child(chapter_two_actions)
+	var decode := Button.new()
+	decode.name = "StoryDecode"
+	decode.text = "Decode the underground signal"
+	decode.tooltip_text = "Once Chapter I ends, decode the second radio transmission at a workbench."
+	decode.pressed.connect(func() -> void: client.story("decode"))
+	chapter_two_actions.add_child(decode)
+	var seal := Button.new()
+	seal.name = "StorySeal"
+	seal.text = "Seal the signal"
+	seal.tooltip_text = "Final choice: silence the research relay. This decision cannot be undone."
+	seal.pressed.connect(func() -> void: client.story("seal"))
+	chapter_two_actions.add_child(seal)
+	var broadcast := Button.new()
+	broadcast.name = "StoryBroadcast"
+	broadcast.text = "Broadcast the truth"
+	broadcast.tooltip_text = "Final choice: warn all surviving settlements. This decision cannot be undone."
+	broadcast.pressed.connect(func() -> void: client.story("broadcast"))
+	chapter_two_actions.add_child(broadcast)
+	_story2_journal = Label.new()
+	_story2_journal.name = "StoryChapterTwoJournal"
+	_story2_journal.text = "Complete Chapter I to unlock the underground story."
+	_story2_journal.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	inventory_box.add_child(_story2_journal)
+
+	var chapter_three_heading := Label.new()
+	chapter_three_heading.text = StoryChapterThree.TITLE + " (requires Chapter II)"
+	inventory_box.add_child(chapter_three_heading)
+	var chapter_three_actions := HBoxContainer.new()
+	inventory_box.add_child(chapter_three_actions)
+	var trace_convoy := Button.new()
+	trace_convoy.name = "StoryTraceConvoy"
+	trace_convoy.text = "Trace missing convoy"
+	trace_convoy.tooltip_text = "After Chapter II, find the convoy frequency at a real workbench."
+	trace_convoy.pressed.connect(func() -> void: client.story("trace"))
+	chapter_three_actions.add_child(trace_convoy)
+	var guide_convoy := Button.new()
+	guide_convoy.name = "StoryGuideConvoy"
+	guide_convoy.text = "Guide convoy to safety"
+	guide_convoy.tooltip_text = "Final choice: reveal the safe route. ASH may hear the signal."
+	guide_convoy.pressed.connect(func() -> void: client.story("guide"))
+	chapter_three_actions.add_child(guide_convoy)
+	var mask_convoy := Button.new()
+	mask_convoy.name = "StoryMaskConvoy"
+	mask_convoy.text = "Mask convoy route"
+	mask_convoy.tooltip_text = "Final choice: send false coordinates and hide the survivors."
+	mask_convoy.pressed.connect(func() -> void: client.story("mask"))
+	chapter_three_actions.add_child(mask_convoy)
+	_story3_journal = Label.new()
+	_story3_journal.name = "StoryChapterThreeJournal"
+	_story3_journal.text = "Finish Chapter II to reveal the missing convoy."
+	_story3_journal.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	inventory_box.add_child(_story3_journal)
 
 	var cache_heading := Label.new()
 	cache_heading.text = "Frontier cache (capture a red/black outpost)"
@@ -2355,6 +2417,14 @@ func _on_event(event: Dictionary) -> void:
 			if int(event.get("peer", -1)) == client.peer_id:
 				banner("BEACON SEVEN / CHAPTER I", Color(0.85, 0.75, 0.42))
 				say(str(event.get("line", "")))
+		"story2":
+			if int(event.get("peer", -1)) == client.peer_id:
+				banner("CHAPTER II / THE DEEP SIGNAL", Color(0.5, 0.85, 0.96))
+				say(str(event.get("line", "")))
+		"story3":
+			if int(event.get("peer", -1)) == client.peer_id:
+				banner("CHAPTER III / THE MISSING CONVOY", Color(0.96, 0.72, 0.5))
+				say(str(event.get("line", "")))
 		# Territory and sieges: the server tells everyone, so the world hears when an outpost falls.
 		"outpost_taken":
 			if my_group > 0 and int(event.get("owner", 0)) == my_group:
@@ -3750,8 +3820,15 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nSTORM MUD: ground travel -%.0f%% | roads reduce the penalty." % [
 			(1.0 - mud_traction) * 100.0]
 	if int(client.you.get("rested_xp_credit", 0)) > 0:
-		_info_label.text += "\nRESTED TRAINING: %d bonus XP left (paid rest at hub/fire)" % int(
+		_info_label.text += "\nRESTED TRAINING: %d bonus XP left (+50-100%% by skill and practice)" % int(
 			client.you["rested_xp_credit"])
+	var practice_branches: int = int(client.you.get("practice_branches", 0))
+	if practice_branches > 0:
+		_info_label.text += "\nCROSS-TRAINING: %d/3 branches in 3 min (+20%% rested XP rate when active)" % mini(
+			practice_branches, 3)
+	var deep_branches: int = int(client.you.get("deep_practice_branches", 0))
+	if deep_branches > 0:
+		_info_label.text += "\nDEEP PRACTICE: %d disciplines (+10%% rested XP in trained disciplines)" % deep_branches
 	for bag in client.bags.values():
 		if not bool(bag.get("corpse_scent", false)):
 			continue
@@ -3993,6 +4070,28 @@ func _process(_delta: float) -> void:
 				transcript_text += "\n\n" + str(recovered_line)
 			if _story_journal.text != transcript_text:
 				_story_journal.text = transcript_text
+	var followup: Dictionary = client.you.get("story2", {})
+	if not followup.is_empty():
+		var followup_objective: String = str(followup.get("objective", ""))
+		_contract_label.text += "\nCHAPTER II: " + followup_objective
+		if _story2_journal != null:
+			var chapter_two_text: String = str(followup.get("title", StoryChapterTwo.TITLE)) \
+				+ "\nOBJECTIVE: " + followup_objective
+			for entry in followup.get("transcript", []):
+				chapter_two_text += "\n\n" + str(entry)
+			if _story2_journal.text != chapter_two_text:
+				_story2_journal.text = chapter_two_text
+	var convoy_story: Dictionary = client.you.get("story3", {})
+	if not convoy_story.is_empty():
+		var convoy_objective: String = str(convoy_story.get("objective", ""))
+		_contract_label.text += "\nCHAPTER III: " + convoy_objective
+		if _story3_journal != null:
+			var convoy_text: String = str(convoy_story.get("title", StoryChapterThree.TITLE)) \
+				+ "\nOBJECTIVE: " + convoy_objective
+			for entry in convoy_story.get("transcript", []):
+				convoy_text += "\n\n" + str(entry)
+			if _story3_journal.text != convoy_text:
+				_story3_journal.text = convoy_text
 	_info_label.text += "  Rest %.0fs" % float(client.you.get("rest_cooldown", 0.0))
 	var combat_tag: float = float(client.you.get("combat_tag_seconds", 0.0))
 	if combat_tag > 0.0:

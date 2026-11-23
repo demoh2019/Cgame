@@ -31,6 +31,11 @@
 
 #include "scene/3d/mesh_instance_3d.h"
 #include "terrain_heightmap.h"
+#ifndef PHYSICS_3D_DISABLED
+#include "scene/resources/3d/shape_3d.h"
+class CollisionShape3D;
+class StaticBody3D;
+#endif
 
 class HeightmapTerrain3D : public MeshInstance3D {
     GDCLASS(HeightmapTerrain3D, MeshInstance3D);
@@ -39,6 +44,22 @@ class HeightmapTerrain3D : public MeshInstance3D {
     Ref<Material> terrain_material;
     Ref<Material> default_material;
     real_t cell_size = 1.0;
+
+#ifndef PHYSICS_3D_DISABLED
+    bool automatic_collision = false;
+    bool collision_rebuild_pending = false;
+    int collision_step = 1;
+    int generated_collision_triangles = 0;
+    int last_collision_width = -1;
+    int last_collision_depth = -1;
+    int last_collision_step = -1;
+    real_t last_collision_cell_size = -1.0;
+    PackedFloat32Array last_collision_heights;
+    StaticBody3D *collision_body = nullptr;
+    CollisionShape3D *collision_shape = nullptr;
+    void _queue_collision_rebuild();
+    void _update_auto_collision();
+#endif
 
     void _heightmap_changed();
     void _rebuild_mesh();
@@ -58,6 +79,15 @@ public:
 
     real_t sample_height_local(real_t p_x, real_t p_z) const;
     Ref<ArrayMesh> build_mesh() const;
+
+#ifndef PHYSICS_3D_DISABLED
+    void set_auto_collision_enabled(bool p_enabled);
+    bool is_auto_collision_enabled() const;
+    void set_auto_collision_step(int p_step);
+    int get_auto_collision_step() const;
+    int get_auto_collision_triangle_count() const;
+    Ref<Shape3D> get_auto_collision_shape() const;
+#endif
 
     HeightmapTerrain3D();
     ~HeightmapTerrain3D();

@@ -1,7 +1,11 @@
 # Albion After — main game
 
+**P1 terrain update:** The native large-world terrain now supports sparse height edits; this increment adds color-only patches without collision resets, non-destructive editor layer binding and viewport sculpt. See [Native Terrain Patch Streaming](docs/NATIVE_TERRAIN_PATCH_STREAMING.md).
+
 **This is the canonical game project at `game/`.** All new gameplay
 features belong here. It is the only game in the repository; `demo/` and `misc/` hold engine labs, not games.
+
+**Story campaign — three playable chapters:** Beacon Seven's Last Transmission leads into the underground quarantine vault and the missing medical convoy. Player decisions in Chapter II affect Chapter III recordings and its four possible epilogues. Quest progress comes only from authenticated world actions, is saved per character, and is visible in the in-game journal. See [Chapter I](docs/STORY_CAMPAIGN_CHAPTER_1.md), [Chapter II](docs/STORY_CAMPAIGN_CHAPTER_2.md), and [Chapter III](docs/STORY_CAMPAIGN_CHAPTER_3.md).
 
 **New engine/game feature — bounded AI decision replay:** Cgame now records optional multi-tick BehaviorTree traces, allows skipping unchanged decisions and ranks CPU-heavy tasks by estimated exclusive execution time. The playable sandbox has Previous/Next/Live replay, while Albion After server NPCs expose an optional eight-tick private decision history. See [Native AI Perception and Diagnostics](docs/NATIVE_AI_PERCEPTION.md).
 

@@ -155,6 +155,10 @@ void ChunkedTerrain3D::_free_chunk_mesh_and_collision(Chunk &r_chunk) {
 		r_chunk.meshes[i] = RID();
 	}
 	r_chunk.lod = -1;
+	r_chunk.lod_use_clock = 0;
+	for (int i = 0; i < MAX_LOD; i++) {
+		r_chunk.lod_last_used[i] = 0;
+	}
 	r_chunk.morph = -1.0f;
 	r_chunk.visible = false;
 	_free_collision(r_chunk);
@@ -261,6 +265,40 @@ void ChunkedTerrain3D::_ensure_mesh(Chunk &r_chunk, int p_lod) {
 		rs->mesh_surface_set_material(mesh_rid, 0, material->get_rid());
 	}
 	r_chunk.meshes[p_lod] = mesh_rid;
+}
+
+// Only trim AFTER swapping the instance to the newly selected base RID.
+// Removing an in-use mesh invalidates the render instance on some drivers.
+void ChunkedTerrain3D::_trim_cached_lods(Chunk &r_chunk) {
+	if (max_cached_lods == 0 || r_chunk.lod < 0 || !r_chunk.instance.is_valid()) {
+		return;
+	}
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs == nullptr) {
+		return;
+	}
+	int resident = 0;
+	for (int i = 0; i < MAX_LOD; i++) {
+		resident += r_chunk.meshes[i].is_valid() ? 1 : 0;
+	}
+	while (resident > max_cached_lods) {
+		int victim = -1;
+		for (int i = 0; i < MAX_LOD; i++) {
+			if (i == r_chunk.lod || !r_chunk.meshes[i].is_valid()) {
+				continue;
+			}
+			if (victim < 0 || r_chunk.lod_last_used[i] < r_chunk.lod_last_used[victim]) {
+				victim = i;
+			}
+		}
+		if (victim < 0) {
+			break; // The active GPU mesh is never eligible for eviction.
+		}
+		rs->free_rid(r_chunk.meshes[victim]);
+		r_chunk.meshes[victim] = RID();
+		r_chunk.lod_last_used[victim] = 0;
+		--resident;
+	}
 }
 
 void ChunkedTerrain3D::_ensure_collision(Chunk &r_chunk) {
@@ -558,6 +596,8 @@ void ChunkedTerrain3D::_update_chunks(bool p_ignore_mesh_budget) {
 							rs->instance_set_base(chunk.instance, chunk.meshes[lod]);
 						}
 						chunk.lod = lod;
+						chunk.lod_last_used[lod] = ++chunk.lod_use_clock;
+						_trim_cached_lods(chunk);
 						chunk.morph = -1.0f; // Mesh topology changed; update its own morph uniform.
 					}
 				}
@@ -735,6 +775,52 @@ PackedFloat32Array ChunkedTerrain3D::bake_horizon_visibility(const PackedFloat32
 	return result;
 }
 
+bool ChunkedTerrain3D::apply_color_patch(const Rect2i &p_region, const PackedColorArray &p_colors) {
+	ERR_FAIL_COND_V_MSG(data_width < 2 || data_depth < 2 ||
+			color_data.size() != data_width * data_depth ||
+			p_region.position.x < 0 || p_region.position.y < 0 ||
+			p_region.position.x >= data_width || p_region.position.y >= data_depth ||
+			p_region.size.x <= 0 || p_region.size.y <= 0 ||
+			p_region.size.x > data_width - p_region.position.x ||
+			p_region.size.y > data_depth - p_region.position.y,
+			false, "Color patches require initialized vertex colors and an in-bounds nonempty region.");
+	const int count = p_region.size.x * p_region.size.y;
+	ERR_FAIL_COND_V_MSG(p_colors.size() != count, false, "Color patch values must match the region dimensions.");
+	for (const Color &color : p_colors) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(color.r) || !Math::is_finite(color.g) ||
+				!Math::is_finite(color.b) || !Math::is_finite(color.a),
+				false, "Color patch samples must be finite.");
+	}
+	bool changed = false;
+	for (int z = 0; z < p_region.size.y && !changed; z++) {
+		for (int x = 0; x < p_region.size.x; x++) {
+			const int source = z * p_region.size.x + x;
+			const int destination = (p_region.position.y + z) * data_width + p_region.position.x + x;
+			if (color_data[destination] != p_colors[source]) {
+				changed = true;
+				break;
+			}
+		}
+	}
+	if (!changed) {
+		last_region_invalidated_chunks = 0;
+		return true;
+	}
+	Color *colors = color_data.ptrw();
+	for (int z = 0; z < p_region.size.y; z++) {
+		for (int x = 0; x < p_region.size.x; x++) {
+			colors[(p_region.position.y + z) * data_width + p_region.position.x + x] =
+					p_colors[z * p_region.size.x + x];
+		}
+	}
+	if (built) {
+		_invalidate_region(p_region, false);
+	} else {
+		_queue_rebuild();
+	}
+	return true;
+}
+
 void ChunkedTerrain3D::set_color_data(const PackedColorArray &p_colors) {
 	ERR_FAIL_COND_MSG(!p_colors.is_empty() && (data_width < 2 || data_depth < 2 ||
 			p_colors.size() != data_width * data_depth),
@@ -830,6 +916,40 @@ void ChunkedTerrain3D::set_mesh_build_budget_usec(int p_usec) {
 void ChunkedTerrain3D::set_mesh_streaming_priority(int p_mode) {
 	// Reordering candidates never invalidates cached meshes or collision.
 	mesh_streaming_priority = CLAMP(p_mode, 0, 2);
+}
+
+void ChunkedTerrain3D::set_max_cached_lods(int p_limit) {
+	const int limit = CLAMP(p_limit, 0, MAX_LOD);
+	if (max_cached_lods == limit) {
+		return;
+	}
+	max_cached_lods = limit;
+	// Changing quality in a live world releases unused GPU meshes now, not
+	// after the next camera movement. A chunk with lod == -1 may still have
+	// an attached old RID, so wait for the next LOD binding in that case.
+	for (Chunk &chunk : chunks) {
+		_trim_cached_lods(chunk);
+	}
+}
+
+int ChunkedTerrain3D::get_cached_mesh_count() const {
+	int result = 0;
+	for (const Chunk &chunk : chunks) {
+		for (int lod = 0; lod < MAX_LOD; lod++) {
+			result += chunk.meshes[lod].is_valid() ? 1 : 0;
+		}
+	}
+	return result;
+}
+
+int ChunkedTerrain3D::get_chunk_cached_lod_count(const Vector2i &p_chunk) const {
+	ERR_FAIL_COND_V(p_chunk.x < 0 || p_chunk.y < 0 || p_chunk.x >= chunks_x || p_chunk.y >= chunks_z, 0);
+	const Chunk &chunk = chunks[p_chunk.y * chunks_x + p_chunk.x];
+	int result = 0;
+	for (int lod = 0; lod < MAX_LOD; lod++) {
+		result += chunk.meshes[lod].is_valid() ? 1 : 0;
+	}
+	return result;
 }
 
 void ChunkedTerrain3D::set_lod_geomorph_enabled(bool p_enabled) {
@@ -992,47 +1112,154 @@ bool ChunkedTerrain3D::is_over_terrain(const Vector3 &p_world_position) const {
 	return local.x >= params.origin.x && local.x <= params.origin.x + size.x && local.z >= params.origin.y && local.z <= params.origin.y + size.y;
 }
 
-void ChunkedTerrain3D::update_region(const Rect2i &p_region) {
-	if (!built || chunks.is_empty()) {
-		return;
+bool ChunkedTerrain3D::apply_height_patch(const Rect2i &p_region, const PackedFloat32Array &p_heights) {
+	// Atomic admission: never overwrite earlier samples when a late value is
+	// NaN/Inf, the region spills beyond the height grid or the request is too
+	// large to process as a single terrain-edit transaction.
+	if (!data_from_script || data_width < 2 || data_depth < 2 ||
+			p_region.position.x < 0 || p_region.position.y < 0 ||
+			p_region.size.x < 1 || p_region.size.y < 1 ||
+			p_region.size.x > data_width || p_region.size.y > data_depth ||
+			p_region.position.x > data_width - p_region.size.x ||
+			p_region.position.y > data_depth - p_region.size.y ||
+			int64_t(p_region.size.x) * int64_t(p_region.size.y) > 4096 ||
+			p_heights.size() != p_region.size.x * p_region.size.y) {
+		return false;
 	}
-	// Normals read one sample beyond a chunk, so include the neighbours of every touched chunk.
-	const Rect2i grown = p_region.grow(1);
-	RenderingServer *rs = RenderingServer::get_singleton();
-	const Params params = _params();
-	for (Chunk &chunk : chunks) {
-		const Rect2i chunk_samples(chunk.x0, chunk.z0, chunk_quads + 1, chunk_quads + 1);
-		if (!chunk_samples.intersects(grown)) {
-			continue;
+	for (int i = 0; i < p_heights.size(); ++i) {
+		if (!Math::is_finite(p_heights[i])) {
+			return false;
 		}
-		for (int i = 0; i < MAX_LOD; i++) {
-			if (chunk.meshes[i].is_valid() && rs) {
-				if (chunk.lod == i && chunk.instance.is_valid()) {
-					// Detach before freeing; it is re-attached at the next update.
-					rs->instance_set_visible(chunk.instance, false);
-				}
-				rs->free_rid(chunk.meshes[i]);
-				chunk.meshes[i] = RID();
+	}
+	bool changed = false;
+	for (int z = 0; z < p_region.size.y && !changed; ++z) {
+		for (int x = 0; x < p_region.size.x; ++x) {
+			if (height_data[(p_region.position.y + z) * data_width + p_region.position.x + x] !=
+					real_t(p_heights[z * p_region.size.x + x])) {
+				changed = true;
+				break;
 			}
 		}
-		if (chunk.instance.is_valid() && rs) {
-			rs->free_rid(chunk.instance);
-			chunk.instance = RID();
+	}
+	if (!changed) {
+		last_region_invalidated_chunks = 0;
+		return true; // No GPU/physics invalidation for identical patches.
+	}
+	real_t *samples = height_data.ptrw();
+	for (int z = 0; z < p_region.size.y; ++z) {
+		for (int x = 0; x < p_region.size.x; ++x) {
+			samples[(p_region.position.y + z) * data_width + p_region.position.x + x] =
+					p_heights[z * p_region.size.x + x];
 		}
-		chunk.lod = -1;
-		chunk.morph = -1.0f;
-		chunk.geometric_error = -1.0f; // Height edits invalidate cached deviation.
-		chunk.visible = false;
-		_free_collision(chunk);
+	}
 
-		real_t low;
-		real_t high;
-		chunk_height_range(_field(), chunk.x0, chunk.z0, chunk_quads, low, high);
-		const int x1 = MIN(chunk.x0 + chunk_quads, data_width - 1);
-		const int z1 = MIN(chunk.z0 + chunk_quads, data_depth - 1);
-		const Vector3 a(params.origin.x + real_t(chunk.x0) * params.spacing.x, low * height_scale + height_offset, params.origin.y + real_t(chunk.z0) * params.spacing.y);
-		const Vector3 b(params.origin.x + real_t(x1) * params.spacing.x, high * height_scale + height_offset, params.origin.y + real_t(z1) * params.spacing.y);
-		chunk.bounds = AABB(a, b - a).abs();
+	// Repair only the affected externally cached normals (and one-ring
+	// derivatives). This leaves authored normals elsewhere untouched.
+	if (normal_data.size() == data_width * data_depth) {
+		const Rect2i dirty_normals = p_region.grow(1).intersection(
+				Rect2i(0, 0, data_width, data_depth));
+		const real_t step_x = size.x / real_t(data_width - 1);
+		const real_t step_z = size.y / real_t(data_depth - 1);
+		Vector3 *normals = normal_data.ptrw();
+		for (int z = dirty_normals.position.y; z < dirty_normals.get_end().y; ++z) {
+			for (int x = dirty_normals.position.x; x < dirty_normals.get_end().x; ++x) {
+				const int west = MAX(x - 1, 0);
+				const int east = MIN(x + 1, data_width - 1);
+				const int north = MAX(z - 1, 0);
+				const int south = MIN(z + 1, data_depth - 1);
+				const real_t dx = (samples[z * data_width + west] -
+						samples[z * data_width + east]) * height_scale /
+						(real_t(east - west) * step_x);
+				const real_t dz = (samples[north * data_width + x] -
+						samples[south * data_width + x]) * height_scale /
+						(real_t(south - north) * step_z);
+				normals[z * data_width + x] = Vector3(dx, 1.0, dz).normalized();
+			}
+		}
+	}
+	update_region(p_region);
+	return true;
+}
+
+void ChunkedTerrain3D::update_region(const Rect2i &p_region) {
+	_invalidate_region(p_region, true);
+}
+
+void ChunkedTerrain3D::_invalidate_region(const Rect2i &p_region, bool p_geometry_changed) {
+	last_region_invalidated_chunks = 0;
+	if (!built || chunks.is_empty() || p_region.position.x < 0 || p_region.position.y < 0 ||
+			p_region.size.x < 1 || p_region.size.y < 1 ||
+			p_region.size.x > data_width || p_region.size.y > data_depth ||
+			p_region.position.x > data_width - p_region.size.x ||
+			p_region.position.y > data_depth - p_region.size.y) {
+		return;
+	}
+	// Visit only chunks touching the edited samples and one neighboring sample.
+	// Sparse brush costs are proportional to dirty chunks, not total world size.
+	const Rect2i grown = p_region.grow(1).intersection(Rect2i(0, 0, data_width, data_depth));
+	const int min_cx = CLAMP((grown.position.x - 1) / chunk_quads, 0, chunks_x - 1);
+	const int min_cz = CLAMP((grown.position.y - 1) / chunk_quads, 0, chunks_z - 1);
+	const int max_cx = CLAMP((grown.position.x + grown.size.x - 1) / chunk_quads, 0, chunks_x - 1);
+	const int max_cz = CLAMP((grown.position.y + grown.size.y - 1) / chunk_quads, 0, chunks_z - 1);
+	RenderingServer *rs = RenderingServer::get_singleton();
+	const Params params = _params();
+	for (int cz = min_cz; cz <= max_cz; cz++) {
+		for (int cx = min_cx; cx <= max_cx; cx++) {
+			Chunk &chunk = chunks[cz * chunks_x + cx];
+			last_region_invalidated_chunks++;
+			for (int i = 0; i < MAX_LOD; i++) {
+				if (chunk.meshes[i].is_valid() && rs) {
+					if (chunk.lod == i && chunk.instance.is_valid()) {
+						// Detach before freeing; it is re-attached at the next update.
+						rs->instance_set_visible(chunk.instance, false);
+					}
+					rs->free_rid(chunk.meshes[i]);
+					chunk.meshes[i] = RID();
+				}
+			}
+			if (chunk.instance.is_valid() && rs) {
+				rs->free_rid(chunk.instance);
+				chunk.instance = RID();
+			}
+			chunk.lod = -1;
+			chunk.lod_use_clock = 0;
+			for (int level = 0; level < MAX_LOD; level++) {
+				chunk.lod_last_used[level] = 0;
+			}
+			chunk.morph = -1.0f;
+			chunk.visible = false;
+			if (!p_geometry_changed) {
+				// Repaint only: retain terrain collision, bounds and cached LOD errors.
+				continue;
+			}
+			chunk.geometric_error = -1.0f; // Only height changes invalidate ruggedness.
+			_free_collision(chunk);
+
+			real_t low;
+			real_t high;
+			chunk_height_range(_field(), chunk.x0, chunk.z0, chunk_quads, low, high);
+			const int x1 = MIN(chunk.x0 + chunk_quads, data_width - 1);
+			const int z1 = MIN(chunk.z0 + chunk_quads, data_depth - 1);
+			const Vector3 a(params.origin.x + real_t(chunk.x0) * params.spacing.x, low * height_scale + height_offset, params.origin.y + real_t(chunk.z0) * params.spacing.y);
+			const Vector3 b(params.origin.x + real_t(x1) * params.spacing.x, high * height_scale + height_offset, params.origin.y + real_t(z1) * params.spacing.y);
+			chunk.bounds = AABB(a, b - a).abs();
+			// Edits also invalidate each coarser level's maximum height error.
+			// Without this recalculation steep newly sculpted hills could still
+			// select the same cheap LOD that was appropriate for a flat chunk.
+			chunk.lod_errors[0] = 0.0;
+			int previous_stride = 1;
+			for (int level = 1; level < MAX_LOD; ++level) {
+				const int stride = lod_stride(level, chunk_quads);
+				if (stride == previous_stride) {
+					chunk.lod_errors[level] = chunk.lod_errors[level - 1];
+				} else {
+					const real_t error = chunk_lod_max_error(_field(), chunk.x0, chunk.z0,
+							chunk_quads, stride) * Math::abs(height_scale);
+					chunk.lod_errors[level] = MAX(error, chunk.lod_errors[level - 1]);
+				}
+				previous_stride = stride;
+			}
+		}
 	}
 	time_since_update = 1e9;
 }
@@ -1062,6 +1289,14 @@ int ChunkedTerrain3D::get_chunk_lod(const Vector2i &p_chunk) const {
 	return chunks[p_chunk.y * chunks_x + p_chunk.x].lod;
 }
 
+real_t ChunkedTerrain3D::get_chunk_lod_error(const Vector2i &p_chunk, int p_lod) const {
+	if (p_chunk.x < 0 || p_chunk.y < 0 || p_chunk.x >= chunks_x ||
+			p_chunk.y >= chunks_z || p_lod < 0 || p_lod >= MAX_LOD) {
+		return -1.0;
+	}
+	return chunks[p_chunk.y * chunks_x + p_chunk.x].lod_errors[p_lod];
+}
+
 void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_heightmap", "texture"), &ChunkedTerrain3D::set_heightmap);
 	ClassDB::bind_method(D_METHOD("get_heightmap"), &ChunkedTerrain3D::get_heightmap);
@@ -1074,6 +1309,7 @@ void ChunkedTerrain3D::_bind_methods() {
 			&ChunkedTerrain3D::bake_horizon_visibility, DEFVAL(6));
 	ClassDB::bind_method(D_METHOD("set_color_data", "colors"), &ChunkedTerrain3D::set_color_data);
 	ClassDB::bind_method(D_METHOD("get_color_data"), &ChunkedTerrain3D::get_color_data);
+	ClassDB::bind_method(D_METHOD("apply_color_patch", "region", "colors"), &ChunkedTerrain3D::apply_color_patch);
 	ClassDB::bind_method(D_METHOD("get_height_dimensions"), &ChunkedTerrain3D::get_height_dimensions);
 	ClassDB::bind_method(D_METHOD("clear_height_data"), &ChunkedTerrain3D::clear_height_data);
 	ClassDB::bind_method(D_METHOD("set_size", "size"), &ChunkedTerrain3D::set_size);
@@ -1098,6 +1334,10 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mesh_build_budget_usec"), &ChunkedTerrain3D::get_mesh_build_budget_usec);
 	ClassDB::bind_method(D_METHOD("set_mesh_streaming_priority", "mode"), &ChunkedTerrain3D::set_mesh_streaming_priority);
 	ClassDB::bind_method(D_METHOD("get_mesh_streaming_priority"), &ChunkedTerrain3D::get_mesh_streaming_priority);
+	ClassDB::bind_method(D_METHOD("set_max_cached_lods", "limit"), &ChunkedTerrain3D::set_max_cached_lods);
+	ClassDB::bind_method(D_METHOD("get_max_cached_lods"), &ChunkedTerrain3D::get_max_cached_lods);
+	ClassDB::bind_method(D_METHOD("get_cached_mesh_count"), &ChunkedTerrain3D::get_cached_mesh_count);
+	ClassDB::bind_method(D_METHOD("get_chunk_cached_lod_count", "chunk"), &ChunkedTerrain3D::get_chunk_cached_lod_count);
 	ClassDB::bind_method(D_METHOD("get_pending_mesh_build_count"), &ChunkedTerrain3D::get_pending_mesh_build_count);
 	ClassDB::bind_method(D_METHOD("set_screen_space_lod_enabled", "enabled"), &ChunkedTerrain3D::set_screen_space_lod_enabled);
 	ClassDB::bind_method(D_METHOD("is_screen_space_lod_enabled"), &ChunkedTerrain3D::is_screen_space_lod_enabled);
@@ -1134,11 +1374,14 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_normal_at", "world_position"), &ChunkedTerrain3D::get_normal_at);
 	ClassDB::bind_method(D_METHOD("is_over_terrain", "world_position"), &ChunkedTerrain3D::is_over_terrain);
 	ClassDB::bind_method(D_METHOD("update_region", "region"), &ChunkedTerrain3D::update_region);
+	ClassDB::bind_method(D_METHOD("get_last_region_invalidated_chunks"), &ChunkedTerrain3D::get_last_region_invalidated_chunks);
+	ClassDB::bind_method(D_METHOD("apply_height_patch", "region", "heights"), &ChunkedTerrain3D::apply_height_patch);
 	ClassDB::bind_method(D_METHOD("get_chunk_count"), &ChunkedTerrain3D::get_chunk_count);
 	ClassDB::bind_method(D_METHOD("get_chunk_grid_size"), &ChunkedTerrain3D::get_chunk_grid_size);
 	ClassDB::bind_method(D_METHOD("get_visible_chunk_count"), &ChunkedTerrain3D::get_visible_chunk_count);
 	ClassDB::bind_method(D_METHOD("get_collision_chunk_count"), &ChunkedTerrain3D::get_collision_chunk_count);
 	ClassDB::bind_method(D_METHOD("get_chunk_lod", "chunk"), &ChunkedTerrain3D::get_chunk_lod);
+	ClassDB::bind_method(D_METHOD("get_chunk_lod_error", "chunk", "lod"), &ChunkedTerrain3D::get_chunk_lod_error);
 	ClassDB::bind_method(D_METHOD("force_update"), &ChunkedTerrain3D::force_update);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "heightmap", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "set_heightmap", "get_heightmap");
@@ -1157,6 +1400,7 @@ void ChunkedTerrain3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_pixel_error", PROPERTY_HINT_RANGE, "0,20,0.1,or_greater,suffix:px"), "set_lod_pixel_error", "get_lod_pixel_error");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "mesh_build_budget_usec", PROPERTY_HINT_RANGE, "0,20000,100,suffix:us"), "set_mesh_build_budget_usec", "get_mesh_build_budget_usec");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "mesh_streaming_priority", PROPERTY_HINT_ENUM, "Original order,Nearest first,Camera facing"), "set_mesh_streaming_priority", "get_mesh_streaming_priority");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cached_lods", PROPERTY_HINT_RANGE, "0,8,1"), "set_max_cached_lods", "get_max_cached_lods");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "screen_space_lod_enabled"), "set_screen_space_lod_enabled", "is_screen_space_lod_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_reference_fov", PROPERTY_HINT_RANGE, "1.01,178.99,0.1,degrees"), "set_lod_reference_fov", "get_lod_reference_fov");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_geometric_error_strength", PROPERTY_HINT_RANGE, "0,1,0.05"), "set_lod_geometric_error_strength", "get_lod_geometric_error_strength");

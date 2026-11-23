@@ -89,6 +89,49 @@ static func with_generated_lods(mesh: Mesh, min_triangles: int = 200) -> Mesh:
 	return result
 
 
+## Native meshopt simplification uses *normal and UV weighted error*, not
+## positions only. The replacement index list references original vertices;
+## all imported tangent, color, UV2, skin and custom channels remain intact.
+## Only used once while caching one-surface static props with no existing
+## importer LODs. Stock Godot and older Cgame use the original importer path.
+static func with_native_attribute_budget(mesh: Mesh, max_triangles: int) -> Mesh:
+	if mesh == null or not (mesh is ArrayMesh) or max_triangles < 1 or \
+			mesh.get_surface_count() != 1 or \
+			(mesh as ArrayMesh).get_blend_shape_count() > 0 or \
+			mesh.surface_get_primitive_type(0) != Mesh.PRIMITIVE_TRIANGLES or \
+			not ClassDB.class_exists("CgameClusterLOD"):
+		return mesh
+	var native: Object = ClassDB.instantiate("CgameClusterLOD")
+	if native == null or not native.has_method("simplify_surface_arrays"):
+		return mesh
+	var lods: Dictionary = RenderingServer.mesh_get_surface(mesh.get_rid(), 0)
+	if not (lods.get("lods", []) as Array).is_empty():
+		return mesh
+	var arrays: Array = mesh.surface_get_arrays(0)
+	var original: PackedInt32Array = arrays[Mesh.ARRAY_INDEX] \
+		if arrays[Mesh.ARRAY_INDEX] is PackedInt32Array else PackedInt32Array()
+	if original.size() < 6 or original.size() <= max_triangles * 3:
+		return mesh
+	var candidate: Array = native.call("simplify_surface_arrays",
+		arrays, max_triangles, 0.6, 0.6)
+	if candidate.size() != Mesh.ARRAY_MAX:
+		return mesh
+	var reduced: PackedInt32Array = candidate[Mesh.ARRAY_INDEX] \
+		if candidate[Mesh.ARRAY_INDEX] is PackedInt32Array else PackedInt32Array()
+	# Only adopt if the native algorithm actually meets this scatter's
+	# target; otherwise the existing ImporterMesh algorithm gets a chance.
+	if reduced.size() < 3 or reduced.size() % 3 != 0 or \
+			reduced.size() >= original.size() or reduced.size() > max_triangles * 3:
+		return mesh
+	var result := ArrayMesh.new()
+	result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, candidate)
+	result.surface_set_material(0, mesh.surface_get_material(0))
+	result.surface_set_name(0, (mesh as ArrayMesh).surface_get_name(0))
+	result.custom_aabb = (mesh as ArrayMesh).custom_aabb
+	result.resource_name = mesh.resource_name
+	return result
+
+
 static var _budgeted: Dictionary = {} # "instance_id|budget" -> Mesh decimated to the budget
 
 ## Ground scatter (pebbles a few centimetres across, sticks) was drawn with full scanned detail
@@ -112,6 +155,13 @@ static func with_triangle_budget(mesh: Mesh, max_triangles: int) -> Mesh:
 	if total <= max_triangles:
 		_budgeted[key] = mesh
 		return mesh
+	# Prefer one native attribute-aware pass for the small static single-
+	# surface props populating actual Albion scenery MultiMeshes. Avoid
+	# normal-map and UV drift from a purely position-based simplifier.
+	var native_budgeted: Mesh = with_native_attribute_budget(source, max_triangles)
+	if native_budgeted != source:
+		_budgeted[key] = native_budgeted
+		return native_budgeted
 	# The importer owns meshoptimizer's current, non-deprecated simplification path.
 	# Generate a full LOD ladder once and promote the best level under each surface's
 	# share of the triangle budget to its new base mesh. If no level fits, use the

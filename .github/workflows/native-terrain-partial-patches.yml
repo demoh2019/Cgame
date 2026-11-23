@@ -1,0 +1,92 @@
+name: Native partial Landscape terrain edits and Albion streaming integration
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'scene/3d/chunked_terrain_3d.h'
+      - 'scene/3d/chunked_terrain_3d.cpp'
+      - 'doc/classes/ChunkedTerrain3D.xml'
+      - 'tests/scene/test_chunked_terrain_3d.cpp'
+      - 'tests/scene/test_terrain_partial_patch_contract.py'
+      - 'game/scripts/client/terrain_live_patch.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/scripts/client/chunk_view.gd'
+      - 'game/tests/test_terrain_live_patch.gd'
+      - 'game/tests/test_terrain_edit_bridge.gd'
+      - 'game/scripts/client/terrain_edit_bridge.gd'
+      - 'game/addons/cgame_terrain_tools/**'
+      - 'game/tests/run_all.gd'
+      - 'game/docs/p1_incremental_terrain_editing.md'
+      - '.github/workflows/native-terrain-partial-patches.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/3d/chunked_terrain_3d.h'
+      - 'scene/3d/chunked_terrain_3d.cpp'
+      - 'doc/classes/ChunkedTerrain3D.xml'
+      - 'tests/scene/test_chunked_terrain_3d.cpp'
+      - 'tests/scene/test_terrain_partial_patch_contract.py'
+      - 'game/scripts/client/terrain_live_patch.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/scripts/client/chunk_view.gd'
+      - 'game/tests/test_terrain_live_patch.gd'
+      - 'game/tests/test_terrain_edit_bridge.gd'
+      - 'game/scripts/client/terrain_edit_bridge.gd'
+      - 'game/addons/cgame_terrain_tools/**'
+      - 'game/tests/run_all.gd'
+      - 'game/docs/p1_incremental_terrain_editing.md'
+      - '.github/workflows/native-terrain-partial-patches.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  terrain-partial-edits:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Atomic dirty-region edits and live game static source contracts
+        run: python3 -m unittest tests/scene/test_terrain_partial_patch_contract.py -v
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native landscape height patch, collision and LOD doctests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*ChunkedTerrain3D*Partial*" --no-colors 2>&1 | tee terrain-patch-native.log
+          timeout 240s "$BIN" --headless --test --test-case="*ChunkedTerrain3D*Bad late patch*" --no-colors 2>&1 | tee -a terrain-patch-native.log
+      - name: Import Albion After; reject GDScript parse failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee terrain-patch-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' terrain-patch-import.log; then exit 1; fi
+      - name: Run real Albion streamed tile editing and renderer regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_one.gd -- test_terrain_live_patch test_terrain_edit_bridge test_terrain_geometric_error_lod test_terrain_mesh_streaming 2>&1 | tee terrain-patch-game.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' terrain-patch-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' terrain-patch-game.log; then exit 1; fi
+      - name: Upload native and game terrain logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-terrain-partial-edit-logs
+          if-no-files-found: ignore
+          path: |
+            terrain-patch-native.log
+            terrain-patch-import.log
+            terrain-patch-game.log

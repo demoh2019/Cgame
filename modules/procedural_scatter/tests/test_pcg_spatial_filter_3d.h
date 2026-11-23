@@ -191,8 +191,8 @@ TEST_CASE("[PCGSpatialFilter3D] exclusions validate complete batch atomically") 
 	CHECK(filter->filter_indices_excluding(candidates, centers, radii, 1.0).size() == 1);
 	CHECK(filter->filter_indices_excluding(candidates, centers, {}, 1.0).is_empty());
 	CHECK(filter->filter_indices_excluding(candidates, centers, { -1.0 }, 1.0).is_empty());
-	CHECK(filter->filter_indices_excluding(candidates, centers, { Math::NaN }, 1.0).is_empty());
-	CHECK(filter->filter_indices_excluding(candidates, centers, { Math::INF }, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding(candidates, centers, { static_cast<float>(Math::NaN) }, 1.0).is_empty());
+	CHECK(filter->filter_indices_excluding(candidates, centers, { static_cast<float>(Math::INF) }, 1.0).is_empty());
 	CHECK(filter->filter_indices_excluding(candidates, centers, { 10001.0 }, 1.0).is_empty());
 	CHECK(filter->filter_indices_excluding(candidates,
 			{ Vector3(Math::INF, 0, 0) }, radii, 1.0).is_empty());
@@ -345,8 +345,8 @@ TEST_CASE("[PCGSpatialFilter3D] density rejects invalid input atomically and cap
 	CHECK(filter->filter_indices_density(points, valid_densities, { 1, 1 }, 7).is_empty());
 	CHECK(filter->filter_indices_density(points, valid_densities, { -1, 2 }, 7).is_empty());
 	CHECK(filter->filter_indices_density(points, valid_densities, { 2147483647, 2 }, 7).is_empty());
-	CHECK(filter->filter_indices_density(points, { Math::NaN, 1.0f }, valid_ids, 7).is_empty());
-	CHECK(filter->filter_indices_density(points, { 1.0f, float(Math::INF) }, valid_ids, 7).is_empty());
+	CHECK(filter->filter_indices_density(points, { static_cast<float>(Math::NaN), 1.0f }, valid_ids, 7).is_empty());
+	CHECK(filter->filter_indices_density(points, { 1.0f, static_cast<float>(Math::INF) }, valid_ids, 7).is_empty());
 	CHECK(filter->filter_indices_density(points, { -0.01f, 1.0f }, valid_ids, 7).is_empty());
 	CHECK(filter->filter_indices_density(points, { 1.01f, 1.0f }, valid_ids, 7).is_empty());
 	CHECK(filter->filter_indices_density(points, valid_densities, valid_ids, -1).is_empty());
@@ -475,9 +475,9 @@ TEST_CASE("[PCGSpatialFilter3D] invalid rotated volumes fail closed atomically")
 	CHECK(filter->filter_indices_excluding_oriented_volumes(
 			points, {}, {}, {}, {}, centers, { Vector3(10001, 1, 1) }, yaws, 0.0).is_empty());
 	CHECK(filter->filter_indices_excluding_oriented_volumes(
-			points, {}, {}, {}, {}, centers, extents, { Math::NaN }, 0.0).is_empty());
+			points, {}, {}, {}, {}, centers, extents, { static_cast<float>(Math::NaN) }, 0.0).is_empty());
 	CHECK(filter->filter_indices_excluding_oriented_volumes(
-			points, {}, {}, {}, {}, centers, extents, { Math::INF }, 0.0).is_empty());
+			points, {}, {}, {}, {}, centers, extents, { static_cast<float>(Math::INF) }, 0.0).is_empty());
 	CHECK(filter->filter_indices_excluding_oriented_volumes(
 			points, {}, {}, {}, {}, centers, extents, { 7.0 }, 0.0).is_empty());
 	CHECK(filter->filter_indices_excluding_oriented_volumes(

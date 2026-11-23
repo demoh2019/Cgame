@@ -91,6 +91,7 @@ public:
 	void accumulate(const Ref<CgameBVH> &p_bvh, const Transform3D &p_camera, float p_fov_deg, int p_spp, const Dictionary &p_light = Dictionary());
 	Vector3 get_pixel(int p_x, int p_y) const;
 	Ref<Image> to_image() const;
+	Ref<Image> to_linear_image() const;
 	Vector2i get_progressive_size() const { return prog_size; }
 	int get_samples() const { return prog_samples; }
 	int get_passes() const { return prog_passes; }

@@ -7,7 +7,7 @@
 		[CgamePathTracer] bakes per-vertex lighting and ambient occlusion and renders still images on the CPU, using a [CgameBVH] for ray queries. It shades each surface hit with sun next-event estimation plus cosine-sampled diffuse bounces terminated by Russian roulette.
 		Work is distributed with [WorkerThreadPool]. Every vertex and every pixel owns its own PCG32 random stream derived from the seed and its index, so results are identical for a given seed regardless of the number of threads. Different seeds give independent estimates.
 		[b]Conventions:[/b] [code]sun_dir[/code] is the direction the sunlight travels (like the forward direction of a directional light). [code]sun_color[/code] is the radiance returned by a white diffuse surface facing the sun, with irradiance divided by pi already folded in. [code]sky_color[/code] is a constant-radiance environment. All colors are linear.
-		The baking and one-shot rendering functions are static. For progressive refinement, create an instance, call [method begin_progressive], then call [method accumulate] repeatedly and read the running estimate with [method to_image] or [method get_pixel].
+		The baking and one-shot rendering functions are static. For progressive refinement, create an instance, call [method begin_progressive], then call [method accumulate] repeatedly and read the running estimate with [method to_image], [method to_linear_image], or [method get_pixel].
 		[codeblock]
 		var bvh := CgameBVH.new()
 		bvh.build(triangles)
@@ -125,6 +125,12 @@
 			<return type="Image" />
 			<description>
 				Returns the current progressive estimate as an [constant Image.FORMAT_RGB8] image, clamped and gamma 2.2 encoded.
+			</description>
+		</method>
+		<method name="to_linear_image" qualifiers="const">
+			<return type="Image" />
+			<description>
+				Returns the current progressive estimate as a linear [constant Image.FORMAT_RGBF] image, preserving HDR radiance above [code]1.0[/code]. Returns black pixels before the first accumulation.
 			</description>
 		</method>
 	</methods>

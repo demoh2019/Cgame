@@ -53,6 +53,10 @@ private:
 		AABB bounds;
 		RID instance;
 		RID meshes[MAX_LOD];
+		// Last-used stamps are local to each chunk. Never evict the RID that is
+		// currently attached to the RenderingServer instance.
+		uint64_t lod_use_clock = 0;
+		uint64_t lod_last_used[MAX_LOD] = {};
 		int lod = -1;
 		real_t lod_errors[MAX_LOD] = {}; // Cached height deviation per LOD.
 		float morph = -1.0f; // Cache the last instance uniform; avoid redundant RD writes.
@@ -87,6 +91,9 @@ private:
 	// 0 = original row-major order, 1 = nearest first,
 	// 2 = nearest with a bounded camera-facing priority bonus.
 	int mesh_streaming_priority = 0;
+	// 0 preserves legacy unlimited GPU geometry caching; 1..8 limits each
+	// chunk to its active LOD and the most recently used neighbours.
+	int max_cached_lods = 0;
 	int pending_mesh_build_count = 0;
 	static uint64_t shared_mesh_budget_frame;
 	static uint64_t shared_mesh_budget_start_usec;
@@ -117,6 +124,7 @@ private:
 	double time_since_update = 1e9;
 	bool built = false;
 	bool rebuild_queued = false;
+	int last_region_invalidated_chunks = 0; // Number of render chunks affected by the last edit.
 
 	HeightmapTerrainGeometry::Params _params() const;
 	HeightmapTerrainGeometry::HeightField _field() const;
@@ -127,7 +135,9 @@ private:
 	void _free_chunk_mesh_and_collision(Chunk &r_chunk);
 	void _free_collision(Chunk &r_chunk);
 	void _ensure_mesh(Chunk &r_chunk, int p_lod);
+	void _trim_cached_lods(Chunk &r_chunk);
 	void _ensure_collision(Chunk &r_chunk);
+	void _invalidate_region(const Rect2i &p_region, bool p_geometry_changed);
 	void _update_transforms();
 	void _update_chunks(bool p_ignore_mesh_budget = false);
 	bool _get_viewer_position(Vector3 &r_position) const;
@@ -152,6 +162,8 @@ public:
 			const Vector2i &p_dimensions, real_t p_spacing, int p_radius_steps = 6);
 	void set_color_data(const PackedColorArray &p_colors);
 	PackedColorArray get_color_data() const { return color_data; }
+	// Changes existing vertex colors without touching collision or heightfield LOD error.
+	bool apply_color_patch(const Rect2i &p_region, const PackedColorArray &p_colors);
 	Vector2i get_height_dimensions() const { return Vector2i(data_width, data_depth); }
 	void clear_height_data();
 
@@ -172,6 +184,10 @@ public:
 	void set_mesh_build_budget_usec(int p_usec);
 	void set_mesh_streaming_priority(int p_mode);
 	int get_mesh_streaming_priority() const { return mesh_streaming_priority; }
+	void set_max_cached_lods(int p_limit);
+	int get_max_cached_lods() const { return max_cached_lods; }
+	int get_cached_mesh_count() const;
+	int get_chunk_cached_lod_count(const Vector2i &p_chunk) const;
 	int get_mesh_build_budget_usec() const { return int(mesh_build_budget_usec); }
 	int get_pending_mesh_build_count() const { return pending_mesh_build_count; }
 	real_t get_lod_pixel_error() const { return lod_pixel_error; }
@@ -216,12 +232,20 @@ public:
 	bool is_over_terrain(const Vector3 &p_world_position) const;
 	// Recomputes meshes and collision after the samples inside `p_region` (sample coordinates) changed.
 	void update_region(const Rect2i &p_region);
+	int get_last_region_invalidated_chunks() const { return last_region_invalidated_chunks; }
+	// Atomically replace at most 4096 height samples in a rectangular source
+	// region; only touched render/collision chunks are invalidated. Use
+	// force_update() to synchronously rebuild immediately if required.
+	bool apply_height_patch(const Rect2i &p_region, const PackedFloat32Array &p_heights);
 
 	int get_chunk_count() const { return int(chunks.size()); }
 	Vector2i get_chunk_grid_size() const { return Vector2i(chunks_x, chunks_z); }
 	int get_visible_chunk_count() const;
 	int get_collision_chunk_count() const;
 	int get_chunk_lod(const Vector2i &p_chunk) const;
+	// Height deviation at a particular simplification level, in world
+	// vertical units; refreshed when nearby height samples are edited.
+	real_t get_chunk_lod_error(const Vector2i &p_chunk, int p_lod) const;
 	// Applies pending changes and the distance based detail selection now, instead of at the next update.
 	void force_update();
 

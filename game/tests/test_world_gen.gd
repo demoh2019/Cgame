@@ -2,6 +2,7 @@ extends RefCounted
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const StoneResources = preload("res://scripts/shared/stone_resources.gd")
 
 
 func run(t) -> void:
@@ -59,6 +60,8 @@ func run(t) -> void:
 	var ruins := 0
 	var zombies := 0
 	var min_spacing := 1000.0
+	var loose_pickups := 0
+	var modeled_boulders := 0
 	for cx in range(-10, 11):
 		for cz in range(-10, 11):
 			var data := a.chunk(Vector2i(cx, cz))
@@ -66,6 +69,17 @@ func run(t) -> void:
 			ruins += 1 if data["ruin"] else 0
 			zombies += data["spawns"].size()
 			for node in data["nodes"]:
+				if node.has("stone_model"):
+					var model_index: int = int(node["stone_model"])
+					t.check(model_index >= 0 and model_index < StoneResources.MODELS.size(),
+						"stone node selects a valid renderable model")
+					if str(node["kind"]) == "pebble":
+						loose_pickups += 1
+						t.eq(int(node["tier"]), 1, "hand-pickable stones are always tier 1")
+						t.check(not bool(node["blocks"]), "small stones cannot block movement")
+					elif str(node["kind"]) == "rock":
+						modeled_boulders += 1
+						t.check(bool(node["blocks"]), "minable boulders have collision")
 				tiers_seen[node["tier"]] = true
 				kinds_seen[node["kind"]] = true
 				t.check(node["tier"] >= 1 and node["tier"] <= Defs.MAX_TIER, "node tier in range")
@@ -74,6 +88,8 @@ func run(t) -> void:
 				# A node belongs to its own chunk.
 				t.eq(WorldGen.cell_of(node["x"], node["z"]), Vector2i(cx, cz), "node lies in its chunk")
 	t.check(total_nodes > 3000, "the world has plenty to gather (%d)" % total_nodes)
+	t.check(loose_pickups > 100, "seeded world includes pickable modeled stones (%d)" % loose_pickups)
+	t.check(modeled_boulders > 20, "seeded world includes mineable modeled rocks (%d)" % modeled_boulders)
 	t.check(tiers_seen.size() >= 3, "several tiers exist near the hub (%d)" % tiers_seen.size())
 	t.check(kinds_seen.has("tree") and kinds_seen.has("rock") and kinds_seen.has("bush"), "trees, rocks and bushes exist")
 	t.check(ruins > 8, "ruins exist (%d)" % ruins)
@@ -109,6 +125,52 @@ func run(t) -> void:
 					contains = true
 			t.check(contains, "a blocking node is found near itself")
 			break
+
+	t.current = "depleted stone collision matches visible model"
+	var blocked_stone: Dictionary = {}
+	for candidate in a.chunk(Vector2i(8, 8))["nodes"]:
+		if str(candidate["kind"]) == "rock" and candidate.has("stone_model"):
+			blocked_stone = candidate
+			break
+	if blocked_stone.is_empty():
+		for cx in range(6, 10):
+			if not blocked_stone.is_empty():
+				break
+			for cz in range(6, 10):
+				if not blocked_stone.is_empty():
+					break
+				for candidate in a.chunk(Vector2i(cx, cz))["nodes"]:
+					if str(candidate["kind"]) == "rock" and candidate.has("stone_model"):
+						blocked_stone = candidate
+						break
+	t.check(not blocked_stone.is_empty(), "found an authoritative collidable model boulder")
+	if not blocked_stone.is_empty():
+		var bx: float = float(blocked_stone["x"])
+		var bz: float = float(blocked_stone["z"])
+		var b_id: int = int(blocked_stone["id"])
+		var initially_blocked := false
+		for obstacle in a.blockers_near(bx, bz, 0.5):
+			if int(obstacle.get("id", -1)) == b_id:
+				initially_blocked = true
+		t.check(initially_blocked, "visible modeled boulder blocks movement")
+		a.set_node_depleted(b_id, true)
+		var mined_blocked := false
+		for obstacle in a.blockers_near(bx, bz, 0.5):
+			if int(obstacle.get("id", -1)) == b_id:
+				mined_blocked = true
+		t.check(not mined_blocked, "mined modeled boulder has no invisible collision")
+		a.set_node_depleted(b_id, false)
+		var regrown_blocked := false
+		for obstacle in a.blockers_near(bx, bz, 0.5):
+			if int(obstacle.get("id", -1)) == b_id:
+				regrown_blocked = true
+		t.check(regrown_blocked, "respawn restores modeled boulder collision")
+		var snapshot_depleted: Dictionary = {}
+		snapshot_depleted[b_id] = true
+		a.sync_depleted_nodes(snapshot_depleted)
+		t.check(a.depleted_blockers.has(b_id), "snapshot-depleted node disables local prediction blocker")
+		a.sync_depleted_nodes({})
+		t.check(not a.depleted_blockers.has(b_id), "snapshot correction restores local blocker")
 
 	t.current = "structures"
 	var hub: Array = a.hub_structures()
