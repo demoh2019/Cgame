@@ -21,6 +21,7 @@
 		terrain.height_scale = 400.0
 		add_child(terrain)
 		[/codeblock]
+		For large, live-edited landscapes, [method apply_height_patch] and [method apply_color_patch] change only a sample rectangle rather than resetting the entire heightfield and all cached chunks. Existing authoring tools can submit brush dirty regions directly. [method get_last_region_invalidated_chunks] shows how many cached chunk meshes were actually affected.
 		For a large world split into multiple [ChunkedTerrain3D] nodes, optionally call [method set_normal_data] after [method set_height_data]. Sampling one height interval beyond each node's border makes adjacent normals agree across streamed nodes and different LOD levels without increasing pixel shader work.
 		Collision uses [HeightMapShape3D]-style shapes and exists only for chunks within [member collision_distance] of the viewer, so the physics engine never sees the whole landscape. The viewer is the node in [member focus], or the current [Camera3D] when no focus is set. Use [method get_height_at] to place objects on the ground without a physics query.
 		[b]Note:[/b] Scaling the node uniformly works, but non-uniform scale and rotation only affect rendering and the height queries approximately. For a world far from the origin combine the terrain with [FloatingOrigin3D].
@@ -28,6 +29,29 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="apply_height_patch">
+			<return type="bool" />
+			<param index="0" name="region" type="Rect2i" />
+			<param index="1" name="heights" type="PackedFloat32Array" />
+			<param index="2" name="normals" type="PackedVector3Array" default="PackedVector3Array()" />
+			<description>
+				Applies an atomic rectangular height edit to an existing grid created by [method set_height_data]. Both [param heights] and [param normals] are row-major over [param region], which uses sample coordinates, not world meters. The operation rejects nonfinite samples, wrong array lengths, empty or out-of-bounds regions before modifying any samples. If [method get_normal_data] is nonempty, [param normals] must contain one finite nonzero vector for each patched sample, including any halo needed for seamless shading; it must otherwise be empty. The native node invalidates only the affected and neighboring LOD meshes, recalculates their bounds and screen-error values, and refreshes their active collision shapes on the next update. Unaffected terrain chunks and materials are retained. Call [method force_update] to synchronously refresh visible meshes and physics.
+			</description>
+		</method>
+		<method name="apply_color_patch">
+			<return type="bool" />
+			<param index="0" name="region" type="Rect2i" />
+			<param index="1" name="colors" type="PackedColorArray" />
+			<description>
+				Replaces existing terrain vertex colors in a sample-coordinate [param region] without touching height data. Initialize a full color grid with [method set_color_data] first. Invalid regions, array lengths and nonfinite RGBA samples are rejected without changing the terrain. Only affected render meshes are invalidated; collision shapes, bounds and LOD errors are preserved. No-op patches return [code]true[/code] without invalidating any chunks.
+			</description>
+		</method>
+		<method name="get_last_region_invalidated_chunks" qualifiers="const">
+			<return type="int" />
+			<description>
+				Number of chunk render meshes invalidated by the most recent [method apply_height_patch], [method apply_color_patch] or [method update_region]. A repeated identical patch reports zero. This is an edit-locality diagnostic, not a GPU time measurement.
+			</description>
+		</method>
 		<method name="bake_horizon_visibility" qualifiers="static">
 			<return type="PackedFloat32Array" />
 			<param index="0" name="heights" type="PackedFloat32Array" />
