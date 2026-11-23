@@ -8,6 +8,7 @@ const ResourceGathering = preload("res://scripts/shared/resource_gathering.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const StoneResources = preload("res://scripts/shared/stone_resources.gd")
 const SolidScenery = preload("res://scripts/shared/solid_scenery.gd")
+const LootCachePalette = preload("res://scripts/shared/loot_cache_palette.gd")
 const GroundPlants = preload("res://scripts/client/ground_plants.gd")
 const TerrainRvt = preload("res://scripts/client/terrain_rvt.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
@@ -1337,6 +1338,10 @@ func _build_objects(data: Dictionary) -> void:
 			var tier: int = node.get("tier", 1)
 			if is_mineral:
 				tints[i] = Color.WHITE.lerp(Color(0.8, 0.85, 1.0), (tier - 1) * 0.2)
+			elif kind.begins_with("crate:"):
+				# Reuse the existing per-instance MultiMesh color buffer.
+				# Special caches stay in ordinary crate batches (no extra draws).
+				tints[i] = LootCachePalette.tint(node)
 			else:
 				tints[i] = Color.WHITE.darkened((tier - 1) * 0.07) if is_tree else Color.WHITE
 			if node.has("id"):
