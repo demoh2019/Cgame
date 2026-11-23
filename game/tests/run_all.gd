@@ -95,6 +95,7 @@ const SUITES := [
 	"res://tests/test_terrain_anisotropy.gd",
 	"res://tests/test_specular_aa.gd",
 	"res://tests/test_graphics_native_specular_aa.gd",
+	"res://tests/test_shader_warmup_hdr_compat.gd",
 	"res://tests/test_graphics_quality.gd",
 	"res://tests/test_graphics_resolution.gd",
 	"res://tests/test_gpu_culling.gd",
