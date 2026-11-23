@@ -200,3 +200,23 @@ func run(t) -> void:
 	t.eq(int(client.nearest_loot(Vector3(0.5, 0.0, middle), Defs.REACH).get("id", -1)), 92,
 		"negative-coordinate seam remains functional")
 	t.eq(spatial.calls.size(), 2, "negative seam search also reads only two chunks")
+
+	t.current = "nearest campfire aim remains bounded and deterministic"
+	client.campfires = {
+		40: {"id": 40, "x": 1.0, "z": 0.0},
+		20: {"id": 20, "x": 1.0, "z": 0.0},
+		10: {"id": 10, "x": NAN, "z": 0.0},
+		50: {"id": 50, "x": 7.0, "z": 0.0},
+	}
+	t.eq(client.nearest_campfire(Vector3.ZERO, 3.2), 20,
+		"equidistant campfires choose stable ID for refuel or extinguish")
+	t.eq(client.nearest_campfire(Vector3.ZERO, 0.25), -1,
+		"out-of-reach fires are never selected")
+	t.eq(client.nearest_campfire(Vector3.ZERO, NAN), -1,
+		"nonfinite interaction radius is rejected")
+	t.eq(client.nearest_campfire(Vector3.ZERO, INF), -1,
+		"infinite interaction radius is rejected")
+	t.eq(client.nearest_campfire(Vector3.ZERO, -1.0), -1,
+		"negative interaction radius is rejected")
+	t.eq(client.nearest_campfire(Vector3(NAN, 0.0, 0.0)), -1,
+		"invalid predicted position is rejected")

@@ -25,8 +25,15 @@ static func crop_for_seed(seed_id: String) -> String:
 
 ## Growth 0..1 at server time `now`.
 static func progress(plot: Dictionary, now: float) -> float:
-	var total: float = maxf(1.0, float(plot.get("grow", 1.0)))
-	return clampf((now - float(plot.get("planted", now))) / total, 0.0, 1.0)
+	var planted: float = float(plot.get("planted", now))
+	var total: float = float(plot.get("grow", 1.0))
+	# Clock and crop records are persisted; corrupt/rewound time cannot
+	# make a crop instantly ripe or send NaN growth to client snapshots.
+	if not is_finite(now) or not is_finite(planted) or not is_finite(total) or total <= 0.0:
+		return 0.0
+	if now <= planted:
+		return 0.0
+	return clampf((now - planted) / total, 0.0, 1.0)
 
 
 static func is_ripe(plot: Dictionary, now: float) -> bool:
@@ -35,6 +42,8 @@ static func is_ripe(plot: Dictionary, now: float) -> bool:
 
 ## Why a plot cannot be placed here ("" when it can).
 static func placement_refusal(zone: int, water: bool, spot: Vector2, plots: Dictionary, own_count: int) -> String:
+	if not spot.is_finite():
+		return "invalid_position"
 	if zone != 0:
 		return "green_zone_only"
 	if water:
@@ -44,7 +53,8 @@ static func placement_refusal(zone: int, water: bool, spot: Vector2, plots: Dict
 	if plots.size() >= MAX_PLOTS_TOTAL:
 		return "world_full"
 	for plot in plots.values():
-		if Vector2(float(plot["x"]), float(plot["z"])).distance_to(spot) < MIN_SPACING:
+		var existing := Vector2(float(plot.get("x", NAN)), float(plot.get("z", NAN)))
+		if existing.is_finite() and existing.distance_squared_to(spot) < MIN_SPACING * MIN_SPACING:
 			return "too_close"
 	return ""
 

@@ -37,7 +37,8 @@ static func valid_site(world, point: Vector2, from: Vector2, campfires: Dictiona
 		return "out_of_range"
 	if point.length() < Structures.MIN_HUB_DISTANCE:
 		return "safe_zone"
-	if world.is_water(point.x, point.y) or world.normal_at(point.x, point.y).y < Structures.MIN_SLOPE_NORMAL_Y:
+	var terrain_normal: Vector3 = world.normal_at(point.x, point.y)
+	if world.is_water(point.x, point.y) or not terrain_normal.is_finite() or terrain_normal.y < Structures.MIN_SLOPE_NORMAL_Y:
 		return "bad_terrain"
 	for blocker in world.blockers_near(point.x, point.y, CAMP_RADIUS + 1.0):
 		var other := Vector2(float(blocker["x"]), float(blocker["z"]))
@@ -61,7 +62,11 @@ static func refuel_reason(camp: Dictionary, position: Vector3, now: float) -> St
 	if not is_finite(expiry) or expiry <= now:
 		return "expired"
 	var point := Vector2(position.x, position.z)
-	var site := Vector2(float(camp["x"]), float(camp["z"]))
+	var site := Vector2(float(camp.get("x", NAN)), float(camp.get("z", NAN)))
+	# A corrupted camp location must never bypass the distance check and
+	# charge wood for a remote refuel.
+	if not site.is_finite():
+		return "invalid_position"
 	if point.distance_squared_to(site) > REFUEL_RANGE * REFUEL_RANGE:
 		return "out_of_range"
 	if expiry - now > MAX_REMAINING_SECONDS - REFUEL_SECONDS:
@@ -70,27 +75,39 @@ static func refuel_reason(camp: Dictionary, position: Vector3, now: float) -> St
 
 
 static func has_warmth(campfires: Dictionary, position: Vector3, now: float) -> bool:
-	if not position.is_finite():
+	if not position.is_finite() or not is_finite(now):
 		return false
 	var at := Vector2(position.x, position.z)
 	for camp in campfires.values():
-		if float(camp["expires"]) > now and at.distance_squared_to(
-				Vector2(float(camp["x"]), float(camp["z"]))) <= WARM_RADIUS * WARM_RADIUS:
+		var expiry: float = float(camp.get("expires", NAN))
+		if not is_finite(expiry) or expiry <= now:
+			continue
+		var site := Vector2(float(camp.get("x", NAN)), float(camp.get("z", NAN)))
+		if site.is_finite() and at.distance_squared_to(site) <= WARM_RADIUS * WARM_RADIUS:
 			return true
 	return false
 
 
 static func visible(campfires: Dictionary, position: Vector3, now: float, radius: float) -> Array:
 	var result: Array = []
-	if not position.is_finite():
+	if not position.is_finite() or not is_finite(now) or not is_finite(radius) or radius < 0.0:
+		return result
+	var radius_squared: float = radius * radius
+	if not is_finite(radius_squared):
 		return result
 	var at := Vector2(position.x, position.z)
 	for camp in campfires.values():
-		var target := Vector2(float(camp["x"]), float(camp["z"]))
-		if float(camp["expires"]) > now and at.distance_squared_to(target) <= radius * radius:
+		var expiry: float = float(camp.get("expires", NAN))
+		var target := Vector2(float(camp.get("x", NAN)), float(camp.get("z", NAN)))
+		var height: float = float(camp.get("y", NAN))
+		if not is_finite(expiry) or expiry <= now or not target.is_finite() or not is_finite(height):
+			continue
+		if at.distance_squared_to(target) <= radius_squared:
+			var alarm_until: float = float(camp.get("alarm_until", now))
+			var stormproof_until: float = float(camp.get("stormproof_until", 0.0))
 			result.append({"id": int(camp["id"]), "x": target.x,
-				"y": float(camp["y"]), "z": target.y,
-				"remaining": maxf(0.0, float(camp["expires"]) - now),
-				"alarm_seconds": maxf(0.0, minf(float(camp.get("alarm_until", now)), float(camp["expires"])) - now),
-				"stormproof_seconds": maxf(0.0, float(camp.get("stormproof_until", 0.0)) - now)})
+				"y": height, "z": target.y,
+				"remaining": expiry - now,
+				"alarm_seconds": maxf(0.0, minf(alarm_until, expiry) - now) if is_finite(alarm_until) else 0.0,
+				"stormproof_seconds": maxf(0.0, stormproof_until - now) if is_finite(stormproof_until) else 0.0})
 	return result
