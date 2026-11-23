@@ -22,6 +22,17 @@ func run(t) -> void:
 	var server := GameServer.new(world, 42)
 	var person = server.add_player(240, "River Scout")
 	t.check(not FieldWater.can_access_lake(world, Vector3.INF), "nonfinite coordinates cannot drink")
+	t.check(not FieldWater.can_access_lake(null, Vector3.ZERO),
+		"missing world never authorizes a shoreline drink")
+	t.check(not FieldWater.needs_drink(null),
+		"missing survival state cannot drink")
+	var invalid_vitals = server.add_player(242, "Test Survivor").survival
+	invalid_vitals.thirst = -5.0
+	t.check(not FieldWater.needs_drink(invalid_vitals),
+		"negative corrupt thirst cannot consume a field filter")
+	invalid_vitals.thirst = 25.0
+	t.check(FieldWater.needs_drink(invalid_vitals),
+		"ordinary thirsty survivor remains eligible")
 	t.eq(server.cmd_drink_water(999)["reason"], "dead", "unknown peer cannot drink")
 	person.position = Vector3(0.0, world.height_at(0.0, 0.0), 0.0)
 	person.survival.thirst = 30.0
