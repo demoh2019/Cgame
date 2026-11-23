@@ -204,3 +204,65 @@ func run(t) -> void:
 				t.eq(WorldGen.cell_of(s["x"], s["z"]), Vector2i(cx, cz), "a structure lies in its chunk")
 				t.check(not a.is_water(s["x"], s["z"]), "structures are not in water")
 	t.check(ruin_structures > 20 and ruin_walls > 3, "ruins hold buildings and walls (%d, %d walls)" % [ruin_structures, ruin_walls])
+
+	t.current = "bounded LRU cache prevents mass chunk regeneration"
+	var first_stats: Dictionary = a.chunk_cache_stats()
+	t.check(int(first_stats["size"]) <= WorldGen.CACHE_LIMIT,
+		"world never keeps more than its chunk cache capacity")
+	t.eq(int(first_stats["collision_chunks"]), int(first_stats["size"]),
+		"collision broadphase has one matching entry for each cached chunk")
+	var cold_cell := Vector2i(220, 220)
+	var hot_cell := Vector2i(221, 220)
+	var cold: Dictionary = a.chunk(cold_cell)
+	var hot: Dictionary = a.chunk(hot_cell)
+	cold["_cache_test_marker"] = "should_evicted"
+	hot["_cache_test_marker"] = "recently_used"
+	var evictions_before: int = int(a.chunk_cache_stats()["evictions"])
+	for index in range(WorldGen.CACHE_LIMIT + 8):
+		a.chunk(Vector2i(300 + index, 350))
+		if index % 4 == 0:
+			a.chunk(hot_cell)
+	var cache_report: Dictionary = a.chunk_cache_stats()
+	t.eq(a.chunk_cache_size(), WorldGen.CACHE_LIMIT,
+		"cache retains at most 256 recent cells even after a long journey")
+	t.eq(int(cache_report["collision_chunks"]), a.chunk_cache_size(),
+		"solid-only collision entries evict with their source chunks")
+	t.check(int(cache_report["evictions"]) > evictions_before,
+		"pressure evicts individual old chunks rather than clearing all")
+	t.eq(str(a.chunk(hot_cell).get("_cache_test_marker", "")), "recently_used",
+		"frequently visited chunks stay hot throughout cache pressure")
+	t.check(not a.chunk(cold_cell).has("_cache_test_marker"),
+		"long-unvisited chunks regenerate deterministically when revisited")
+	var miss_before: int = int(a.chunk_cache_stats()["misses"])
+	var hit_before: int = int(a.chunk_cache_stats()["hits"])
+	var visited_again: Dictionary = a.chunk(hot_cell)
+	t.eq(visited_again.get("_cache_test_marker"), "recently_used",
+		"cache hits return the existing generated chunk object")
+	t.eq(int(a.chunk_cache_stats()["misses"]), miss_before,
+		"cache hit avoids extra world generation")
+	t.check(int(a.chunk_cache_stats()["hits"]) > hit_before,
+		"cache diagnostics count reuse without iterating chunk contents")
+
+	t.current = "collision broadphase stays live across eviction and build changes"
+	var dynamic_id: int = 735199
+	var wall_x: float = 15000.0
+	var wall_z: float = 15000.0
+	a.add_dynamic_blocker(dynamic_id, wall_x, wall_z, 1.1)
+	var dynamic_found: bool = false
+	for obstacle in a.blockers_near(wall_x, wall_z, 0.5):
+		if int(obstacle.get("id", -1)) == dynamic_id:
+			dynamic_found = true
+	t.check(dynamic_found, "new build is collidable after static cache churn")
+	a.remove_dynamic_blocker(dynamic_id)
+	var dynamic_removed: bool = true
+	for obstacle in a.blockers_near(wall_x, wall_z, 0.5):
+		if int(obstacle.get("id", -1)) == dynamic_id:
+			dynamic_removed = false
+	t.check(dynamic_removed, "removing a build immediately removes its collision")
+	if not blocked_stone.is_empty():
+		var stone_center: Vector2 = Vector2(float(blocked_stone["x"]), float(blocked_stone["z"]))
+		var stone_found: bool = false
+		for obstacle in a.blockers_near(stone_center.x, stone_center.y, 0.5):
+			if int(obstacle.get("id", -1)) == int(blocked_stone["id"]):
+				stone_found = true
+		t.check(stone_found, "procedural rock collision returns after LRU regeneration")
