@@ -61,6 +61,9 @@ func run(t) -> void:
 					"the seeded resource ID maps to its original cell")
 	t.eq(WorldGen.entity_cell(0), Vector2i(1024, 1024),
 			"an invalid nonpositive world ID cannot route into a normal chunk")
+	for invalid_id in [-12345, 4194304001, 9223372036854775807]:
+		t.eq(WorldGen.entity_cell(invalid_id), Vector2i(1024, 1024),
+				"out-of-range network IDs cannot overflow into active chunk coordinates")
 	for group in ["nodes", "crates", "spawns", "structures"]:
 		for object in chunk_a[group]:
 			if object.has("id"):
