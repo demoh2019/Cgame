@@ -50,7 +50,8 @@ func run(t) -> void:
 				for nearby_site in world.poi.sites_in_region(rx, rz):
 					var position: Vector2 = Vector2(float(nearby_site["x"]),
 						float(nearby_site["z"]))
-					if position.distance_to(Vector2(query_x, query_z)) <= 							radius + float(nearby_site["radius"]):
+					var site_limit: float = radius + float(nearby_site["radius"])
+					if position.distance_to(Vector2(query_x, query_z)) <= site_limit:
 						oracle.append(nearby_site)
 		t.eq(world.poi.sites_near(query_x, query_z, radius), oracle,
 			"distance-squared query preserves exact world candidates")
