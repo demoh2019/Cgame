@@ -201,10 +201,19 @@ void CgamePopulationLOD::_refresh_attraction() {
 		}
 		// Only grid cells whose centres can intersect this signal need
 		// evaluation. Rows retain the original ascending region order.
-		const int low_x = MAX(0, (int)Math::floor((a.pos.x - a.radius - origin.x) / cell_size - 0.5));
-		const int high_x = MIN(cols - 1, (int)Math::ceil((a.pos.x + a.radius - origin.x) / cell_size - 0.5));
-		const int low_y = MAX(0, (int)Math::floor((a.pos.y - a.radius - origin.y) / cell_size - 0.5));
-		const int high_y = MIN(rows - 1, (int)Math::ceil((a.pos.y + a.radius - origin.y) / cell_size - 0.5));
+		const real_t min_x = (a.pos.x - a.radius - origin.x) / cell_size - 0.5;
+		const real_t max_x = (a.pos.x + a.radius - origin.x) / cell_size - 0.5;
+		const real_t min_y = (a.pos.y - a.radius - origin.y) / cell_size - 0.5;
+		const real_t max_y = (a.pos.y + a.radius - origin.y) / cell_size - 0.5;
+		if (!Math::is_finite(min_x) || !Math::is_finite(max_x) || !Math::is_finite(min_y) || !Math::is_finite(max_y)) {
+			continue;
+		}
+		// Clamp before converting to int: a large but finite external
+		// position must never overflow to another occupied region.
+		const int low_x = (int)CLAMP(Math::floor(min_x), (real_t)0.0, (real_t)cols);
+		const int high_x = (int)CLAMP(Math::ceil(max_x), (real_t)-1.0, (real_t)(cols - 1));
+		const int low_y = (int)CLAMP(Math::floor(min_y), (real_t)0.0, (real_t)rows);
+		const int high_y = (int)CLAMP(Math::ceil(max_y), (real_t)-1.0, (real_t)(rows - 1));
 		for (int cy = low_y; cy <= high_y; cy++) {
 			for (int cx = low_x; cx <= high_x; cx++) {
 				const int r = cy * cols + cx;
