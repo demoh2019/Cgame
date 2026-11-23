@@ -20,6 +20,7 @@ var shutting_down := false
 var sim # GameServer, on the server.
 var client # GameClient, on the client.
 var allow_debug: bool = false
+var _bad_result_packet_warned := false
 var _command_counts: Dictionary = {} # peer -> commands in the current second
 var _count_clock: float = 0.0
 const MAX_COMMANDS_PER_SECOND := 80
@@ -1362,11 +1363,36 @@ func s_events(list: Array) -> void:
 		client.on_events(list)
 
 
+## Validate result RPC packets before forwarding them to gameplay. The current
+## protocol sends (String kind, Dictionary payload); some older servers send a
+## single envelope. Do not invent a kind when a legacy packet is ambiguous.
+static func normalize_result_packet(kind: Variant, data: Variant = null) -> Dictionary:
+	if kind is String and data is Dictionary and not str(kind).is_empty():
+		return {"kind": str(kind), "data": data}
+	if kind is Dictionary and data == null:
+		var envelope: Dictionary = kind
+		if envelope.get("kind") is String and not str(envelope["kind"]).is_empty() \
+				and envelope.get("data") is Dictionary:
+			return {"kind": str(envelope["kind"]), "data": envelope["data"]}
+	return {}
+
+
 @rpc("authority", "reliable")
-func s_result(kind: String, data: Dictionary) -> void:
+func s_result(kind: Variant, data: Variant = null) -> void:
+	# An optional second parameter lets Object.callp() accept old one-arg
+	# replies; valid current two-arg replies retain their original behavior.
+	var packet: Dictionary = normalize_result_packet(kind, data)
+	if packet.is_empty():
+		if not _bad_result_packet_warned:
+			_bad_result_packet_warned = true
+			push_warning("Incompatible s_result RPC from server: expected command kind and result. " \
+				+ "Restart both the Albion After server and client from the same build.")
+		return
+	var command_kind: String = packet["kind"]
+	var payload: Dictionary = packet["data"]
 	if client != null:
-		client.on_result(kind, data)
-	result_received.emit(kind, data)
+		client.on_result(command_kind, payload)
+	result_received.emit(command_kind, payload)
 
 
 # --- Server tick helper ------------------------------------------------------------------------------------
