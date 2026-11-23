@@ -50,6 +50,31 @@ foliage.terrain_cell_size = terrain.cell_size
 add_child(foliage)
 ```
 
+## Automatically synchronized terrain physics (opt-in)
+
+`HeightmapTerrain3D.auto_collision_enabled = true` creates an internal,
+unsaved `StaticBody3D/CollisionShape3D` pair with a
+`ConcavePolygonShape3D` generated from the **same heightmap** that draws
+the terrain. Sculpting, height-array replacement, resizing, swapping the
+heightmap and changing cell size update the collision shape. Editor changes
+made inside the running scene are coalesced into a single deferred
+physics-server update; standalone scene nodes rebuild immediately.
+Vertex-color painting and material changes do not regenerate collision
+when height data is unchanged.
+
+`auto_collision_step` (1..16) controls the minimum sample stride.
+Large grids automatically increase the collision stride to keep at most
+**8192 collision triangles**; *visual* mesh detail is unaffected.
+`get_auto_collision_triangle_count()` reports the actual collision
+triangle count; `get_auto_collision_shape()` exposes the shape for
+debugging/tests. Disabling collision disables the shape, and enabling
+it again reuses unchanged data. Default: **off**, maintaining legacy
+projects and avoiding costly physics shapes for purely decorative terrain.
+
+Physics collision is a heightfield triangle surface, not a full erosion,
+splat paint, level-streaming or Nanite system. The visual mesh still
+rebuilds in full and is capped at 513x513 samples.
+
 ## Design choices and limitations
 
 - Uses one continuous triangle mesh with **correct winding**, computed normals, UVs, and vertex colors.
@@ -57,7 +82,7 @@ add_child(foliage)
 - Radius is given in world units in the editor and grid units in the resource API.
 - Brushes use radial falloff. Each mouse click is a discrete Undo/Redo action; continuous drag painting is not yet provided.
 - The current implementation rebuilds the **entire mesh** after edits. It is deliberately capped at **513×513 samples** to prevent accidentally creating an unbounded mesh.
-- Terrain collision is **not updated automatically**. To add static collision, use the inherited MeshInstance3D collision tools and regenerate it after terrain edits.
+- Opt-in native auto collision updates with deferred/coalesced shape rebuilds, a bounded 8192-triangle budget and a 1..16 minimum sample step. It remains off by default; manually authored collision remains supported.
 - Color painting currently writes vertex colors, **not** blended multi-texture terrain layers. Assign a ShaderMaterial with vertex-color support for custom shading.
 - Erosion, streaming, grass/trees, GPU-driven rendering, HLOD, PCG graphs, World Partition, caves, and advanced terrain shaders are **not included** in this PR.
 
