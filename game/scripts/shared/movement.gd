@@ -105,12 +105,16 @@ static func move(world, position: Vector3, direction: Vector2, speed: float, del
 	var segments: int = maxi(1, ceili(displacement.length() / COLLISION_STEP))
 	var increment: Vector2 = displacement / float(segments)
 	var point := Vector2(position.x, position.z)
+	# Query the authoritative obstacle index once for the full swept path,
+	# not once per substep: each nearby blocker is checked at every candidate.
+	var nearby: Array = world.blockers_near(point.x, point.y,
+		displacement.length() + Defs.PLAYER_RADIUS + 1.0)
 	for _i in segments:
 		var target: Vector2 = point + increment
 		var candidates: Array[Vector2] = [target, Vector2(target.x, point.y), Vector2(point.x, target.y)]
 		var accepted := false
 		for candidate in candidates:
-			if _is_free(world, candidate, allow_swim):
+			if _is_free(world, candidate, allow_swim, nearby):
 				point = candidate
 				accepted = true
 				break
@@ -175,11 +179,11 @@ static func overlaps_blocker(point: Vector2, blocker: Dictionary) -> bool:
 	return offset.length_squared() < combined * combined
 
 
-static func _is_free(world, point: Vector2, allow_swim: bool = false) -> bool:
+static func _is_free(world, point: Vector2, allow_swim: bool, nearby: Array) -> bool:
 	# Wading is allowed until the water is deeper than a meter; beyond that only swimmers.
 	if not allow_swim and world.height_at(point.x, point.y) < Defs.WATER_LEVEL - 1.0:
 		return false
-	for blocker in world.blockers_near(point.x, point.y, Defs.PLAYER_RADIUS + 1.0):
+	for blocker in nearby:
 		if overlaps_blocker(point, blocker):
 			return false
 	return true
