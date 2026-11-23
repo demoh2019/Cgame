@@ -367,9 +367,17 @@ static func configure_terrain_mesh_residency(quality: int) -> void:
 	terrain_max_cached_lods = [1, 2, 2, 3][clampi(quality, 0, 3)]
 
 
+## Older Cgame executables have ChunkedTerrain3D but do not yet expose its
+## GPU mesh residency cap. Keep chunk creation and live graphics presets
+## working until the engine binary is rebuilt from the current sources.
+static func _set_terrain_mesh_residency(terrain: ChunkedTerrain3D) -> void:
+	if terrain.has_method("set_max_cached_lods"):
+		terrain.call("set_max_cached_lods", terrain_max_cached_lods)
+
+
 static func apply_terrain_mesh_residency(node: Node) -> void:
 	if node is ChunkedTerrain3D and node.is_in_group(TERRAIN_LOD_GROUP):
-		node.max_cached_lods = terrain_max_cached_lods
+		_set_terrain_mesh_residency(node as ChunkedTerrain3D)
 
 
 static func configure_terrain_geomorph(quality: int) -> void:
@@ -379,7 +387,8 @@ static func configure_terrain_geomorph(quality: int) -> void:
 static func apply_terrain_geomorph(node: Node) -> void:
 	if node is ChunkedTerrain3D:
 		var terrain := node as ChunkedTerrain3D
-		terrain.lod_geomorph_enabled = terrain_geomorph_enabled
+		if terrain.has_method("set_lod_geomorph_enabled"):
+			terrain.lod_geomorph_enabled = terrain_geomorph_enabled
 		# A slightly faster update preserves smooth movement while the native
 		# engine changes only one per-instance uniform, never reuploads meshes.
 		terrain.update_interval = 0.16 if terrain_geomorph_enabled else 0.5
@@ -415,10 +424,9 @@ static func configure_terrain_error_lod(quality: int) -> void:
 
 
 static func apply_terrain_error_lod(node: Node) -> void:
-	if node is ChunkedTerrain3D:
-		var terrain := node as ChunkedTerrain3D
-		terrain.lod_geometric_error_strength = terrain_error_strength_for_quality(
-			terrain_error_lod_quality)
+	if node is ChunkedTerrain3D and node.has_method("set_lod_geometric_error_strength"):
+		node.call("set_lod_geometric_error_strength",
+			terrain_error_strength_for_quality(terrain_error_lod_quality))
 
 
 ## Per-chunk geometric simplification budget in screen pixels.
@@ -946,9 +954,10 @@ func _build_terrain(origin: Vector2) -> void:
 	# Must be set before add_child() triggers native initial mesh streaming.
 	_terrain.mesh_build_budget_usec = terrain_mesh_build_budget_usec
 	_terrain.mesh_streaming_priority = terrain_mesh_streaming_priority
-	_terrain.max_cached_lods = terrain_max_cached_lods
+	_set_terrain_mesh_residency(_terrain)
 	apply_terrain_error_lod(_terrain)
-	_terrain.lod_geomorph_enabled = terrain_geomorph_enabled
+	if _terrain.has_method("set_lod_geomorph_enabled"):
+		_terrain.lod_geomorph_enabled = terrain_geomorph_enabled
 	_terrain.skirt_depth = 3.0
 	_terrain.collision_enabled = false # The server decides where players can stand.
 	_terrain.cast_shadows = false
@@ -956,7 +965,8 @@ func _build_terrain(origin: Vector2) -> void:
 	# GeometryInstance3D; explicitly include the static heightfield in
 	# optional Ultra SDFGI. No extra cascades or shadow atlas allocations
 	# exist on Performance/Balanced/High.
-	_terrain.contribute_to_gi = true
+	if _terrain.has_method("set_contribute_to_gi"):
+		_terrain.contribute_to_gi = true
 	# Also on the layer the terrain runtime virtual texture's bake cameras see (terrain_rvt.gd).
 	if "render_layers" in _terrain:
 		_terrain.render_layers = TerrainRvt.terrain_layers()
@@ -966,8 +976,9 @@ func _build_terrain(origin: Vector2) -> void:
 	# The forked ChunkedTerrain3D accepts normals sampled one grid step past
 	# the current chunk. Their shared world-space derivative removes bright
 	# vertical lighting seams without an extra shader pass or texture.
-	_terrain.set_normal_data(TerrainSeamNormals.build(_raw_heights, origin,
-		SAMPLES, step, HEIGHT_MIN, HEIGHT_RANGE, Callable(_world, "ground_at")))
+	if _terrain.has_method("set_normal_data"):
+		_terrain.set_normal_data(TerrainSeamNormals.build(_raw_heights, origin,
+			SAMPLES, step, HEIGHT_MIN, HEIGHT_RANGE, Callable(_world, "ground_at")))
 	_refresh_terrain_horizon()
 	add_child(_terrain)
 	_terrain.add_to_group(TERRAIN_LOD_GROUP)

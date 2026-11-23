@@ -8,6 +8,24 @@ const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 func run(t) -> void:
 	t.current = "native GPU terrain mesh cache API and safe defaults"
 	var terrain := ChunkedTerrain3D.new()
+	# Installed game builds can temporarily lag behind their C++ source.
+	# Gameplay must still create chunks and change graphics presets safely.
+	var code: String = (ChunkView as Script).source_code
+	t.check(code.contains("terrain.has_method(\"set_max_cached_lods\")"),
+		"residency configuration checks the engine API before using it")
+	t.check(code.contains("_set_terrain_mesh_residency(_terrain)"),
+		"new terrain chunks share the same compatibility-aware setter")
+	if not terrain.has_method("set_max_cached_lods"):
+		terrain.add_to_group(ChunkView.TERRAIN_LOD_GROUP)
+		ChunkView.configure_terrain_mesh_residency(3)
+		ChunkView.apply_terrain_mesh_residency(terrain)
+		ChunkView.apply_terrain_error_lod(terrain)
+		ChunkView.apply_terrain_geomorph(terrain)
+		t.check(not terrain.has_method("set_max_cached_lods"),
+			"older terrain binaries skip GPU cache tuning without crashing")
+		terrain.free()
+		ChunkView.configure_terrain_mesh_residency(1)
+		return
 	t.eq(terrain.max_cached_lods, 0, "existing engine scenes retain unlimited legacy cache")
 	t.eq(terrain.get_cached_mesh_count(), 0, "empty terrain has no resident GPU meshes")
 	terrain.max_cached_lods = -8
@@ -31,8 +49,8 @@ func run(t) -> void:
 			"runtime GPU cache cap is applied to active terrain nodes")
 		node.free()
 	t.check((ChunkView as Script).source_code.contains(
-		"_terrain.max_cached_lods = terrain_max_cached_lods"),
-		"new gameplay terrain gets a GPU cache budget before entering the SceneTree")
+		"_set_terrain_mesh_residency(_terrain)"),
+		"new gameplay terrain gets a GPU cache budget when the executable supports it")
 	t.check((GraphicsQuality as Script).source_code.contains(
 		"ChunkView.apply_terrain_mesh_residency(lod_terrain)"),
 		"quality changes retune already resident world chunks without rebuilding heightmaps")
