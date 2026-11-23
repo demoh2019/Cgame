@@ -25,6 +25,42 @@ func _pos(world, point: Vector2) -> Vector3:
 
 
 func run(t) -> void:
+	t.current = "survey geometry skips only provably unreachable chunks"
+	var centre := Vector2(32.0, 32.0)
+	t.near(RuinSurvey.cell_min_distance_squared(centre, Vector2i.ZERO),
+		0.0, 0.001, "current chunk has zero distance")
+	t.near(RuinSurvey.cell_min_distance_squared(centre, Vector2i(3, 0)),
+		160.0 * 160.0, 0.001, "east edge computes exact lower bound")
+	t.check(RuinSurvey.cell_min_distance_squared(centre, Vector2i(3, 3)) >
+		RuinSurvey.SCAN_RADIUS * RuinSurvey.SCAN_RADIUS,
+		"diagonal corner chunk can be skipped before world generation")
+	t.check(RuinSurvey.cell_min_distance_squared(Vector2(63.9, 63.9),
+		Vector2i(3, 3)) < RuinSurvey.SCAN_RADIUS * RuinSurvey.SCAN_RADIUS,
+		"near a cell corner the diagonal chunk still qualifies")
+	t.check(is_inf(RuinSurvey.cell_min_distance_squared(Vector2(NAN, 0), Vector2i.ZERO)),
+		"invalid origin is not allowed to select world chunks")
+	# For several player positions, each grid cell containing a truly
+	# reachable point must survive the lower-bound cull.
+	var all_kept: bool = true
+	for offset in [Vector2.ZERO, Vector2(31, 9), Vector2(63, 63),
+			Vector2(-9, -31), Vector2(0.5, 62.5)]:
+		var location: Vector2 = Vector2(1000, 1000) + offset
+		var current: Vector2i = WorldGen.cell_of(location.x, location.y)
+		for dx in range(-RuinSurvey.CELL_RADIUS, RuinSurvey.CELL_RADIUS + 1):
+			for dz in range(-RuinSurvey.CELL_RADIUS, RuinSurvey.CELL_RADIUS + 1):
+				var checked_cell: Vector2i = current + Vector2i(dx, dz)
+				var cell_origin: Vector2 = WorldGen.cell_origin(checked_cell)
+				for xstep in 5:
+					for zstep in 5:
+						var point: Vector2 = cell_origin + Vector2(
+							float(xstep) * Defs.CHUNK_SIZE / 4.0,
+							float(zstep) * Defs.CHUNK_SIZE / 4.0)
+						if location.distance_squared_to(point) <= RuinSurvey.SCAN_RADIUS * RuinSurvey.SCAN_RADIUS:
+							if RuinSurvey.cell_min_distance_squared(location, checked_cell) >
+									RuinSurvey.SCAN_RADIUS * RuinSurvey.SCAN_RADIUS:
+								all_kept = false
+	t.check(all_kept, "no sampled reachable crate is removed by chunk pruning")
+
 	t.current = "real gathered-item map and bounded wilderness-only scanning"
 	t.check(Defs.is_item(RuinSurvey.ITEM_ID), "craftable survey chart is a real item")
 	t.eq(Defs.item(RuinSurvey.ITEM_ID)["kind"], "material",

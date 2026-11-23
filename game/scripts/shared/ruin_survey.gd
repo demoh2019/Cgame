@@ -3,12 +3,26 @@ extends RefCounted
 ## cannot supply a crate ID, location, search radius or any loot values.
 
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const Defs = preload("res://scripts/shared/defs.gd")
 
 const ITEM_ID := "ruin_survey_chart"
 const SCAN_RADIUS := 190.0
 const MARK_SECONDS := 75.0
 const MIN_ZONE := 2
 const CELL_RADIUS := 3
+
+
+## Lower bound on the XZ distance to any point in a chunk. A chunk outside
+## the current search radius cannot contain a closer crate, so do not
+## generate its terrain, structures or contents just to reject it.
+static func cell_min_distance_squared(origin: Vector2, cell: Vector2i) -> float:
+	if not origin.is_finite():
+		return INF
+	var start: Vector2 = WorldGen.cell_origin(cell)
+	var nearest := Vector2(
+		clampf(origin.x, start.x, start.x + Defs.CHUNK_SIZE),
+		clampf(origin.y, start.y, start.y + Defs.CHUNK_SIZE))
+	return origin.distance_squared_to(nearest)
 
 
 ## Bounded 7x7 world-chunk scan, selecting the nearest live red/black ruin
@@ -23,7 +37,12 @@ static func nearest(world, at: Vector3, opened: Dictionary) -> Dictionary:
 	var best: Dictionary = {}
 	for dx in range(-CELL_RADIUS, CELL_RADIUS + 1):
 		for dz in range(-CELL_RADIUS, CELL_RADIUS + 1):
-			var chunk: Dictionary = world.chunk(cell + Vector2i(dx, dz))
+			var chunk_cell: Vector2i = cell + Vector2i(dx, dz)
+			# Re-evaluate against the nearest found candidate to prune even
+			# more chunks. Strict > preserves equidistant stable-ID ties.
+			if cell_min_distance_squared(origin, chunk_cell) > best_distance:
+				continue
+			var chunk: Dictionary = world.chunk(chunk_cell)
 			if int(chunk.get("zone", -1)) < MIN_ZONE:
 				continue
 			for crate in chunk["crates"]:
