@@ -524,3 +524,8 @@
 
 /thirdparty/                                  @godotengine/buildsystem
 /thirdparty/jolt_physics/                     @godotengine/buildsystem @godotengine/jolt-physics
+
+# Canonical Albion After game and test content.
+/game/                                       @demoh2019
+/game/tests/                                 @demoh2019 @godotengine/tests
+/game/tools/                                 @demoh2019 @godotengine/buildsystem

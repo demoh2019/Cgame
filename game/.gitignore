@@ -1,7 +1,7 @@
 .godot/
 *.import
 assets/packs
-*.uid
+# .uid script resource identities are versioned and must not be ignored.
 # Poly Haven sources: only the baked meshes and the textures they use are kept (tools/fetch_polyhaven.sh gets the rest).
 assets/models/polyhaven/*/*.gltf
 assets/models/polyhaven/*/*.bin
