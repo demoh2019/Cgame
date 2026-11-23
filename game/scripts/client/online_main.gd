@@ -3252,7 +3252,8 @@ func _interact() -> void:
 			client.resource_pickup(pickup_id)
 			_hold_pickup_since_ms = Time.get_ticks_msec()
 			_hold_pickup_next_ms = _hold_pickup_since_ms + HOLD_PICKUP_DELAY_MS
-			_hold_pickup_pending = {pickup_id: _hold_pickup_since_ms + HOLD_PICKUP_RETRY_MS}
+			_hold_pickup_pending.clear()
+			_hold_pickup_pending[pickup_id] = _hold_pickup_since_ms + HOLD_PICKUP_RETRY_MS
 		elif ResourceGathering.is_strike(str(node["kind"])):
 			var facing: Vector2 = _aim_direction()
 			if facing == Vector2.ZERO:
