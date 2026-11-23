@@ -179,7 +179,7 @@ static func pack_meshlets(vertices: PackedVector3Array, meshlets: Array) -> Dict
 static func pack_resident_page(vertices: PackedVector3Array, meshlets: Array,
 		page_id: int, slot_id: int) -> Dictionary:
 	var start: int = page_id * TASK_GROUP_SIZE
-	if page_id < 0 or slot_id < 0 or start >= meshlets.size():
+	if page_id < 0 or slot_id < 0 or slot_id >= 256 or start >= meshlets.size():
 		return {"error": "invalid page or slot"}
 	var positions := PackedByteArray()
 	positions.resize(PagePolicy.POSITIONS_BYTES)
@@ -575,7 +575,7 @@ func _stream_gpu_pages(camera_position: Vector3) -> bool:
 	if _slot_pages.is_empty():
 		return true
 	var wanted: PackedInt32Array = PagePolicy.wanted_pages(
-		_page_bounds, camera_position, model, _slot_pages.size())
+		_page_bounds, camera_position, model, _slot_pages.size(), _planes)
 	var transfers: Dictionary = PagePolicy.plan(
 		_slot_pages, wanted, maxi(max_page_uploads_per_frame, 0))
 	var uploads: Array = transfers["uploads"]
