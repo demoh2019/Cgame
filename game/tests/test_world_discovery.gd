@@ -103,6 +103,24 @@ func run(t) -> void:
 		t.check(world.poi.station_near(float(site["station_x"]), float(site["station_z"])),
 			"settlement workbench remains reachable at its actual position")
 
+	t.current = "world POI caches remain bounded while exploring"
+	for i in range(258):
+		world.poi.sites_in_region(100 + i, -200 - i)
+	var recent_region := Vector2i(100, -200)
+	world.poi.sites_in_region(recent_region.x, recent_region.y)
+	var next_region := Vector2i(999, -999)
+	world.poi.sites_in_region(next_region.x, next_region.y)
+	t.check(world.poi._regions.size() <= 256,
+		"region cache stays bounded during long-distance travel")
+	t.check(world.poi._region_lru.has(recent_region),
+		"recently viewed region remains cached")
+	t.check(not world.poi._regions.has(Vector2i(103, -203)),
+		"least recently used region is evicted first")
+	for i in range(280):
+		world.poi.levellers(300 + i, 400 + i)
+	t.check(world.poi._leveller_cache.size() <= 256,
+		"terrain leveller cache stays bounded across the world")
+
 	t.current = "save records are finite, unique and world-seed verified"
 	var records: Array = WorldDiscovery.to_saved(journal)
 	t.eq(records.size(), 1, "one entry persisted")
