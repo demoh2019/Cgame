@@ -40,18 +40,17 @@ static func is_loose_stone_entry(entry: Dictionary) -> bool:
 	return filename.contains("rock") or filename.contains("stone") or filename.contains("boulder")
 
 
-## Separate lightweight stones from mineable rocks, preserving biome art.
-## The same seeded choice runs on clients and dedicated servers.
+## Both nature-kit pebbles are truly hand-sized; every imported stone,
+## including small rock_9 and stone_scatter, is a solid mineable model.
+## Do not classify a 1.5-metre imported stone as a hand pickup by threshold.
+## The same seeded selection runs on clients and dedicated servers.
 static func pick_model(biome: String, small: bool, rng: RandomNumberGenerator) -> int:
 	var choices: Array[int] = []
 	for index in MODELS.size():
 		var entry: Dictionary = MODELS[index]
-		var size: float = float(entry["size"])
 		if not (biome in entry["biomes"]):
 			continue
-		if small and size > 1.5:
-			continue
-		if not small and size < 1.1:
+		if small != entry.has("nature"):
 			continue
 		choices.append(index)
 	return choices[rng.randi_range(0, choices.size() - 1)] if not choices.is_empty() else -1
