@@ -36,6 +36,7 @@
 
 #include "core/math/math_funcs.h"
 #include "core/math/plane.h"
+#include "scene/resources/mesh.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
 #include "tests/test_macros.h"
