@@ -559,6 +559,9 @@ var _next_id: int = 5_000_000_000
 
 func _init(p_world, p_seed: int = 1) -> void:
 	world = p_world
+	# Authoritative resource lifetime and collision must agree. The same
+	# dictionary is mutated by harvest and respawn, without resync copies.
+	world.set_depleted_resources(depleted)
 	PcgSpawns.attach(p_world) # PCG loot caches and encounter spots (no-op without the engine module).
 	territory = TerritoryControl.new(p_world)
 	rng.seed = p_seed
