@@ -1,0 +1,78 @@
+name: P1 meshlet page serialization and Albion streamed scenery integration
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/cgame_virtual_geometry/**'
+      - 'game/scripts/client/virtual_geometry_page_inspector.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/scripts/client/chunk_view.gd'
+      - 'game/tests/test_virtual_geometry_meshlet_pages.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_meshlet_page_contract.py'
+      - '.github/workflows/native-meshlet-page-serialization.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/cgame_virtual_geometry/**'
+      - 'game/scripts/client/virtual_geometry_page_inspector.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/scripts/client/chunk_view.gd'
+      - 'game/tests/test_virtual_geometry_meshlet_pages.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_meshlet_page_contract.py'
+      - '.github/workflows/native-meshlet-page-serialization.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  meshlet-pages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Verify packed GPU-ready meshlet pages ABI and live game integration
+        run: python3 -m unittest tests/scene/test_meshlet_page_contract.py -v
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native byte-layout, triangle coverage and corrupted input tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*CgameMeshletPages*" --no-colors 2>&1 | tee meshlet-page-native.log
+          grep -Eq '[0-9]+ test cases|[0-9]+ assertions' meshlet-page-native.log
+      - name: Import Albion and reject script parse failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee meshlet-page-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' meshlet-page-import.log; then exit 1; fi
+      - name: Validate real MultiMesh group, full PBR assets and previous mesh LOD fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_one.gd -- test_virtual_geometry_meshlet_pages test_virtual_geometry_attribute_lod test_imported_mesh_lod 2>&1 | tee meshlet-page-game.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' meshlet-page-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' meshlet-page-game.log; then exit 1; fi
+      - name: Save native and game test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-meshlet-page-test-logs
+          if-no-files-found: ignore
+          path: |
+            meshlet-page-native.log
+            meshlet-page-import.log
+            meshlet-page-game.log
