@@ -5,6 +5,12 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const ResourceGathering = preload("res://scripts/shared/resource_gathering.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
+const GameClient = preload("res://scripts/client/game_client.gd")
+
+
+class FakeNet:
+	extends RefCounted
+	var client
 
 
 func _find(world, kind: String) -> Dictionary:
@@ -179,3 +185,52 @@ func run(t) -> void:
 		ResourceGathering.strike_yield("tree", 1) + 1
 		+ ResourceGathering.strike_yield("tree", 2),
 		"ordinary strike adds only its base resource amount")
+
+
+	t.current = "held-E selector ignores trees, depletion and in-flight pickups"
+	var picker = GameClient.new(FakeNet.new())
+	picker.world = world
+	var loose: Dictionary = _find(world, "branch")
+	t.check(not loose.is_empty(), "pickup probe exists in generated world")
+	if not loose.is_empty():
+		var at_pickup := Vector3(float(loose["x"]), float(loose["y"]), float(loose["z"]))
+		var loose_id: int = int(loose["id"])
+		var chosen: Dictionary = picker.nearest_pickup_node(at_pickup, 0.1)
+		t.eq(int(chosen.get("id", -1)), loose_id,
+			"held-E finds a nearby real pickup with no other interaction kind")
+		var pending: Dictionary = {}
+		pending[loose_id] = true
+		t.check(picker.nearest_pickup_node(at_pickup, 0.1, pending).is_empty(),
+			"a pending request cannot be sent repeatedly while awaiting the server")
+		picker.depleted[loose_id] = true
+		t.check(picker.nearest_pickup_node(at_pickup, 0.1).is_empty(),
+			"depleted loose resources are ignored")
+	if not tree.is_empty():
+		var at_tree := Vector3(float(tree["x"]), float(tree["y"]), float(tree["z"]))
+		var tree_choice: Dictionary = picker.nearest_pickup_node(at_tree, 0.05)
+		t.check(tree_choice.is_empty() or int(tree_choice.get("id", -1)) != int(tree["id"]),
+			"holding E never turns into automatic tree chopping")
+
+	t.current = "render revisions distinguish mining damage from world disappearance"
+	var original_visibility_revision: int = picker.world_state_revision
+	var original_damage_revision: int = picker.resource_damage_revision
+	var sample_id: int = int(tree["id"])
+	var progress_event: Dictionary = {"type": "gathered", "strike": true,
+		"node": sample_id, "hit": 1, "final": false}
+	picker.on_events([progress_event])
+	t.eq(picker.world_state_revision, original_visibility_revision,
+		"ordinary resource damage must not trigger a full chunk geometry rescan")
+	t.eq(picker.resource_damage_revision, original_damage_revision + 1,
+		"real strike invalidates the inexpensive per-instance tint")
+	picker.on_events([progress_event])
+	t.eq(picker.resource_damage_revision, original_damage_revision + 1,
+		"duplicate strike events do not cause redundant GPU updates")
+	picker.on_events([{"type": "gathered", "strike": true,
+		"node": sample_id, "hit": 2, "final": false}])
+	t.eq(picker.resource_damage_revision, original_damage_revision + 2,
+		"the next strike updates the damage marker and tint")
+	picker.on_events([{"type": "gathered", "strike": true,
+		"node": sample_id, "hit": 3, "final": true}])
+	t.check(not picker.resource_hits.has(sample_id), "depletion clears stale resource damage")
+	t.eq(picker.resource_damage_revision, original_damage_revision + 3,
+		"depletion clears damaged instance tint once")
