@@ -13,7 +13,7 @@ static func make_meshlets(count: int) -> Array:
 		out.append({
 			"vertex_ids": PackedInt32Array([0, 1, 2]),
 			"indices": PackedInt32Array([0, 1, 2]),
-			"bounds_center": Vector3(float(id / 32) * 20.0, 0.0, 0.0),
+			"bounds_center": Vector3(float(id) / 32.0 * 20.0 if id % 32 == 0 else float(id - id % 32) / 32.0 * 20.0, 0.0, 0.0),
 			"bounds_radius": 2.0,
 			"cone_axis": Vector3.UP,
 			"cone_cutoff": 1.0,
