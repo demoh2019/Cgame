@@ -546,7 +546,8 @@ func c_fish(baited: bool = false, storm_cast: bool = false) -> void:
 func c_gather(node_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
-		var node: Dictionary = sim._find_node(node_id)
+		var player = sim.players.get(peer)
+		var node: Dictionary = sim._find_node_near(node_id, player.position) if player != null else {}
 		if ResourceGathering.is_strike(str(node.get("kind", ""))):
 			s_result.rpc_id(peer, "gather", {"ok": false, "reason": "use_strikes"})
 		else:

@@ -1520,7 +1520,7 @@ func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
 		return {"ok": false, "reason": "mounted"}
 	if not player.recall.is_empty():
 		return {"ok": false, "reason": "recall_channeling"}
-	var node := _find_node(node_id)
+	var node := _find_node_near(node_id, player.position)
 	if node.is_empty():
 		return {"ok": false, "reason": "no_such_node"}
 	if depleted.has(node_id):
@@ -1564,7 +1564,7 @@ func cmd_resource_pickup(peer_id: int, node_id: int) -> Dictionary:
 		return {"ok": false, "reason": "dead"}
 	if player.mounted or not player.recall.is_empty() or not player.action.is_empty():
 		return {"ok": false, "reason": "busy"}
-	var node: Dictionary = _find_node(node_id)
+	var node: Dictionary = _find_node_near(node_id, player.position)
 	if node.is_empty() or not ResourceGathering.is_pickup(str(node.get("kind", ""))):
 		return {"ok": false, "reason": "not_pickup"}
 	if depleted.has(node_id):
@@ -1594,7 +1594,7 @@ func cmd_resource_hit(peer_id: int, node_id: int, dir_x: float, dir_z: float) ->
 		return {"ok": false, "reason": "dead"}
 	if player.mounted or not player.recall.is_empty() or not player.action.is_empty():
 		return {"ok": false, "reason": "busy"}
-	var node: Dictionary = _find_node(node_id)
+	var node: Dictionary = _find_node_near(node_id, player.position)
 	if node.is_empty() or not ResourceGathering.is_strike(str(node.get("kind", ""))):
 		return {"ok": false, "reason": "not_mineable"}
 	if depleted.has(node_id):
@@ -6843,8 +6843,26 @@ func _distance_xz(position: Vector3, thing: Dictionary) -> float:
 	return Vector2(position.x - float(thing["x"]), position.z - float(thing["z"])).length()
 
 
+## Authoritative short-range resource lookup for E/LMB. Never scan the chunks
+## around *other* players when resolving an action from this player.
+## The radius matches the maximum client/server reach (including large models);
+## at a regular position, only one of the world chunks needs generation.
+func _find_node_near(node_id: int, position: Vector3) -> Dictionary:
+	if not position.is_finite():
+		return {}
+	var extent: float = Defs.REACH + 0.5 + ResourceGathering.MAX_REACH_MARGIN
+	var from_cell: Vector2i = WorldGen.cell_of(position.x - extent, position.z - extent)
+	var to_cell: Vector2i = WorldGen.cell_of(position.x + extent, position.z + extent)
+	for cx in range(from_cell.x, to_cell.x + 1):
+		for cz in range(from_cell.y, to_cell.y + 1):
+			for node in world.chunk(Vector2i(cx, cz))["nodes"]:
+				if int(node["id"]) == node_id:
+					return node
+	return {}
+
+
 func _find_node(node_id: int) -> Dictionary:
-	# Ids encode the chunk loosely; look in the chunks around players instead of searching the world.
+	# Legacy lookup for simulation tasks without a player-position argument.
 	for player in players.values():
 		var cell := WorldGen.cell_of(player.position.x, player.position.z)
 		for dx in range(-1, 2):

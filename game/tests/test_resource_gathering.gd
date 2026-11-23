@@ -305,3 +305,29 @@ func run(t) -> void:
 	t.check(not picker.resource_hits.has(sample_id), "depletion clears stale resource damage")
 	t.eq(picker.resource_damage_revision, original_damage_revision + 3,
 		"depletion clears damaged instance tint once")
+
+	t.current = "resource action lookup stays local to its authoritative player"
+	# A new seeded world has the same node IDs but no chunk cache primed by
+	# the earlier harvesting tests. Distant online players must not cause
+	# remote world generation for each local pickup/mining RPC.
+	var scoped_world := WorldGen.new(42)
+	var scoped_server := GameServer.new(scoped_world, 42)
+	for other in range(6):
+		var remote = scoped_server.add_player(920 + other, "Remote%d" % other)
+		remote.position = Vector3(10000.0 + other * Defs.CHUNK_SIZE, 0.0, 8000.0)
+	var source_position := Vector3(float(tree["x"]), float(tree["y"]), float(tree["z"]))
+	var misses_before: int = int(scoped_world.chunk_cache_stats()["misses"])
+	var local_node: Dictionary = scoped_server._find_node_near(int(tree["id"]), source_position)
+	t.eq(int(local_node.get("id", -1)), int(tree["id"]),
+		"local node resolves to the exact same authoritative world ID")
+	var lookup_misses: int = int(scoped_world.chunk_cache_stats()["misses"]) - misses_before
+	t.check(lookup_misses <= 4,
+		"nearby lookup generates at most four chunks regardless of remote player count")
+	var invalid_misses: int = int(scoped_world.chunk_cache_stats()["misses"])
+	t.check(scoped_server._find_node_near(int(tree["id"]), Vector3(INF, 0.0, 0.0)).is_empty(),
+		"nonfinite positions are rejected without querying any chunk")
+	t.eq(int(scoped_world.chunk_cache_stats()["misses"]), invalid_misses,
+		"invalid resource lookup does not create a chunk")
+	t.check(scoped_server._find_node_near(int(tree["id"]),
+		Vector3(source_position.x + Defs.CHUNK_SIZE * 8.0, 0.0, source_position.z)).is_empty(),
+		"distant players cannot resolve a remote resource by guessing its ID")
