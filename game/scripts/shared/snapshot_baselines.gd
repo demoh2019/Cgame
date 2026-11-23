@@ -20,9 +20,12 @@ func _slot(client_id: int) -> Dictionary:
 func record_sent(client_id: int, sequence: int, state: Dictionary) -> void:
 	var slot: Dictionary = _slot(client_id)
 	var pending: Dictionary = slot["pending"]
+	# Late/replayed sends cannot re-enter the pending window after an ACK.
+	# One sequence always names one immutable snapshot, even on retries.
+	if sequence <= int(slot["acked_seq"]) or pending.has(sequence):
+		return
 	var order: Array[int] = slot["order"]
-	if not pending.has(sequence):
-		order.append(sequence)
+	order.append(sequence)
 	pending[sequence] = state.duplicate(true)
 	while order.size() > MAX_UNACKED:
 		var oldest: int = order.pop_front()
@@ -63,9 +66,13 @@ func build_packet(client_id: int, sequence: int, state: Dictionary, tolerances: 
 	# The server can read its private baseline directly without cloning the
 	# entire entity set on every snapshot tick.
 	var baseline: Dictionary = slot["acked_state"]
-	var delta: Dictionary = SnapshotDelta.diff(baseline, state, tolerances)
+	var pending: Dictionary = slot["pending"]
+	# A retransmission must encode the ORIGINAL snapshot for its sequence.
+	# Otherwise an ACK could confirm a different state from what was received.
+	var packet_state: Dictionary = pending[sequence] if pending.has(sequence) else state
+	var delta: Dictionary = SnapshotDelta.diff(baseline, packet_state, tolerances)
 	var packet: Dictionary = {"sequence": sequence, "baseline": int(slot["acked_seq"]), "delta": delta}
-	record_sent(client_id, sequence, state)
+	record_sent(client_id, sequence, packet_state)
 	return packet
 
 

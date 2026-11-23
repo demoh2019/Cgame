@@ -113,6 +113,30 @@ func run(t) -> void:
 	bl.forget(1)
 	t.check(bl.baseline_for(1).is_empty(), "forget clears baseline")
 
+	t.current = "snapshot IDs are immutable across retries and late sends"
+	var replay := SnapshotBaselines.new()
+	replay.record_sent(42, 5, {"unit": {"hp": 80}})
+	replay.record_sent(42, 5, {"unit": {"hp": 1}})
+	replay.acknowledge(42, 5)
+	t.eq((replay.baseline_for(42)["unit"] as Dictionary)["hp"], 80,
+		"same sequence keeps the original delivered snapshot")
+	replay.record_sent(42, 5, {"unit": {"hp": 1}})
+	replay.record_sent(42, 4, {"unit": {"hp": 1}})
+	var replay_pending: Dictionary = (replay._clients[42] as Dictionary)["pending"]
+	t.eq(replay_pending.size(), 0, "acked and older snapshot IDs cannot re-enter history")
+	replay.record_sent(42, 6, {"unit": {"hp": 60}})
+	replay.acknowledge(42, 6)
+	t.eq((replay.baseline_for(42)["unit"] as Dictionary)["hp"], 60,
+		"newer sequence is still acknowledged and applied normally")
+	var retry := SnapshotBaselines.new()
+	var sent: Dictionary = retry.build_packet(8, 7, {1: {"hp": 30}})
+	var resent: Dictionary = retry.build_packet(8, 7, {1: {"hp": 1}})
+	t.eq(resent["delta"], sent["delta"],
+		"retrying the same sequence retransmits identical world state")
+	retry.acknowledge(8, 7)
+	t.eq((retry.baseline_for(8)[1] as Dictionary)["hp"], 30,
+		"acknowledged baseline matches both copies of the retried packet")
+
 	var bl2 := SnapshotBaselines.new()
 	for i in 100:
 		bl2.record_sent(7, i, {i: {"v": i}})
