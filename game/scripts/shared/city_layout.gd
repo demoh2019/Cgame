@@ -229,6 +229,63 @@ static func street_distance(point: Vector2, paths: Array) -> float:
 	return nearest
 
 
+## A compact, deterministic grid of nearby street segments for building and loot clearance.
+## Each segment is stored once; cell entries contain only its integer index.
+## Every segment's bounds are expanded by max_clearance, so a single cell lookup is exact
+## for queries with clearance <= max_clearance (larger queries use the scalar fallback).
+static func index_streets(paths: Array, cell_size: float = 16.0, max_clearance: float = 8.0) -> Dictionary:
+	var cells: Dictionary = {}
+	var segments := PackedVector2Array()
+	cell_size = maxf(cell_size, 1.0)
+	max_clearance = maxf(max_clearance, 0.0)
+	for street in paths:
+		var path: PackedVector2Array = street
+		for i in path.size() - 1:
+			var a: Vector2 = path[i]
+			var b: Vector2 = path[i + 1]
+			if (b - a).length_squared() < 0.00001:
+				continue
+			var segment_id: int = segments.size() >> 1
+			segments.append(a)
+			segments.append(b)
+			var min_x: int = floori((minf(a.x, b.x) - max_clearance) / cell_size)
+			var max_x: int = floori((maxf(a.x, b.x) + max_clearance) / cell_size)
+			var min_y: int = floori((minf(a.y, b.y) - max_clearance) / cell_size)
+			var max_y: int = floori((maxf(a.y, b.y) + max_clearance) / cell_size)
+			for cx in range(min_x, max_x + 1):
+				for cy in range(min_y, max_y + 1):
+					var key := Vector2i(cx, cy)
+					var candidates: PackedInt32Array = cells.get(key, PackedInt32Array())
+					candidates.append(segment_id)
+					cells[key] = candidates
+	return {"cell_size": cell_size, "margin": max_clearance, "cells": cells,
+			"segments": segments, "paths": paths}
+
+
+## True when an obstacle circle would overlap the road surface plus clearance.
+## Uses only local indexed segments, not every polyline in the city.
+static func street_blocked(point: Vector2, clearance: float, index: Dictionary) -> bool:
+	if clearance <= 0.0:
+		return false
+	if clearance > float(index["margin"]):
+		var paths: Array = index["paths"]
+		return street_distance(point, paths) < clearance
+	var cell_size: float = float(index["cell_size"])
+	var key := Vector2i(floori(point.x / cell_size), floori(point.y / cell_size))
+	var cells: Dictionary = index["cells"]
+	var local_segments: PackedInt32Array = cells.get(key, PackedInt32Array())
+	var endpoints: PackedVector2Array = index["segments"]
+	var radius_squared: float = clearance * clearance
+	for segment_id in local_segments:
+		var a: Vector2 = endpoints[segment_id * 2]
+		var b: Vector2 = endpoints[segment_id * 2 + 1]
+		var delta: Vector2 = b - a
+		var t: float = clampf((point - a).dot(delta) / delta.length_squared(), 0.0, 1.0)
+		if point.distance_squared_to(a + delta * t) < radius_squared:
+			return true
+	return false
+
+
 static func _arc(rx: float, ry: float, from_angle: float, to_angle: float, rotation: float) -> PackedVector2Array:
 	var points: Array[Vector2] = []
 	for i in 49:
