@@ -120,6 +120,7 @@ const SUITES := [
 	"res://tests/test_predictive_streaming.gd",
 	"res://tests/test_world_streamer_shared_budget.gd",
 	"res://tests/test_world_streamer_backpressure.gd",
+	"res://tests/test_stream_requests_priority.gd",
 	"res://tests/test_world_streaming_focus_status.gd",
 	"res://tests/test_world_streamer_simulation_tiers.gd",
 	"res://tests/test_world_streamer_chunk_cache.gd",

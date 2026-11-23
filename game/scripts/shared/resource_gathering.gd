@@ -8,11 +8,17 @@ const PROGRESS_EXPIRE_SECONDS := 45.0
 const MAX_REACH_MARGIN := 3.0
 
 static func is_pickup(kind: String) -> bool:
-	return kind in ["pebble", "branch", "bush", "berry"]
+	match kind:
+		"pebble", "branch", "bush", "berry":
+			return true
+	return false
 
 
 static func is_strike(kind: String) -> bool:
-	return kind == "tree" or kind == "rock" or kind == "ore"
+	match kind:
+		"tree", "rock", "ore":
+			return true
+	return false
 
 
 static func strikes_needed(kind: String) -> int:
@@ -85,8 +91,11 @@ static func weakspot_position(node: Dictionary, completed_hits: int) -> Vector3:
 	var angle_degrees: int = posmod(posmod(id, 360) * 37 + posmod(index, 360) * 107, 360)
 	var angle: float = deg_to_rad(float(angle_degrees))
 	var kind: String = str(node.get("kind", ""))
-	var radius: float = clampf(float(node.get("radius", 0.5)) * (0.6 if kind == "tree" else 0.72), 0.22, 1.1)
-	var height: float = 1.05 if kind == "tree" else clampf(float(node.get("radius", 0.6)) * 0.85, 0.38, 1.2)
+	var node_radius: float = float(node.get("radius", 0.5))
+	if not is_finite(node_radius):
+		node_radius = 0.5
+	var radius: float = clampf(node_radius * (0.6 if kind == "tree" else 0.72), 0.22, 1.1)
+	var height: float = 1.05 if kind == "tree" else clampf(node_radius * 0.85, 0.38, 1.2)
 	return Vector3(float(node.get("x", 0.0)) + cos(angle) * radius,
 		float(node.get("y", 0.0)) + height,
 		float(node.get("z", 0.0)) + sin(angle) * radius)

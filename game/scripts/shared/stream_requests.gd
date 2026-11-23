@@ -39,6 +39,9 @@ func request(cell: Vector2i, priority: float, generation: int) -> bool:
 		_stats["rejected_stale"] = int(_stats["rejected_stale"]) + 1
 		return false
 	newest_generation = generation
+	# A malformed priority must not poison the strict ordering comparator.
+	if not is_finite(priority):
+		priority = 0.0
 	if _reqs.has(cell):
 		var r: Req = _reqs[cell]
 		r.generation = maxi(r.generation, generation)
@@ -101,24 +104,25 @@ func next_batch(budget: int) -> Array[Vector2i]:
 		allowed = mini(allowed, max_in_flight - in_flight_count())
 	if allowed <= 0:
 		return out
-	# Keep only the best `allowed` requests in memory for this tick.
-	# Dense world partitions commonly have far more queued cells than the
-	# per-frame generation budget; sorting the whole queue is unnecessary.
 	var queued: Array[Req] = []
+	# Most frame budgets request only a handful of chunks. Keep a bounded,
+	# sorted top-K instead of sorting every queued cell on each frame.
 	for r: Req in _reqs.values():
 		if r.state != State.QUEUED:
 			continue
-		var insert_at: int = queued.size()
-		for i in queued.size():
-			if _before(r, queued[i]):
-				insert_at = i
-				break
-		if insert_at >= allowed:
-			continue
-		queued.insert(insert_at, r)
-		if queued.size() > allowed:
-			queued.pop_back()
-	for i in queued.size():
+		if allowed <= 4:
+			var pos: int = 0
+			while pos < queued.size() and not _before(r, queued[pos]):
+				pos += 1
+			if pos < allowed:
+				queued.insert(pos, r)
+				if queued.size() > allowed:
+					queued.pop_back()
+		else:
+			queued.append(r)
+	if allowed > 4:
+		queued.sort_custom(_before)
+	for i in mini(allowed, queued.size()):
 		queued[i].state = State.IN_FLIGHT
 		out.append(queued[i].cell)
 	return out
