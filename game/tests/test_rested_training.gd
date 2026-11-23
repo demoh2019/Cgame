@@ -6,6 +6,7 @@ const GameServer = preload("res://scripts/server/game_server.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 const CrossTraining = preload("res://scripts/shared/cross_training.gd")
+const DeepPractice = preload("res://scripts/shared/deep_practice.gd")
 
 
 func run(t) -> void:
@@ -162,3 +163,79 @@ func run(t) -> void:
 	capped.skills.xp["medic"] = Skills.MAX_XP - 5
 	server._award(capped, "medic", 20.0)
 	t.eq(capped.rested_xp_credit, 57, "base action XP alone reaches the cap")
+
+	t.current = "deep practice: two distinct skills in one branch"
+	var deep: Dictionary = {}
+	t.eq(DeepPractice.trained_branches(deep, 20.0), 0, "new training has no discipline depth")
+	deep = DeepPractice.record(deep, "woodcutting", 10.0, 20.0)
+	deep = DeepPractice.record(deep, "woodcutting", 10.0, 21.0)
+	t.eq(DeepPractice.skills_in_branch(deep, "gathering", 21.0), 1,
+		"repeating a skill does not simulate a new technique")
+	t.eq(deep["woodcutting"], 20.0, "same-skill refresh is rate limited")
+	deep = DeepPractice.record(deep, "mining", 4.0, 21.0)
+	t.eq(DeepPractice.skills_in_branch(deep, "gathering", 21.0), 1,
+		"tiny progress cannot count as a different technique")
+	deep = DeepPractice.record(deep, "mining", 10.0, 22.0)
+	t.eq(DeepPractice.skills_in_branch(deep, "gathering", 22.0), 2,
+		"two meaningful skills build one discipline")
+	t.eq(DeepPractice.trained_branches(deep, 22.0), 1,
+		"deep training counts practiced disciplines, not actions")
+	t.check(DeepPractice.active_for(deep, "foraging", 20.0, 22.0),
+		"third skill in mastered discipline receives a training bonus")
+	t.check(not DeepPractice.active_for(deep, "medic", 20.0, 22.0),
+		"unrelated discipline cannot borrow training depth")
+	t.check(not DeepPractice.active_for(deep, "foraging", 1.0, 22.0),
+		"trivial tick awards cannot use training depth")
+	t.check(not DeepPractice.active_for(deep, "unrecognized", 20.0, 22.0),
+		"unknown skills cannot activate the reward")
+	t.eq(DeepPractice.skills_in_branch(deep, "gathering", 203.0), 0,
+		"depth expires after three minutes")
+	t.eq(DeepPractice.skills_in_branch(
+		{"woodcutting": NAN, "mining": INF, "foraging": 99.0}, "gathering", 22.0),
+		0, "invalid or future timestamps never earn depth")
+	t.eq(DeepPractice.skills_in_branch(deep, "gathering", NAN), 0,
+		"invalid server clock never enables depth")
+	t.eq(Training.bonus_for(20.0, 100, 1, false, true), 17,
+		"novice deep-practice bonus alone adds 10 percentage points")
+	t.eq(Training.bonus_for(20.0, 100, 10, true, true), 18,
+		"developing player can combine both training bonuses")
+	t.eq(Training.bonus_for(20.0, 100, 25, true, true), 16,
+		"expert combines disciplined and varied practice")
+	t.eq(Training.bonus_for(20.0, 100, 1, true, true), 20,
+		"novice combined training is capped at +100 percent")
+	t.eq(Training.bonus_for(20.0, 3, 1, true, true), 3,
+		"deep practice cannot overspend the paid reserve")
+
+	t.current = "deep practice is live, server-owned, and reconnect-safe"
+	var focused = server.add_player(807, "Focused")
+	focused.rested_xp_credit = 220
+	server.time = 20.0
+	server._award(focused, "woodcutting", 10.0)
+	server._award(focused, "mining", 10.0)
+	t.eq(int(server.snapshot_for(focused.id)["you"]["deep_practice_branches"]), 1,
+		"the owner can see the newly trained gathering discipline")
+	var before_foraging: int = int(focused.skills.xp["foraging"])
+	server._award(focused, "foraging", 20.0)
+	t.eq(int(focused.skills.xp["foraging"]) - before_foraging, 37,
+		"real gathering work receives the +85 percent novice bonus")
+	t.eq(focused.rested_xp_credit, 187,
+		"deep practice consumes only confirmed bonus XP from paid rest")
+	server._award(focused, "medic", 10.0)
+	server._award(focused, "crafting", 10.0)
+	server._award(focused, "melee", 10.0)
+	server._award(focused, "marksman", 10.0)
+	t.eq(int(server.snapshot_for(focused.id)["you"]["deep_practice_branches"]), 2,
+		"gathering and combat both become deeply trained disciplines")
+	var before_slayer: int = int(focused.skills.xp["slayer"])
+	server._award(focused, "slayer", 20.0)
+	t.eq(int(focused.skills.xp["slayer"]) - before_slayer, 40,
+		"real combat mastery combines both bonuses but caps at twice base XP")
+	var focused_saved: Dictionary = server.character_data(focused)
+	t.check(not focused_saved.has("deep_practice_state"),
+		"discipline state cannot be forged through saved character data")
+	var relogged = server.add_player(808, "Focused again", "focused-account", focused_saved)
+	t.eq(int(server.snapshot_for(relogged.id)["you"]["deep_practice_branches"]), 0,
+		"reconnecting clears temporary training depth")
+	server.time = 201.0
+	t.eq(int(server.snapshot_for(focused.id)["you"]["deep_practice_branches"]), 0,
+		"old discipline exercises expire without extra permanent bonuses")
