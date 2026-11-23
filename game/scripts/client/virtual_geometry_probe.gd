@@ -46,3 +46,23 @@ static func attach_for_debug(mesh: Mesh, camera: Camera3D) -> RefCounted:
 	if int(renderer.call("attach", camera.get_parent(), camera)) != 1:
 		return null
 	return renderer
+
+
+## Remove the debug compositor callback before freeing its GPU page RIDs.
+## Renderer resources are created by the render thread, so retire them there.
+static func detach_for_debug(renderer: RefCounted, camera: Camera3D) -> void:
+	if renderer == null:
+		return
+	if camera != null and is_instance_valid(camera) and camera.compositor != null:
+		var comp: Compositor = camera.compositor
+		var effects: Array[CompositorEffect] = comp.compositor_effects
+		for effect in effects.duplicate():
+			if effect.get("renderer") == renderer:
+				effects.erase(effect)
+		comp.compositor_effects = effects
+	if RenderingServer.has_method("call_on_render_thread"):
+		RenderingServer.call_on_render_thread(Callable(renderer, "release"))
+	else:
+		# A renderer without this API is necessarily on the legacy
+		# fallback path, which never allocated the GPU page buffers.
+		renderer.call("release")
