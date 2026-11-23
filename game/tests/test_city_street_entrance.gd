@@ -2,6 +2,24 @@ extends RefCounted
 ## City ring entrances, street-index parity and varied settlement shapes.
 const CityLayout = preload("res://scripts/shared/city_layout.gd")
 
+	t.current = "malformed city geometry stays fail-closed and bounded"
+	t.check(not CityLayout.contains(Vector2.ZERO, "radial", INF),
+		"infinite settlement radius cannot cover the whole map")
+	t.check(not CityLayout.contains(Vector2.ZERO, "radial", NAN),
+		"NaN settlement radius cannot create a valid footprint")
+	t.check(not CityLayout.contains(Vector2.ZERO, "radial", radius, NAN),
+		"nonfinite city rotation cannot create a valid footprint")
+	t.check(CityLayout.building_lots(17, "radial", INF, 0.0).is_empty(),
+		"invalid radius cannot create infinite building lot positions")
+	t.check(CityLayout.building_lots(17, "radial", CityLayout.MAX_LAYOUT_RADIUS + 1.0, 0.0).is_empty(),
+		"extreme city radius cannot create unbounded lot coordinates")
+	t.check(CityLayout.streets("radial", INF, 0.0).is_empty(),
+		"infinite radius cannot create unbounded road geometry")
+	t.check(CityLayout.streets("radial", CityLayout.MAX_LAYOUT_RADIUS + 1.0, 0.0).is_empty(),
+		"oversized city radius is rejected before road subdivision")
+	t.check(CityLayout.streets("radial", radius, INF).is_empty(),
+		"nonfinite rotation cannot create corrupt road vertices")
+
 
 func run(t) -> void:
 	t.current = "closed city ring connects to the side facing the regional road"

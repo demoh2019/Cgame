@@ -3,6 +3,8 @@ extends RefCounted
 ## Offsets are relative to the city centre; rotation is applied only at the output boundary.
 
 const TYPES := ["grid", "radial", "oval", "hexagonal", "organic", "linear", "triangular", "crescent"]
+## Generated settlements currently top out at 92 m; reject hostile inputs that explode road sampling.
+const MAX_LAYOUT_RADIUS := 256.0
 ## A malformed or extremely long road may cover millions of index cells.
 ## Keep such segments in a tiny scalar fallback list instead of allocating the grid.
 const MAX_INDEX_CELLS_PER_SEGMENT := 4096
@@ -17,7 +19,8 @@ static func rotation_for_seed(seed: int) -> float:
 
 
 static func contains(offset: Vector2, layout: String, radius: float, rotation: float = 0.0) -> bool:
-	if radius <= 0.0 or not offset.is_finite():
+	if not offset.is_finite() or not is_finite(radius) or radius <= 0.0 or radius > MAX_LAYOUT_RADIUS \
+			or not is_finite(rotation):
 		return false
 	var p: Vector2 = offset.rotated(-rotation)
 	var x: float = absf(p.x)
@@ -52,6 +55,8 @@ static func contains(offset: Vector2, layout: String, radius: float, rotation: f
 
 ## Candidate building lots, deliberately separated by roads. The caller validates water and collision spacing.
 static func building_lots(seed: int, layout: String, radius: float, rotation: float) -> Array[Dictionary]:
+	if not is_finite(radius) or radius <= 0.0 or radius > MAX_LAYOUT_RADIUS or not is_finite(rotation):
+		return []
 	var candidates: Array[Vector2] = []
 	match layout:
 		"grid":
@@ -134,6 +139,8 @@ static func building_lots(seed: int, layout: String, radius: float, rotation: fl
 
 ## Polyline paths for terrain-painted, traversable streets. Every segment is at most 12 metres.
 static func streets(layout: String, radius: float, rotation: float) -> Array:
+	if not is_finite(radius) or radius <= 0.0 or radius > MAX_LAYOUT_RADIUS or not is_finite(rotation):
+		return []
 	var result: Array = []
 	match layout:
 		"grid":
