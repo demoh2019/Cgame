@@ -369,7 +369,10 @@ static func entity_id(cell: Vector2i, index: int) -> int:
 ## Never trust an ID alone: the server also checks player proximity and
 ## verifies the exact ID inside the decoded chunk before granting actions.
 static func entity_cell(entity: int) -> Vector2i:
-	if entity <= 0:
+	# The canonical 2048x2048 cell domain uses exactly 4,194,304,000 IDs.
+	# Reject huge network integers before narrowing them to Vector2i's
+	# 32-bit axes, which would otherwise wrap into an unrelated world cell.
+	if entity <= 0 or entity > 2048 * 2048 * 1000:
 		return Vector2i(1024, 1024)
 	@warning_ignore("integer_division")
 	var packed_cell: int = (entity - 1) / 1000
