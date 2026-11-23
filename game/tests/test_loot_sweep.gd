@@ -74,7 +74,8 @@ func run(t) -> void:
 			"z": owner.position.z + oz, "items": {"fiber_1": 1},
 			"allowed_tokens": [], "reserved_until": 0.0,
 			"expires": server.time + 20.0}
-		var distance: float = Vector2(ox, oz).length_squared()
+		var bag_at := Vector2(float(dense[id]["x"]), float(dense[id]["z"]))
+		var distance: float = Vector2(owner.position.x, owner.position.z).distance_squared_to(bag_at)
 		if distance <= Sweep.RADIUS * Sweep.RADIUS:
 			reference.append({"id": id, "distance": distance})
 	reference.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
