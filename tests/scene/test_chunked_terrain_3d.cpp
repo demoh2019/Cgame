@@ -353,7 +353,7 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Sparse patches rebuild only touched ter
 	ERR_PRINT_OFF;
 	CHECK_FALSE(terrain->apply_height_patch(Rect2i(0, 0, 2, 2), PackedFloat32Array({ 0.7f })));
 	CHECK_FALSE(terrain->apply_height_patch(Rect2i(-1, 0, 1, 1), PackedFloat32Array({ 0.7f })));
-	CHECK_FALSE(terrain->apply_height_patch(Rect2i(0, 0, 1, 1), PackedFloat32Array({ Math::INF })));
+	CHECK_FALSE(terrain->apply_height_patch(Rect2i(0, 0, 1, 1), PackedFloat32Array({ float(Math::INF) })));
 	ERR_PRINT_ON;
 	CHECK(terrain->get_height_data() == before);
 
