@@ -2063,6 +2063,9 @@ func _apply_world_state() -> void:
 	# Rescanning every node of every loaded chunk each frame cost ~1.2 ms; only chunks that have not seen
 	# the current server revision (new chunks, or after a gather/crate change) need it.
 	var revision: int = client.world_state_revision
+	# Movement prediction must stop treating hidden trees, logs and rocks as
+	# obstacles as soon as their authoritative depletion reaches the client.
+	client.world.set_depleted_resources(client.depleted)
 	var hidden: Dictionary = {}
 	for cell in streamer.get_loaded_cells():
 		var chunk := streamer.get_chunk(cell)
