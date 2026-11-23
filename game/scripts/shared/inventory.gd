@@ -109,6 +109,13 @@ func remove(id: String, amount: int) -> bool:
 		left -= taken
 		if int(slots[i]["count"]) == 0:
 			slots[i] = {}
+	# Equipment and durability belong to items still physically carried.
+	# Dropping the final copy must not leave a phantom equipped weapon or
+	# give a later, freshly acquired item the old one's damage.
+	if count(id) == 0:
+		wear.erase(id)
+		if is_equipped(id):
+			unequip_missing()
 	return true
 
 
@@ -180,6 +187,7 @@ func take_everything() -> Dictionary:
 	weapon = ""
 	armor = ""
 	gear = {}
+	wear.clear()
 	return result
 
 
