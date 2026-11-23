@@ -2329,7 +2329,12 @@ func _update_prompt() -> void:
 	elif not node.is_empty():
 		var resource_kind: String = str(node["kind"])
 		if ResourceGathering.is_pickup(resource_kind):
-			text = "[E] Pick up %s" % ("loose stones" if resource_kind == "pebble" else "fallen sticks")
+			text = "[E] %s" % {
+				"pebble": "Pick up loose stones",
+				"branch": "Pick up fallen sticks",
+				"bush": "Gather fibers",
+				"berry": "Pick berries",
+			}.get(resource_kind, "Collect resources")
 		elif ResourceGathering.is_strike(resource_kind):
 			text = "[LMB] %s %s (tier %d)" % ["Chop" if resource_kind == "tree" else "Mine", resource_kind, int(node["tier"])]
 		else:
