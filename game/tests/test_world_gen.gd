@@ -81,12 +81,37 @@ func run(t) -> void:
 	var min_spacing := 1000.0
 	var loose_pickups := 0
 	var modeled_boulders := 0
+	var roadside_caches := 0
 	for cx in range(-10, 11):
 		for cz in range(-10, 11):
 			var data := a.chunk(Vector2i(cx, cz))
 			total_nodes += data["nodes"].size()
 			ruins += 1 if data["ruin"] else 0
 			zombies += data["spawns"].size()
+			for crate in data["crates"]:
+				if not bool(crate.get("roadside_cache", false)):
+					continue
+				roadside_caches += 1
+				var p := Vector2(float(crate["x"]), float(crate["z"]))
+				t.eq(crate["kind"], "crate", "roadside supplies use existing lootable crates")
+				t.eq(int(crate["id"]), WorldGen.entity_id(Vector2i(cx, cz), WorldGen.ROADSIDE_CACHE_ID_BASE),
+						"roadside supplies use reserved stable world IDs")
+				t.eq(WorldGen.cell_of(p.x, p.y), Vector2i(cx, cz),
+						"roadside supplies stay in their owning chunk")
+				t.check(not a.is_water(p.x, p.y), "roadside supplies stay on land")
+				t.near(float(crate["y"]), a.height_at(p.x, p.y), 0.001,
+						"roadside supplies match terrain height")
+				t.check(a.roads.coverage_at(p.x, p.y) <= 0.01, "roadside crates do not block road travel")
+				var nearest := INF
+				for piece in a.roads.pieces_in_cell(Vector2i(cx, cz)):
+					var start: Vector2 = piece[0]
+					var end: Vector2 = piece[1]
+					var delta: Vector2 = end - start
+					if delta.length_squared() <= 0.0001:
+						continue
+					var fraction: float = clampf((p - start).dot(delta) / delta.length_squared(), 0.0, 1.0)
+					nearest = minf(nearest, p.distance_to(start + delta * fraction))
+				t.check(nearest <= 9.01, "roadside supply caches are reachable from a nearby road")
 			for node in data["nodes"]:
 				if node.has("stone_model"):
 					var model_index: int = int(node["stone_model"])
@@ -109,6 +134,7 @@ func run(t) -> void:
 	t.check(total_nodes > 3000, "the world has plenty to gather (%d)" % total_nodes)
 	t.check(loose_pickups > 100, "seeded world includes pickable modeled stones (%d)" % loose_pickups)
 	t.check(modeled_boulders > 20, "seeded world includes mineable modeled rocks (%d)" % modeled_boulders)
+	t.check(roadside_caches > 0, "roads contain collectible traveler caches (%d)" % roadside_caches)
 	t.check(tiers_seen.size() >= 3, "several tiers exist near the hub (%d)" % tiers_seen.size())
 	t.check(kinds_seen.has("tree") and kinds_seen.has("rock") and kinds_seen.has("bush"), "trees, rocks and bushes exist")
 	t.check(ruins > 8, "ruins exist (%d)" % ruins)
