@@ -19,6 +19,8 @@ const SUITES := [
 	"res://tests/test_model_catalog.gd",
 	"res://tests/test_imported_mesh_lod.gd",
 	"res://tests/test_virtual_geometry_attribute_lod.gd",
+	"res://tests/test_meshlet_renderer.gd",
+	"res://tests/test_meshlet_page_streaming.gd",
 	"res://tests/test_virtual_geometry_meshlet_pages.gd",
 	"res://tests/test_mesh_pbr_preservation.gd",
 	"res://tests/test_graphics_stone_microdetail.gd",
