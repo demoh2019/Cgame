@@ -69,14 +69,18 @@ static func objectives(you: Variant) -> Array[Dictionary]:
 			"RECOVER TEAMMATE GEAR", "x", "z", true)
 		_add(result, group.get("rally", {}), "rally",
 			"PARTY RALLY", "x", "z", true)
-		var party_ping: Dictionary = group.get("ping", {})
-		var ping_label := "PARTY PING"
-		if str(party_ping.get("kind", "")) == "survey" and (
-				str(party_ping.get("material", "")) in ["ore", "rock"]) and (
-				int(party_ping.get("tier", 0)) >= 2 and int(party_ping.get("tier", 0)) <= 4):
-			ping_label = "T%d %s PARTY VEIN" % [
-				int(party_ping["tier"]), str(party_ping["material"]).to_upper()]
-		_add(result, party_ping, "ping", ping_label, "x", "z", true)
+		var raw_ping: Variant = group.get("ping", {})
+		if raw_ping is Dictionary:
+			var party_ping: Dictionary = raw_ping
+			var ping_label := "PARTY PING"
+			var tier_value: Variant = party_ping.get("tier", 0)
+			# A malformed tier cannot turn an ordinary ping into a high-tier ore vein.
+			if str(party_ping.get("kind", "")) == "survey" and (
+					str(party_ping.get("material", "")) in ["ore", "rock"]) and (
+					tier_value is int) and tier_value >= 2 and tier_value <= 4:
+				ping_label = "T%d %s PARTY VEIN" % [
+					tier_value, str(party_ping["material"]).to_upper()]
+			_add(result, party_ping, "ping", ping_label, "x", "z", true)
 	return result
 
 

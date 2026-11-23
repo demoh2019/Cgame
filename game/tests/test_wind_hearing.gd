@@ -50,6 +50,17 @@ func run(t) -> void:
 	t.check(WindHearing.radius(1000.0, gust * 100.0, source, downwind, 33.0) <= 33.0,
 		"extreme gusts and sound remain bounded by each infected leash")
 
+	t.current = "extreme but finite vectors cannot distort infected hearing"
+	t.near(WindHearing.radius(sound, Vector2(1.0e30, 0.0),
+		source, downwind, 33.0), sound, 0.0001,
+		"overflowing squared wind velocity falls back to original sound range")
+	t.near(WindHearing.radius(sound, gust, Vector2(-1.0e30, 0.0),
+		Vector2(1.0e30, 0.0), 33.0), sound, 0.0001,
+		"huge finite actor separation cannot produce a directional hearing bonus")
+	t.near(WindHearing.radius(sound, gust, Vector2(-1.0e30, 0.0),
+		Vector2(1.0e30, 0.0), sound), sound, 0.0001,
+		"numeric edge cases remain limited by the infected's hearing leash")
+
 	t.current = "initial infected aggro uses wind, not an everlasting combat buff"
 	var world := WorldGen.new(114)
 	var ground := WorldGen.HUB_HEIGHT

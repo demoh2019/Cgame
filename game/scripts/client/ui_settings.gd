@@ -80,14 +80,15 @@ static func set_value(key: String, value, persist: bool = true) -> void:
 static func sanitize(key: String, value):
 	var fallback = DEFAULTS.get(key)
 	var numeric: bool = typeof(value) in [TYPE_FLOAT, TYPE_INT]
+	var finite_numeric: bool = numeric and is_finite(float(value))
 	match key:
 		"ui_scale":
 			var f: float = float(value) if numeric else 1.0
 			return clampf(f if is_finite(f) else 1.0, UI_SCALE_MIN, UI_SCALE_MAX)
 		"colorblind":
-			return clampi(int(value) if numeric else 0, 0, COLORBLIND_NAMES.size() - 1)
+			return int(clampf(float(value), 0.0, float(COLORBLIND_NAMES.size() - 1))) if finite_numeric else 0
 		"caption_size":
-			return clampi(int(value) if numeric else 1, 0, CAPTION_SIZES.size() - 1)
+			return int(clampf(float(value), 0.0, float(CAPTION_SIZES.size() - 1))) if finite_numeric else 1
 		"locale":
 			return str(value) if str(value) in LOCALES else ""
 		"fp_fov":
@@ -96,7 +97,14 @@ static func sanitize(key: String, value):
 		"mouse_sensitivity":
 			var sens: float = float(value) if numeric else 1.0
 			return clampf(sens if is_finite(sens) else 1.0, 0.1, 4.0)
-	return bool(value) if typeof(fallback) == TYPE_BOOL else fallback
+	if typeof(fallback) == TYPE_BOOL:
+		if value is bool:
+			return value
+		# Old versions stored 0/1 flags. Keep compatibility without making a
+		# damaged "false" string or NaN enable flashing/shaking settings.
+		if finite_numeric and (float(value) == 0.0 or float(value) == 1.0):
+			return float(value) == 1.0
+	return fallback
 
 
 ## Multiplier for camera shake (Unreal "Camera Shake Scale", Cinemachine impulse gain).

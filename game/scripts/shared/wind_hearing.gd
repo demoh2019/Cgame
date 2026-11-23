@@ -17,10 +17,17 @@ static func radius(noise: float, wind: Vector2, source: Vector2,
 		return 0.0
 	if not wind.is_finite() or not source.is_finite() or not listener.is_finite():
 		return original
-	var speed: float = wind.length()
+	var wind_squared: float = wind.length_squared()
 	var offset: Vector2 = listener - source
-	if speed <= MIN_WIND_SPEED or offset.length_squared() < 0.0001:
+	var offset_squared: float = offset.length_squared()
+	# Finite vector components can still overflow squared distances.
+	# Invalid propagation geometry must never boost or suppress hearing.
+	if not offset.is_finite() or not is_finite(wind_squared) or \
+			not is_finite(offset_squared):
 		return original
+	if wind_squared <= MIN_WIND_SPEED * MIN_WIND_SPEED or offset_squared < 0.0001:
+		return original
+	var speed: float = sqrt(wind_squared)
 	var wind_factor: float = clampf((speed - MIN_WIND_SPEED) /
 		(FULL_WIND_SPEED - MIN_WIND_SPEED), 0.0, 1.0)
 	var direction: float = clampf(wind.normalized().dot(offset.normalized()), -1.0, 1.0)

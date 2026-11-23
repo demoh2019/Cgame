@@ -122,6 +122,44 @@ func run(t) -> void:
 	cached.find_path(Vector2i(1, 1), Vector2i(20, 20))
 	t.eq(cached.cache_hits, 1, "invalidate drops cached routes")
 
+	t.current = "many NPC routes cannot grow the abstract cache without bound"
+	_walls.clear()
+	var limited := HierarchicalPathfinder.new()
+	limited.build(48, 48, 8, _is_open)
+	var earliest_start := Vector2i(1, 1)
+	var earliest_goal := Vector2i(9, 1)
+	var recent_start := Vector2i.ZERO
+	var recent_goal := Vector2i.ZERO
+	for i in HierarchicalPathfinder.MAX_CACHED_ROUTES + 9:
+		# Deterministic unique directed pairs from a 6x6 cluster map.
+		var start_cluster: int = i / 35
+		var goal_cluster: int = i % 35
+		if goal_cluster >= start_cluster:
+			goal_cluster += 1
+		var a: Vector2i = Vector2i((start_cluster % 6) * 8 + 1,
+			(start_cluster / 6) * 8 + 1)
+		var b: Vector2i = Vector2i((goal_cluster % 6) * 8 + 1,
+			(goal_cluster / 6) * 8 + 1)
+		var candidate: PackedVector2Array = limited.find_path(a, b)
+		t.check(_valid(candidate, a, b),
+			"cached navigation paths remain physically traversable")
+		t.check(limited.cached_route_count() <= HierarchicalPathfinder.MAX_CACHED_ROUTES,
+			"cache size stays below fixed residency budget")
+		recent_start = a
+		recent_goal = b
+	t.eq(limited.cached_route_count(), HierarchicalPathfinder.MAX_CACHED_ROUTES,
+		"full route cache evicts older entries instead of growing indefinitely")
+	var hits: int = limited.cache_hits
+	t.check(_valid(limited.find_path(recent_start, recent_goal), recent_start, recent_goal),
+		"most recent cached corridor can still be refined")
+	t.eq(limited.cache_hits, hits + 1, "retained corridor is a cache hit")
+	t.check(_valid(limited.find_path(earliest_start, earliest_goal), earliest_start, earliest_goal),
+		"evicted old corridor is rebuilt on demand")
+	t.eq(limited.cache_hits, hits + 1, "expired corridor cannot masquerade as a hit")
+	limited.invalidate_cluster(Vector2i(16, 16))
+	t.eq(limited.cached_route_count(), 0,
+		"dynamic geometry changes invalidate resident corridors and FIFO order")
+
 	t.current = "repeated navigation updates recycle abstract graph slots"
 	_walls.clear()
 	var reused := HierarchicalPathfinder.new()

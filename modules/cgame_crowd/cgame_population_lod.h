@@ -81,6 +81,8 @@ class CgamePopulationLOD : public RefCounted {
 		real_t strength = 0.0;
 		real_t radius = 1.0;
 		real_t ttl = -1.0;
+		int source_id = 0;
+		bool sourced = false; // Reusable per-player signal, not a one-off event.
 	};
 
 	struct Spawner {
@@ -174,8 +176,15 @@ public:
 	void set_kind_weight(const String &p_kind, real_t p_weight);
 	real_t get_kind_weight(const String &p_kind) const;
 	void add_attractor(const String &p_kind, const Vector2 &p_pos, real_t p_strength, real_t p_radius, real_t p_ttl = -1.0);
+	void set_source_attractor(const String &p_kind, int p_source_id, const Vector2 &p_pos, real_t p_strength, real_t p_radius, real_t p_ttl);
+	int active_attractor_count() const { return (int)attractors.size(); }
 	void clear_attractors();
-	void set_night(bool p_night) { night = p_night; }
+	void set_night(bool p_night) {
+		if (night != p_night) {
+			night = p_night;
+			attr_dirty = true;
+		}
+	}
 	bool is_night() const { return night; }
 	void set_decay(int p_region, real_t p_rate);
 	void add_spawner(int p_region, const String &p_type, real_t p_rate, int p_cap);

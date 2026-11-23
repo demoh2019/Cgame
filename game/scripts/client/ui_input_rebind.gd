@@ -98,7 +98,8 @@ static func conflict(action: String, keycode: int) -> String:
 ## Rebinds `action` to `keycode`. A key already used by another rebindable action swaps with it so no action
 ## is left unbound. Returns the id of the swapped action or "".
 static func rebind(action: String, keycode: int, persist: bool = true, config_path: String = "") -> String:
-	if not InputMap.has_action(action) or keycode == KEY_NONE:
+	if not action_ids().has(action) or not InputMap.has_action(action) or \
+			keycode == KEY_NONE or keycode < 0 or keycode > 16777215:
 		return ""
 	var swapped := conflict(action, keycode)
 	var previous := key_of(action)
@@ -139,16 +140,47 @@ static func save_bindings(config_path: String = "") -> int:
 	return config.save(file_path)
 
 
+## Decode a potentially hand-edited config into one unique, complete key map.
+## Swapping an occupied default is essential: replacing a binding with another
+## action's default must not leave that action bound to the same key.
+static func resolved_saved(raw: Dictionary) -> Dictionary:
+	var result: Dictionary = {}
+	for entry in ACTIONS:
+		result[entry[0]] = int(entry[2])
+	for entry in ACTIONS:
+		var action: String = str(entry[0])
+		if not raw.has(action):
+			continue
+		var desired: Variant = raw[action]
+		if not (desired is int):
+			continue
+		var code: int = int(desired)
+		if code <= 0 or code > 16777215 or code == int(entry[2]):
+			continue
+		var old: int = int(result[action])
+		if code == old:
+			continue
+		var owner: String = ""
+		for other in ACTIONS:
+			if int(result[other[0]]) == code:
+				owner = str(other[0])
+				break
+		result[action] = code
+		if not owner.is_empty():
+			result[owner] = old
+	return result
+
+
 static func load_bindings(config_path: String = "") -> void:
 	var file_path := config_path if config_path != "" else UiSettings.path
 	var config := ConfigFile.new()
 	if config.load(file_path) != OK or not config.has_section(SECTION):
 		return
-	var seen := {}
+	var saved: Dictionary = {}
 	for entry in ACTIONS:
-		var raw = config.get_value(SECTION, entry[0], entry[2])
-		var code: int = int(raw) if typeof(raw) in [TYPE_INT, TYPE_FLOAT] else entry[2]
-		if code <= 0 or seen.has(code): # Reject corrupt or duplicated saved keys; fall back to the default.
-			code = entry[2]
-		seen[code] = true
-		_set_key(entry[0], code)
+		var action: String = str(entry[0])
+		if config.has_section_key(SECTION, action):
+			saved[action] = config.get_value(SECTION, action)
+	var resolved: Dictionary = resolved_saved(saved)
+	for entry in ACTIONS:
+		_set_key(entry[0], int(resolved[entry[0]]))
