@@ -8,6 +8,7 @@ extends RefCounted
 ## contracts exactly like the hub's. The bank and the market stay in the hub's safe zone.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const CityLayout = preload("res://scripts/shared/city_layout.gd")
 
 const REGION_SIZE := 256.0
 const MIN_HUB_DISTANCE := 150.0
@@ -162,13 +163,17 @@ func _find_site(rx: int, rz: int) -> Array:
 		var site_seed: int = world.mix(rx, rz, world.world_seed, 73)
 		var name := _place_name(site_seed)
 		var station_offset := Vector2(3.5, 0.0)
-		return [{
+		var site: Dictionary = {
 			"id": site_seed % 10000000, "kind": kind, "name": name, "title": KINDS[kind]["title"],
 			"display": _display_name(kind, name), "x": p.x, "z": p.y, "y": world.height_at(p.x, p.y),
 			"radius": radius, "clear": float(KINDS[kind]["clear"]) * radius, "zone": zone, "biome": biome,
 			"station": bool(KINDS[kind]["station"]), "station_x": p.x + station_offset.x, "station_z": p.y + station_offset.y,
 			"seed": site_seed,
-		}]
+		}
+		if kind == "city":
+			site["layout"] = CityLayout.layout_for_seed(site_seed)
+			site["layout_rotation"] = CityLayout.rotation_for_seed(site_seed)
+		return [site]
 	return _find_landmark(rx, rz)
 
 
@@ -357,12 +362,13 @@ func contents(site: Dictionary) -> Dictionary:
 			_npcs(result, rng, site, [["miner", 2]], 5.0, 11.0)
 			_zombies(result, rng, center, rng.randi_range(2, 4), 6.0, 24.0, zone, true)
 		"city":
-			_houses(result, rng, center, rng.randi_range(14, 22), 14.0, 80.0, 12.0, taken)
+			_city_buildings(result, rng, site, center, taken)
 			_ruin_bits(result, rng, center, rng.randi_range(24, 36), 8.0, 84.0, taken)
 			_fences(result, rng, center, rng.randi_range(8, 14), 10.0, 82.0, [WALL_STONE, 4, 0])
 			_crates(result, rng, center, rng.randi_range(6, 10), 8.0, 64.0, taken)
 			_props(result, rng, center, rng.randi_range(20, 30), 6.0, 70.0, RUIN_PROPS)
 			_zombies(result, rng, center, rng.randi_range(8, 14) + zone, 8.0, 70.0, zone, true)
+			_trim_city_footprint(result, center, str(site["layout"]), float(site["layout_rotation"]), float(site["radius"]))
 		"bunker":
 			_ring_walls(result, rng, center, 24.0, 0.85, [WALL_STONE, 4])
 			_towers(result, center, [Vector2(-20.0, 0.0), Vector2(20.0, 0.0)] if rng.randf() < 0.5 else [Vector2(0.0, 0.0)], 1.0, 1)
@@ -388,6 +394,38 @@ func contents(site: Dictionary) -> Dictionary:
 			_zombies(result, rng, center, rng.randi_range(0, 2), 14.0, 28.0, zone, false)
 	site["contents"] = result
 	return result
+
+
+## City buildings follow the seeded district plan, leaving actual room for painted streets.
+func _city_buildings(result: Dictionary, rng: RandomNumberGenerator, site: Dictionary, center: Vector2, taken: Array) -> void:
+	var layout: String = str(site["layout"])
+	var rotation: float = float(site["layout_rotation"])
+	var candidates: Array[Dictionary] = CityLayout.building_lots(int(site["seed"]), layout, float(site["radius"]), rotation)
+	var wanted: int = rng.randi_range(14, 22)
+	var placed := 0
+	for lot in candidates:
+		if placed >= wanted:
+			break
+		var p: Vector2 = center + Vector2(lot["offset"])
+		if not _usable(p, taken, 12.0):
+			continue
+		taken.append(p)
+		placed += 1
+		var yaw: float = float(lot["yaw"]) + rng.randf_range(-0.12, 0.12)
+		result["structures"].append({"kind": "building", "variant": _house_variant(rng, BUILDING_VARIANTS - 1),
+			"scale": BUILDING_SCALE, "x": p.x, "z": p.y, "y": _ground(p), "yaw": yaw,
+			"radius": BUILDING_SCALE * 0.62, "blocks": true})
+
+
+## Keep rubble, loot and enemies inside the same footprint as the city blocks.
+func _trim_city_footprint(result: Dictionary, center: Vector2, layout: String, rotation: float, radius: float) -> void:
+	for group in ["structures", "crates", "props", "spawns"]:
+		var inside: Array = []
+		for item in result[group]:
+			var offset := Vector2(float(item["x"]), float(item["z"])) - center
+			if CityLayout.contains(offset, layout, radius, rotation):
+				inside.append(item)
+		result[group] = inside
 
 
 func _house_variant(rng: RandomNumberGenerator, limit: int) -> int:

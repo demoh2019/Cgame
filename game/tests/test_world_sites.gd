@@ -4,6 +4,7 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
+const CityLayout = preload("res://scripts/shared/city_layout.gd")
 
 
 func _all_sites(world, radius_regions: int = 13) -> Array:
@@ -17,6 +18,7 @@ func _all_sites(world, radius_regions: int = 13) -> Array:
 func run(t) -> void:
 	_island(t)
 	_sites(t)
+	_city_layouts(t)
 	_contents(t)
 	_chunks(t)
 	_stations(t)
@@ -75,6 +77,56 @@ func _sites(t) -> void:
 			else:
 				far += 1
 	t.check(near >= 3 and far >= 8, "settlements exist both close to the hub (%d) and far away (%d)" % [near, far])
+
+
+func _city_layouts(t) -> void:
+	t.current = "city footprint and street plans"
+	var radius := 92.0
+	var angle := 0.37
+	for layout in CityLayout.TYPES:
+		var lots: Array[Dictionary] = CityLayout.building_lots(97321, layout, radius, angle)
+		t.check(lots.size() >= 14, "%s creates many buildable lots" % layout)
+		t.eq(lots, CityLayout.building_lots(97321, layout, radius, angle), "city lots are deterministic")
+		for lot in lots:
+			var offset: Vector2 = lot["offset"]
+			t.check(CityLayout.contains(offset, layout, radius, angle), "a city lot stays inside its footprint")
+			t.check(offset.length() <= radius, "a city lot stays in the surrounding site circle")
+		var streets: Array = CityLayout.streets(layout, radius, angle)
+		t.check(streets.size() >= 3, "%s has a local road network" % layout)
+		for street in streets:
+			var path: PackedVector2Array = street
+			t.check(path.size() >= 3, "city streets have enough points for road painting")
+			for point in path:
+				t.check(point.length() <= radius, "city roads stay in the surrounding site circle")
+	t.check(CityLayout.contains(Vector2(70.0, 0.0), "radial", radius), "circular cities extend radially")
+	t.check(not CityLayout.contains(Vector2(70.0, 0.0), "grid", radius), "square cities have distinct boundaries")
+	t.check(not CityLayout.contains(Vector2(0.0, 70.0), "linear", radius), "linear cities remain narrow")
+
+	var world := WorldGen.new(1337)
+	var seen: Dictionary = {}
+	var first_city: Dictionary = {}
+	for site in _all_sites(world):
+		if str(site["kind"]) != "city":
+			continue
+		var layout: String = str(site["layout"])
+		seen[layout] = true
+		t.check(CityLayout.TYPES.has(layout), "a generated city has a supported layout")
+		if first_city.is_empty():
+			first_city = site
+		var center := Vector2(float(site["x"]), float(site["z"]))
+		var content: Dictionary = world.poi.contents(site)
+		for group in ["structures", "crates", "props", "spawns"]:
+			for item in content[group]:
+				var offset := Vector2(float(item["x"]), float(item["z"])) - center
+				t.check(CityLayout.contains(offset, layout, float(site["radius"]), float(site["layout_rotation"])),
+						"all city content respects its shape")
+	t.check(seen.size() >= 3, "the island generates multiple city layouts (%s)" % str(seen.keys()))
+	if not first_city.is_empty():
+		var city_roads := 0
+		for road in world.roads.all_roads():
+			if road["from"] == first_city["display"] and road["to"] == first_city["display"]:
+				city_roads += 1
+		t.check(city_roads >= 3, "the generated city has internal painted streets")
 
 
 func _contents(t) -> void:
