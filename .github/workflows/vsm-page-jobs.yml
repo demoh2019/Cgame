@@ -1,0 +1,81 @@
+name: Native virtual shadow clipmap page jobs
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/cgame_streaming/virtual_shadow_pages.*'
+      - 'modules/cgame_streaming/tests/test_cgame_rendering_data.h'
+      - 'modules/cgame_streaming/doc_classes/VirtualShadowPages.xml'
+      - 'game/scripts/shared/virtual_shadow_pages.gd'
+      - 'game/tests/test_shadow_pages_and_gates.gd'
+      - 'game/tests/run_vsm_page_jobs.gd'
+      - '.github/workflows/vsm-page-jobs.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/cgame_streaming/virtual_shadow_pages.*'
+      - 'modules/cgame_streaming/tests/test_cgame_rendering_data.h'
+      - 'modules/cgame_streaming/doc_classes/VirtualShadowPages.xml'
+      - 'game/scripts/shared/virtual_shadow_pages.gd'
+      - 'game/tests/test_shadow_pages_and_gates.gd'
+      - 'game/tests/run_vsm_page_jobs.gd'
+      - '.github/workflows/vsm-page-jobs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: vsm-page-jobs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-vsm-page-jobs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-vsm-page-jobs
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Test native virtual shadow clipmap and page jobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --test --test-case='*[VirtualShadowPages]*' --no-colors 2>&1 | tee vsm-native.log
+          if grep -Ei 'FAILED|AssertionError|error:' vsm-native.log; then exit 1; fi
+      - name: Import Albion After scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee vsm-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' vsm-import.log; then exit 1; fi
+      - name: Test Albion After shadow page fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_vsm_page_jobs.gd 2>&1 | tee vsm-game.log
+          grep -E '^VSM PAGE JOBS TOTAL: [0-9]+ checks, 0 failures$' vsm-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' vsm-game.log; then exit 1; fi
+      - name: Save failure logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsm-page-jobs-logs
+          if-no-files-found: ignore
+          path: |
+            vsm-native.log
+            vsm-import.log
+            vsm-game.log
