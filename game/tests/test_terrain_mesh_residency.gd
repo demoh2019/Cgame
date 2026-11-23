@@ -84,8 +84,13 @@ func run(t) -> void:
 		"reducing the cap evicts unused GPU mesh RIDs immediately")
 	for z in live.get_chunk_grid_size().y:
 		for x in live.get_chunk_grid_size().x:
-			t.check(live.get_chunk_cached_lod_count(Vector2i(x, z)) <= 1,
+			var cell := Vector2i(x, z)
+			var kept: int = live.get_chunk_cached_lod_count(cell)
+			t.check(kept <= 1,
 				"one active LOD is kept for every terrain chunk after live eviction")
+			if live.get_chunk_lod(cell) >= 0:
+				t.eq(kept, 1,
+					"LRU eviction never frees the currently rendered mesh RID")
 	eye.position = Vector3(2, 1, 2)
 	live.force_update()
 	t.check(live.get_cached_mesh_count() > 0 and live.get_cached_mesh_count() <= chunks,
