@@ -364,6 +364,7 @@ const SUITES := [
 	"res://tests/test_parry_riposte.gd",
 	"res://tests/test_stagger_finisher.gd",
 	"res://tests/test_movement.gd",
+	"res://tests/test_solid_scenery_collision.gd",
 	"res://tests/test_mounts.gd",
 	"res://tests/test_bike_visual.gd",
 	"res://tests/test_bike_lantern.gd",
