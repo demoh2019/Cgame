@@ -84,6 +84,11 @@ func setup(p_client) -> void:
 	client = p_client
 	visible = false
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	# The chart handles keyboard shortcuts in _gui_input() (Space centres the map).
+	# Plain Control defaults to FOCUS_NONE, so grab_focus() on J warned every time.
+	focus_mode = Control.FOCUS_ALL
+	focus_behavior_recursive = Control.FOCUS_BEHAVIOR_ENABLED
+	accessibility_name = "World map"
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_water_gradient = GradientBatch.make_gradient(WATER_SHALLOW, WATER_DEEP)

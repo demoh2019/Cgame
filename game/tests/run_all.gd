@@ -76,6 +76,7 @@ const SUITES := [
 	"res://tests/test_snapshot_interest_grid.gd",
 	"res://tests/test_network_jitter_buffer.gd",
 	"res://tests/test_ui_parity.gd",
+	"res://tests/test_world_map_focus.gd",
 	"res://tests/test_world_overlay_significance.gd",
 	"res://tests/test_terrain_shader_lod.gd",
 	"res://tests/test_terrain_screen_lod.gd",
