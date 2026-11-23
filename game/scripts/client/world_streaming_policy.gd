@@ -11,14 +11,20 @@ const IDLE_VELOCITY_SQ := 0.16
 const MAX_PREDICTIVE_SPEED := 48.0
 
 
-static func lookahead_seconds(mounted: bool, velocity: Vector3) -> float:
-	# Reject both non-finite components and squared-length overflow. This is
-	# presentation-only; authoritative player movement is never modified.
+## Check raw frame displacement before the 18 m/s visual hint clamp.
+## Otherwise a teleport during a short render frame looks like ordinary
+## movement and incorrectly prefetches unrelated terrain for several frames.
+static func plausible_velocity(velocity: Vector3) -> bool:
 	if not velocity.is_finite():
-		return 0.0
+		return false
 	var speed_squared: float = velocity.length_squared()
-	if not is_finite(speed_squared) or speed_squared < IDLE_VELOCITY_SQ or \
-			speed_squared > MAX_PREDICTIVE_SPEED * MAX_PREDICTIVE_SPEED:
+	return is_finite(speed_squared) and \
+		speed_squared <= MAX_PREDICTIVE_SPEED * MAX_PREDICTIVE_SPEED
+
+
+static func lookahead_seconds(mounted: bool, velocity: Vector3) -> float:
+	# Presentation-only; authoritative player movement is never modified.
+	if not plausible_velocity(velocity) or velocity.length_squared() < IDLE_VELOCITY_SQ:
 		return 0.0
 	return RIDING_LOOKAHEAD if mounted else WALK_LOOKAHEAD
 
