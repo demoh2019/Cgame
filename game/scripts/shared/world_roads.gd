@@ -154,8 +154,9 @@ func _lay_road(a: Dictionary, b: Dictionary) -> void:
 	else:
 		finish -= direction * float(b["end"])
 	var length: float = start.distance_to(finish)
-	# Nearby sites may have entrances less than two road steps apart: keep that connection.
-	if length < 3.0:
+	# Preserve old non-city link spacing; a nearby city entrance still needs a short connection.
+	var minimum_length: float = 3.0 if a.has("layout") or b.has("layout") else STEP * 2.0
+	if length < minimum_length:
 		return
 	var side := Vector2(-direction.y, direction.x)
 	var seed_value: int = world.mix(int(a["x"]), int(b["z"]), int(a["z"]) + int(b["x"]), world.world_seed)
