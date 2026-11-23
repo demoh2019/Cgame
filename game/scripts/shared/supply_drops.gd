@@ -25,12 +25,15 @@ static func site_near(world, player_position: Vector3, rng: RandomNumberGenerato
 		var direction := Vector2.from_angle(rng.randf_range(0.0, TAU))
 		var point := origin + direction * rng.randf_range(MIN_DISTANCE, MAX_DISTANCE)
 		var zone: int = world.zone_at(point.x, point.y)
-		if not ZoneRisk.full_loot(zone) or world.is_water(point.x, point.y):
+		if not ZoneRisk.full_loot(zone) or world.is_safe(point.x, point.y) or world.is_water(point.x, point.y):
 			continue
-		if world.normal_at(point.x, point.y).y < 0.75:
+		var ground_normal: Vector3 = world.normal_at(point.x, point.y)
+		if not ground_normal.is_finite() or ground_normal.y < 0.75:
 			continue
-		return {"x": point.x, "y": world.height_at(point.x, point.y),
-			"z": point.y, "zone": zone}
+		var elevation: float = world.height_at(point.x, point.y)
+		if not is_finite(elevation):
+			continue
+		return {"x": point.x, "y": elevation, "z": point.y, "zone": zone}
 	return {}
 
 
@@ -146,8 +149,10 @@ static func _guard_point_safe(world, point: Vector2, zone: int,
 		survivors: Array[Vector3], infected: Dictionary,
 		selected: Array[Dictionary]) -> bool:
 	if not point.is_finite() or world.zone_at(point.x, point.y) != zone or \
-			world.is_safe(point.x, point.y) or world.is_water(point.x, point.y) or \
-			world.normal_at(point.x, point.y).y < 0.75 or \
+			world.is_safe(point.x, point.y) or world.is_water(point.x, point.y):
+		return false
+	var ground_normal: Vector3 = world.normal_at(point.x, point.y)
+	if not ground_normal.is_finite() or ground_normal.y < 0.75 or \
 			not Movement._is_free(world, point):
 		return false
 	for survivor in survivors:

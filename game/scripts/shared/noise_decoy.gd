@@ -32,7 +32,8 @@ static func landing(world, origin: Vector3, direction: Vector2) -> Dictionary:
 		return {}
 	if world.is_safe(target.x, target.y) or world.is_water(target.x, target.y):
 		return {}
-	if world.normal_at(target.x, target.y).y < 0.7:
+	var ground_normal: Vector3 = world.normal_at(target.x, target.y)
+	if not ground_normal.is_finite() or ground_normal.y < 0.7:
 		return {}
 	# Sample the physical flight path so a client cannot throw through trees,
 	# rock pillars or barricades to distract enemies on the far side.
@@ -42,17 +43,22 @@ static func landing(world, origin: Vector3, direction: Vector2) -> Dictionary:
 			if point.distance_to(Vector2(float(blocker["x"]), float(blocker["z"]))) < (
 					float(blocker["radius"]) + 0.3):
 				return {}
-	return {"x": target.x, "y": world.height_at(target.x, target.y), "z": target.y}
+	var elevation: float = world.height_at(target.x, target.y)
+	if not is_finite(elevation):
+		return {}
+	return {"x": target.x, "y": elevation, "z": target.y}
 
 
 static func is_audible(decoy: Dictionary, position: Vector3, now: float) -> bool:
 	if not position.is_finite() or not is_finite(now):
 		return false
-	if float(decoy.get("expires", -1.0)) <= now:
+	var expiry: float = float(decoy.get("expires", NAN))
+	var x: float = float(decoy.get("x", NAN))
+	var z: float = float(decoy.get("z", NAN))
+	if not is_finite(expiry) or expiry <= now or not is_finite(x) or not is_finite(z):
 		return false
-	var offset := Vector2(position.x - float(decoy["x"]),
-			position.z - float(decoy["z"]))
-	return offset.length_squared() <= HEARING_RADIUS * HEARING_RADIUS
+	var offset := Vector2(position.x - x, position.z - z)
+	return offset.is_finite() and offset.length_squared() <= HEARING_RADIUS * HEARING_RADIUS
 
 
 static func visible_state(decoy: Dictionary, now: float) -> Dictionary:

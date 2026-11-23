@@ -6,6 +6,9 @@ extends RefCounted
 
 const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const CELL_SIZE := 8.0
+## Avoid quadratic cell enumeration for unusually large AI reach values.
+## Beyond this range scanning the indexed wall array is safer and preserves order.
+const MAX_GRID_QUERY_REACH := CELL_SIZE * 8.0
 
 
 static func build(barricades: Dictionary) -> Dictionary:
@@ -43,12 +46,20 @@ static func candidates(index: Dictionary, here: Vector2, toward: Vector2,
 	var cells: Dictionary = index.get("cells", {})
 	var positions: Array = index.get("positions", [])
 	var ids: Array = index.get("ids", [])
+	var reach_sq: float = reach * reach
+	if reach > MAX_GRID_QUERY_REACH:
+		# Wide queries would enumerate thousands of empty cells; scan only
+		# real indexed walls and preserve the original barricade ordering.
+		for slot in ids.size():
+			var offset: Vector2 = positions[slot] - here
+			if offset.length_squared() <= reach_sq and offset.dot(toward) > 0.0:
+				result.append(int(ids[slot]))
+		return result
 	var low := Vector2i(floori((here.x - reach) / CELL_SIZE),
 		floori((here.y - reach) / CELL_SIZE))
 	var high := Vector2i(floori((here.x + reach) / CELL_SIZE),
 		floori((here.y + reach) / CELL_SIZE))
 	var selected: Array[int] = []
-	var reach_sq: float = reach * reach
 	for cx in range(low.x, high.x + 1):
 		for cz in range(low.y, high.y + 1):
 			var slots: Array = cells.get(Vector2i(cx, cz), [])
