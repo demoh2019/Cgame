@@ -116,6 +116,8 @@ func _city_layouts(t) -> void:
 				t.check(point.length() <= radius, "city roads stay in the surrounding site circle")
 				t.check(CityLayout.contains(point, layout, radius, angle), "city streets stay within their own footprint")
 		var entrance: Vector2 = CityLayout.entrance_offset(layout, radius, angle, Vector2.RIGHT)
+		t.eq(CityLayout.entrance_on_paths(streets, Vector2.RIGHT), entrance,
+				"road entrances reuse cached street paths without changing geometry")
 		t.check(CityLayout.contains(entrance, layout, radius, angle), "the city entrance is inside the footprint")
 		var terminal_found := false
 		for street in streets:
