@@ -7432,8 +7432,8 @@ func _tick_barricade_upkeep(seconds: float) -> void:
 	var crumbled: Array = []
 	# Index connected owners just once for all structures in this upkeep pass.
 	# Account rights and guest peer IDs keep their original authoritative rules.
-	var active_owners: Dictionary = WallUpkeepIndex.live_owners(players, func(survivor) -> bool:
-		return _alive(survivor))
+	var active_owners: Dictionary = WallUpkeepIndex.live_owners(
+		players, func(survivor) -> bool: return _alive(survivor))
 	for id in barricades:
 		var wall: Dictionary = barricades[id]
 		if WallUpkeepIndex.owner_near(wall, active_owners):
