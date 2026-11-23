@@ -36,15 +36,21 @@ static func valid_site(world, site: Vector2, origin: Vector2, existing: Dictiona
 
 
 static func catches(trap: Dictionary, infected, now: float) -> bool:
-	if infected == null or not infected.is_alive() or infected.raid_boss:
+	if infected == null or not infected.is_alive() or infected.raid_boss or \
+			not is_finite(now) or now < 0.0 or not infected.position.is_finite():
 		return false
-	if not is_finite(now) or float(trap.get("expires", -1.0)) <= now:
+	var expiry_value: Variant = trap.get("expires", null)
+	if not (expiry_value is int or expiry_value is float) or \
+			not (trap.get("x", null) is int or trap.get("x", null) is float) or \
+			not (trap.get("z", null) is int or trap.get("z", null) is float):
 		return false
-	if not infected.position.is_finite():
-		return false
+	var expiry: float = float(expiry_value)
 	var center := Vector2(float(trap["x"]), float(trap["z"]))
+	if not is_finite(expiry) or expiry <= now or not center.is_finite():
+		return false
 	var position := Vector2(infected.position.x, infected.position.z)
-	return position.distance_squared_to(center) <= TRIGGER_RADIUS * TRIGGER_RADIUS
+	var distance_squared: float = position.distance_squared_to(center)
+	return is_finite(distance_squared) and distance_squared <= TRIGGER_RADIUS * TRIGGER_RADIUS
 
 
 static func root_duration(infected) -> float:
@@ -53,14 +59,33 @@ static func root_duration(infected) -> float:
 
 static func visible(traps: Dictionary, position: Vector3, now: float, radius: float) -> Array:
 	var output: Array = []
-	if not position.is_finite():
+	if not position.is_finite() or not is_finite(now) or now < 0.0 or \
+			not is_finite(radius) or radius <= 0.0:
 		return output
 	var here := Vector2(position.x, position.z)
-	for trap in traps.values():
+	var radius_squared: float = radius * radius
+	if not is_finite(radius_squared):
+		return output
+	for value in traps.values():
+		if not (value is Dictionary):
+			continue
+		var trap: Dictionary = value
+		if not (trap.get("id", null) is int) or \
+				not (trap.get("expires", null) is float or trap.get("expires", null) is int) or \
+				not (trap.get("x", null) is float or trap.get("x", null) is int) or \
+				not (trap.get("y", null) is float or trap.get("y", null) is int) or \
+				not (trap.get("z", null) is float or trap.get("z", null) is int):
+			continue
+		var expiry: float = float(trap["expires"])
 		var at := Vector2(float(trap["x"]), float(trap["z"]))
-		if float(trap["expires"]) > now and here.distance_squared_to(at) <= radius * radius:
+		var altitude: float = float(trap["y"])
+		if not is_finite(expiry) or expiry <= now or not at.is_finite() or \
+				not is_finite(altitude):
+			continue
+		var distance_squared: float = here.distance_squared_to(at)
+		if is_finite(distance_squared) and distance_squared <= radius_squared:
 			# Never send owner account, server expiry, or trigger bookkeeping.
-			output.append({"id": int(trap["id"]), "x": float(trap["x"]),
-				"y": float(trap["y"]), "z": float(trap["z"]),
-				"remaining": maxf(0.0, float(trap["expires"]) - now)})
+			output.append({"id": int(trap["id"]), "x": at.x,
+				"y": altitude, "z": at.y,
+				"remaining": expiry - now})
 	return output
