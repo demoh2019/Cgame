@@ -32,6 +32,7 @@
 
 #include "cgame_cluster_lod.h"
 #include "cgame_meshlets.h"
+#include "cgame_meshlet_pages.h"
 #include "cgame_occlusion_raster.h"
 
 #include "core/object/class_db.h"
