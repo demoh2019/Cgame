@@ -462,4 +462,81 @@ TEST_CASE("[VirtualShadowPages] Clipmap recentring and LRU eviction") {
 	CHECK((int)h2["allocated"] > 0);
 }
 
+
+TEST_CASE("[VirtualShadowPages] Active clipmap aliases and deterministic render jobs") {
+	Ref<VirtualShadowPages> v;
+	v.instantiate();
+	v->setup(1, 64.0, 128, 512, 8); // 4 pages per axis.
+	PackedVector3Array point;
+	point.push_back(Vector3(0, 0, 0));
+	v->begin_frame(LIGHT, Vector3());
+	CHECK(v->get_render_jobs().is_empty());
+	v->request_for_receivers(point, vsp_fp(1, 0.01f));
+	Dictionary first = v->end_frame();
+	const PackedInt32Array jobs1 = v->get_render_jobs();
+	REQUIRE(jobs1.size() == 4);
+	CHECK(jobs1[0] == 0); // level
+	CHECK(jobs1[1] == 0); // global page X
+	CHECK(jobs1[2] == 0); // global page Y
+	CHECK((int)first["rendered"] == jobs1.size() / 4);
+	CHECK(v->page_table()[0] == jobs1[3]);
+	const int old_slot = jobs1[3];
+
+	// Keep the original page cached while walking one WHOLE clipmap width.
+	// Both pages alias index (gx mod N)==0, but only the current one may
+	// appear in the GPU indirection table.
+	const real_t shift = v->page_world_size(0) * 4.0;
+	v->begin_frame(LIGHT, Vector3(shift, 0, 0));
+	CHECK(v->get_render_jobs().is_empty());
+	point.set(0, Vector3(shift, 0, 0));
+	v->request_for_receivers(point, vsp_fp(1, 0.01f));
+	Dictionary second = v->end_frame();
+	const PackedInt32Array jobs2 = v->get_render_jobs();
+	REQUIRE(jobs2.size() == 4);
+	CHECK(jobs2[0] == 0);
+	CHECK(jobs2[1] == 4);
+	CHECK(jobs2[2] == 0);
+	CHECK(jobs2[3] != old_slot);
+	CHECK((int)second["allocated"] == 1);
+	CHECK(v->is_resident(0, 0, 0)); // Old page retained for future reuse.
+	CHECK(v->is_resident(0, 4, 0));
+	CHECK(v->resident_count() == 2);
+	CHECK(v->page_table()[0] == jobs2[3]); // Never let old page overwrite new one.
+
+	v->begin_frame(LIGHT, Vector3(shift, 0, 0));
+	v->request_for_receivers(point, vsp_fp(1, 0.01f));
+	CHECK((int)v->end_frame()["rendered"] == 0);
+	CHECK(v->get_render_jobs().is_empty());
+	Array moved;
+	moved.push_back(AABB(Vector3(shift - 1.0, -1.0, -1.0), Vector3(2, 2, 2)));
+	v->begin_frame(LIGHT, Vector3(shift, 0, 0));
+	v->request_for_receivers(point, vsp_fp(1, 0.01f));
+	v->invalidate_casters(moved);
+	CHECK((int)v->end_frame()["rendered"] == 1);
+	const PackedInt32Array rerender = v->get_render_jobs();
+	REQUIRE(rerender.size() == 4);
+	CHECK(rerender[3] == jobs2[3]); // Dirty re-render uses the existing slot.
+
+	// Single-page clipmap must accept its centre (legacy half=0 skipped all).
+	v->setup(1, 16.0, 128, 128, 1);
+	v->begin_frame(LIGHT, Vector3());
+	point.set(0, Vector3(0, 0, 0));
+	v->request_for_receivers(point, vsp_fp(1, 0.01f));
+	CHECK((int)v->end_frame()["allocated"] == 1);
+	CHECK(v->page_table().size() == 1);
+	CHECK(v->page_table()[0] == 0);
+
+	// An odd-sized 3x3 clipmap must accept all three X columns.
+	v->setup(1, 48.0, 128, 384, 9);
+	v->begin_frame(LIGHT, Vector3());
+	const real_t pw = v->page_world_size(0);
+	PackedVector3Array three;
+	three.push_back(Vector3(-pw, 0, 0));
+	three.push_back(Vector3(0, 0, 0));
+	three.push_back(Vector3(pw, 0, 0));
+	v->request_for_receivers(three, vsp_fp(3, 0.01f));
+	CHECK((int)v->end_frame()["allocated"] == 3);
+	CHECK(v->get_render_jobs().size() == 12);
+}
+
 } //namespace TestCgameRenderingData
