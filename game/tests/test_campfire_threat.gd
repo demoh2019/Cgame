@@ -50,6 +50,31 @@ func run(t) -> void:
 		CampfireThreat.light_buckets(ties, night, true), Vector3.ZERO).get("id", -1),
 		3, "equal-distance fires use stable ID tie-break")
 
+	t.current = "damaged campfire records cannot lure infected"
+	var corrupt: Dictionary = fires.duplicate(true)
+	corrupt[8] = {"id": 8, "x": site.x, "z": site.y, "expires": "tomorrow"}
+	corrupt[9] = {"id": 7, "x": site.x, "z": site.y, "expires": night + 100.0}
+	corrupt[10] = {"id": 10, "x": NAN, "z": site.y, "expires": night + 100.0}
+	corrupt[11] = {"id": 11, "x": "210", "z": site.y, "expires": night + 100.0}
+	corrupt[12] = {"id": 12, "x": site.x, "z": site.y, "expires": INF}
+	corrupt[13] = "not a real campfire"
+	var filtered: Dictionary = CampfireThreat.light_buckets(corrupt, night, true)
+	var safe_entries: int = 0
+	for bucket in filtered.values():
+		safe_entries += bucket.size()
+	t.eq(safe_entries, 1,
+		"only a valid server-id-matched burning fire survives the indexed scan")
+	t.eq(CampfireThreat.nearest_light(filtered,
+		Vector3(site.x + 3.0, 0.0, site.y)).get("id", -1), 7,
+		"a nearby infected still investigates the genuine campfire")
+	var poisoned: Dictionary = filtered.duplicate(true)
+	var cell := Vector2i(floori(site.x / CampfireThreat.LURE_RADIUS),
+		floori(site.y / CampfireThreat.LURE_RADIUS))
+	(poisoned[cell] as Array).insert(0, {"id": 1, "x": NAN, "z": site.y})
+	t.eq(CampfireThreat.nearest_light(poisoned,
+		Vector3(site.x + 3.0, 0.0, site.y)).get("id", -1), 7,
+		"a bad nearest candidate cannot poison the infected target distance")
+
 	t.current = "server connects camp lighting to real infected AI"
 	var world := WorldGen.new(841)
 	var sim := GameServer.new(world, 841)
