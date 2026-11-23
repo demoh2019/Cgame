@@ -1566,8 +1566,13 @@ func cmd_resource_pickup(peer_id: int, node_id: int) -> Dictionary:
 		return {"ok": false, "reason": "depleted"}
 	if _distance_xz(player.position, node) > Defs.REACH + 0.5:
 		return {"ok": false, "reason": "too_far"}
+	if not player.progression.can_gather(str(node["kind"]), int(node["tier"])):
+		return {"ok": false, "reason": "need_skill",
+			"skill": Progression.resource_skill(str(node["kind"])), "tier": node["tier"]}
 	var info: Dictionary = Defs.node_info(str(node["kind"]))
-	var item_id: String = "%s_1" % str(info["yield"])
+	var item_id: String = str(info["yield"])
+	if item_id in ["wood", "stone", "ore", "fiber"]:
+		item_id = "%s_%d" % [item_id, int(node["tier"])]
 	if player.inventory.free_space_for(item_id) < int(info["amount"]):
 		return {"ok": false, "reason": "inventory_full"}
 	_finish_gather(player, node)
