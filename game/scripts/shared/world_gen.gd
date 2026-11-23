@@ -19,6 +19,7 @@ var _temperature: FastNoiseLite
 var _moisture: FastNoiseLite
 var _cache: Dictionary = {}
 var dynamic_blockers: Dictionary = {} # Session structures shared with movement and prediction.
+var depleted_blockers: Dictionary = {} # Reference to authoritative resource depletion; removed trees cannot stay solid.
 var _hub_structures: Array = []
 var _level_rx: int = 1 << 30
 var _level_rz: int = 1 << 30
@@ -834,7 +835,7 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 ## Slots 810..819 do not overlap loose stones (550..789), pickups (790..809),
 ## outposts (850+), hostiles (900+) or grove trees (960+).
 const FALLEN_WOOD_ID_BASE := 810
-const FALLEN_WOOD_MAX := 10
+const FALLEN_WOOD_MAX := 1
 
 
 func _add_fallen_wood(cell: Vector2i, origin: Vector2, tier: int, nodes: Array,
@@ -848,7 +849,7 @@ func _add_fallen_wood(cell: Vector2i, origin: Vector2, tier: int, nodes: Array,
 		return
 	var placed := 0
 	for _attempt in 16:
-		if placed >= 1:
+		if placed >= FALLEN_WOOD_MAX:
 			break
 		# Keep every 5m log away from borders so adjacent chunks cannot
 		# create overlapping collision on either side of a streaming seam.
@@ -958,6 +959,12 @@ static func _pick_zombie(zone: int, rng: RandomNumberGenerator) -> String:
 	return "walker"
 
 
+## Server and client provide their current resource state. Dictionaries are
+## reference values, so server depletion/respawn updates require no full copy.
+func set_depleted_resources(ids: Dictionary) -> void:
+	depleted_blockers = ids
+
+
 ## Static things that block movement near a point, for both the server and client prediction.
 func add_dynamic_blocker(id: int, x: float, z: float, radius: float) -> void:
 	if is_finite(x) and is_finite(z) and is_finite(radius) and radius > 0.0:
@@ -1008,6 +1015,8 @@ func blockers_near(x: float, z: float, radius: float) -> Array:
 			var data := chunk(Vector2i(cx, cz))
 			for group in ["nodes", "crates", "structures", "props"]:
 				for n in data[group]:
+					if group == "nodes" and depleted_blockers.has(int(n["id"])):
+						continue
 					if n["blocks"] and absf(n["x"] - x) < radius + n["radius"] and absf(n["z"] - z) < radius + n["radius"]:
 						result.append(n)
 	# Include built obstacles without erasing the procedural hub/terrain blockers.
