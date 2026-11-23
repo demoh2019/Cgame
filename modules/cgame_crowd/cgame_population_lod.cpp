@@ -644,9 +644,22 @@ bool CgamePopulationLOD::_near_player(const Vector2 &p_pos, const PackedVector2A
 
 PackedInt32Array CgamePopulationLOD::regions_near(const PackedVector2Array &p_positions) const {
 	PackedInt32Array out;
-	for (int r = 0; r < region_count(); r++) {
-		if (_near_player(region_center(r), p_positions) && herd_region_count(r) > 0) {
-			out.push_back(r);
+	if (p_positions.is_empty() || herds.is_empty()) {
+		return out;
+	}
+	// Herds are ordered by id, not region. Accumulate only occupied regions
+	// and sort the final result to retain the old ascending grid-cell order.
+	// This avoids scanning the entire world for every nearby-player query.
+	RBMap<int, int> occupied;
+	for (const KeyValue<int, Herd> &kv : herds) {
+		const Herd &h = kv.value;
+		if (_valid_region(h.region) && h.count > 0) {
+			occupied[h.region] += h.count;
+		}
+	}
+	for (const KeyValue<int, int> &kv : occupied) {
+		if (kv.value > 0 && _near_player(region_center(kv.key), p_positions)) {
+			out.push_back(kv.key);
 		}
 	}
 	return out;
