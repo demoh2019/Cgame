@@ -277,7 +277,10 @@ static func _deserialize_checked(schema: Dictionary, bytes: PackedByteArray, bas
 
 static func deserialize(schema: Dictionary, bytes: PackedByteArray, baseline: Dictionary) -> Dictionary:
 	var decoded: Dictionary = _deserialize_checked(schema, bytes, baseline)
-	return decoded["state"] if bool(decoded["ok"]) else {}
+	if not bool(decoded["ok"]):
+		return {}
+	var state: Dictionary = decoded["state"]
+	return state
 
 
 ## Versioned wrapper: 4-byte schema hash header followed by the payload.
