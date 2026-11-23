@@ -904,7 +904,7 @@ func _add_roadside_caches(cell: Vector2i, origin: Vector2, tier: int, nodes: Arr
 	rng.seed = mix(cell.x, cell.y, world_seed, 251)
 	if rng.randf() > ROADSIDE_CACHE_CHANCE:
 		return
-	for attempt in 12:
+	for _attempt in 12:
 		var piece: Array = pieces[rng.randi_range(0, pieces.size() - 1)]
 		var a: Vector2 = piece[0]
 		var b: Vector2 = piece[1]
@@ -916,7 +916,9 @@ func _add_roadside_caches(cell: Vector2i, origin: Vector2, tier: int, nodes: Arr
 		var p: Vector2 = a.lerp(b, rng.randf_range(0.2, 0.8)) + side * bank
 		# Both neighbors can spawn caches without creating collision at the seam.
 		var local: Vector2 = p - origin
-		if local.x < 6.0 or local.y < 6.0 or 				local.x >= Defs.CHUNK_SIZE - 6.0 or local.y >= Defs.CHUNK_SIZE - 6.0:
+		if local.x < 6.0 or local.y < 6.0:
+			continue
+		if local.x >= Defs.CHUNK_SIZE - 6.0 or local.y >= Defs.CHUNK_SIZE - 6.0:
 			continue
 		if is_water(p.x, p.y) or is_safe(p.x, p.y) or _in_site_clearing(p, sites):
 			continue
