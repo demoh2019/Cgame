@@ -3,6 +3,9 @@ extends RefCounted
 ## Offsets are relative to the city centre; rotation is applied only at the output boundary.
 
 const TYPES := ["grid", "radial", "oval", "hexagonal", "organic", "linear", "triangular", "crescent"]
+## A malformed or extremely long road may cover millions of index cells.
+## Keep such segments in a tiny scalar fallback list instead of allocating the grid.
+const MAX_INDEX_CELLS_PER_SEGMENT := 4096
 
 
 static func layout_for_seed(seed: int) -> String:
@@ -245,6 +248,11 @@ static func street_distance(point: Vector2, paths: Array) -> float:
 static func index_streets(paths: Array, cell_size: float = 16.0, max_clearance: float = 8.0) -> Dictionary:
 	var cells: Dictionary = {}
 	var segments := PackedVector2Array()
+	var overflow_segments := PackedInt32Array()
+	if not is_finite(cell_size):
+		cell_size = 16.0
+	if not is_finite(max_clearance):
+		max_clearance = 8.0
 	cell_size = maxf(cell_size, 1.0)
 	max_clearance = maxf(max_clearance, 0.0)
 	for street in paths:
@@ -261,6 +269,10 @@ static func index_streets(paths: Array, cell_size: float = 16.0, max_clearance: 
 			var max_x: int = floori((maxf(a.x, b.x) + max_clearance) / cell_size)
 			var min_y: int = floori((minf(a.y, b.y) - max_clearance) / cell_size)
 			var max_y: int = floori((maxf(a.y, b.y) + max_clearance) / cell_size)
+			var cell_count: float = float(max_x - min_x + 1) * float(max_y - min_y + 1)
+			if cell_count > float(MAX_INDEX_CELLS_PER_SEGMENT):
+				overflow_segments.append(segment_id)
+				continue
 			for cx in range(min_x, max_x + 1):
 				for cy in range(min_y, max_y + 1):
 					var key := Vector2i(cx, cy)
@@ -268,13 +280,13 @@ static func index_streets(paths: Array, cell_size: float = 16.0, max_clearance: 
 					candidates.append(segment_id)
 					cells[key] = candidates
 	return {"cell_size": cell_size, "margin": max_clearance, "cells": cells,
-			"segments": segments, "paths": paths}
+			"segments": segments, "overflow_segments": overflow_segments, "paths": paths}
 
 
 ## True when an obstacle circle would overlap the road surface plus clearance.
 ## Uses only local indexed segments, not every polyline in the city.
 static func street_blocked(point: Vector2, clearance: float, index: Dictionary) -> bool:
-	if clearance <= 0.0:
+	if not point.is_finite() or not is_finite(clearance) or clearance <= 0.0:
 		return false
 	if clearance > float(index["margin"]):
 		var paths: Array = index["paths"]
@@ -283,15 +295,20 @@ static func street_blocked(point: Vector2, clearance: float, index: Dictionary) 
 	var key := Vector2i(floori(point.x / cell_size), floori(point.y / cell_size))
 	var cells: Dictionary = index["cells"]
 	var local_segments: PackedInt32Array = cells.get(key, PackedInt32Array())
+	var overflow_segments: PackedInt32Array = index.get("overflow_segments", PackedInt32Array())
 	var endpoints: PackedVector2Array = index["segments"]
 	var radius_squared: float = clearance * clearance
-	for segment_id in local_segments:
-		var a: Vector2 = endpoints[segment_id * 2]
-		var b: Vector2 = endpoints[segment_id * 2 + 1]
-		var delta: Vector2 = b - a
-		var t: float = clampf((point - a).dot(delta) / delta.length_squared(), 0.0, 1.0)
-		if point.distance_squared_to(a + delta * t) < radius_squared:
-			return true
+	# Regular short roads use one grid bucket; unusually long roads use a
+	# bounded fallback without ever allocating the full covered grid.
+	for pass_id in 2:
+		var selected: PackedInt32Array = local_segments if pass_id == 0 else overflow_segments
+		for segment_id in selected:
+			var a: Vector2 = endpoints[segment_id * 2]
+			var b: Vector2 = endpoints[segment_id * 2 + 1]
+			var delta: Vector2 = b - a
+			var t: float = clampf((point - a).dot(delta) / delta.length_squared(), 0.0, 1.0)
+			if point.distance_squared_to(a + delta * t) < radius_squared:
+				return true
 	return false
 
 

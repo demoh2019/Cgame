@@ -43,9 +43,6 @@ func request(cell: Vector2i, priority: float, generation: int) -> bool:
 		_stats["rejected_stale"] = int(_stats["rejected_stale"]) + 1
 		return false
 	newest_generation = generation
-	# A malformed priority must not poison the strict ordering comparator.
-	if not is_finite(priority):
-		priority = 0.0
 	if _reqs.has(cell):
 		var r: Req = _reqs[cell]
 		r.generation = maxi(r.generation, generation)

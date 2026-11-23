@@ -40,3 +40,24 @@ func run(t) -> void:
 				distance < radius, "indexed and scalar clearance agree for sample %d" % i)
 	t.eq(CityLayout.street_distance(Vector2.ZERO, []), INF,
 		"empty street network leaves an infinite distance")
+
+	t.current = "oversized road segments stay accurate without huge grid allocation"
+	var highway: Array = [PackedVector2Array([
+		Vector2(-80000.0, 0.0), Vector2(80000.0, 0.0)])]
+	var highway_index: Dictionary = CityLayout.index_streets(highway, 16.0, 8.0)
+	t.eq((highway_index["cells"] as Dictionary).size(), 0,
+		"giant segment does not allocate thousands of empty street buckets")
+	t.eq((highway_index["overflow_segments"] as PackedInt32Array).size(), 1,
+		"long segment is retained in a compact scalar fallback")
+	for probe in [Vector2.ZERO, Vector2(0.0, 5.0), Vector2(0.0, 25.0),
+			Vector2(79999.0, 1.0), Vector2(80050.0, 0.0)]:
+		var expected_blocked: bool = CityLayout.street_distance(probe, highway) < 6.0
+		t.eq(CityLayout.street_blocked(probe, 6.0, highway_index), expected_blocked,
+			"overflow road clearance matches exact distance")
+	t.check(not CityLayout.street_blocked(Vector2(NAN, 0.0), 3.0, highway_index),
+		"nonfinite road probes cannot create bogus indexed collisions")
+	t.check(not CityLayout.street_blocked(Vector2.ZERO, INF, highway_index),
+		"nonfinite clearance cannot block settlement placement")
+	var safe_index: Dictionary = CityLayout.index_streets(highway, NAN, INF)
+	t.check(is_finite(float(safe_index["cell_size"])) and is_finite(float(safe_index["margin"])),
+		"nonfinite index parameters are normalized")
