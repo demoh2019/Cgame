@@ -4,6 +4,7 @@ extends RefCounted
 
 const Net = preload("res://scripts/shared/net.gd")
 const NetProtocol = preload("res://scripts/shared/net_protocol.gd")
+const NetSchema = preload("res://scripts/shared/net_schema.gd")
 
 
 func run(t) -> void:
@@ -47,5 +48,29 @@ func run(t) -> void:
 	var changed: PackedByteArray = handshake.duplicate()
 	changed[changed.size() - 1] = (changed[changed.size() - 1] + 1) % 256
 	t.check(not NetProtocol.accepts(other, changed), "different RPC fingerprint is rejected")
+	t.current = "network bitstream rejects truncated packets and preserves Unicode names"
+	var schema: Dictionary = {"fields": [
+		NetSchema.make_field("name", "string", 8),
+		NetSchema.make_field("count", "int", 12, 0.0, 4095.0),
+	]}
+	var long_name: String = "Ж".repeat(200)
+	var packet: PackedByteArray = NetSchema.serialize(schema,
+		{"name": long_name, "count": 1729}, {}, true)
+	var decoded: Dictionary = NetSchema.deserialize(schema, packet, {})
+	t.eq(decoded.get("name"), "Ж".repeat(127),
+		"255-byte string limit never splits a multibyte UTF-8 character")
+	t.eq(int(decoded.get("count", -1)), 1729,
+		"field following a multibyte name retains its correct bit offset")
+	var partial: PackedByteArray = packet.duplicate()
+	partial.resize(partial.size() - 1)
+	t.eq(NetSchema.deserialize(schema, partial, {"count": 2}), {},
+		"a truncated value cannot silently replace a valid baseline")
+	t.eq(NetSchema.deserialize(schema, PackedByteArray(), {"count": 2}), {},
+		"a missing presence mask cannot silently masquerade as an empty delta")
+	var baseline: Dictionary = {"name": "prior", "count": 15}
+	var empty_delta: PackedByteArray = NetSchema.serialize(schema, {}, baseline, true)
+	t.eq(NetSchema.deserialize(schema, empty_delta, baseline), baseline,
+		"valid unchanged deltas still preserve their baseline")
+
 	other.free()
 	net.free()
