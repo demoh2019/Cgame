@@ -13,8 +13,29 @@ func _find_danger_crate(world) -> Dictionary:
 	for cx in range(8, 20):
 		for cz in range(0, 16):
 			var data: Dictionary = world.chunk(Vector2i(cx, cz))
-			if int(data["zone"]) >= 2 and not data["crates"].is_empty():
-				var crate: Dictionary = data["crates"][0].duplicate(true)
+			if int(data["zone"]) >= 2:
+				for candidate in data["crates"]:
+					if bool(candidate.get("roadside_cache", false)) or bool(candidate.get("urban_cache", false)):
+						continue # This test covers ordinary loot, unchanged by exploration bonuses.
+					var crate: Dictionary = candidate.duplicate(true)
+					crate["zone"] = int(data["zone"])
+					return crate
+	return {}
+
+
+## Choose a real seeded cache from authoritative chunk data, never a synthetic
+## forged crate descriptor. Skip roadless chunks to keep the regression fast.
+func _find_roadside_crate(world) -> Dictionary:
+	for cx in range(-10, 11):
+		for cz in range(-10, 11):
+			var cell := Vector2i(cx, cz)
+			if world.roads.pieces_in_cell(cell).is_empty():
+				continue
+			var data: Dictionary = world.chunk(cell)
+			for candidate in data["crates"]:
+				if not bool(candidate.get("roadside_cache", false)):
+					continue
+				var crate: Dictionary = candidate.duplicate(true)
 				crate["zone"] = int(data["zone"])
 				return crate
 	return {}
@@ -36,6 +57,29 @@ func run(t) -> void:
 	t.eq(Scavenging.enriched_loot(3, 5, initial)["scrap"], 8, "maximum bonus is four scrap")
 	t.eq(Scavenging.enriched_loot(3, 5, initial)["antibiotics"], 1, "medicine cannot be multiplied")
 	t.eq(initial["scrap"], 4, "enriched loot does not mutate base dictionary")
+
+	t.current = "scavenging rewards real exploration caches"
+	for cache_zone in [0, 1, 2, 3]:
+		var travel: Dictionary = Scavenging.exploration_bonus(cache_zone, initial, "roadside")
+		var city: Dictionary = Scavenging.exploration_bonus(cache_zone, initial, "urban")
+		t.eq(int(travel.get("scrap", 0)), 5 + cache_zone,
+				"roadside supply caches grant only a bounded salvage bonus")
+		t.eq(int(city.get("scrap", 0)), 6 + cache_zone,
+				"urban courtyards grant a slightly larger salvage bonus")
+		if cache_zone >= 2:
+			var ingot_id: String = "bar_%d" % (cache_zone + 1)
+			t.eq(int(city.get(ingot_id, 0)), 1,
+					"dangerous-city caches include one tier-appropriate metal bar")
+			t.check(Defs.is_item(ingot_id), "city bonus is a real item in the shared catalog")
+		else:
+			t.eq(city.size(), initial.size(), "safe and yellow city salvage has no tiered bar")
+	t.eq(Scavenging.exploration_bonus(3, initial, "ordinary"), initial,
+			"ordinary crate loot remains unchanged")
+	t.eq(Scavenging.exploration_bonus(-1, initial, "roadside"), initial,
+			"invalid negative danger zones cannot grant exploration loot")
+	t.eq(Scavenging.exploration_bonus(999, initial, "urban"), initial,
+			"invalid excessive danger zones cannot grant exploration loot")
+	t.eq(initial["scrap"], 4, "exploration rewards never mutate the input loot")
 
 	t.current = "scavenging persistence is strict, atomic and backward compatible"
 	var profession := Progression.new()
@@ -85,6 +129,28 @@ func run(t) -> void:
 	t.eq(server.cmd_loot(910, int(crate["id"])).get("reason", ""), "empty",
 		"repeated opening cannot farm loot or XP")
 	t.eq(player.progression.scavenging_xp, expected_xp, "repeat opening awards no XP")
+
+	var roadside: Dictionary = _find_roadside_crate(world)
+	t.check(not roadside.is_empty(), "a real roadside cache is present in the seeded world")
+	if not roadside.is_empty():
+		var travel_server := GameServer.new(world, 3141)
+		var traveler = travel_server.add_player(912, "Traveler")
+		var road_x: float = float(roadside["x"])
+		var road_z: float = float(roadside["z"])
+		traveler.position = Vector3(road_x - 1.0, world.height_at(road_x - 1.0, road_z), road_z)
+		var road_zone: int = int(roadside["zone"])
+		var expected_rng := RandomNumberGenerator.new()
+		expected_rng.seed = WorldGen.mix(int(roadside["id"]), int(travel_server.time), world.world_seed, 3)
+		var baseline: Dictionary = Combat.crate_loot(road_zone, expected_rng)
+		var expected_supplies: Dictionary = Scavenging.exploration_bonus(road_zone, baseline, "roadside")
+		var before_scrap: int = traveler.inventory.count("scrap")
+		t.check(bool(travel_server.cmd_loot(912, int(roadside["id"])).get("ok", false)),
+				"a real roadside cache opens via the authoritative loot path")
+		t.eq(traveler.inventory.count("scrap") - before_scrap,
+				int(expected_supplies.get("scrap", 0)),
+				"the server grants the exact fixed roadside bonus above ordinary loot")
+		t.eq(str(travel_server.cmd_loot(912, int(roadside["id"])).get("reason", "")), "empty",
+				"reopening the same roadside cache cannot duplicate exploration supplies")
 	var bag_id: int = server.new_id()
 	server.bags[bag_id] = {"id": bag_id, "x": x, "y": player.position.y,
 		"z": z, "items": {"silver": 1}, "expires": server.time + 300.0}
