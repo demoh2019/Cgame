@@ -10,6 +10,8 @@ const UiGamepad = preload("res://scripts/client/ui_gamepad.gd")
 const UiAccess = preload("res://scripts/client/ui_access.gd")
 const UiTheme = preload("res://scripts/client/ui_theme.gd")
 const PauseMenu = preload("res://scripts/client/ui_pause_menu.gd")
+const AudioMix = preload("res://scripts/client/audio_mix.gd")
+const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 
 const TMP := "user://test_ui_parity.cfg"
 
@@ -164,12 +166,64 @@ func run(t) -> void:
 	t.eq(over.get_constant("outline_size", "Label"), before_outline, "high contrast restores outline")
 	t.check(not UiAccess.high_contrast_active(), "restored")
 
-	t.current = "settings menu builds"
+	t.current = "settings menu builds: graphics, audio, gameplay, keys and accessibility"
 	UiSettings.set_value("show_fps", false)
+	var prior_audio_path: String = AudioMix.path
+	AudioMix.path = "user://test_albion_settings_audio.cfg"
+	DirAccess.remove_absolute(AudioMix.path)
+	AudioMix.reset_volumes(false)
 	var menu := PauseMenu.new()
 	t.eq(menu.visible, false, "menu starts hidden")
-	t.eq(menu._tabs.get_tab_count(), 3, "three tabs")
+	t.eq(menu._tabs.get_tab_count(), 5, "five working Settings tabs")
 	t.eq(menu._bind_buttons.size(), UiInputRebind.ACTIONS.size(), "a button per rebindable action")
+	t.eq(menu._audio_sliders.size(), AudioMix.SLIDERS.size(), "one slider per real AudioMix bus")
+	for bus in AudioMix.SLIDERS:
+		var slider: HSlider = menu._audio_sliders[bus]
+		t.eq(slider.min_value, 0.0, "audio controls support silence")
+		t.eq(slider.max_value, 100.0, "audio controls support full volume")
+		t.eq(slider.step, 5.0, "audio controls snap to five percent")
+	t.eq(PauseMenu.graphics_selection(-10, false), 0, "graphics preset bounds negative values")
+	t.eq(PauseMenu.graphics_selection(999, false), 3, "graphics preset bounds oversized values")
+	t.eq(PauseMenu.graphics_selection(0, true), GraphicsQuality.NAMES.size(), "auto graphics has a real menu choice")
+	menu.set_graphics_choice(2, false)
+	t.eq(menu._graphics_picker.selected, 2, "Settings reflects manual high quality")
+	menu.set_graphics_choice(1, true)
+	t.eq(menu._graphics_picker.selected, 4, "Settings reflects auto quality")
+	var chosen: Array[int] = []
+	menu.graphics_selected.connect(func(level: int) -> void: chosen.append(level))
+	menu._graphics_picker.item_selected.emit(3)
+	t.eq(chosen, [3], "graphics tab sends chosen preset to live scene controller")
+	menu._graphics_picker.item_selected.emit(GraphicsQuality.NAMES.size())
+	t.eq(chosen, [3, 4], "graphics tab sends auto mode to live controller")
+	var sfx: HSlider = menu._audio_sliders["SFX"]
+	sfx.value = 35.0
+	t.near(float(AudioMix.volumes["SFX"]), 0.35, 0.001, "slider applies to real SFX bus")
+	menu.close()
+	var sound_cfg := ConfigFile.new()
+	t.eq(sound_cfg.load(AudioMix.path), OK, "closing settings persists changed sound volume")
+	t.near(float(sound_cfg.get_value("volume", "SFX", 1.0)), 0.35, 0.001, "SFX persisted")
+	AudioMix.set_volume("SFX", 0.7, false)
+	menu._refresh_audio_sliders()
+	t.near(sfx.value, 70.0, 0.01, "reopening the settings page refreshes externally changed volume")
+	var audio_page: VBoxContainer = menu._tabs.get_node("Audio").get_child(0) as VBoxContainer
+	var audio_reset: Button = audio_page.get_child(audio_page.get_child_count() - 1) as Button
+	audio_reset.pressed.emit()
+	for bus in AudioMix.SLIDERS:
+		t.near(float(AudioMix.volumes[bus]), 1.0, 0.001, "audio reset restores all five buses")
+	var online_source: String = FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
+	t.check(online_source.contains('menu.connect("graphics_selected"'),
+		"game connects pause graphics picker to real world rendering")
+	t.check(online_source.contains('settings_button.text = "Settings"'),
+		"title screen exposes the same Settings window")
+	t.check(online_source.contains("func _apply_graphics_selection(") and
+		online_source.contains("GraphicsQuality.apply(get_viewport()"),
+		"graphics selection uses the full renderer / streamer path")
+	t.eq(UiLocalization.t("Graphics", "ru"), "Графика", "graphics tab translated")
+	t.eq(UiLocalization.t("Audio", "ru"), "Звук", "audio tab translated")
+	AudioMix.path = prior_audio_path
+	AudioMix.reset_volumes(false)
+	AudioMix.load_all()
+	DirAccess.remove_absolute("user://test_albion_settings_audio.cfg")
 	menu._capturing = "access_fps"
 	var press := InputEventKey.new()
 	press.physical_keycode = KEY_F6
