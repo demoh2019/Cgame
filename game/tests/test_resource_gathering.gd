@@ -85,6 +85,17 @@ func run(t) -> void:
 	t.check(not ResourceGathering.aimed_at(Vector3.ZERO, large_stone, Vector2.RIGHT),
 		"invalid geometry never grants unlimited remote gathering reach")
 
+	t.current = "overflowing aim lengths and infinite rock bounds"
+	var near_rock: Dictionary = {"kind": "rock", "x": 0.5, "z": 0.0, "radius": 0.0}
+	t.check(not ResourceGathering.aimed_at(Vector3.ZERO, near_rock,
+		Vector2(1.0e30, 0.0), 2.0),
+		"finite components with overflowing length cannot bypass the close-range guard")
+	var infinite_rock: Dictionary = {"kind": "rock", "x": 5.0, "z": 0.0,
+		"radius": INF, "solid_model": true}
+	t.check(not ResourceGathering.aimed_at(Vector3.ZERO, infinite_rock,
+		Vector2.RIGHT, 2.0),
+		"infinite model radius cannot expand authorized mining reach")
+
 	t.current = "server-validated mining with incremental grants and shared depletion"
 	var world := WorldGen.new(42)
 	var tree: Dictionary = _find(world, "tree")
