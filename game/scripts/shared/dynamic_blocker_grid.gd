@@ -32,7 +32,8 @@ func upsert(key: Variant, blocker: Dictionary) -> void:
 	var rows: int = to.y - from.y + 1
 	# Huge footprints would fan out across thousands of buckets. Keep them
 	# in a small global overflow list rather than risking runaway memory.
-	if columns <= 0 or rows <= 0 or columns > MAX_ENTRY_TILES or rows > MAX_ENTRY_TILES 			or columns * rows > MAX_ENTRY_TILES:
+	if (columns <= 0 or rows <= 0 or columns > MAX_ENTRY_TILES
+			or rows > MAX_ENTRY_TILES or columns * rows > MAX_ENTRY_TILES):
 		_oversized[key] = true
 		_occupied[key] = []
 		return
@@ -77,7 +78,9 @@ func query(blockers: Dictionary, x: float, z: float, radius: float) -> Array:
 	var to: Vector2i = Vector2i(floori((x + radius) / TILE_SIZE), floori((z + radius) / TILE_SIZE))
 	var columns: int = to.x - from.x + 1
 	var rows: int = to.y - from.y + 1
-	if blockers.size() != _order.size() or columns <= 0 or rows <= 0 			or columns > MAX_QUERY_TILES or rows > MAX_QUERY_TILES 			or columns * rows > MAX_QUERY_TILES:
+	if (blockers.size() != _order.size() or columns <= 0 or rows <= 0
+			or columns > MAX_QUERY_TILES or rows > MAX_QUERY_TILES
+			or columns * rows > MAX_QUERY_TILES):
 		return _scan_all(blockers, x, z, radius)
 	var candidates: Dictionary = _oversized.duplicate()
 	for tx in range(from.x, to.x + 1):
