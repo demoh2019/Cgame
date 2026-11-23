@@ -74,6 +74,7 @@ const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const GraphicsTextureStreaming = preload("res://scripts/client/graphics_texture_streaming.gd")
 const TerrainLivePatch = preload("res://scripts/client/terrain_live_patch.gd")
+const VirtualGeometryPageInspector = preload("res://scripts/client/virtual_geometry_page_inspector.gd")
 const ObjectPopulationProfiler = preload("res://scripts/client/object_population_profiler.gd")
 const AmbientTickBudget = preload("res://scripts/client/ambient_tick_budget.gd")
 const AMBIENT_CPU_BUDGET_US := [900, 1500, 2500, 4000] # Quality tiers, main-thread cosmetics only.
@@ -2624,6 +2625,20 @@ func _update_first_person_mouse() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Nanite P1 asset-page validation on *actual* streamed foliage/props.
+	# Explicit debug keystroke only: no mesh scans/uploads per gameplay frame.
+	# Consume before ordinary F8 parry to avoid gameplay effects.
+	if OS.is_debug_build() and event is InputEventKey and event.pressed and \
+			not event.echo and event.ctrl_pressed and event.shift_pressed and \
+			event.keycode == KEY_F8:
+		var page_stats: Dictionary = VirtualGeometryPageInspector.inspect_streamed_world(
+			get_tree(), 8, 4096)
+		var page_report: String = VirtualGeometryPageInspector.format_report(page_stats)
+		print(page_report)
+		if hud != null:
+			hud.say(page_report)
+		get_viewport().set_input_as_handled()
+		return
 	# P1 large-world terrain editor validation: manually sculpt a small visual
 	# patch of the actually streamed ChunkedTerrain3D under the player. Debug
 	# only; collision is disabled here and server ground/AI are authoritative.
