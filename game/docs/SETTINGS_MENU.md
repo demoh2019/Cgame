@@ -32,6 +32,12 @@ Controls: remap keys, gamepad prompts, restore default bindings.
 Accessibility: colorblind filters, interface scale, reduced shake and
 flashes, high contrast and scalable closed captions.
 
+Each sound slider now displays its exact percentage beside the control.
+The Graphics tab has **Reset display settings**, which restores
+Windowed mode, V-Sync On and Unlimited FPS while preserving quality,
+interface preferences and key bindings. The menu refreshes selectors
+when reopened, and its tab bar accepts keyboard and gamepad focus.
+
 The content of every tab scrolls on small windows or when UI scale is
 increased for legibility.
 

@@ -22,6 +22,13 @@ class AlbionSettingsMenuContract(unittest.TestCase):
         self.assertIn("slider.drag_ended.connect(", pause)
         self.assertIn("AudioMix.reset_volumes()", pause)
         self.assertIn("slider.set_value_no_signal(", pause)
+        self.assertIn("var _audio_value_labels: Dictionary", pause)
+        self.assertIn("percent_label.text =", pause)
+        self.assertIn("_audio_value_labels[bus] = percent_label", pause)
+        self.assertIn("Control.FOCUS_ALL", pause)
+        self.assertIn("func _reset_display_settings()", pause)
+        self.assertIn("DisplaySettings.reset()", pause)
+        self.assertIn("_refresh_display_pickers()", pause)
         self.assertIn("UiInputRebind.rebind(", pause)
         self.assertIn("UiSettings.set_value(", pause)
 
@@ -59,6 +66,8 @@ class AlbionSettingsMenuContract(unittest.TestCase):
         for label in ('"Window mode"', '"Vertical sync"', '"FPS limit"'):
             self.assertIn(label, pause)
         self.assertIn('frame cap survives restart', tests)
+        self.assertIn('static func reset(persist: bool = true)', display)
+        self.assertIn('display reset never clears interface preferences', tests)
         self.assertIn('V-Sync survives restart', tests)
 
     def test_audio_persistence_and_translation_have_regressions(self):
@@ -71,6 +80,8 @@ class AlbionSettingsMenuContract(unittest.TestCase):
         self.assertIn("if not SLIDERS.has(bus):", mix)
         self.assertIn("linear if is_finite(linear) else 1.0", mix)
         self.assertIn("static func reset_volumes(", mix)
+        self.assertIn("var loaded: bool = config.load(path) == OK", mix)
+        self.assertIn("if loaded else 1.0", mix)
         self.assertIn('"Graphics": "Графика"', locale)
         self.assertIn('"Audio": "Звук"', locale)
         self.assertIn("five working Settings tabs", tests)
