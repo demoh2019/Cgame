@@ -4,6 +4,7 @@ extends Node3D
 ## "opened" flags from the server change what is shown.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const ResourceGathering = preload("res://scripts/shared/resource_gathering.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const StoneResources = preload("res://scripts/shared/stone_resources.gd")
 const GroundPlants = preload("res://scripts/client/ground_plants.gd")
@@ -1255,6 +1256,13 @@ func _build_objects(data: Dictionary) -> void:
 			_shadow_casters.append({"node": instance, "role": "tree" if kind.begins_with("tree:") else "structure",
 				"bounds": SceneryBatches.bounds_for(multimesh.mesh, transforms)})
 		_groups[batch_id] = {"multimesh": multimesh, "index": index, "transforms": transforms, "tree": kind.begins_with("tree:")}
+		for i in list.size():
+			var harvest_node: Dictionary = list[i]
+			var strikes: int = ResourceGathering.strikes_needed(str(harvest_node.get("kind", "")))
+			if strikes > 0 and harvest_node.has("id"):
+				_resource_damage_slots[int(harvest_node["id"])] = {
+					"mesh": multimesh, "slot": i, "tint": tints[i], "total": strikes,
+				}
 	_build_decor(origin, rng, data)
 	_build_windmills(windmills, origin)
 	_build_signposts(origin)
@@ -2131,6 +2139,32 @@ func _refresh_ground_contact() -> void:
 
 
 ## Hides depleted nodes and opened crates. `hidden_ids` is the set of ids the server says are gone.
+## Damage tint only changes for currently struck, streamed instances.
+## No duplicate meshes and no whole-chunk GPU buffer upload on every frame.
+func apply_resource_damage(hits: Dictionary) -> void:
+	for node_id in _resource_colored_hits.keys():
+		if hits.has(node_id):
+			continue
+		var previous: Dictionary = _resource_damage_slots.get(node_id, {})
+		if not previous.is_empty():
+			var mesh: MultiMesh = previous["mesh"]
+			mesh.set_instance_color(int(previous["slot"]), previous["tint"])
+		_resource_colored_hits.erase(node_id)
+	for node_id in hits:
+		if not _resource_damage_slots.has(node_id):
+			continue
+		var applied: int = int(hits[node_id])
+		if int(_resource_colored_hits.get(node_id, -1)) == applied:
+			continue
+		var source: Dictionary = _resource_damage_slots[node_id]
+		var amount: float = clampf(float(applied) / float(maxi(1, int(source["total"]))), 0.0, 1.0)
+		var original: Color = source["tint"]
+		var cracked: Color = original.lerp(Color(0.30, 0.27, 0.23), amount * 0.65)
+		var multimesh: MultiMesh = source["mesh"]
+		multimesh.set_instance_color(int(source["slot"]), cracked)
+		_resource_colored_hits[node_id] = applied
+
+
 func apply_state(hidden_ids: Dictionary) -> void:
 	var changed := false
 	_state_seen_pending = true
@@ -2309,6 +2343,8 @@ func _build_bridge(bridge: Dictionary, origin: Vector2) -> void:
 var _state_seen := false
 var _state_seen_pending := false
 var _shaking: Dictionary = {} # node id -> {"group", "slot", "t"}
+var _resource_damage_slots: Dictionary = {} # Node id -> GPU instance, base tint and hit total.
+var _resource_colored_hits: Dictionary = {} # Only modified slots, not all world nodes.
 var _falling: Array = [] # [{"node": MeshInstance3D, "base": Transform3D, "axis": Vector3, "t": float}]
 const SHAKE_SECONDS := 0.45
 const FALL_SECONDS := 1.9
