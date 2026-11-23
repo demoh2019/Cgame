@@ -18,18 +18,27 @@ static func light_buckets(fires: Dictionary, now: float, night: bool) -> Diction
 	var buckets: Dictionary = {}
 	if not night or not is_finite(now):
 		return buckets
-	for fire in fires.values():
-		if not (fire is Dictionary) or not fire.has("id"):
+	for fire_id in fires:
+		var fire: Variant = fires[fire_id]
+		if not (fire_id is int) or not (fire is Dictionary):
 			continue
-		var expiry: float = float(fire.get("expires", -1.0))
-		var x: float = float(fire.get("x", NAN))
-		var z: float = float(fire.get("z", NAN))
+		var record: Dictionary = fire
+		# Only genuine server-created ID-keyed fires may attract infected.
+		# Do not coerce malformed coordinates or expiry text into live cues.
+		if not (record.get("id", null) is int) or int(record["id"]) != int(fire_id) or \
+				not (record.get("expires", null) is float or record.get("expires", null) is int) or \
+				not (record.get("x", null) is float or record.get("x", null) is int) or \
+				not (record.get("z", null) is float or record.get("z", null) is int):
+			continue
+		var expiry: float = float(record["expires"])
+		var x: float = float(record["x"])
+		var z: float = float(record["z"])
 		if not is_finite(expiry) or expiry <= now or not is_finite(x) or not is_finite(z):
 			continue
 		var cell := Vector2i(floori(x / LURE_RADIUS), floori(z / LURE_RADIUS))
 		if not buckets.has(cell):
 			buckets[cell] = []
-		buckets[cell].append(fire)
+		buckets[cell].append(record)
 	return buckets
 
 
@@ -45,9 +54,14 @@ static func nearest_light(buckets: Dictionary, infected: Vector3) -> Dictionary:
 	for dx in range(-1, 2):
 		for dz in range(-1, 2):
 			for fire in buckets.get(cell + Vector2i(dx, dz), []):
+				if not (fire is Dictionary) or \
+						not (fire.get("id", null) is int) or \
+						not (fire.get("x", null) is float or fire.get("x", null) is int) or \
+						not (fire.get("z", null) is float or fire.get("z", null) is int):
+					continue
 				var at := Vector2(float(fire["x"]), float(fire["z"]))
 				var d: float = here.distance_squared_to(at)
-				if d > best_distance:
+				if not is_finite(d) or d > best_distance:
 					continue
 				if closest.is_empty() or d < best_distance or (
 						is_equal_approx(d, best_distance) and

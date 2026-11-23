@@ -2,6 +2,7 @@ extends RefCounted
 ## The FPS budget controller must be deterministic, use hysteresis and ignore single stalls.
 
 const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.gd")
+const GraphicsVramBudget = preload("res://scripts/client/graphics_vram_budget.gd")
 
 
 func run(t) -> void:
@@ -84,6 +85,31 @@ func run(t) -> void:
 		"missing GPU duration still permits legacy resolution-limit downgrade")
 	t.check(not GraphicsAutoQuality.at_resolution_limit(true, false, true, 1.0 / 30.0, INF),
 		"invalid GPU readings do not allow a premature quality upgrade")
+	t.current = "VRAM budget ignores suspended frames and unavailable telemetry"
+	var vram := GraphicsVramBudget.new()
+	var high_usage: float = GraphicsVramBudget.budget_bytes(1) * 0.96
+	t.check(GraphicsVramBudget.valid_sample(high_usage, 1.0 / 60.0),
+		"finite positive memory during normal rendering is measurable")
+	for invalid_memory in [NAN, INF, -1.0, 0.0]:
+		t.check(not GraphicsVramBudget.valid_sample(invalid_memory, 1.0 / 60.0),
+			"unavailable VRAM readings are not interpreted as sustained pressure")
+		t.check(not vram.sample(invalid_memory, 1, 1.0 / 60.0),
+			"invalid VRAM never forces a graphics downgrade")
+	for bad_delta in [NAN, INF, -1.0, 0.0, 0.3, 1.0]:
+		t.check(not GraphicsVramBudget.valid_sample(high_usage, bad_delta),
+			"paused or invalid frame time never counts toward the VRAM timer")
+		t.check(not vram.sample(high_usage, 1, bad_delta),
+			"VRAM budget ignores a loading stall")
+	for i in 80:
+		t.check(not vram.sample(high_usage, 1, 0.016),
+			"early high-memory samples cannot cause premature quality switching")
+	t.check(not vram.sample(high_usage, 1, 0.9),
+		"one asset-loading hitch cannot complete the memory pressure timer")
+	var sustained := false
+	for i in 80:
+		sustained = vram.sample(high_usage, 1, 0.016) or sustained
+	t.check(sustained, "sustained real memory pressure still lowers detail")
+
 	var source: String = FileAccess.get_file_as_string(
 		"res://scripts/client/online_main.gd")
 	t.check(source.contains("GraphicsAutoQuality.at_resolution_limit("),
@@ -92,3 +118,5 @@ func run(t) -> void:
 		"GPU timing is forwarded to the actual quality controller")
 	t.check(source.contains("_adaptive_resolution.sample_frame(delta, gpu_ms)"),
 		"pixel budget uses the same GPU timer as world detail quality")
+	t.check(source.contains("GraphicsVramBudget.valid_sample(vram_used, delta)"),
+		"live client filters VRAM samples before the native or script pressure policy")
