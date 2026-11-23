@@ -1,7 +1,8 @@
 .godot/
 *.import
 assets/packs
-*.uid
+# Script .uid files are tracked so Godot resource references remain stable.
+# Do not ignore tracked UIDs: the repository CI checks for this mismatch.
 # Poly Haven sources: only the baked meshes and the textures they use are kept (tools/fetch_polyhaven.sh gets the rest).
 assets/models/polyhaven/*/*.gltf
 assets/models/polyhaven/*/*.bin
