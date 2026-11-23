@@ -6843,30 +6843,44 @@ func _distance_xz(position: Vector3, thing: Dictionary) -> float:
 	return Vector2(position.x - float(thing["x"]), position.z - float(thing["z"])).length()
 
 
-func _find_node(node_id: int) -> Dictionary:
-	# Ids encode the chunk loosely; look in the chunks around players instead of searching the world.
+## Only examine seeded world entities in the 3x3 cell area of an active
+## player, as before. Unlike the old nested scan this check reads no chunks.
+func _entity_cell_near_players(cell: Vector2i) -> bool:
 	for player in players.values():
-		var cell := WorldGen.cell_of(player.position.x, player.position.z)
-		for dx in range(-1, 2):
-			for dz in range(-1, 2):
-				var data: Dictionary = world.chunk(Vector2i(cell.x + dx, cell.y + dz))
-				for node in data["nodes"]:
-					if node["id"] == node_id:
-						return node
+		if not player.position.is_finite():
+			continue
+		var player_cell: Vector2i = WorldGen.cell_of(player.position.x, player.position.z)
+		if absi(cell.x - player_cell.x) <= 1 and absi(cell.y - player_cell.y) <= 1:
+			return true
+	return false
+
+
+func _find_node(node_id: int) -> Dictionary:
+	if node_id <= 0:
+		return {}
+	var cell: Vector2i = WorldGen.entity_cell(node_id)
+	if not _entity_cell_near_players(cell):
+		return {}
+	# Exact ID verification makes fabricated and stale IDs harmless; no
+	# O(players * 9 chunks * objects) scan for each gathering action.
+	for node in world.chunk(cell)["nodes"]:
+		if int(node["id"]) == node_id:
+			return node
 	return {}
 
 
 func _find_crate(crate_id: int) -> Dictionary:
-	for player in players.values():
-		var cell := WorldGen.cell_of(player.position.x, player.position.z)
-		for dx in range(-1, 2):
-			for dz in range(-1, 2):
-				var data: Dictionary = world.chunk(Vector2i(cell.x + dx, cell.y + dz))
-				for crate in data["crates"]:
-					if crate["id"] == crate_id:
-						var result: Dictionary = crate.duplicate()
-						result["zone"] = data["zone"]
-						return result
+	if crate_id <= 0:
+		return {}
+	var cell: Vector2i = WorldGen.entity_cell(crate_id)
+	if not _entity_cell_near_players(cell):
+		return {}
+	var data: Dictionary = world.chunk(cell)
+	for crate in data["crates"]:
+		if int(crate["id"]) == crate_id:
+			var result: Dictionary = crate.duplicate()
+			result["zone"] = data["zone"]
+			return result
 	return {}
 
 
