@@ -13,6 +13,9 @@ on:
       - 'game/scripts/client/online_main.gd'
       - 'game/scripts/client/chunk_view.gd'
       - 'game/tests/test_terrain_live_patch.gd'
+      - 'game/tests/test_terrain_edit_bridge.gd'
+      - 'game/scripts/client/terrain_edit_bridge.gd'
+      - 'game/addons/cgame_terrain_tools/**'
       - 'game/tests/run_all.gd'
       - 'game/docs/p1_incremental_terrain_editing.md'
       - '.github/workflows/native-terrain-partial-patches.yml'
@@ -28,6 +31,9 @@ on:
       - 'game/scripts/client/online_main.gd'
       - 'game/scripts/client/chunk_view.gd'
       - 'game/tests/test_terrain_live_patch.gd'
+      - 'game/tests/test_terrain_edit_bridge.gd'
+      - 'game/scripts/client/terrain_edit_bridge.gd'
+      - 'game/addons/cgame_terrain_tools/**'
       - 'game/tests/run_all.gd'
       - 'game/docs/p1_incremental_terrain_editing.md'
       - '.github/workflows/native-terrain-partial-patches.yml'
@@ -71,7 +77,7 @@ jobs:
         run: |
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
-          timeout 240s "$BIN" --headless --path game --script res://tests/run_one.gd -- test_terrain_live_patch test_terrain_geometric_error_lod test_terrain_mesh_streaming 2>&1 | tee terrain-patch-game.log
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_one.gd -- test_terrain_live_patch test_terrain_edit_bridge test_terrain_geometric_error_lod test_terrain_mesh_streaming 2>&1 | tee terrain-patch-game.log
           grep -E '^TOTAL [0-9]+ checks, 0 failures$' terrain-patch-game.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' terrain-patch-game.log; then exit 1; fi
       - name: Upload native and game terrain logs

@@ -62,7 +62,7 @@ class TestTerrainPartialPatchContract(unittest.TestCase):
         )[0]
         for marker in (
             "p_region.grow(1)",
-            "chunk_samples.intersects(grown)",
+            "for (int cx = min_cx; cx <= max_cx; cx++)",
             "rs->free_rid(chunk.meshes[i])",
             "_free_collision(chunk)",
             "chunk.bounds = AABB",
@@ -72,7 +72,7 @@ class TestTerrainPartialPatchContract(unittest.TestCase):
             "time_since_update = 1e9",
         ):
             self.assertIn(marker, fn)
-        self.assertLess(fn.index("chunk_samples.intersects(grown)"),
+        self.assertLess(fn.index("for (int cx = min_cx; cx <= max_cx; cx++)"),
                         fn.index("_free_collision(chunk)"))
         self.assertNotIn("_free_chunks()", fn)
         self.assertNotIn("_rebuild()", fn)

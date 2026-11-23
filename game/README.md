@@ -1,5 +1,7 @@
 # Albion After — main game
 
+**P1 terrain update:** The native large-world terrain now supports sparse height edits; this increment adds color-only patches without collision resets, non-destructive editor layer binding and viewport sculpt. See [Native Terrain Patch Streaming](docs/NATIVE_TERRAIN_PATCH_STREAMING.md).
+
 **This is the canonical game project at `game/`.** All new gameplay
 features belong here. It is the only game in the repository; `demo/` and `misc/` hold engine labs, not games.
 

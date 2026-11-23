@@ -1,5 +1,7 @@
 # Native heightmap terrain (initial implementation)
 
+**Large-world counterpart:** The engine's existing `ChunkedTerrain3D` (used in Albion After) now supports sparse height/color patches and the editor's live layer brushes. See [Native Terrain Patch Streaming](../../game/docs/NATIVE_TERRAIN_PATCH_STREAMING.md). The small `HeightmapTerrain3D` prototype remains a separate 513×513 heightmap authoring path.
+
 This module adds **HeightmapTerrain3D**, a native scene node with a serializable **TerrainHeightmap** resource. It is compiled into Godot by default for builds with 3D enabled.
 
 The goal of this first increment is to provide a small but usable engine-integrated terrain editor, not to replace the existing third-party Terrain3D extension. The native class names are intentionally distinct to avoid a collision with the extension.
