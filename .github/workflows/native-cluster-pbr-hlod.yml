@@ -1,0 +1,90 @@
+name: Native cluster PBR HLOD and Albion PCG rendering
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/cgame_virtual_geometry/**'
+      - 'game/scripts/client/pcg_world_dressing.gd'
+      - 'game/tests/test_virtual_cluster_hlod.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_cluster_hlod_contract.py'
+      - '.github/workflows/native-cluster-pbr-hlod.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/cgame_virtual_geometry/**'
+      - 'game/scripts/client/pcg_world_dressing.gd'
+      - 'game/tests/test_virtual_cluster_hlod.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_cluster_hlod_contract.py'
+      - '.github/workflows/native-cluster-pbr-hlod.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate native API and real PCG integration
+        run: python3 -m unittest tests/scene/test_cluster_hlod_contract.py -v
+
+  native-game:
+    needs: contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native cluster simplification and actual draw-ready PBR test
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[CgameClusterLOD]*" --no-colors 2>&1 | tee native-cluster.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' native-cluster.log; then exit 1; fi
+      - name: Import full Albion After game
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee cluster-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' cluster-import.log; then exit 1; fi
+      - name: Test native and stock-Godot fallback HLOD rendering
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_one.gd -- test_virtual_cluster_hlod test_pcg_world 2>&1 | tee cluster-game.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' cluster-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' cluster-game.log; then exit 1; fi
+      - name: Full Albion After headless regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 600s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee cluster-full.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' cluster-full.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' cluster-full.log; then exit 1; fi
+      - name: Archive cluster LOD test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cluster-pbr-hlod-regression
+          if-no-files-found: ignore
+          path: |
+            native-cluster.log
+            cluster-import.log
+            cluster-game.log
+            cluster-full.log
