@@ -49,7 +49,7 @@ func run(t) -> void:
 		var node_id: int = int(indexed_node["id"])
 		t.check(server._find_node(node_id).is_empty(),
 				"a remote chunk is not scanned without a nearby player")
-		var guest = server.add_player(13, "Node Scout")
+		server.add_player(13, "Node Scout")
 		_teleport(server, 13, float(indexed_node["x"]), float(indexed_node["z"]))
 		t.eq(int(server._find_node(node_id).get("id", -1)), node_id,
 				"resource ID lookup resolves the actual nearby world node")
