@@ -116,7 +116,8 @@ func run(t) -> void:
 	if game_renderer != null:
 		t.check(int(game_renderer.call("page_count")) >= 1,
 			"real game model generates one or more streamable pages")
-		t.check(not game_renderer.call("get_packed").has("positions"),
+		var game_packed: Dictionary = game_renderer.call("get_packed")
+		t.check(not game_packed.has("positions"),
 			"GPU page mode skips the duplicate full-source CPU upload buffer")
 		t.eq(int(game_renderer.get("max_resident_pages")), 2,
 			"live debug feature applies a bounded resident page budget")
