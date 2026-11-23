@@ -163,6 +163,15 @@ Array CgameMeshletPages::build_pages(const PackedVector3Array &p_vertices,
 		uint32_t current_triangle = triangle_offset;
 		for (uint32_t i = 0; i < count; ++i) {
 			const CgameMeshlets::Meshlet &meshlet = meshlets[first + i];
+			// Extreme but finite input coordinates may overflow meshoptimizer's
+			// float sphere arithmetic. Never serialize invalid bounds/cones.
+			if (!meshlet.bounds_center.is_finite() ||
+					!Math::is_finite(meshlet.bounds_radius) ||
+					meshlet.bounds_radius < 0.0f ||
+					!meshlet.cone_axis.is_finite() ||
+					!Math::is_finite(meshlet.cone_cutoff)) {
+				return Array();
+			}
 			const uint32_t off = desc_offset + i * DESCRIPTOR_BYTES;
 			put_u32(dst, off, current_vertex);
 			put_u32(dst, off + 4, current_triangle);
