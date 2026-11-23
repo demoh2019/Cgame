@@ -5,6 +5,29 @@ extends RefCounted
 const WorldStreamingPolicy = preload("res://scripts/client/world_streaming_policy.gd")
 
 func run(t) -> void:
+	t.current = "stream prefetch ignores impossible correction and teleport speeds"
+	t.eq(WorldStreamingPolicy.lookahead_seconds(false, Vector3.ZERO), 0.0,
+		"idling does not predict distant chunks")
+	t.eq(WorldStreamingPolicy.lookahead_seconds(false, Vector3(8.0, 0.0, -3.0)),
+		WorldStreamingPolicy.WALK_LOOKAHEAD,
+		"walking still prioritizes chunks ahead of normal movement")
+	t.eq(WorldStreamingPolicy.lookahead_seconds(true, Vector3(12.0, 0.0, 0.0)),
+		WorldStreamingPolicy.RIDING_LOOKAHEAD,
+		"riding keeps a longer, bounded world prefetch horizon")
+	t.eq(WorldStreamingPolicy.lookahead_seconds(true, Vector3(50.0, 0.0, 0.0)), 0.0,
+		"teleport-rate movement does not pull the queue far from the player")
+	t.eq(WorldStreamingPolicy.lookahead_seconds(false, Vector3(1.0e30, 0.0, 0.0)), 0.0,
+		"overflowing squared velocity cannot poison chunk scheduling")
+	t.eq(WorldStreamingPolicy.lookahead_seconds(false, Vector3(INF, 0.0, 0.0)), 0.0,
+		"non-finite network corrections have no lookahead")
+	t.eq(WorldStreamingPolicy.lookahead_seconds(true, Vector3(48.0, 0.0, 0.0)),
+		WorldStreamingPolicy.RIDING_LOOKAHEAD,
+		"the conservative cap still accepts movement exactly at its boundary")
+	t.check(WorldStreamingPolicy.plausible_velocity(Vector3(18.0, 0.0, 0.0)),
+		"normal visual velocity is safe for prefetch")
+	t.check(not WorldStreamingPolicy.plausible_velocity(Vector3(75.0, 0.0, 0.0)),
+		"raw un-clamped teleport velocities are rejected")
+
 	t.current = "native world partition movement budget"
 	var streamer := WorldStreamer.new()
 	t.near(streamer.lookahead_seconds, 0.0, 0.0001,
@@ -73,6 +96,8 @@ func run(t) -> void:
 		"networked world explicitly opts into forward chunk prioritization")
 	t.check(online.contains("streamer.velocity_hint = _stream_velocity"),
 		"displayed authoritative player movement drives the native queue")
+	t.check(online.contains("WorldStreamingPolicy.plausible_velocity(raw_velocity)"),
+		"real online client checks raw displacement before smoothing prefetch")
 	t.check(online.contains("moved.length_squared() < 576.0"),
 		"teleports and large server corrections reset motion prediction")
 	t.check(online.contains("_stream_velocity = Vector3.ZERO"),

@@ -6,11 +6,25 @@ extends RefCounted
 const WALK_LOOKAHEAD := 2.0
 const RIDING_LOOKAHEAD := 3.0
 const IDLE_VELOCITY_SQ := 0.16
+# Gameplay movement is much slower. A one-frame network correction or large
+# teleport should never project the chunk queue kilometres ahead.
+const MAX_PREDICTIVE_SPEED := 48.0
+
+
+## Check raw frame displacement before the 18 m/s visual hint clamp.
+## Otherwise a teleport during a short render frame looks like ordinary
+## movement and incorrectly prefetches unrelated terrain for several frames.
+static func plausible_velocity(velocity: Vector3) -> bool:
+	if not velocity.is_finite():
+		return false
+	var speed_squared: float = velocity.length_squared()
+	return is_finite(speed_squared) and \
+		speed_squared <= MAX_PREDICTIVE_SPEED * MAX_PREDICTIVE_SPEED
 
 
 static func lookahead_seconds(mounted: bool, velocity: Vector3) -> float:
-	# Teleports and invalid correction samples should never steer streaming.
-	if not velocity.is_finite() or velocity.length_squared() < IDLE_VELOCITY_SQ:
+	# Presentation-only; authoritative player movement is never modified.
+	if not plausible_velocity(velocity) or velocity.length_squared() < IDLE_VELOCITY_SQ:
 		return 0.0
 	return RIDING_LOOKAHEAD if mounted else WALK_LOOKAHEAD
 

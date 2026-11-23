@@ -72,5 +72,29 @@ func run(t) -> void:
 	t.eq(NetSchema.deserialize(schema, empty_delta, baseline), baseline,
 		"valid unchanged deltas still preserve their baseline")
 
+	t.current = "versioned snapshots reject incomplete payloads and preserve valid deltas"
+	var versioned: PackedByteArray = NetSchema.serialize_versioned(schema,
+		{"name": "Aurora", "count": 1729}, {}, true)
+	var versioned_ok: Dictionary = NetSchema.deserialize_versioned(schema, versioned, {})
+	t.check(bool(versioned_ok["ok"]), "matching versioned snapshot is valid")
+	t.eq(versioned_ok["state"], {"name": "Aurora", "count": 1729},
+		"versioned decode restores all acknowledged values")
+	var truncated: PackedByteArray = versioned.duplicate()
+	truncated.resize(truncated.size() - 1)
+	var invalid: Dictionary = NetSchema.deserialize_versioned(schema, truncated, {"count": 2})
+	t.check(not bool(invalid["ok"]) and (invalid["state"] as Dictionary).is_empty(),
+		"matching hash cannot conceal a truncated versioned snapshot")
+	var header_only: PackedByteArray = versioned.slice(0, 4)
+	t.check(not bool(NetSchema.deserialize_versioned(schema, header_only, {})["ok"]),
+		"header without a presence mask is never accepted")
+	var wrong_header: PackedByteArray = versioned.duplicate()
+	wrong_header[0] = (wrong_header[0] + 1) % 256
+	t.check(not bool(NetSchema.deserialize_versioned(schema, wrong_header, {})["ok"]),
+		"mismatched schema fingerprints are still refused")
+	var valid_empty: PackedByteArray = NetSchema.serialize_versioned(schema, {}, baseline, true)
+	t.eq(NetSchema.deserialize_versioned(schema, valid_empty, baseline),
+		{"ok": true, "state": baseline},
+		"valid empty delta retains its prior state without a false corruption warning")
+
 	other.free()
 	net.free()

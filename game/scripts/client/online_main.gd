@@ -2027,9 +2027,15 @@ func _process(delta: float) -> void:
 		var moved: Vector3 = position - _stream_previous_position
 		if _stream_has_previous_position and is_finite(delta) and delta > 0.0001 \
 				and moved.length_squared() < 576.0:
-			var measured_velocity: Vector3 = (moved / delta).limit_length(18.0)
-			_stream_velocity = _stream_velocity.lerp(measured_velocity,
-				clampf(delta * 7.0, 0.0, 1.0))
+			# Check the raw speed *before* limiting the visual hint. A small
+			# teleport over one fast frame must not look like a normal ride.
+			var raw_velocity: Vector3 = moved / delta
+			if WorldStreamingPolicy.plausible_velocity(raw_velocity):
+				var measured_velocity: Vector3 = raw_velocity.limit_length(18.0)
+				_stream_velocity = _stream_velocity.lerp(measured_velocity,
+					clampf(delta * 7.0, 0.0, 1.0))
+			else:
+				_stream_velocity = Vector3.ZERO
 		else:
 			_stream_velocity = Vector3.ZERO
 		_stream_previous_position = position
