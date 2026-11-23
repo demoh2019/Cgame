@@ -1090,6 +1090,7 @@ func _spawn_player(player: Player) -> void:
 		for id in STARTER_KIT:
 			player.inventory.add(id, STARTER_KIT[id])
 	player.action = {}
+	player.resource_next_hit_at = 0.0
 	player.recall = {}
 	player.threat_scan = {} # Death cannot preserve a scouting advantage.
 	player.sharpened_weapon = ""
@@ -7972,8 +7973,8 @@ func _finish_gather(player: Player, node: Dictionary, base_amount: int = -1,
 		_award(player, gather_skill, (3.0 + 2.0 * float(amount - left)) * float(int(node["tier"])))
 	# No XP for items that did not fit, nor for repeat attempts on depleted nodes.
 	player.progression.award_gather(String(node["kind"]), int(node["tier"]), amount - left)
-	# Finishing a genuine resource harvest generates sound exactly once. This
-	# uses the same short-lived channel as footsteps and gunfire; existing
+	# Each server-confirmed strike or forage gives away the player's position.
+	# Uses the same short-lived channel as footsteps and gunfire; existing
 	# infected hearing, chase leashes, safe zones and camouflage rules apply.
 	var harvest_noise: float = GatheringNoise.radius(String(node["kind"]),
 		player.crouching, amount - left)
@@ -7991,6 +7992,7 @@ func _finish_gather(player: Player, node: Dictionary, base_amount: int = -1,
 		SurveySignal.clear_depleted(parties, int(node["id"]))
 	events.append({"type": "gathered", "peer": player.id, "item": item_id,
 		"amount": amount - left, "node": node["id"], "final": finish_node, "strike": from_strike,
+		"x": float(node["x"]), "z": float(node["z"]),
 		"herbs": herbs_added, "harvest_noise": harvest_noise,
 		"outpost_bonus": paid_outpost_bonus,
 		"wedge_bonus": wedge_bonus if wedge_spent else 0})
