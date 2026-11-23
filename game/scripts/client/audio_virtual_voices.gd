@@ -11,17 +11,18 @@ var voices: Array[Dictionary] = []
 
 
 func add(sound_name: String, position: Vector3, volume_db: float, now: float, length: float) -> bool:
-	if sound_name.is_empty() or not is_finite(length) or length < MIN_LENGTH 			or not is_finite(now) or not is_finite(volume_db) 			or not position.is_finite():
+	if sound_name.is_empty() or not is_finite(length) or length < MIN_LENGTH:
+		return false
+	if not is_finite(now) or not is_finite(volume_db) or not position.is_finite():
 		return false
 	expire(now)
 	if voices.size() >= MAX_VIRTUAL:
-		# The oldest voice is not necessarily the one nearest completion:
-		# long ambience may outlive a newer short warning. Preserve it.
 		var victim: int = 0
 		var least_remaining: float = INF
 		for i in voices.size():
 			var entry: Dictionary = voices[i]
-			var remaining: float = float(entry["length"]) 				- maxf(0.0, now - float(entry["born"]))
+			var remaining: float = float(entry["length"]) - maxf(
+				0.0, now - float(entry["born"]))
 			if remaining < least_remaining:
 				least_remaining = remaining
 				victim = i
@@ -29,7 +30,6 @@ func add(sound_name: String, position: Vector3, volume_db: float, now: float, le
 	voices.append({"name": sound_name, "position": position, "volume_db": volume_db,
 		"born": now, "length": length})
 	return true
-
 
 func expire(now: float) -> void:
 	if not is_finite(now):

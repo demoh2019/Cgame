@@ -272,6 +272,14 @@ static func _deserialize_checked(schema: Dictionary, bytes: PackedByteArray, bas
 			out[fd["name"]] = _dequant(fd, _read_field(r, fd))
 			if not r.valid:
 				return {"ok": false, "state": {}}
+	var expected_bytes: int = int((r.bitpos + 7) / 8)
+	if bytes.size() != expected_bytes:
+		return {"ok": false, "state": {}}
+	var used_bits: int = r.bitpos % 8
+	if used_bits != 0 and not bytes.is_empty():
+		var padding_mask: int = 0xFF << used_bits
+		if (int(bytes[bytes.size() - 1]) & padding_mask) != 0:
+			return {"ok": false, "state": {}}
 	return {"ok": true, "state": out}
 
 
