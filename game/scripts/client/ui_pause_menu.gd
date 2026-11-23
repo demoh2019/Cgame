@@ -215,7 +215,7 @@ func _display_option(parent: Control, caption: String, key: String,
 	choice.select(maxi(allowed.find(DisplaySettings.get_value(key)), 0))
 	choice.item_selected.connect(func(index: int) -> void:
 		DisplaySettings.set_value(key, choice.get_item_id(index))
-		DisplaySettings.apply(get_window()))
+		DisplaySettings.apply(get_window() if is_inside_tree() else null))
 	_display_pickers[key] = choice
 	_row(parent, caption, choice)
 
