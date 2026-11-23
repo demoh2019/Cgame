@@ -27,14 +27,15 @@ static func pressure(zombies: Dictionary, peer_id: int, position: Vector3) -> fl
 	var near: float = 0.0
 	var at := Vector2(position.x, position.z)
 	for infected in zombies.values():
-		if not infected.is_alive() or infected.target_id != peer_id:
+		if infected == null or not infected.is_alive() or infected.target_id != peer_id:
 			continue
 		if infected.state != Zombie.State.CHASE and infected.state != Zombie.State.ATTACK:
 			continue
 		if not infected.position.is_finite():
 			continue
 		var source := Vector2(infected.position.x, infected.position.z)
-		if at.distance_squared_to(source) > THREAT_RADIUS * THREAT_RADIUS:
+		var distance_squared: float = at.distance_squared_to(source)
+		if not is_finite(distance_squared) or distance_squared > THREAT_RADIUS * THREAT_RADIUS:
 			continue
 		var weight: float = 2.0 if infected.raid_boss else (
 			1.5 if infected.elite else 1.0)
@@ -58,7 +59,8 @@ static func has_live_companion(peer_id: int, position: Vector3,
 			continue
 		var gap := Vector2(position.x - member.position.x,
 			position.z - member.position.z)
-		if gap.length_squared() <= SUPPORT_RADIUS * SUPPORT_RADIUS:
+		var distance_squared: float = gap.length_squared()
+		if is_finite(distance_squared) and distance_squared <= SUPPORT_RADIUS * SUPPORT_RADIUS:
 			return true
 	return false
 

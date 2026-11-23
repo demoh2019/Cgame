@@ -48,6 +48,22 @@ func run(t) -> void:
 	t.eq(CombatStress.pressure(server.zombies, solo.id, solo.position), 0.0,
 		"defeated infected never continue stress")
 
+	t.current = "corrupt or overflowing positions cannot create phantom PvE pressure"
+	var valid_position: Vector3 = solo.position
+	var valid_enemy_position: Vector3 = infected.position
+	infected.state = Zombie.State.CHASE
+	infected.raid_boss = false
+	infected.elite = false
+	infected.position = Vector3(1.0e30, 0.0, 0.0)
+	t.eq(CombatStress.pressure(server.zombies, solo.id, solo.position), 0.0,
+		"huge but finite enemy separation cannot register as nearby")
+	infected.position = valid_enemy_position
+	var poisoned: Dictionary = {999: null}
+	poisoned[infected.id] = infected
+	t.eq(CombatStress.pressure(poisoned, solo.id, valid_position), 1.0,
+		"null zombie records cannot break an otherwise valid pressure scan")
+	infected.state = Zombie.State.DEAD
+
 	t.current = "stress rate bounds and recovery"
 	t.near(CombatStress.advance(0.0, 10.0, 1.0, false, false, false),
 		50.0, 0.001, "solo pursuit builds pressure")
@@ -84,6 +100,15 @@ func run(t) -> void:
 		"companion joins")
 	t.check(CombatStress.has_live_companion(solo.id, solo.position,
 		server.players, server.parties), "real nearby teammate grants support")
+	var original_ally_position: Vector3 = ally.position
+	ally.position = Vector3(1.0e30, 0.0, 0.0)
+	t.check(not CombatStress.has_live_companion(solo.id, solo.position,
+		server.players, server.parties),
+		"overflowing party separation never grants fake combat support")
+	ally.position = original_ally_position
+	t.check(CombatStress.has_live_companion(solo.id, solo.position,
+		server.players, server.parties),
+		"real nearby ally support returns after a valid position update")
 	infected.target_id = solo.id
 	solo.combat_stress = 80.0
 	var stamina_before: float = solo.survival.stamina

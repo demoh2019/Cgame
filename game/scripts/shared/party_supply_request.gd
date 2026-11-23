@@ -32,4 +32,7 @@ static func can_send(now: float, last_at: float) -> bool:
 		return false
 	if last_at == -INF: # First request in this server session.
 		return true
-	return is_finite(last_at) and now >= last_at + COOLDOWN
+	# Reject a future or corrupt last-send timestamp. Subtracting two
+	# valid nonnegative server times avoids overflowing the deadline sum.
+	return is_finite(last_at) and last_at >= 0.0 and now >= last_at and \
+		is_finite(now - last_at) and now - last_at >= COOLDOWN
