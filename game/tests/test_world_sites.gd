@@ -93,6 +93,16 @@ func _city_layouts(t) -> void:
 			t.check(offset.length() <= radius, "a city lot stays in the surrounding site circle")
 		var streets: Array = CityLayout.streets(layout, radius, angle)
 		t.check(streets.size() >= 3, "%s has a local road network" % layout)
+		var street_index: Dictionary = CityLayout.index_streets(streets, 12.0, 8.0)
+		var segments: PackedVector2Array = street_index["segments"]
+		t.check(segments.size() >= 6, "the city street index contains segments")
+		for xi in range(-3, 4):
+			for yi in range(-3, 4):
+				var probe: Vector2 = Vector2(float(xi), float(yi)).rotated(angle) * radius * 0.17
+				for clearance in [1.0, 3.1, 6.82, 10.0]:
+					var scalar_blocked: bool = CityLayout.street_distance(probe, streets) < float(clearance)
+					t.eq(CityLayout.street_blocked(probe, float(clearance), street_index), scalar_blocked,
+							"spatial street index matches scalar clearance, including its large-radius fallback")
 		var safe_lots := 0
 		for lot in lots:
 			var offset: Vector2 = lot["offset"]
@@ -129,6 +139,7 @@ func _city_layouts(t) -> void:
 	var world := WorldGen.new(1337)
 	var seen: Dictionary = {}
 	var first_city: Dictionary = {}
+	var salvage_caches := 0
 	for site in _all_sites(world):
 		if str(site["kind"]) != "city":
 			continue
@@ -139,17 +150,26 @@ func _city_layouts(t) -> void:
 			first_city = site
 		var center := Vector2(float(site["x"]), float(site["z"]))
 		var content: Dictionary = world.poi.contents(site)
-		var paths: Array = CityLayout.streets(layout, float(site["radius"]), float(site["layout_rotation"]))
+		t.check(site.has("city_plan"), "a generated city caches its plan for reuse")
+		var plan: Dictionary = world.poi.city_plan(site)
+		var paths: Array = plan["paths"]
+		t.check(plan["index"]["segments"].size() > 0, "the cached city plan holds its road index")
 		for group in ["structures", "crates", "props", "spawns"]:
 			for item in content[group]:
 				var offset := Vector2(float(item["x"]), float(item["z"])) - center
 				t.check(CityLayout.contains(offset, layout, float(site["radius"]), float(site["layout_rotation"])),
 						"all city content respects its shape")
+				if group == "crates" and bool(item.get("urban_cache", false)):
+					salvage_caches += 1
+					t.eq(item["kind"], "crate", "city salvage uses normal lootable crates")
+					t.check(not world.is_water(float(item["x"]), float(item["z"])),
+							"city salvage stays on dry ground")
 				if group != "spawns" and bool(item.get("blocks", true)):
 					var clearance: float = CityLayout.street_distance(offset, paths)
 					t.check(clearance + 0.001 >= float(item.get("radius", 0.0)) + 3.1,
 							"buildings, ruins and loot never block local city roads")
 	t.check(seen.size() >= 3, "the island generates multiple city layouts (%s)" % str(seen.keys()))
+	t.check(salvage_caches >= 1, "ruined cities contain additional accessible scavenging caches (%d)" % salvage_caches)
 	if not first_city.is_empty():
 		var city_roads := 0
 		for road in world.roads.all_roads():
