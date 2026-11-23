@@ -178,7 +178,7 @@ func run(t) -> void:
 	expected_indices.resize(4096)
 	for i in dense_points.size():
 		dense_points[i] = Vector3(float(i % 32) * 0.25, 2.0,
-			float(int(i / 32) % 32) * 0.25)
+			float(i % 16) * 0.25)
 		expected_indices[i] = i
 	var packed_groups: Array = SceneryBatches.partition_indices_3d(
 		dense_points, 32.0, 48, 256, false)
