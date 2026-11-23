@@ -16,6 +16,7 @@ signal changed
 var edit: TerrainEditLayers = TerrainEditLayers.new()
 var selected_layer: int = -1
 var live_target: ChunkedTerrain3D = null # Selected editor terrain, not a separate preview.
+var viewport_sculpt_enabled: bool = false # Opt-in: leave normal editor selection unchanged.
 var brush_kind: int = TerrainEditLayers.Brush.RAISE
 var brush_radius: float = 4.0
 var brush_strength: float = 1.0
@@ -300,6 +301,11 @@ func preview_image() -> Image:
 # ------------------------------------------------------------------ UI
 
 func _build_ui() -> void:
+	var viewport_sculpt := CheckBox.new()
+	viewport_sculpt.text = "Sculpt selected terrain (3D viewport)"
+	viewport_sculpt.tooltip_text = "When enabled, left-click the selected ChunkedTerrain3D in the 3D view to sculpt. Disable to select or move objects normally."
+	viewport_sculpt.toggled.connect(func(enabled: bool) -> void: viewport_sculpt_enabled = enabled)
+	add_child(viewport_sculpt)
 	_brush_option = OptionButton.new()
 	for n in ["Raise", "Lower", "Smooth", "Flatten", "Noise", "Erode"]:
 		_brush_option.add_item(n)
