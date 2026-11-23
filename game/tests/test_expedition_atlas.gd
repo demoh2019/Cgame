@@ -80,6 +80,19 @@ func run(t) -> void:
 	t.eq(Atlas.objectives(invalid)[0]["label"], "ELITE INFECTED",
 		"only fixed safe user-facing text is displayed")
 
+	t.current = "malformed group ping data cannot break personal map objectives"
+	var bad_ping: Dictionary = _snapshot()
+	bad_ping["party"]["ping"] = ["invalid", "rpc", "value"]
+	t.eq(Atlas.objectives(bad_ping).size(), 6,
+		"malformed group pings are skipped while other six goals remain")
+	bad_ping["party"]["ping"] = {"x": 20.0, "z": -12.0,
+		"remaining": 15.0, "kind": "survey", "material": "ore", "tier": "3"}
+	t.eq(Atlas.find(Atlas.objectives(bad_ping), "ping").get("label", ""),
+		"PARTY PING", "string tier cannot forge a high-tier prospect marker")
+	bad_ping["party"]["ping"]["tier"] = 3
+	t.eq(Atlas.find(Atlas.objectives(bad_ping), "ping").get("label", ""),
+		"T3 ORE PARTY VEIN", "integer tier still shows real party survey detail")
+
 	t.current = "selectable world-map goal synchronizes with radar even while hidden"
 	var fake := FakeClient.new()
 	fake.you = _snapshot()
