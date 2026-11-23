@@ -267,14 +267,39 @@ Vector3 CgamePathTracer::get_pixel(int p_x, int p_y) const {
 
 Ref<Image> CgamePathTracer::to_image() const {
 	Ref<Image> img = Image::create_empty(MAX(prog_size.x, 1), MAX(prog_size.y, 1), false, Image::FORMAT_RGB8);
-	for (int y = 0; y < prog_size.y; y++) {
-		for (int x = 0; x < prog_size.x; x++) {
-			const Vector3 c = get_pixel(x, y);
-			img->set_pixel(x, y, Color(
-										 Math::pow(CLAMP(c.x, 0.0f, 1.0f), 0.4545f),
-										 Math::pow(CLAMP(c.y, 0.0f, 1.0f), 0.4545f),
-										 Math::pow(CLAMP(c.z, 0.0f, 1.0f), 0.4545f)));
-		}
+	if (prog_samples == 0 || img->is_empty()) {
+		return img;
+	}
+
+	const auto encode_channel = [](float p_linear) -> uint8_t {
+		const float gamma = Math::pow(CLAMP(p_linear, 0.0f, 1.0f), 0.4545f);
+		// Match the RGB8 rounding in Image::set_pixel().
+		return static_cast<uint8_t>(CLAMP(gamma * 255.0f + 0.5f, 0.0f, 255.0f));
+	};
+	const Vector3 *sum = prog_sum.ptr();
+	uint8_t *dst = img->ptrw();
+	for (int i = 0; i < prog_sum.size(); i++, dst += 3) {
+		const Vector3 c = sum[i] / float(prog_samples);
+		dst[0] = encode_channel(c.x);
+		dst[1] = encode_channel(c.y);
+		dst[2] = encode_channel(c.z);
+	}
+	return img;
+}
+
+Ref<Image> CgamePathTracer::to_linear_image() const {
+	Ref<Image> img = Image::create_empty(MAX(prog_size.x, 1), MAX(prog_size.y, 1), false, Image::FORMAT_RGBF);
+	if (prog_samples == 0 || img->is_empty()) {
+		return img;
+	}
+
+	const Vector3 *sum = prog_sum.ptr();
+	float *dst = reinterpret_cast<float *>(img->ptrw());
+	for (int i = 0; i < prog_sum.size(); i++, dst += 3) {
+		const Vector3 c = sum[i] / float(prog_samples);
+		dst[0] = c.x;
+		dst[1] = c.y;
+		dst[2] = c.z;
 	}
 	return img;
 }
@@ -297,6 +322,7 @@ void CgamePathTracer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("accumulate", "bvh", "camera", "fov_deg", "spp", "light"), &CgamePathTracer::accumulate, DEFVAL(Dictionary()));
 	ClassDB::bind_method(D_METHOD("get_pixel", "x", "y"), &CgamePathTracer::get_pixel);
 	ClassDB::bind_method(D_METHOD("to_image"), &CgamePathTracer::to_image);
+	ClassDB::bind_method(D_METHOD("to_linear_image"), &CgamePathTracer::to_linear_image);
 	ClassDB::bind_method(D_METHOD("get_progressive_size"), &CgamePathTracer::get_progressive_size);
 	ClassDB::bind_method(D_METHOD("get_samples"), &CgamePathTracer::get_samples);
 	ClassDB::bind_method(D_METHOD("get_passes"), &CgamePathTracer::get_passes);
