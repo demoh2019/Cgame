@@ -758,7 +758,9 @@ bool ChunkedTerrain3D::apply_color_patch(const Rect2i &p_region, const PackedCol
 	const int count = p_region.size.x * p_region.size.y;
 	ERR_FAIL_COND_V_MSG(p_colors.size() != count, false, "Color patch values must match the region dimensions.");
 	for (const Color &color : p_colors) {
-		ERR_FAIL_COND_V_MSG(!color.is_finite(), false, "Color patch samples must be finite.");
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(color.r) || !Math::is_finite(color.g) ||
+				!Math::is_finite(color.b) || !Math::is_finite(color.a),
+				false, "Color patch samples must be finite.");
 	}
 	bool changed = false;
 	for (int z = 0; z < p_region.size.y && !changed; z++) {
