@@ -90,6 +90,7 @@ uniform sampler2D rough_map : hint_default_white, filter_linear_mipmap, repeat_e
 uniform float radius = 18.0;
 uniform float tile_meters = 3.0;
 varying vec2 world_xz;
+varying vec3 world_normal;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
@@ -101,6 +102,7 @@ float noise(vec2 p) {
 
 void vertex() {
 	world_xz = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xz;
+	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 }
 
 void fragment() {
@@ -114,7 +116,19 @@ void fragment() {
 	float grime = smoothstep(0.7, 1.0, rim + ragged * 0.2) * 0.45 + noise(world_xz * 0.35) * 0.2;
 	vec3 stone = texture(albedo_map, uv).rgb;
 	ALBEDO = mix(stone, stone * vec3(0.62, 0.58, 0.45), grime) * 0.72;
-	NORMAL_MAP = texture(normal_map, uv).rgb;
+	// Explicit world-space TBN keeps the normal detail on procedural/imported
+	// plaza meshes that have no ARRAY_TANGENT. The texture is still sampled
+	// in the same world X/Z projection, but never asks Forward+ for tangents.
+	vec3 n = normalize(world_normal);
+	vec3 tangent = vec3(1.0, 0.0, 0.0) - n * n.x;
+	if (dot(tangent, tangent) < 0.0001) {
+		tangent = vec3(0.0, 0.0, 1.0) - n * n.z;
+	}
+	tangent = normalize(tangent);
+	vec3 bitangent = normalize(cross(tangent, n));
+	vec3 detail = texture(normal_map, uv).rgb * 2.0 - 1.0;
+	vec3 mapped_normal = normalize(tangent * detail.x + bitangent * detail.y + n * detail.z);
+	NORMAL = normalize((VIEW_MATRIX * vec4(mapped_normal, 0.0)).xyz);
 	ROUGHNESS = texture(rough_map, uv).r;
 }
 """
@@ -132,15 +146,18 @@ varying vec3 world_normal;
 
 void vertex() {
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	world_normal = abs(normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz));
+	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 }
 
 void fragment() {
 	vec3 source = texture(colormap, UV).rgb;
 	bool water = source.b > source.r + 0.25 && world_normal.y > 0.85;
-	vec3 w = world_normal / (world_normal.x + world_normal.y + world_normal.z);
+	vec3 weights = abs(world_normal);
+	weights /= max(weights.x + weights.y + weights.z, 0.0001);
 	vec3 p = world_position / 1.6;
-	vec3 stone = texture(stone_map, p.zy).rgb * w.x + texture(stone_map, p.xz).rgb * w.y + texture(stone_map, p.xy).rgb * w.z;
+	vec3 stone = texture(stone_map, p.zy).rgb * weights.x +
+		texture(stone_map, p.xz).rgb * weights.y +
+		texture(stone_map, p.xy).rgb * weights.z;
 	if (water) {
 		float ripple = sin(world_position.x * 3.0 + TIME * 1.7) * sin(world_position.z * 2.6 - TIME * 1.3);
 		ALBEDO = vec3(0.07, 0.2, 0.24) + ripple * 0.02;
@@ -148,7 +165,19 @@ void fragment() {
 		SPECULAR = 0.8;
 	} else {
 		ALBEDO = stone * 0.85 * mix(0.75, 1.0, source.r);
-		NORMAL_MAP = texture(stone_normal, p.xz).rgb;
+		// Triplanar normal reconstruction in world space: no tangent attribute
+		// is required on the Kenney fountain's imported surfaces.
+		vec3 sx = texture(stone_normal, p.zy).rgb * 2.0 - 1.0;
+		vec3 sy = texture(stone_normal, p.xz).rgb * 2.0 - 1.0;
+		vec3 sz = texture(stone_normal, p.xy).rgb * 2.0 - 1.0;
+		vec3 nx = vec3(sx.z, -sx.y, sx.x);
+		vec3 ny = vec3(sy.x, sy.z, -sy.y);
+		vec3 nz = vec3(sz.x, sz.y, sz.z);
+		nx.x *= sign(world_normal.x);
+		ny.y *= sign(world_normal.y);
+		nz.z *= sign(world_normal.z);
+		vec3 mapped_normal = normalize(nx * weights.x + ny * weights.y + nz * weights.z);
+		NORMAL = normalize((VIEW_MATRIX * vec4(mapped_normal, 0.0)).xyz);
 		ROUGHNESS = 0.9;
 	}
 }
