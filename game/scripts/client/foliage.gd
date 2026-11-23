@@ -211,6 +211,7 @@ void fragment() {
 		}
 		// The tangent-space normal is meaningful only on imported surfaces with
 		// normal+tangent arrays. Do not pay a texture read for the distant LOD.
+		#ifdef AA_FOLIAGE_HAS_TANGENTS
 		if (use_normal_map) {
 			vec3 normal_sample = textureGrad(normal_tex, UV, uv_dx, uv_dy).rgb;
 			NORMAL_MAP = normal_sample;
@@ -220,6 +221,7 @@ void fragment() {
 			aa_filter_normal = normalize(mix(vec3(0.0, 0.0, 1.0),
 				tangent_normal, aa_normal_scale));
 		}
+		#endif
 	}
 	// Approximate ambient light lost inside the crown without an extra
 	// depth/SSAO pass. Preserve the imported ORM AO and its distance fade.
@@ -251,8 +253,7 @@ void fragment() {
 
 const MeshLOD = preload("res://scripts/client/mesh_lod_preservation.gd")
 
-static var _shader: Shader
-static var _msaa_cutout_shader: Shader
+static var _shader_variants: Dictionary = {} # Normal-map on/off x MSAA coverage on/off.
 static var _coverage_enabled := false
 static var _alpha_mips_enabled := false
 static var _coverage_texture_cache: Dictionary = {} # One optimized texture per source+cutoff.
@@ -267,21 +268,26 @@ static func supports_alpha_coverage(method: String, msaa: int) -> bool:
 
 ## Shared shaders: only thin alpha-cutout leaves use the MSAA variant.
 ## Neither variant adds a texture fetch, a draw call, or a transparent sorting pass.
-static func _shader_for_surface(cutout: bool) -> Shader:
-	if _shader == null:
-		_shader = Shader.new()
-		_shader.code = SHADER_CODE
-	if not cutout or not _coverage_enabled:
-		return _shader
-	if _msaa_cutout_shader == null:
-		_msaa_cutout_shader = Shader.new()
-		_msaa_cutout_shader.code = SHADER_CODE.replace(
-			"render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;",
-			"render_mode cull_disabled, diffuse_burley, specular_schlick_ggx, alpha_to_coverage;").replace(
-			"ALPHA_SCISSOR_THRESHOLD = scissor;",
-			"ALPHA_SCISSOR_THRESHOLD = scissor;\n\t\tALPHA_ANTIALIASING_EDGE = 0.3;\n\t\tALPHA_TEXTURE_COORDINATE = UV;")
-	return _msaa_cutout_shader
-
+static func _shader_for_surface(cutout: bool, normal_mapped: bool = false) -> Shader:
+	# NORMAL_MAP has a compile-time tangent requirement, even when its runtime
+	# use_normal_map uniform is false. Build a tangent-free shader for those meshes.
+	var coverage: bool = cutout and _coverage_enabled
+	var variant: int = (2 if coverage else 0) + (1 if normal_mapped else 0)
+	if not _shader_variants.has(variant):
+		var code := SHADER_CODE
+		if normal_mapped:
+			code = code.replace("shader_type spatial;",
+				"shader_type spatial;\n#define AA_FOLIAGE_HAS_TANGENTS")
+		if coverage:
+			code = code.replace(
+				"render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;",
+				"render_mode cull_disabled, diffuse_burley, specular_schlick_ggx, alpha_to_coverage;").replace(
+				"ALPHA_SCISSOR_THRESHOLD = scissor;",
+				"ALPHA_SCISSOR_THRESHOLD = scissor;\n\t\tALPHA_ANTIALIASING_EDGE = 0.3;\n\t\tALPHA_TEXTURE_COORDINATE = UV;")
+		var shader := Shader.new()
+		shader.code = code
+		_shader_variants[variant] = shader
+	return _shader_variants[variant] as Shader
 
 ## Switching quality changes the shader of already cached instances in place:
 ## no mesh regeneration, no texture duplication and no world-chunk rebuild.
@@ -296,7 +302,8 @@ static func configure_antialiasing(enabled: bool) -> void:
 		for surface in geometry.get_surface_count():
 			var material := geometry.surface_get_material(surface) as ShaderMaterial
 			if material != null and bool(material.get_shader_parameter("cut_out")):
-				material.shader = _shader_for_surface(true)
+				material.shader = _shader_for_surface(true,
+					bool(material.get_meta("aa_foliage_normal_mapped", false)))
 
 
 
@@ -415,9 +422,16 @@ static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false)
 			var standard := base as BaseMaterial3D
 			var cut: bool = standard.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED
 			var material := ShaderMaterial.new()
-			# Select the shader before setting imported PBR parameters so the
-			# material uniforms are initialized once for either quality variant.
-			material.shader = _shader_for_surface(cut)
+			var tangent_data = arrays[Mesh.ARRAY_TANGENT]
+			var normal_data = arrays[Mesh.ARRAY_NORMAL]
+			var normal_map: Texture2D = standard.normal_texture
+			var normal_mapped: bool = standard.normal_enabled and normal_map != null and \
+				tangent_data is PackedFloat32Array and normal_data is PackedVector3Array and \
+				normal_data.size() > 0 and tangent_data.size() == normal_data.size() * 4
+			# Select the shader before setting imported PBR parameters. Only a real
+			# tangent frame may use the normal-mapped variant.
+			material.shader = _shader_for_surface(cut, normal_mapped)
+			material.set_meta("aa_foliage_normal_mapped", normal_mapped)
 			material.set_shader_parameter("sway", sway)
 			material.set_shader_parameter("instance_tinted", tinted)
 			material.set_shader_parameter("height_ref", height)
@@ -443,11 +457,9 @@ static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false)
 					material.set_shader_parameter("use_metallic_map", true)
 					material.set_shader_parameter("metallic_tex", metallic_map)
 					material.set_shader_parameter("metallic_mask", _channel_mask(standard.metallic_texture_channel))
-			# Normal textures require normals AND tangents (the original renderer rule).
-			var tangent_data = arrays[Mesh.ARRAY_TANGENT]
-			var normal_data = arrays[Mesh.ARRAY_NORMAL]
-			var normal_map: Texture2D = standard.normal_texture
-			if standard.normal_enabled and normal_map != null and tangent_data != null and tangent_data.size() > 0 and normal_data != null and normal_data.size() > 0:
+			# Shader compilation must also avoid reading NORMAL_MAP on tangentless
+			# surfaces; the uniform alone is not enough.
+			if normal_mapped:
 				material.set_shader_parameter("use_normal_map", true)
 				material.set_shader_parameter("normal_tex", normal_map)
 				material.set_shader_parameter("normal_strength", standard.normal_scale)

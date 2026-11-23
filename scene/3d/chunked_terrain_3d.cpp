@@ -992,8 +992,80 @@ bool ChunkedTerrain3D::is_over_terrain(const Vector3 &p_world_position) const {
 	return local.x >= params.origin.x && local.x <= params.origin.x + size.x && local.z >= params.origin.y && local.z <= params.origin.y + size.y;
 }
 
+bool ChunkedTerrain3D::apply_height_patch(const Rect2i &p_region, const PackedFloat32Array &p_heights) {
+	// Atomic admission: never overwrite earlier samples when a late value is
+	// NaN/Inf, the region spills beyond the height grid or the request is too
+	// large to process as a single terrain-edit transaction.
+	if (!data_from_script || data_width < 2 || data_depth < 2 ||
+			p_region.position.x < 0 || p_region.position.y < 0 ||
+			p_region.size.x < 1 || p_region.size.y < 1 ||
+			p_region.size.x > data_width || p_region.size.y > data_depth ||
+			p_region.position.x > data_width - p_region.size.x ||
+			p_region.position.y > data_depth - p_region.size.y ||
+			int64_t(p_region.size.x) * int64_t(p_region.size.y) > 4096 ||
+			p_heights.size() != p_region.size.x * p_region.size.y) {
+		return false;
+	}
+	for (int i = 0; i < p_heights.size(); ++i) {
+		if (!Math::is_finite(p_heights[i])) {
+			return false;
+		}
+	}
+	bool changed = false;
+	for (int z = 0; z < p_region.size.y && !changed; ++z) {
+		for (int x = 0; x < p_region.size.x; ++x) {
+			if (height_data[(p_region.position.y + z) * data_width + p_region.position.x + x] !=
+					real_t(p_heights[z * p_region.size.x + x])) {
+				changed = true;
+				break;
+			}
+		}
+	}
+	if (!changed) {
+		return true; // No GPU/physics invalidation for identical patches.
+	}
+	real_t *samples = height_data.ptrw();
+	for (int z = 0; z < p_region.size.y; ++z) {
+		for (int x = 0; x < p_region.size.x; ++x) {
+			samples[(p_region.position.y + z) * data_width + p_region.position.x + x] =
+					p_heights[z * p_region.size.x + x];
+		}
+	}
+
+	// Repair only the affected externally cached normals (and one-ring
+	// derivatives). This leaves authored normals elsewhere untouched.
+	if (normal_data.size() == data_width * data_depth) {
+		const Rect2i dirty_normals = p_region.grow(1).intersection(
+				Rect2i(0, 0, data_width, data_depth));
+		const real_t step_x = size.x / real_t(data_width - 1);
+		const real_t step_z = size.y / real_t(data_depth - 1);
+		Vector3 *normals = normal_data.ptrw();
+		for (int z = dirty_normals.position.y; z < dirty_normals.get_end().y; ++z) {
+			for (int x = dirty_normals.position.x; x < dirty_normals.get_end().x; ++x) {
+				const int west = MAX(x - 1, 0);
+				const int east = MIN(x + 1, data_width - 1);
+				const int north = MAX(z - 1, 0);
+				const int south = MIN(z + 1, data_depth - 1);
+				const real_t dx = (samples[z * data_width + west] -
+						samples[z * data_width + east]) * height_scale /
+						(real_t(east - west) * step_x);
+				const real_t dz = (samples[north * data_width + x] -
+						samples[south * data_width + x]) * height_scale /
+						(real_t(south - north) * step_z);
+				normals[z * data_width + x] = Vector3(dx, 1.0, dz).normalized();
+			}
+		}
+	}
+	update_region(p_region);
+	return true;
+}
+
 void ChunkedTerrain3D::update_region(const Rect2i &p_region) {
-	if (!built || chunks.is_empty()) {
+	if (!built || chunks.is_empty() || p_region.position.x < 0 || p_region.position.y < 0 ||
+			p_region.size.x < 1 || p_region.size.y < 1 ||
+			p_region.size.x > data_width || p_region.size.y > data_depth ||
+			p_region.position.x > data_width - p_region.size.x ||
+			p_region.position.y > data_depth - p_region.size.y) {
 		return;
 	}
 	// Normals read one sample beyond a chunk, so include the neighbours of every touched chunk.
@@ -1033,6 +1105,22 @@ void ChunkedTerrain3D::update_region(const Rect2i &p_region) {
 		const Vector3 a(params.origin.x + real_t(chunk.x0) * params.spacing.x, low * height_scale + height_offset, params.origin.y + real_t(chunk.z0) * params.spacing.y);
 		const Vector3 b(params.origin.x + real_t(x1) * params.spacing.x, high * height_scale + height_offset, params.origin.y + real_t(z1) * params.spacing.y);
 		chunk.bounds = AABB(a, b - a).abs();
+		// Edits also invalidate each coarser level's maximum height error.
+		// Without this recalculation steep newly sculpted hills could still
+		// select the same cheap LOD that was appropriate for a flat chunk.
+		chunk.lod_errors[0] = 0.0;
+		int previous_stride = 1;
+		for (int level = 1; level < MAX_LOD; ++level) {
+			const int stride = lod_stride(level, chunk_quads);
+			if (stride == previous_stride) {
+				chunk.lod_errors[level] = chunk.lod_errors[level - 1];
+			} else {
+				const real_t error = chunk_lod_max_error(_field(), chunk.x0, chunk.z0,
+						chunk_quads, stride) * Math::abs(height_scale);
+				chunk.lod_errors[level] = MAX(error, chunk.lod_errors[level - 1]);
+			}
+			previous_stride = stride;
+		}
 	}
 	time_since_update = 1e9;
 }
@@ -1060,6 +1148,14 @@ int ChunkedTerrain3D::get_collision_chunk_count() const {
 int ChunkedTerrain3D::get_chunk_lod(const Vector2i &p_chunk) const {
 	ERR_FAIL_COND_V(p_chunk.x < 0 || p_chunk.y < 0 || p_chunk.x >= chunks_x || p_chunk.y >= chunks_z, -1);
 	return chunks[p_chunk.y * chunks_x + p_chunk.x].lod;
+}
+
+real_t ChunkedTerrain3D::get_chunk_lod_error(const Vector2i &p_chunk, int p_lod) const {
+	if (p_chunk.x < 0 || p_chunk.y < 0 || p_chunk.x >= chunks_x ||
+			p_chunk.y >= chunks_z || p_lod < 0 || p_lod >= MAX_LOD) {
+		return -1.0;
+	}
+	return chunks[p_chunk.y * chunks_x + p_chunk.x].lod_errors[p_lod];
 }
 
 void ChunkedTerrain3D::_bind_methods() {
@@ -1134,11 +1230,13 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_normal_at", "world_position"), &ChunkedTerrain3D::get_normal_at);
 	ClassDB::bind_method(D_METHOD("is_over_terrain", "world_position"), &ChunkedTerrain3D::is_over_terrain);
 	ClassDB::bind_method(D_METHOD("update_region", "region"), &ChunkedTerrain3D::update_region);
+	ClassDB::bind_method(D_METHOD("apply_height_patch", "region", "heights"), &ChunkedTerrain3D::apply_height_patch);
 	ClassDB::bind_method(D_METHOD("get_chunk_count"), &ChunkedTerrain3D::get_chunk_count);
 	ClassDB::bind_method(D_METHOD("get_chunk_grid_size"), &ChunkedTerrain3D::get_chunk_grid_size);
 	ClassDB::bind_method(D_METHOD("get_visible_chunk_count"), &ChunkedTerrain3D::get_visible_chunk_count);
 	ClassDB::bind_method(D_METHOD("get_collision_chunk_count"), &ChunkedTerrain3D::get_collision_chunk_count);
 	ClassDB::bind_method(D_METHOD("get_chunk_lod", "chunk"), &ChunkedTerrain3D::get_chunk_lod);
+	ClassDB::bind_method(D_METHOD("get_chunk_lod_error", "chunk", "lod"), &ChunkedTerrain3D::get_chunk_lod_error);
 	ClassDB::bind_method(D_METHOD("force_update"), &ChunkedTerrain3D::force_update);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "heightmap", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "set_heightmap", "get_heightmap");
