@@ -9,20 +9,24 @@ const MAX_PARTICIPANTS := 5
 
 
 static func activate(bag: Dictionary, identities: Array, boss_id: int, now: float) -> bool:
+	var items: Variant = bag.get("items", null)
+	var raw_lock: Variant = bag.get("raid_reserved_until", null)
 	if not is_finite(now) or now < 0.0 or boss_id <= 0 or identities.is_empty() \
-			or identities.size() > MAX_PARTICIPANTS or bag.get("items", {}).is_empty() \
-			or not bag.has("raid_reserved_until"):
+			or identities.size() > MAX_PARTICIPANTS or not (items is Dictionary) \
+			or (items as Dictionary).is_empty() or not (raw_lock is int or raw_lock is float) \
+			or not is_finite(float(raw_lock)) or float(raw_lock) <= now \
+			or bag.has("raid_round_robin"):
 		return false
 	var ordered: Array[String] = []
-	for token in identities:
-		if not token is String or str(token).is_empty() or ordered.has(str(token)):
+	for identity in identities:
+		if not (identity is String) or str(identity).is_empty() or ordered.has(str(identity)):
 			return false
-		ordered.append(str(token))
+		ordered.append(str(identity))
 	bag["raid_round_robin"] = {
 		"order": ordered,
 		"index": posmod(boss_id, ordered.size()),
-		"until": now + TURN_SECONDS,
-		"original": (bag["items"] as Dictionary).duplicate(true)
+		"until": minf(now + TURN_SECONDS, float(raw_lock)),
+		"original": (items as Dictionary).duplicate(true)
 	}
 	return true
 
@@ -31,14 +35,48 @@ static func active(bag: Dictionary, now: float) -> bool:
 	return bag.has("raid_round_robin") and RaidLoot.remaining(bag, now) > 0.0
 
 
+static func _validated_rule(bag: Dictionary) -> Dictionary:
+	var raw: Variant = bag.get("raid_round_robin", null)
+	if not (raw is Dictionary):
+		return {}
+	var rule: Dictionary = raw
+	var order_raw: Variant = rule.get("order", null)
+	var index_raw: Variant = rule.get("index", null)
+	var until_raw: Variant = rule.get("until", null)
+	var original_raw: Variant = rule.get("original", null)
+	var items_raw: Variant = bag.get("items", null)
+	if not (order_raw is Array) or not (index_raw is int) or \
+			not (until_raw is int or until_raw is float) or \
+			not is_finite(float(until_raw)) or not (original_raw is Dictionary) or \
+			not (items_raw is Dictionary):
+		return {}
+	var order: Array = order_raw
+	if order.is_empty() or order.size() > MAX_PARTICIPANTS or \
+			int(index_raw) < 0 or int(index_raw) >= order.size():
+		return {}
+	var seen: Dictionary = {}
+	for identity in order:
+		if not (identity is String) or str(identity).is_empty() or seen.has(identity):
+			return {}
+		seen[identity] = true
+	var original: Dictionary = original_raw
+	for item_id in original:
+		var amount: Variant = original[item_id]
+		if not (amount is int or amount is float) or \
+				not is_finite(float(amount)) or float(amount) < 0.0 or \
+				float(amount) != floor(float(amount)):
+			return {}
+	return rule
+
+
 ## No state mutation when merely checking a turn (e.g. for snapshots).
 static func turn(bag: Dictionary, player, now: float) -> Dictionary:
 	if not active(bag, now):
 		return {"ok": true, "active": false}
-	var rule: Dictionary = bag["raid_round_robin"]
-	var order: Array = rule["order"]
-	if order.is_empty() or not is_finite(now):
+	var rule: Dictionary = _validated_rule(bag)
+	if rule.is_empty() or player == null or not is_finite(now) or now < 0.0:
 		return {"ok": false, "reason": "invalid_state"}
+	var order: Array = rule["order"]
 	var owner: String = RaidLoot.token(player)
 	if not order.has(owner):
 		return {"ok": false, "reason": "raid_reserved"}
@@ -58,27 +96,33 @@ static func turn(bag: Dictionary, player, now: float) -> Dictionary:
 ## the original server-owned bag before any inventory transfer.
 static func offer(bag: Dictionary, player, now: float, requested_item: String = "") -> Dictionary:
 	var status: Dictionary = turn(bag, player, now)
-	if not bool(status["ok"]):
-		return {"ok": false, "reason": status.get("reason", "not_your_turn"),
+	if not bool(status.get("active", false)) or not bool(status.get("ok", false)):
+		return {"ok": false, "reason": status.get("reason", "not_active"),
 			"remaining": float(status.get("seconds", 0.0))}
-	if not bool(status.get("active", false)):
-		return {"ok": false, "reason": "not_active"}
-	var rule: Dictionary = bag["raid_round_robin"]
+	var rule: Dictionary = _validated_rule(bag)
+	if rule.is_empty():
+		return {"ok": false, "reason": "invalid_state"}
 	var count: int = (rule["order"] as Array).size()
-	var contents: Dictionary = bag.get("items", {})
+	var contents: Dictionary = bag["items"]
+	var original: Dictionary = rule["original"]
 	var ids: Array = contents.keys()
 	ids.sort()
 	if not requested_item.is_empty():
-		if not contents.has(requested_item) or int(contents[requested_item]) <= 0 \
-				or not (rule["original"] as Dictionary).has(requested_item):
+		if not contents.has(requested_item) or not (contents[requested_item] is int or contents[requested_item] is float) or \
+				float(contents[requested_item]) <= 0.0 or not original.has(requested_item):
 			return {"ok": false, "reason": "item_unavailable"}
 		ids = [requested_item]
 	for item_id in ids:
-		var available: int = int(contents[item_id])
-		if available <= 0:
+		var raw_available: Variant = contents[item_id]
+		if not (raw_available is int or raw_available is float) or \
+				not is_finite(float(raw_available)) or float(raw_available) <= 0.0:
 			continue
-		var original: int = maxi(1, int((rule["original"] as Dictionary).get(item_id, available)))
-		var share: int = maxi(1, ceili(float(original) / float(count)))
+		var raw_original: Variant = original.get(item_id, raw_available)
+		if not (raw_original is int or raw_original is float) or \
+				not is_finite(float(raw_original)) or float(raw_original) <= 0.0:
+			return {"ok": false, "reason": "invalid_state"}
+		var available: int = int(raw_available)
+		var share: int = maxi(1, ceili(float(raw_original) / float(count)))
 		return {"ok": true, "item": str(item_id),
 			"quantity": mini(available, share), "index": int(status["index"])}
 	return {"ok": false, "reason": "empty"}
@@ -89,23 +133,31 @@ static func offer(bag: Dictionary, player, now: float, requested_item: String = 
 ## may be sent to a contributor whose turn is active.
 static func choice_ids(bag: Dictionary) -> Array[String]:
 	var result: Array[String] = []
-	var contents: Dictionary = bag.get("items", {})
-	for item_id in contents.keys():
-		if int(contents[item_id]) > 0:
+	var contents_raw: Variant = bag.get("items", null)
+	if not (contents_raw is Dictionary):
+		return result
+	var contents: Dictionary = contents_raw
+	for item_id in contents:
+		var amount: Variant = contents[item_id]
+		if (amount is int or amount is float) and is_finite(float(amount)) and \
+				float(amount) > 0.0:
 			result.append(str(item_id))
 	result.sort()
 	return result
 
 
 static func complete(bag: Dictionary, current_index: int, now: float) -> void:
-	if not active(bag, now):
+	if not active(bag, now) or not is_finite(now) or now < 0.0:
 		return
-	var rule: Dictionary = bag["raid_round_robin"]
+	var rule: Dictionary = _validated_rule(bag)
+	if rule.is_empty():
+		return
 	var count: int = (rule["order"] as Array).size()
-	if count <= 0:
+	if current_index < 0 or current_index >= count:
 		return
+	var lock_remaining: float = RaidLoot.remaining(bag, now)
 	rule["index"] = posmod(current_index + 1, count)
-	rule["until"] = now + TURN_SECONDS
+	rule["until"] = minf(now + TURN_SECONDS, now + lock_remaining)
 
 
 ## The actual turn holder may yield without claiming anything. This does not
