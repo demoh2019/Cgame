@@ -32,7 +32,9 @@ func run(t) -> void:
 		t.eq(bytes.size(), int(ceil(float(bits * 3) / 8.0)),
 			"bit count %d has minimal payload length" % bits)
 		var recovered: Vector3 = Quant.unpack_vector3(bytes, lower, upper, bits)
-		var tolerance: float = 100.0 / float((1 << bits) - 1) + 0.0001
+		# Error is bounded by half a quantization interval on each axis.
+		# Use the 3D length of those half-steps, not one axis alone.
+		var tolerance: float = (upper - lower).length() / 			(2.0 * float((1 << bits) - 1)) + 0.0001
 		t.check(recovered.is_finite() and source.distance_to(recovered) <= tolerance,
 			"coordinate error stays within each axis' quantization step at %d bits" % bits)
 	var corner: PackedByteArray = Quant.pack_vector3(upper, lower, upper, 21)
