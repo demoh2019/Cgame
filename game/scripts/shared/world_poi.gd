@@ -368,7 +368,8 @@ func contents(site: Dictionary) -> Dictionary:
 			_crates(result, rng, center, rng.randi_range(6, 10), 8.0, 64.0, taken)
 			_props(result, rng, center, rng.randi_range(20, 30), 6.0, 70.0, RUIN_PROPS)
 			_zombies(result, rng, center, rng.randi_range(8, 14) + zone, 8.0, 70.0, zone, true)
-			_trim_city_footprint(result, center, str(site["layout"]), float(site["layout_rotation"]), float(site["radius"]))
+			_trim_city_footprint(result, site, center)
+			_city_salvage(result, rng, site, center)
 		"bunker":
 			_ring_walls(result, rng, center, 24.0, 0.85, [WALL_STONE, 4])
 			_towers(result, center, [Vector2(-20.0, 0.0), Vector2(20.0, 0.0)] if rng.randf() < 0.5 else [Vector2(0.0, 0.0)], 1.0, 1)
@@ -393,16 +394,47 @@ func contents(site: Dictionary) -> Dictionary:
 			_npcs(result, rng, site, [["fisher", 1], ["villager", 1]], 4.0, 12.0)
 			_zombies(result, rng, center, rng.randi_range(0, 2), 14.0, 28.0, zone, false)
 	site["contents"] = result
+	if kind == "city":
+		# Cached content no longer needs temporary lots or the clearance grid.
+		# The regional road renderer keeps only the lightweight path polylines.
+		var cached_plan: Dictionary = city_plan(site)
+		cached_plan.erase("lots")
+		cached_plan.erase("index")
 	return result
+
+
+## Lazily bake each city's road paths once, without eagerly allocating indices.
+## The POI record is shared by local generation and the regional road renderer.
+func city_plan(site: Dictionary) -> Dictionary:
+	if site.has("city_plan"):
+		var cached: Dictionary = site["city_plan"]
+		return cached
+	var layout: String = str(site["layout"])
+	var radius: float = float(site["radius"])
+	var rotation: float = float(site["layout_rotation"])
+	var paths: Array = CityLayout.streets(layout, radius, rotation)
+	var plan: Dictionary = {"paths": paths}
+	site["city_plan"] = plan
+	return plan
+
+
+## A temporary grid and lot list live only for authoritative city generation.
+func _city_content_plan(site: Dictionary) -> Dictionary:
+	var plan: Dictionary = city_plan(site)
+	if not plan.has("index"):
+		var paths: Array = plan["paths"]
+		plan["index"] = CityLayout.index_streets(paths)
+	if not plan.has("lots"):
+		plan["lots"] = CityLayout.building_lots(int(site["seed"]), str(site["layout"]),
+				float(site["radius"]), float(site["layout_rotation"]))
+	return plan
 
 
 ## City buildings follow the seeded district plan, leaving actual room for painted streets.
 func _city_buildings(result: Dictionary, rng: RandomNumberGenerator, site: Dictionary, center: Vector2, taken: Array) -> void:
-	var layout: String = str(site["layout"])
-	var rotation: float = float(site["layout_rotation"])
-	var city_radius: float = float(site["radius"])
-	var candidates: Array[Dictionary] = CityLayout.building_lots(int(site["seed"]), layout, city_radius, rotation)
-	var paths: Array = CityLayout.streets(layout, city_radius, rotation)
+	var plan: Dictionary = _city_content_plan(site)
+	var candidates: Array[Dictionary] = plan["lots"]
+	var street_index: Dictionary = plan["index"]
 	var wanted: int = rng.randi_range(14, 22)
 	var placed := 0
 	for lot in candidates:
@@ -413,7 +445,7 @@ func _city_buildings(result: Dictionary, rng: RandomNumberGenerator, site: Dicti
 		if not _usable(p, taken, 12.0):
 			continue
 		# Buildings must never block the painted roads, including at intersections.
-		if CityLayout.street_distance(offset, paths) < BUILDING_SCALE * 0.62 + 3.1:
+		if CityLayout.street_blocked(offset, BUILDING_SCALE * 0.62 + 3.1, street_index):
 			continue
 		taken.append(p)
 		placed += 1
@@ -424,8 +456,12 @@ func _city_buildings(result: Dictionary, rng: RandomNumberGenerator, site: Dicti
 
 
 ## Keep rubble, loot and enemies inside the same footprint as the city blocks.
-func _trim_city_footprint(result: Dictionary, center: Vector2, layout: String, rotation: float, radius: float) -> void:
-	var paths: Array = CityLayout.streets(layout, radius, rotation)
+func _trim_city_footprint(result: Dictionary, site: Dictionary, center: Vector2) -> void:
+	var plan: Dictionary = _city_content_plan(site)
+	var street_index: Dictionary = plan["index"]
+	var layout: String = str(site["layout"])
+	var rotation: float = float(site["layout_rotation"])
+	var radius: float = float(site["radius"])
 	for group in ["structures", "crates", "props", "spawns"]:
 		var inside: Array = []
 		for item in result[group]:
@@ -433,10 +469,54 @@ func _trim_city_footprint(result: Dictionary, center: Vector2, layout: String, r
 			if not CityLayout.contains(offset, layout, radius, rotation):
 				continue
 			if group != "spawns" and bool(item.get("blocks", true)):
-				if CityLayout.street_distance(offset, paths) < float(item.get("radius", 0.0)) + 3.1:
+				if CityLayout.street_blocked(offset, float(item.get("radius", 0.0)) + 3.1, street_index):
 					continue
 			inside.append(item)
 		result[group] = inside
+
+
+## Lootable salvage caches in ruined-city courtyards. They are ordinary server-authoritative
+## crates, so existing scavenging, tier, respawn and persistence rules apply unchanged.
+func _city_salvage(result: Dictionary, rng: RandomNumberGenerator, site: Dictionary, center: Vector2) -> void:
+	var plan: Dictionary = _city_content_plan(site)
+	var street_index: Dictionary = plan["index"]
+	var lots: Array[Dictionary] = plan["lots"]
+	var candidates: Array[Vector2] = []
+	for lot in lots:
+		candidates.append(lot["offset"])
+	# Extra courtyards give highly built-up city shapes a chance to spawn salvage.
+	# This separate random stream does not move buildings, enemies or normal loot.
+	var cache_rng := RandomNumberGenerator.new()
+	cache_rng.seed = int(site["seed"]) ^ 0x73ab5e14
+	for attempt in 64:
+		var offset: Vector2 = Vector2.from_angle(cache_rng.randf() * TAU)
+		offset *= sqrt(cache_rng.randf()) * float(site["radius"]) * 0.78
+		candidates.append(offset.rotated(float(site["layout_rotation"])))
+	var placed := 0
+	for offset in candidates:
+		if placed >= 3:
+			break
+		if not CityLayout.contains(offset, str(site["layout"]), float(site["radius"]),
+				float(site["layout_rotation"])):
+			continue
+		var p: Vector2 = center + offset
+		if world.is_water(p.x, p.y) or CityLayout.street_blocked(offset, 4.0, street_index):
+			continue
+		var occupied := false
+		for group in ["structures", "crates", "props"]:
+			for item in result[group]:
+				var obstacle := Vector2(float(item["x"]), float(item["z"]))
+				var reach: float = float(item.get("radius", 0.6)) + 2.0
+				if p.distance_squared_to(obstacle) < reach * reach:
+					occupied = true
+					break
+			if occupied:
+				break
+		if occupied:
+			continue
+		result["crates"].append({"kind": "crate", "variant": rng.randi_range(0, CRATE_VARIANTS - 1),
+			"urban_cache": true, "x": p.x, "z": p.y, "y": _ground(p), "radius": 0.6, "blocks": true})
+		placed += 1
 
 
 func _house_variant(rng: RandomNumberGenerator, limit: int) -> int:

@@ -110,8 +110,8 @@ func _build() -> void:
 					var place: Dictionary = {"name": str(site["display"]), "x": float(site["x"]), "z": float(site["z"]),
 						"radius": float(site["radius"]), "end": minf(float(site["radius"]) * 0.35, 20.0), "id": int(site["id"])}
 					if str(site["kind"]) == "city":
-						place["layout"] = str(site["layout"])
-						place["layout_rotation"] = float(site["layout_rotation"])
+						var plan: Dictionary = world.poi.city_plan(site)
+						place["city_paths"] = plan["paths"]
 						_lay_city_streets(site)
 					places.append(place)
 	# Build the graph in one native nearest-neighbor pass when Cgame supports it.
@@ -123,7 +123,8 @@ func _build() -> void:
 ## Index the local streets with the same terrain mask and authoritative road grip as intercity roads.
 func _lay_city_streets(site: Dictionary) -> void:
 	var center := Vector2(float(site["x"]), float(site["z"]))
-	var paths: Array = CityLayout.streets(str(site["layout"]), float(site["radius"]), float(site["layout_rotation"]))
+	var plan: Dictionary = world.poi.city_plan(site)
+	var paths: Array = plan["paths"]
 	for offsets in paths:
 		var points := PackedVector2Array()
 		for offset in offsets:
@@ -143,19 +144,19 @@ func _lay_road(a: Dictionary, b: Dictionary) -> void:
 	var start := Vector2(a["x"], a["z"])
 	var finish := Vector2(b["x"], b["z"])
 	var direction := (finish - start).normalized()
-	if a.has("layout"):
-		start += CityLayout.entrance_offset(str(a["layout"]), float(a["radius"]),
-				float(a["layout_rotation"]), direction)
+	if a.has("city_paths"):
+		var from_paths: Array = a["city_paths"]
+		start += CityLayout.entrance_on_paths(from_paths, direction)
 	else:
 		start += direction * float(a["end"])
-	if b.has("layout"):
-		finish += CityLayout.entrance_offset(str(b["layout"]), float(b["radius"]),
-				float(b["layout_rotation"]), -direction)
+	if b.has("city_paths"):
+		var to_paths: Array = b["city_paths"]
+		finish += CityLayout.entrance_on_paths(to_paths, -direction)
 	else:
 		finish -= direction * float(b["end"])
 	var length: float = start.distance_to(finish)
 	# Preserve old non-city link spacing; a nearby city entrance still needs a short connection.
-	var minimum_length: float = 3.0 if a.has("layout") or b.has("layout") else STEP * 2.0
+	var minimum_length: float = 3.0 if a.has("city_paths") or b.has("city_paths") else STEP * 2.0
 	if length < minimum_length:
 		return
 	var side := Vector2(-direction.y, direction.x)
