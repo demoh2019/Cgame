@@ -24,6 +24,28 @@ func run(t) -> void:
 		"rearward scenery remains eligible, rather than being culled")
 	t.eq(DecorPolicy.rank(-10.0, 0.0), 0.0,
 		"invalid negative distance cannot outrank the current chunk")
+	t.near(DecorPolicy.rank_ground(Vector2(0.0, -100.0), Vector2(0.0, -1.0)),
+			70.0, 0.001, "the near camera-facing scenery keeps its original priority")
+	t.near(DecorPolicy.rank_ground(Vector2(0.0, 100.0), Vector2(0.0, -1.0)),
+			130.0, 0.001, "rearward scenery keeps its original priority")
+	t.near(DecorPolicy.rank_ground(Vector2(30.0, 40.0), Vector2.ZERO),
+			DecorPolicy.rank(50.0, 0.0), 0.001,
+			"when camera is almost vertical, prioritize strictly by ground distance")
+	var rank_rng := RandomNumberGenerator.new()
+	rank_rng.seed = 12572
+	var max_rank_error := 0.0
+	for i in 500:
+		var delta_xz := Vector2(rank_rng.randf_range(-200.0, 200.0),
+				rank_rng.randf_range(-200.0, 200.0))
+		var yaw: float = rank_rng.randf_range(0.0, TAU)
+		var forward_xz: Vector2 = Vector2.from_angle(yaw)
+		var old_facing: float = delta_xz.normalized().dot(forward_xz) \
+				if delta_xz.length_squared() > 0.0001 else 0.0
+		var old_rank: float = DecorPolicy.rank(delta_xz.length(), old_facing)
+		var new_rank: float = DecorPolicy.rank_ground(delta_xz, forward_xz)
+		max_rank_error = maxf(max_rank_error, absf(old_rank - new_rank))
+	t.check(max_rank_error < 0.0001,
+			"ground-plane queue ranking preserves per-chunk camera priority (%f)" % max_rank_error)
 	t.check(DecorPolicy.can_continue(100000, 1000, 0),
 		"first indivisible decorative mesh always builds to avoid starvation")
 	t.check(DecorPolicy.can_continue(999, 1000, 2),
