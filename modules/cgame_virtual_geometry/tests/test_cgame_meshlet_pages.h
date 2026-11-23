@@ -80,7 +80,8 @@ TEST_CASE("[CgameMeshletPages] bounded binary pages retain every original triang
 			CHECK(vertex_ids.size() <= 64);
 			CHECK(local_indices.size() % 3 == 0);
 			CHECK(local_indices.size() <= 124 * 3);
-			CHECK(Vector3(m["bounds_center"]).is_finite());
+			const Vector3 center = m["bounds_center"];
+			CHECK(center.is_finite());
 			CHECK(float(m["bounds_radius"]) >= 0.0f);
 			for (int tri = 0; tri < local_indices.size(); tri += 3) {
 				const int ia = local_indices[tri];
@@ -123,25 +124,25 @@ TEST_CASE("[CgameMeshletPages] corrupted page byte counts offsets references and
 	REQUIRE(pages.size() > 0);
 	const PackedByteArray valid = pages[0];
 	CHECK_FALSE(CgameMeshletPages::inspect_page(valid).is_empty());
-	PackedByteArray corrupt = valid.duplicate();
+	PackedByteArray corrupt = valid;
 	corrupt.set(0, 0); // Invalid magic.
 	CHECK(CgameMeshletPages::inspect_page(corrupt).is_empty());
-	corrupt = valid.duplicate();
+	corrupt = valid;
 	corrupt.set(4, 255); // Unsupported layout version.
 	CHECK(CgameMeshletPages::inspect_page(corrupt).is_empty());
-	corrupt = valid.duplicate();
+	corrupt = valid;
 	corrupt.set(28, 0); // Header size mismatch.
 	CHECK(CgameMeshletPages::inspect_page(corrupt).is_empty());
-	corrupt = valid.duplicate();
+	corrupt = valid;
 	corrupt.set(24, 255); // Impossible triangles stream offset.
 	CHECK(CgameMeshletPages::inspect_page(corrupt).is_empty());
-	corrupt = valid.duplicate();
+	corrupt = valid;
 	corrupt.set(32 + 8, 0); // First descriptor has no vertex references.
 	CHECK(CgameMeshletPages::inspect_page(corrupt).is_empty());
-	corrupt = valid.duplicate();
+	corrupt = valid;
 	corrupt.set(32 + 12, 255); // First descriptor has too many triangles.
 	CHECK(CgameMeshletPages::inspect_page(corrupt).is_empty());
-	corrupt = valid.duplicate();
+	corrupt = valid;
 	corrupt.push_back(0); // Trailing smuggled bytes.
 	CHECK(CgameMeshletPages::inspect_page(corrupt).is_empty());
 	CHECK(CgameMeshletPages::inspect_page(PackedByteArray()).is_empty());
