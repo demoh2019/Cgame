@@ -35,8 +35,47 @@ Use `game_facade/cgame_virtual_geometry_facade.gd` to call the native classes wi
 
 `tests/test_cgame_virtual_geometry.h` (doctest) mirrors `test_virtual_geometry.gd` and `test_occlusion_culling.gd`: meshlet limits and coverage, cone/frustum culling, monotonic cluster errors, far cut has fewer triangles, watertight cuts, determinism, and an occluded box behind a wall. Run with `./bin/godot.<platform>.editor.<arch> --test --test-case="*Cgame*"`.
 
+## P1: Attribute-fidelity meshoptimizer surface simplification
+
+The native static method `CgameClusterLOD.simplify_surface_arrays(surface_arrays,
+target_triangles, normal_weight=0.6, uv_weight=0.6)` now offers an **opt-in**
+normal/UV-weighted simplification path for a *complete Godot surface*. The
+algorithm passes positions and available normals/UVs to
+`meshopt_simplifyWithAttributes` with locked borders. It never modifies
+the source vertex array: output differs **only in `Mesh.ARRAY_INDEX`**.
+This preserves original normals, tangent frames and bitangent signs, UV1/2,
+vertex colors, bones and weights, and custom vertex channels. The source
+material is retained by the caller when constructing its new `ArrayMesh`.
+
+The API rejects invalid array shape, out-of-range indices, a nonfinite
+vertex/normal/UV, mismatched attribute length, oversized data, or
+nonfinite/unbounded weights. If the target cannot be reached due to
+topological restrictions, the caller receives a valid *reduced* index
+list or an empty result if no reduction was possible. Callers must
+check actual triangle count before adoption. Vertices are not compacted,
+and there is no GPU geometry streaming/residency in this feature.
+
+**Real Albion After integration:** the production
+`game/scripts/client/model_catalog.gd` calls
+`MeshLodPreservation.with_triangle_budget(...)` while loading/caching
+small scattered meshes. In `game/scripts/client/mesh_lod_preservation.gd`,
+a single-surface static mesh with no blend shapes or pre-authored LODs
+now tries the new native weighted pass first. If it cannot hit the
+triangular draw budget, if no native Cgame method is present, or for
+multi-surface/animated meshes, the previous importer simplification is
+used. This runs once per source mesh, never per frame. No gameplay
+collision, server data, audio, skin deformation or network state changes.
+
+Tests:
+`modules/cgame_virtual_geometry/tests/test_cgame_virtual_geometry.h`,
+`game/tests/test_virtual_geometry_attribute_lod.gd`,
+`tests/scene/test_virtual_geometry_attribute_contract.py`, and the
+`.github/workflows/native-virtual-geometry-attribute-lod.yml` workflow.
+Source-level checks are not equivalent to successful native compilation
+or graphics-driver testing.
+
 ## Limitations
 
 - No GPU path and no streaming; hierarchy building is single threaded and intended for offline or load-time use.
-- Simplification ignores normals, UVs and other attributes (positions only).
+- The legacy cluster DAG `build_hierarchy` simplification is still positions-only. The new standalone native surface helper considers normals/UV1 and retains all original vertex channels, but does not yet feed attribute penalties into the cluster DAG or produce compact GPU meshlet pages.
 - The occlusion rasterizer is scalar C++ written so that compilers can auto-vectorize the row loops; there is no explicit SIMD or tile binning yet.
