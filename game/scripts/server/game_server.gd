@@ -1613,6 +1613,7 @@ func cmd_resource_hit(peer_id: int, node_id: int, dir_x: float, dir_z: float) ->
 	if not progress.is_empty() and time >= float(progress.get("expires", 0.0)):
 		resource_hit_progress.erase(node_id)
 		depleted[node_id] = time + float(Defs.node_info(kind)["respawn"])
+		world.set_node_depleted(node_id, true)
 		return {"ok": false, "reason": "depleted"}
 	var current_hits: int = int(progress.get("hits", 0))
 	var hit: int = mini(current_hits + 1, hits_needed)
@@ -8031,6 +8032,7 @@ func _finish_gather(player: Player, node: Dictionary, base_amount: int = -1,
 		player.action = {}
 		resource_hit_progress.erase(int(node["id"]))
 		depleted[int(node["id"])] = time + float(info["respawn"])
+		world.set_node_depleted(int(node["id"]), true)
 		SurveySignal.clear_depleted(parties, int(node["id"]))
 	events.append({"type": "gathered", "peer": player.id, "item": item_id,
 		"amount": amount - left, "node": node["id"], "final": finish_node, "strike": from_strike,
@@ -9918,9 +9920,11 @@ func _tick_world(delta: float) -> void:
 	for id in depleted.keys():
 		if time >= float(depleted[id]):
 			depleted.erase(id)
+			world.set_node_depleted(int(id), false)
 	for id in resource_hit_progress.keys():
 		if time >= float(resource_hit_progress[id]["expires"]):
 			depleted[id] = time + float(resource_hit_progress[id]["respawn"])
+			world.set_node_depleted(int(id), true)
 			resource_hit_progress.erase(id)
 	for id in opened_crates.keys():
 		if time >= float(opened_crates[id]):
