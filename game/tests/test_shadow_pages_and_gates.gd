@@ -108,6 +108,56 @@ func run(t) -> void:
 	t.check(int(h2["resident"]) <= 6, "resident never exceeds pool")
 	t.check(int(h2["allocated"]) > 0, "new pages allocated under pressure")
 
+
+	t.current = "renderer-ready shadow page jobs and toroidal window safety"
+	var gpu_pages: RefCounted = VSP.new()
+	gpu_pages.setup(1, 64.0, 128, 512, 8) # 4x4 pages.
+	gpu_pages.begin_frame(LIGHT, Vector3.ZERO)
+	var single := PackedVector3Array([Vector3.ZERO])
+	gpu_pages.request_for_receivers(single, _fp(1, 0.01))
+	t.eq(int(gpu_pages.end_frame()["rendered"]), 1,
+		"visible centre page is requested for rendering")
+	var initial_jobs: PackedInt32Array = gpu_pages.get_render_jobs()
+	t.eq(initial_jobs.size(), 4, "one page has a 4-int GPU render record")
+	if initial_jobs.size() == 4:
+		t.eq(initial_jobs[0], 0, "render job carries clipmap level")
+		t.eq(initial_jobs[1], 0, "render job carries global X coordinate")
+		t.eq(initial_jobs[2], 0, "render job carries global Y coordinate")
+		t.eq(gpu_pages.page_table()[0], initial_jobs[3],
+			"render target slot agrees with the current page table")
+	var step: float = gpu_pages.page_world_size(0) * 4.0
+	gpu_pages.begin_frame(LIGHT, Vector3(step, 0, 0))
+	t.eq(gpu_pages.get_render_jobs().size(), 0,
+		"new frame clears previous renderer commands")
+	single[0] = Vector3(step, 0, 0)
+	gpu_pages.request_for_receivers(single, _fp(1, 0.01))
+	gpu_pages.end_frame()
+	var moved_jobs: PackedInt32Array = gpu_pages.get_render_jobs()
+	t.eq(moved_jobs.size(), 4, "new clipmap region schedules exactly one new page")
+	if moved_jobs.size() == 4:
+		t.eq(moved_jobs[1], 4, "new page keeps unwrapped global page X")
+		t.eq(gpu_pages.page_table()[0], moved_jobs[3],
+			"old resident page never aliases a new clipmap table slot")
+	t.eq(gpu_pages.resident_count(), 2, "old page is still cached for returning")
+	gpu_pages.begin_frame(LIGHT, Vector3(step, 0, 0))
+	gpu_pages.request_for_receivers(single, _fp(1, 0.01))
+	gpu_pages.end_frame()
+	t.eq(gpu_pages.get_render_jobs().size(), 0, "unchanged static pages need no GPU work")
+	gpu_pages.setup(1, 16.0, 128, 128, 1)
+	gpu_pages.begin_frame(LIGHT, Vector3.ZERO)
+	single[0] = Vector3.ZERO
+	gpu_pages.request_for_receivers(single, _fp(1, 0.01))
+	t.eq(int(gpu_pages.end_frame()["allocated"]), 1,
+		"one-page VSM clipmap can request its centre")
+	gpu_pages.setup(1, 48.0, 128, 384, 9)
+	gpu_pages.begin_frame(LIGHT, Vector3.ZERO)
+	var page_m: float = gpu_pages.page_world_size(0)
+	gpu_pages.request_for_receivers(PackedVector3Array([
+		Vector3(-page_m, 0, 0), Vector3.ZERO, Vector3(page_m, 0, 0)
+	]), _fp(3, 0.01))
+	t.eq(int(gpu_pages.end_frame()["allocated"]), 3,
+		"odd-sized clipmap keeps all three columns of virtual pages")
+
 	t.current = "perf regression"
 	var base: Dictionary = {"frame_time_p50": 10.0, "frame_time_p95": 16.0, "frame_time_p99": 20.0,
 		"memory_peak": 500.0, "draw_calls": 1000.0, "shader_compiles": 0.0}
