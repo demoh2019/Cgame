@@ -191,7 +191,7 @@ static func inspect_streamable_meshlets(vertices: PackedVector3Array, meshlets: 
 				indices.is_empty() or indices.size() % 3 != 0 or indices.size() / 3 > MAX_MESHLET_TRIANGLES:
 			return {"error": "invalid meshlet shape %d" % i}
 		for id in vids:
-			if id < 0 or id >= vertices.size():
+			if id < 0 or id >= vertices.size() or not vertices[id].is_finite():
 				return {"error": "invalid source vertex in meshlet %d" % i}
 		for index in indices:
 			if index < 0 or index >= vids.size():
