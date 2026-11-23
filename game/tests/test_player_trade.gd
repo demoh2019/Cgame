@@ -56,6 +56,41 @@ func run(t) -> void:
 	t.eq(armored.weapon, "", "seller no longer equips a transferred weapon")
 	t.eq(buyer.count("club_1"), 1, "recipient gains weapon once")
 
+	t.current = "damaged traded equipment never becomes a free repair"
+	var damaged_seller := Inventory.new()
+	var pristine_buyer := Inventory.new()
+	damaged_seller.add("club_1", 1)
+	damaged_seller.damage_item("club_1", 63.0)
+	t.near(damaged_seller.durability("club_1"), 37.0, 0.001,
+		"traded weapon starts damaged")
+	t.check(PlayerTrade.exchange(damaged_seller, pristine_buyer,
+		{"club_1": 1}, {}).get("ok", false), "damaged weapon can be gifted")
+	t.near(pristine_buyer.durability("club_1"), 37.0, 0.001,
+		"recipient keeps the real weapon wear rather than receiving free repairs")
+	t.eq(damaged_seller.count("club_1"), 0, "seller no longer holds the transferred weapon")
+	var stacked_seller := Inventory.new()
+	var stacked_buyer := Inventory.new()
+	stacked_seller.add("club_1", 2)
+	stacked_buyer.add("club_1", 1)
+	stacked_seller.damage_item("club_1", 35.0)
+	stacked_buyer.damage_item("club_1", 70.0)
+	t.check(PlayerTrade.exchange(stacked_seller, stacked_buyer,
+		{"club_1": 1}, {}).get("ok", false), "partial equipment stack transfer succeeds")
+	t.near(stacked_seller.durability("club_1"), 65.0, 0.001,
+		"seller keeps existing wear on their remaining copy")
+	t.near(stacked_buyer.durability("club_1"), 30.0, 0.001,
+		"receiver's more damaged existing copy cannot be repaired by merging stacks")
+	var reverse_seller := Inventory.new()
+	var reverse_buyer := Inventory.new()
+	reverse_seller.add("silver", 10)
+	reverse_buyer.add("club_1", 1)
+	reverse_buyer.damage_item("club_1", 48.0)
+	t.check(PlayerTrade.exchange(reverse_seller, reverse_buyer,
+		{"silver": 2}, {"club_1": 1}).get("ok", false),
+		"durability is preserved when damaged equipment is the counteroffer")
+	t.near(reverse_seller.durability("club_1"), 52.0, 0.001,
+		"second trader's worn gear reaches the first trader without restoration")
+
 	t.current = "server validates proximity and participants"
 	var world := WorldGen.new(42)
 	var server := GameServer.new(world, 1234)
