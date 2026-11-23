@@ -25,6 +25,19 @@ func run(t) -> void:
 	var sim := GameServer.new(world, 43)
 	var player = sim.add_player(541, "Shore Survivor")
 	var shore: Vector3 = _shore(world)
+	t.current = "invalid cast clocks and coordinates fail closed"
+	t.check(is_zero_approx(Fishing.bite_at(NAN, 0.5)),
+		"NaN cast time cannot create a bite window")
+	t.check(is_zero_approx(Fishing.bite_at(5.0, NAN)),
+		"nonfinite random input cannot move the bite timer")
+	t.check(not Fishing.biting(NAN, 1.5),
+		"nonfinite remaining cast time never hooks a fish")
+	t.check(not Fishing.biting(1.5, INF),
+		"infinite bite deadline is invalid")
+	t.check(not Fishing.biting(-1.0, 1.5),
+		"negative cast time is invalid")
+	t.eq(Fishing.water_near(null, Vector3.ZERO), Vector2.INF,
+		"missing world is handled without dereferencing")
 	t.current = "server-authoritative shore access"
 	t.check(shore.is_finite(), "found reproducible shoreline near water")
 	if not shore.is_finite():

@@ -23,17 +23,21 @@ const HOOK_BONUS := 1
 
 ## Seconds left on the cast when the fish bites, from a roll in 0..1.
 static func bite_at(cast_seconds: float, roll: float) -> float:
+	if not is_finite(cast_seconds) or cast_seconds <= BITE_WINDOW or not is_finite(roll):
+		return 0.0
 	var latest: float = maxf(cast_seconds - BITE_EARLIEST, BITE_LATEST_LEFT)
 	return lerpf(BITE_LATEST_LEFT, latest, clampf(roll, 0.0, 1.0))
 
 
 ## Whether `remaining` seconds left on the cast fall inside the bite window.
 static func biting(remaining: float, bite_left: float) -> bool:
-	return remaining <= bite_left and remaining > bite_left - BITE_WINDOW
+	return is_finite(remaining) and is_finite(bite_left) and remaining >= 0.0 \
+		and bite_left >= BITE_LATEST_LEFT and remaining <= bite_left \
+		and remaining > bite_left - BITE_WINDOW
 
 
 static func water_near(world, position: Vector3) -> Vector2:
-	if not position.is_finite() or world.is_water(position.x, position.z):
+	if world == null or not position.is_finite() or world.is_water(position.x, position.z):
 		return Vector2.INF # No casting from deep water or forged coordinates.
 	for distance in WATER_DISTANCES:
 		for sample in WATER_SAMPLES:
@@ -58,6 +62,8 @@ static func catch_item(tier: int) -> String:
 
 static func validate_start(world, player_position: Vector3, backpack, skill_tier: int = 1,
 		baited: bool = false) -> Dictionary:
+	if world == null or backpack == null or not player_position.is_finite():
+		return {"ok": false, "reason": "invalid_position"}
 	var rod_id: String = backpack.best_tool("fishing")
 	if rod_id == "":
 		return {"ok": false, "reason": "need_rod"}

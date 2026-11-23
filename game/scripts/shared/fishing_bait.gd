@@ -11,10 +11,16 @@ static func can_request(backpack) -> bool:
 	return backpack != null and backpack.count(ITEM_ID) > 0
 
 
+static func valid_fish_id(fish_id: String) -> bool:
+	return fish_id == "raw_fish" or fish_id in [
+		"raw_fish_2", "raw_fish_3", "raw_fish_4"]
+
+
 ## Returns whether a real bait was consumed. Reserve enough fish capacity
 ## before deducting anything; unbaited and partially-full casts stay normal.
 static func spend_for_bonus(backpack, fish_id: String, base_amount: int, requested: bool) -> bool:
-	if not requested or not can_request(backpack) or base_amount < 1 or base_amount > 2:
+	if not requested or not can_request(backpack) or not valid_fish_id(fish_id) \
+			or base_amount < 1 or base_amount > 2:
 		return false
 	if backpack.free_space_for(fish_id) < base_amount + BONUS_FISH:
 		return false

@@ -78,6 +78,20 @@ func run(t) -> void:
 	t.eq(Fishing.validate_start(shore, Vector3.ZERO, weak_rod, 4, true)["item"], "raw_fish",
 		"bait cannot bypass the actual carried rod tier")
 
+	t.current = "bait can only pay for registered raw fish"
+	t.check(not FishingBait.valid_fish_id("cooked_fish"),
+		"cooked meals are not a fishing catch")
+	t.check(not FishingBait.valid_fish_id("club_4"),
+		"weapons cannot be bait reward targets")
+	t.check(not FishingBait.spend_for_bonus(rod, "cooked_fish", 1, true),
+		"arbitrary food IDs cannot consume bait")
+	t.check(not FishingBait.spend_for_bonus(rod, "raw_fish_99", 1, true),
+		"nonexistent catch tier cannot consume bait")
+	t.eq(rod.count(FishingBait.ITEM_ID), 1,
+		"refused reward types do not consume bait")
+	t.check(not FishingBait.spend_for_bonus(null, "raw_fish", 1, true),
+		"missing inventory is a safe refusal")
+
 	t.current = "atomic cost and backpack capacity"
 	t.check(not FishingBait.spend_for_bonus(rod, "raw_fish_4", 1, false),
 		"ordinary cast never consumes bait")
