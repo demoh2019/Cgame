@@ -49,7 +49,8 @@ var bags: Dictionary = {}
 var depleted: Dictionary = {}
 var resource_hits: Dictionary = {} # Server-verified nearby node id -> completed strikes.
 var crates_used: Dictionary = {}
-var world_state_revision: int = Time.get_ticks_usec() # Bumped only when depleted/crates_used really change, so views skip per-frame rescans.
+var world_state_revision: int = Time.get_ticks_usec() # Geometry and collision visibility only.
+var resource_damage_revision: int = 1 # Per-instance mining tint; avoid full chunk visibility scans on every hit.
 var server_time: float = 0.0
 var snapshots_received: int = 0
 var events: Array = [] # Recent events, newest last (for the HUD log).
@@ -95,9 +96,13 @@ func on_events(list: Array) -> void:
 		if str(event.get("type", "")) == "gathered" and bool(event.get("strike", false)):
 			var node_id: int = int(event.get("node", -1))
 			if bool(event.get("final", false)):
-				resource_hits.erase(node_id)
+				if resource_hits.erase(node_id):
+					resource_damage_revision += 1
 			else:
-				resource_hits[node_id] = int(event.get("hit", 0))
+				var next_hits: int = int(event.get("hit", 0))
+				if int(resource_hits.get(node_id, -1)) != next_hits:
+					resource_hits[node_id] = next_hits
+					resource_damage_revision += 1
 		if str(event.get("type", "")) == "party_supply_request":
 			var seen: Dictionary = PartySupplyBeacon.read(
 				event, peer_id, you.get("party", {}), server_time)
@@ -185,7 +190,7 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	for entry in snapshot.get("resource_hits", []):
 		next_resource_hits[int(entry["id"])] = int(entry["hits"])
 	if resource_hits != next_resource_hits:
-		world_state_revision += 1
+		resource_damage_revision += 1
 	resource_hits = next_resource_hits
 	var next_depleted: Dictionary = {}
 	for id in snapshot["depleted"]:
@@ -890,6 +895,31 @@ func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Def
 					float(node["z"]) - point.z).length()
 				var margin: float = ResourceGathering.reach_margin(node)
 				var distance: float = maxf(0.0, center_distance - margin)
+				if distance < best_distance:
+					best_distance = distance
+					best = node
+	return best
+
+
+## Only true one-press gatherables, not trees, ores, doors or loot crates.
+## The held-E collector skips already sent requests until depletion arrives.
+func nearest_pickup_node(point: Vector3, radius: float,
+		skip_ids: Dictionary = {}) -> Dictionary:
+	if world == null:
+		return {}
+	var best: Dictionary = {}
+	var best_distance: float = radius
+	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			for node in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["nodes"]:
+				var node_id: int = int(node["id"])
+				if depleted.has(node_id) or skip_ids.has(node_id) \
+						or not ResourceGathering.is_pickup(str(node["kind"])):
+					continue
+				var offset := Vector2(float(node["x"]) - point.x,
+					float(node["z"]) - point.z)
+				var distance: float = offset.length()
 				if distance < best_distance:
 					best_distance = distance
 					best = node
