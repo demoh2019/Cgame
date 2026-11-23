@@ -515,10 +515,12 @@ func _build_environment() -> void:
 	_perf.set("loaded_cells_source", func() -> int: return streamer.get_loaded_count() if streamer != null else 0)
 	# Live world-generation cache diagnostics: constant-time counters with no
 	# scanning or extra procedural generation in the sampling path.
-	_perf.add_source("world_cache_cells", func() -> float:
+	_perf.add_source("cache_cells", func() -> float:
 		return float(client.world.chunk_cache_size()) if client != null and client.world != null else 0.0)
-	_perf.add_source("world_cache_evicted", func() -> float:
+	_perf.add_source("cache_evicted", func() -> float:
 		return float(client.world.chunk_cache_evictions()) if client != null and client.world != null else 0.0)
+	_perf.add_source("cache_hit_pct", func() -> float:
+		return client.world.chunk_cache_hit_percent() if client != null and client.world != null else 0.0)
 	# Hardware ray-traced sun shadows + AO (ray query): Ultra only, and only where the GPU
 	# reports SUPPORTS_RAY_QUERY on Forward+. attach() is a no-op everywhere else.
 	if GraphicsQuality.level() >= 3:
