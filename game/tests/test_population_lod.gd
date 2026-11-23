@@ -197,6 +197,51 @@ func run(t) -> void:
 	t.eq(pr2.promote(55, far_only).size(), 0, "no player nearby means no promotion")
 	t.eq(pr2.regions_near(PackedVector2Array([pr2.region_center(55)])).size(), 1, "regions_near finds the herd region")
 
+	t.current = "sparse promotion regions match the full grid"
+	var sparse := PopulationLOD.new()
+	sparse.setup(70, 56, 32.0, 812, Vector2(-600.0, -500.0))
+	sparse.promote_radius = 128.0
+	sparse.max_concrete_agents = 2048
+	var sparse_rng := RandomNumberGenerator.new()
+	sparse_rng.seed = 21891
+	for i in 180:
+		sparse.add_herd(sparse_rng.randi_range(0, sparse.region_count() - 1),
+				{"walker": sparse_rng.randi_range(1, 9)})
+	sparse.add_herd(987, {"runner": 5})
+	sparse.add_herd(123, {}) # Empty herd must not count as an occupied region.
+	var probe_positions := PackedVector2Array([
+		sparse.region_center(987),
+		sparse.region_center(19),
+		sparse.region_center(3400),
+		Vector2(5000.0, 5000.0),
+	])
+	var expected_regions := PackedInt32Array()
+	for region in sparse.region_count():
+		if sparse.herd_region_count(region) <= 0:
+			continue
+		var center: Vector2 = sparse.region_center(region)
+		var near: bool = false
+		for probe in probe_positions:
+			if center.distance_to(probe) <= sparse.promote_radius + sparse.cell_size * 0.5:
+				near = true
+				break
+		if near:
+			expected_regions.append(region)
+	t.eq(sparse.regions_near(probe_positions), expected_regions,
+			"sparse occupied-region lookup matches exhaustive sorted promotion list")
+	t.eq(sparse.regions_near(PackedVector2Array()).size(), 0,
+			"empty player positions produce no promoted regions")
+	t.check(sparse.regions_near(probe_positions).has(987),
+			"an occupied target region is promoted near its player")
+	var before_promote: int = sparse.herd_region_count(987)
+	var promoted: Array = sparse.promote(987, PackedVector2Array([sparse.region_center(987)]))
+	t.eq(promoted.size(), before_promote, "all local herds are promoted within budget")
+	t.check(not sparse.regions_near(PackedVector2Array([sparse.region_center(987)])).has(987),
+			"an emptied promoted region disappears immediately from the sparse query")
+	sparse.demote(promoted, 987)
+	t.check(sparse.regions_near(PackedVector2Array([sparse.region_center(987)])).has(987),
+			"demoted agents immediately reappear as a promotable region")
+
 	t.current = "demote restores herd"
 	var d := _make(5)
 	d.add_herd(55, {"walker": 14, "runner": 6})
