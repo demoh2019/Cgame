@@ -2,6 +2,8 @@
 
 **P1 terrain update:** The native large-world terrain now supports sparse height edits; this increment adds color-only patches without collision resets, non-destructive editor layer binding and viewport sculpt. See [Native Terrain Patch Streaming](docs/NATIVE_TERRAIN_PATCH_STREAMING.md).
 
+**P1 GPU-resident meshlet page streaming (experimental):** bounded task/mesh shader residency buffers, frustum-prioritized CPU page selection, GPU per-meshlet culling, and an opt-in debug draw using the game's actual rock mesh. Defaults leave regular rendering untouched. See [GPU Meshlet Residency](docs/P1_GPU_MESHLET_RESIDENCY.md).
+
 **This is the canonical game project at `game/`.** All new gameplay
 features belong here. It is the only game in the repository; `demo/` and `misc/` hold engine labs, not games.
 
