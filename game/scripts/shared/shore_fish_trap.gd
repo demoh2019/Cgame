@@ -38,14 +38,23 @@ static func visible(traps: Dictionary, position: Vector3, now: float, radius: fl
 		return result
 	var at := Vector2(position.x, position.z)
 	for trap in traps.values():
-		var remaining: float = float(trap["expires"]) - now
+		var expiry: float = float(trap.get("expires", NAN))
+		var ready_at: float = float(trap.get("ready_at", NAN))
+		var x: float = float(trap.get("x", NAN))
+		var z: float = float(trap.get("z", NAN))
+		var y: float = float(trap.get("y", NAN))
+		if not is_finite(expiry) or not is_finite(ready_at):
+			continue
+		if not is_finite(x) or not is_finite(z) or not is_finite(y):
+			continue # Corrupt temporary nets cannot poison client snapshots.
+		var remaining: float = expiry - now
 		if remaining <= 0.0:
 			continue
-		var spot := Vector2(float(trap["x"]), float(trap["z"]))
+		var spot := Vector2(x, z)
 		if at.distance_squared_to(spot) <= radius * radius:
 			result.append({"id": int(trap["id"]), "x": spot.x, "z": spot.y,
-				"y": float(trap["y"]), "tier": int(trap["tier"]),
-				"ready": now >= float(trap["ready_at"]),
-				"ready_in": maxf(0.0, float(trap["ready_at"]) - now),
+				"y": y, "tier": int(trap["tier"]),
+				"ready": now >= ready_at,
+				"ready_in": maxf(0.0, ready_at - now),
 				"remaining": remaining})
 	return result
