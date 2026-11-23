@@ -29,6 +29,7 @@ extends RefCounted
 ## RenderingDevice.draw_list_draw_mesh_tasks_indirect().
 
 const Meshlets = preload("res://scripts/shared/meshlets.gd")
+const ClusterLOD = preload("res://scripts/shared/cluster_lod.gd")
 
 const TASK_SHADER_PATH: String = "res://shaders/compute/meshlet.task.glsl"
 const MESH_SHADER_PATH: String = "res://shaders/compute/meshlet.mesh.glsl"
@@ -77,6 +78,29 @@ var _buffers: Array[RID] = []
 var _frame_buffer: RID = RID()
 var _gpu_failed: bool = false
 
+
+
+## Build the CPU fallback of a selected cluster cut without losing texture UVs,
+## vertex colors, normals or tangents. The mesh-shader path is position-only
+## for now; this ArrayMesh path is what authored PBR assets should use.
+## One surface at a time: multi-material assets keep their surface boundaries.
+static func build_material_preserving_cut(source_mesh: ArrayMesh,
+		hierarchy: Dictionary, cut: PackedInt32Array, surface: int = 0) -> ArrayMesh:
+	if source_mesh == null or surface < 0 or surface >= source_mesh.get_surface_count():
+		return null
+	# Blend shape targets need simplification-aware remapping. Refuse until
+	# that pipeline exists instead of returning a silently corrupted mesh.
+	if source_mesh.get_blend_shape_count() > 0:
+		return null
+	var source_arrays: Array = source_mesh.surface_get_arrays(surface)
+	var arrays: Array = ClusterLOD.build_cut_arrays(source_arrays, hierarchy, cut)
+	if arrays.is_empty():
+		return null
+	var output := ArrayMesh.new()
+	output.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	output.surface_set_material(0, source_mesh.surface_get_material(surface))
+	output.resource_name = source_mesh.resource_name + "_cluster_lod"
+	return output
 
 # ---- packing (pure, no device) ---------------------------------------------------------------
 
