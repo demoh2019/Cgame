@@ -128,8 +128,12 @@ func run(t) -> void:
 		t.check(not pickup.is_empty(), "%s exists as a real generated resource" % kind)
 		if pickup.is_empty():
 			continue
-		player.position = Vector3(float(pickup["x"]),
+		var reach: float = Defs.REACH + 0.5 + ResourceGathering.reach_margin(pickup)
+		player.position = Vector3(float(pickup["x"]) + reach + 0.05,
 			float(pickup["y"]), float(pickup["z"]))
+		t.eq(server.cmd_resource_pickup(801, int(pickup["id"])).get("reason", ""),
+			"too_far", "server rejects pickup outside the visible footprint")
+		player.position.x = float(pickup["x"]) + reach - 0.05
 		var item: String = "stone_1" if kind == "pebble" else "wood_1"
 		var before: int = player.inventory.count(item)
 		var picked: Dictionary = server.cmd_resource_pickup(801, int(pickup["id"]))

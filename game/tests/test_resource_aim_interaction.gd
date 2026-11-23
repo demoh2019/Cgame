@@ -100,3 +100,27 @@ func run(t) -> void:
 		"new world invalidates visible geometry cache")
 	t.eq(client.resource_damage_revision, old_damage_revision + 1,
 		"new world invalidates mining damage tints")
+
+	t.current = "aimed mining chooses the visible rock"
+	var mine_stub := ChunkStub.new()
+	mine_stub.nodes = [
+		{"id": 31, "kind": "rock", "x": 1.0, "z": 1.0, "radius": 0.3},
+		{"id": 32, "kind": "rock", "x": 2.0, "z": 0.0, "radius": 0.3},
+	]
+	client.world = mine_stub
+	client.depleted.clear()
+	t.eq(int(client.nearest_strike_node(Vector3.ZERO, Vector2.RIGHT, 2.6).get("id", -1)), 32,
+		"aimed mineable beats the closer rock to the side")
+	t.eq(int(client.nearest_strike_node(Vector3.ZERO, Vector2(1.0, 1.0), 2.6).get("id", -1)), 31,
+		"turning to the other rock changes the target")
+	t.check(client.nearest_strike_node(Vector3.ZERO, Vector2.ZERO, 2.6).is_empty(),
+		"invalid mining direction cannot select a resource")
+
+	t.current = "held E works at the edge of a modeled pebble"
+	var loose_stub := ChunkStub.new()
+	loose_stub.nodes = [{"id": 41, "kind": "pebble", "x": 3.0, "z": 0.0, "radius": 0.5}]
+	client.world = loose_stub
+	t.eq(int(client.nearest_pickup_node(Vector3.ZERO, 2.6).get("id", -1)), 41,
+		"large visible pebble is reachable from its model boundary")
+	t.check(client.nearest_pickup_node(Vector3(0.0, 0.0, INF), 2.6).is_empty(),
+		"nonfinite positions cannot trigger any chunk lookup")

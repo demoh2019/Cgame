@@ -995,6 +995,9 @@ func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Def
 			or direction.length_squared() < 0.01 or not (radius > 0.0 and radius < INF):
 		return best
 	var best_distance: float = radius
+	var aimed: Dictionary = {}
+	var best_aim_score: float = -INF
+	var aim: Vector2 = direction.normalized()
 	var bounds: Rect2i = _resource_cell_bounds(point, radius, ResourceGathering.MAX_REACH_MARGIN)
 	for cx in range(bounds.position.x, bounds.position.x + bounds.size.x):
 		for cz in range(bounds.position.y, bounds.position.y + bounds.size.y):
@@ -1010,7 +1013,16 @@ func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Def
 				if distance < best_distance:
 					best_distance = distance
 					best = node
-	return best
+				# Mine the model in the crosshair before a closer off-axis resource.
+				var offset := Vector2(float(node["x"]) - point.x, float(node["z"]) - point.z)
+				var alignment: float = offset.dot(aim) / maxf(center_distance, 0.001)
+				if alignment < 0.82:
+					continue
+				var score: float = alignment * 6.0 - distance * 0.22
+				if score > best_aim_score:
+					best_aim_score = score
+					aimed = node
+	return aimed if not aimed.is_empty() else best
 
 
 ## Only true one-press gatherables, not trees, ores, doors or loot crates.
@@ -1020,9 +1032,9 @@ func nearest_pickup_node(point: Vector3, radius: float,
 	if world == null or not point.is_finite() or not (radius > 0.0 and radius < INF):
 		return {}
 	var best: Dictionary = {}
-	# Held-E runs frequently: compare squared distances to avoid a square root per node.
-	var best_distance_squared: float = radius * radius
-	var bounds: Rect2i = _resource_cell_bounds(point, radius, 0.0)
+	# Compare squared distances first; only reachable models need a square root.
+	var best_distance: float = radius
+	var bounds: Rect2i = _resource_cell_bounds(point, radius, ResourceGathering.MAX_REACH_MARGIN)
 	for cx in range(bounds.position.x, bounds.position.x + bounds.size.x):
 		for cz in range(bounds.position.y, bounds.position.y + bounds.size.y):
 			for node in world.chunk(Vector2i(cx, cz))["nodes"]:
@@ -1032,9 +1044,14 @@ func nearest_pickup_node(point: Vector3, radius: float,
 					continue
 				var offset := Vector2(float(node["x"]) - point.x,
 					float(node["z"]) - point.z)
+				var margin: float = ResourceGathering.reach_margin(node)
 				var distance_squared: float = offset.length_squared()
-				if distance_squared < best_distance_squared:
-					best_distance_squared = distance_squared
+				var limit: float = best_distance + margin
+				if distance_squared >= limit * limit:
+					continue
+				var edge_distance: float = maxf(0.0, sqrt(distance_squared) - margin)
+				if edge_distance < best_distance:
+					best_distance = edge_distance
 					best = node
 	return best
 

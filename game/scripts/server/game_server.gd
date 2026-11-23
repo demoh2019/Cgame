@@ -1568,7 +1568,9 @@ func cmd_resource_pickup(peer_id: int, node_id: int) -> Dictionary:
 		return {"ok": false, "reason": "not_pickup"}
 	if depleted.has(node_id):
 		return {"ok": false, "reason": "depleted"}
-	if _distance_xz(player.position, node) > Defs.REACH + 0.5:
+	# Match the client model-footprint reach and reject invalid positions.
+	var pickup_distance: float = _distance_xz(player.position, node) if player.position.is_finite() else INF
+	if not is_finite(pickup_distance) or pickup_distance > Defs.REACH + 0.5 + ResourceGathering.reach_margin(node):
 		return {"ok": false, "reason": "too_far"}
 	if not player.progression.can_gather(str(node["kind"]), int(node["tier"])):
 		return {"ok": false, "reason": "need_skill",
