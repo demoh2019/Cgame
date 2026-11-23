@@ -5,6 +5,25 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const StoneResources = preload("res://scripts/shared/stone_resources.gd")
 
 
+## Exhaustive reference for outdoor procedural collisions. The cached
+## broadphase must return the same IDs and ordering as the old group scan.
+static func _reference_procedural_blockers(world, x: float, z: float, radius: float) -> Array[int]:
+	var ids: Array[int] = []
+	var cell_a: Vector2i = WorldGen.cell_of(x - radius, z - radius)
+	var cell_b: Vector2i = WorldGen.cell_of(x + radius, z + radius)
+	for cx in range(cell_a.x, cell_b.x + 1):
+		for cz in range(cell_a.y, cell_b.y + 1):
+			var data: Dictionary = world.chunk(Vector2i(cx, cz))
+			for group in ["nodes", "crates", "structures", "props"]:
+				for item in data[group]:
+					if group == "nodes" and world.depleted_blockers.has(item["id"]):
+						continue
+					if bool(item["blocks"]) and absf(float(item["x"]) - x) < radius + float(item["radius"]) \
+							and absf(float(item["z"]) - z) < radius + float(item["radius"]):
+						ids.append(int(item["id"]))
+	return ids
+
+
 func run(t) -> void:
 	t.current = "determinism"
 	var a := WorldGen.new(42)
@@ -242,6 +261,8 @@ func run(t) -> void:
 		"cache hit avoids extra world generation")
 	t.check(int(a.chunk_cache_stats()["hits"]) > hit_before,
 		"cache diagnostics count reuse without iterating chunk contents")
+	t.check(a.chunk_cache_hit_percent() > 0.0 and a.chunk_cache_hit_percent() <= 100.0,
+		"profiler hit percentage stays within meaningful bounds")
 
 	t.current = "collision broadphase stays live across eviction and build changes"
 	var dynamic_id: int = 735199
@@ -266,3 +287,15 @@ func run(t) -> void:
 			if int(obstacle.get("id", -1)) == int(blocked_stone["id"]):
 				stone_found = true
 		t.check(stone_found, "procedural rock collision returns after LRU regeneration")
+		var actual_ids: Array[int] = []
+		for obstacle in a.blockers_near(stone_center.x, stone_center.y, 0.5):
+			actual_ids.append(int(obstacle["id"]))
+		t.eq(actual_ids, _reference_procedural_blockers(a, stone_center.x, stone_center.y, 0.5),
+			"solid-only index preserves exhaustive collision results and iteration order")
+		a.set_node_depleted(int(blocked_stone["id"]), true)
+		actual_ids.clear()
+		for obstacle in a.blockers_near(stone_center.x, stone_center.y, 0.5):
+			actual_ids.append(int(obstacle["id"]))
+		t.eq(actual_ids, _reference_procedural_blockers(a, stone_center.x, stone_center.y, 0.5),
+			"solid index matches full scans after resource depletion")
+		a.set_node_depleted(int(blocked_stone["id"]), false)
