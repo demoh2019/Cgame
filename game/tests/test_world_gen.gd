@@ -3,6 +3,7 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const StoneResources = preload("res://scripts/shared/stone_resources.gd")
+const DynamicBlockerGrid = preload("res://scripts/shared/dynamic_blocker_grid.gd")
 
 
 ## Exhaustive reference for outdoor procedural collisions. The cached
@@ -325,3 +326,134 @@ func run(t) -> void:
 		t.eq(actual_ids, _reference_procedural_blockers(a, stone_center.x, stone_center.y, 0.5),
 			"solid index matches full scans after resource depletion")
 		a.set_node_depleted(int(blocked_stone["id"]), false)
+
+	t.current = "incremental built-obstacle grid matches exact legacy collider scan"
+	var built_grid := DynamicBlockerGrid.new()
+	var live: Dictionary = {}
+	live[11] = {"id": 11, "x": 15.0, "z": -1.0, "radius": 2.0}
+	built_grid.upsert(11, live[11])
+	live["12:0"] = {"id": 12, "x": 32.5, "z": -1.0, "radius": 1.5}
+	built_grid.upsert("12:0", live["12:0"])
+	live[13] = {"id": 13, "x": 100.0, "z": 100.0, "radius": 1.0}
+	built_grid.upsert(13, live[13])
+	t.eq(built_grid.query(live, 17.0, -1.0, 0.0).size(), 1,
+		"large wall remains searchable across a 16m cell boundary")
+	t.eq(built_grid.query(live, 17.0, -1.0, 0.0)[0]["id"], 11,
+		"touching the collision edge remains blocked, not just overlapping it")
+	t.eq(built_grid.query(live, -100.0, -100.0, 0.0).size(), 0,
+		"distant built obstacles are excluded")
+	t.eq(built_grid.last_candidates, 0, "empty local cells avoid scanning all built structures")
+	t.eq(built_grid.query(live, 30.0, -1.0, 3.0).size(), 1,
+		"multipart house walls participate in the same grid")
+	t.eq(built_grid.query(live, 32.0, -1.0, 20.0).size(), 2,
+		"one overlapping wall appears once despite occupying several cells")
+	var original_order: Array[int] = []
+	for wall in live.values():
+		if absf(float(wall["x"]) - 32.0) <= 20.0 + float(wall["radius"]) \
+				and absf(float(wall["z"]) + 1.0) <= 20.0 + float(wall["radius"]):
+			original_order.append(int(wall["id"]))
+	var indexed_order: Array[int] = []
+	for wall in built_grid.query(live, 32.0, -1.0, 20.0):
+		indexed_order.append(int(wall["id"]))
+	t.eq(indexed_order, original_order,
+		"mixed integer and string keys keep the original collision resolution order")
+	live[11] = {"id": 11, "x": -32.0, "z": -32.0, "radius": 3.0}
+	built_grid.upsert(11, live[11])
+	t.eq(built_grid.query(live, 15.0, -1.0, 0.0).size(), 0,
+		"moving a built blocker removes old indexed footprint immediately")
+	t.eq(built_grid.query(live, -35.0, -32.0, 0.0)[0]["id"], 11,
+		"moving a wall updates negative-coordinate cells")
+	built_grid.remove("12:0")
+	live.erase("12:0")
+	t.eq(built_grid.query(live, 32.5, -1.0, 0.0).size(), 0,
+		"removing house parts invalidates all old cells")
+	var huge: Dictionary = {"id": 99, "x": 0.0, "z": 0.0, "radius": 180.0}
+	live[99] = huge
+	built_grid.upsert(99, huge)
+	t.eq(int(built_grid.stats()["oversized"]), 1,
+		"oversized walls stay in a bounded fallback instead of multiplying memory")
+	t.eq(built_grid.query(live, 170.0, 0.0, 0.0)[0]["id"], 99,
+		"overflow obstacles still block at the correct distance")
+	t.eq(built_grid.query(live, -300.0, -300.0, 600.0).size(), live.size(),
+		"very broad queries fall back to an exhaustive scan")
+	t.eq(built_grid.last_candidates, live.size(),
+		"large-radius fallback reports the real number of tested obstacles")
+	var index_size: int = int(built_grid.stats()["entries"])
+	built_grid.upsert(42, {"id": 42, "x": NAN, "z": 1.0, "radius": 1.0})
+	t.eq(int(built_grid.stats()["entries"]), index_size, "invalid geometry is not indexed")
+
+	t.current = "indexed dynamic collisions agree with exhaustive deterministic queries"
+	var seeded := RandomNumberGenerator.new()
+	seeded.seed = 812719
+	var many: Dictionary = {}
+	var spatial := DynamicBlockerGrid.new()
+	for i in 120:
+		var key: int = 2000 + i
+		var bx: float = seeded.randf_range(-300.0, 300.0)
+		var bz: float = seeded.randf_range(-300.0, 300.0)
+		var br: float = seeded.randf_range(0.2, 11.0)
+		var blocker: Dictionary = {"id": key, "x": bx, "z": bz, "radius": br}
+		many[key] = blocker
+		spatial.upsert(key, blocker)
+	for sample in 48:
+		var qx: float = seeded.randf_range(-310.0, 310.0)
+		var qz: float = seeded.randf_range(-310.0, 310.0)
+		var reach: float = seeded.randf_range(0.0, 30.0)
+		var expected: Array[int] = []
+		for item in many.values():
+			var r: float = reach + float(item["radius"])
+			if absf(float(item["x"]) - qx) <= r and absf(float(item["z"]) - qz) <= r:
+				expected.append(int(item["id"]))
+		var actual: Array[int] = []
+		for item in spatial.query(many, qx, qz, reach):
+			actual.append(int(item["id"]))
+		t.eq(actual, expected, "spatial query %d matches exhaustive ordered lookup" % sample)
+	for i in range(10):
+		var stale_key: int = 2000 + i
+		spatial.remove(stale_key)
+		many.erase(stale_key)
+	for sample in 24:
+		var qx: float = seeded.randf_range(-310.0, 310.0)
+		var qz: float = seeded.randf_range(-310.0, 310.0)
+		var expected: Array[int] = []
+		for item in many.values():
+			if absf(float(item["x"]) - qx) <= 18.0 + float(item["radius"]) \
+					and absf(float(item["z"]) - qz) <= 18.0 + float(item["radius"]):
+				expected.append(int(item["id"]))
+		var actual: Array[int] = []
+		for item in spatial.query(many, qx, qz, 18.0):
+			actual.append(int(item["id"]))
+		t.eq(actual, expected, "index remains accurate after removals %d" % sample)
+
+	t.current = "world build events update spatial collision index immediately"
+	var construction := WorldGen.new(139)
+	var building_id: int = 900077
+	construction.add_structure_blockers(building_id, [[-100.0, -100.0, 1.0],
+		[-92.0, -100.0, 0.6]])
+	t.eq(construction.dynamic_blocker_count(), 2, "two house wall circles are indexed")
+	t.eq(int(construction.dynamic_blocker_stats()["entries"]), 2,
+		"world and spatial index remain in sync")
+	var parts_near: Array = []
+	for wall in construction.blockers_near(-100.0, -100.0, 0.1):
+		if int(wall.get("id", -1)) == building_id:
+			parts_near.append(wall)
+	t.eq(parts_near.size(), 1, "house wall immediately blocks movement")
+	construction.add_structure_blockers(building_id, [[-80.0, -100.0, 1.0]])
+	t.eq(construction.dynamic_blocker_count(), 1, "changing a door removes old wall parts")
+	var stale: bool = false
+	for wall in construction.blockers_near(-100.0, -100.0, 0.1):
+		if int(wall.get("id", -1)) == building_id:
+			stale = true
+	t.check(not stale, "open doorway has no invisible old wall collision")
+	construction.add_dynamic_blocker(building_id, -60.0, -100.0, 1.0)
+	t.eq(construction.dynamic_blocker_count(), 1,
+		"converting a house to a single obstacle removes prior parts")
+	var replacement: bool = false
+	for wall in construction.blockers_near(-60.0, -100.0, 0.1):
+		if int(wall.get("id", -1)) == building_id:
+			replacement = true
+	t.check(replacement, "single structure collision is visible in new position")
+	construction.remove_dynamic_blocker(building_id)
+	t.eq(construction.dynamic_blocker_count(), 0, "demolition removes all indexed blockers")
+	t.eq(int(construction.dynamic_blocker_stats()["tiles"]), 0,
+		"all empty spatial buckets are released after demolition")
