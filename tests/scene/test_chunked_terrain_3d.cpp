@@ -297,6 +297,50 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Editing heights and invalid input") {
 	memdelete(terrain);
 }
 
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Sparse paint keeps physics while preserving LOD metadata") {
+	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
+	PackedColorArray colors;
+	colors.resize(65 * 65);
+	colors.fill(Color(0.2, 0.3, 0.4, 1.0));
+	terrain->set_color_data(colors);
+	PackedVector3Array normals;
+	normals.resize(65 * 65);
+	normals.fill(Vector3(0, 1, 0));
+	terrain->set_normal_data(normals);
+	Node3D *focus = memnew(Node3D);
+	SceneTree::get_singleton()->get_root()->add_child(terrain);
+	SceneTree::get_singleton()->get_root()->add_child(focus);
+	focus->set_global_position(Vector3(-22, 10, -22));
+	terrain->set_focus(terrain->get_path_to(focus));
+	terrain->set_collision_distance(100.0);
+	terrain->force_update();
+	const int collision_before = terrain->get_collision_chunk_count();
+	REQUIRE(collision_before > 0);
+
+	CHECK(terrain->apply_color_patch(Rect2i(7, 7, 2, 1),
+			PackedColorArray({ Color(1, 0, 0), Color(0, 1, 0) })));
+	CHECK(terrain->get_last_region_invalidated_chunks() == 1);
+	CHECK(terrain->get_collision_chunk_count() == collision_before);
+	CHECK(terrain->get_color_data()[7 * 65 + 7] == Color(1, 0, 0));
+	CHECK(terrain->get_color_data()[7 * 65 + 8] == Color(0, 1, 0));
+	CHECK(terrain->get_color_data()[8 * 65 + 8] == Color(0.2, 0.3, 0.4, 1.0));
+
+	// A height-only patch is refused while the material uses external
+	// normals. Supplying matching finite normals lets us edit locally.
+	const PackedFloat32Array before = terrain->get_height_data();
+	ERR_PRINT_OFF;
+	CHECK_FALSE(terrain->apply_color_patch(Rect2i(7, 7, 2, 2), PackedColorArray({ Color(1, 0, 0) })));
+	ERR_PRINT_ON;
+	CHECK(terrain->get_height_data() == before);
+	CHECK(terrain->apply_height_patch(Rect2i(7, 7, 1, 1), PackedFloat32Array({ 0.9f })));
+	CHECK(terrain->get_last_region_invalidated_chunks() == 1);
+	CHECK(terrain->get_normal_data()[7 * 65 + 7].is_equal_approx(Vector3(0, 1, 0)));
+	terrain->force_update();
+	CHECK(terrain->get_chunk_count() == 4);
+	memdelete(focus);
+	memdelete(terrain);
+}
+
 TEST_CASE("[SceneTree][ChunkedTerrain3D] Terrains whose size is not a multiple of the chunk") {
 	// 50 samples: 49 quads, chunks of 32 -> 2 chunks per side; the last one is partial.
 	ChunkedTerrain3D *terrain = make_terrain(50, 49.0, 10.0);
