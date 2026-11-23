@@ -29,6 +29,7 @@ extends RefCounted
 ## RenderingDevice.draw_list_draw_mesh_tasks_indirect().
 
 const Meshlets = preload("res://scripts/shared/meshlets.gd")
+const PagePolicy = preload("res://scripts/shared/meshlet_page_streaming.gd")
 
 const TASK_SHADER_PATH: String = "res://shaders/compute/meshlet.task.glsl"
 const MESH_SHADER_PATH: String = "res://shaders/compute/meshlet.mesh.glsl"
@@ -58,10 +59,17 @@ var last_path: int = DrawPath.NONE
 var meshlet_count: int = 0
 var vertex_count: int = 0
 var last_error: String = ""
+## GPU-only geometry page pool. The task shader still culls individual meshlets.
+## Default keeps up to 64 pages (~3.5 MiB of meshlet payload) on the GPU.
+var max_resident_pages: int = 64
+var max_page_uploads_per_frame: int = 4
+var last_page_uploads: int = 0
 
 var _vertices: PackedVector3Array = PackedVector3Array()
 var _meshlets: Array = []
 var _packed: Dictionary = {}
+var _page_bounds: Array[Dictionary] = []
+var _slot_pages: PackedInt32Array = PackedInt32Array()
 var _camera_pos: Vector3 = Vector3.ZERO
 var _planes: Array = []
 
@@ -160,6 +168,80 @@ static func pack_meshlets(vertices: PackedVector3Array, meshlets: Array) -> Dict
 		"vertex_count": vertices.size(),
 		"vertex_slots": total_vertex_slots,
 		"triangle_count": total_triangles,
+	}
+
+
+## Encodes exactly one resident GPU slot. All vertex positions and triangle
+## indices are copied into that slot's fixed storage window. Other pages are
+## not present in the GPU buffers; the stable slot id is the task-group id.
+## The full pack_meshlets() layout remains available for CPU tooling/tests.
+@warning_ignore("integer_division")
+static func pack_resident_page(vertices: PackedVector3Array, meshlets: Array,
+		page_id: int, slot_id: int) -> Dictionary:
+	var start: int = page_id * TASK_GROUP_SIZE
+	if page_id < 0 or slot_id < 0 or start >= meshlets.size():
+		return {"error": "invalid page or slot"}
+	var positions := PackedByteArray()
+	positions.resize(PagePolicy.POSITIONS_BYTES)
+	var vertex_ids := PackedByteArray()
+	vertex_ids.resize(PagePolicy.VERTEX_IDS_BYTES)
+	var triangles := PackedByteArray()
+	triangles.resize(PagePolicy.TRIANGLES_BYTES)
+	var descriptors := PackedByteArray()
+	descriptors.resize(PagePolicy.DESCRIPTORS_BYTES)
+	var count: int = mini(TASK_GROUP_SIZE, meshlets.size() - start)
+	for local_id in count:
+		var meshlet: Dictionary = meshlets[start + local_id]
+		var vids: PackedInt32Array = meshlet["vertex_ids"]
+		var idx: PackedInt32Array = meshlet["indices"]
+		if vids.is_empty() or vids.size() > MAX_MESHLET_VERTICES or idx.is_empty() or \
+				idx.size() % 3 != 0 or idx.size() / 3 > MAX_MESHLET_TRIANGLES:
+			return {"error": "invalid meshlet dimensions"}
+		for k in vids.size():
+			var source_id: int = vids[k]
+			if source_id < 0 or source_id >= vertices.size():
+				return {"error": "invalid vertex id"}
+			var position: Vector3 = vertices[source_id]
+			var position_index: int = local_id * MAX_MESHLET_VERTICES + k
+			var offset: int = position_index * 16
+			positions.encode_float(offset, position.x)
+			positions.encode_float(offset + 4, position.y)
+			positions.encode_float(offset + 8, position.z)
+			positions.encode_float(offset + 12, 1.0)
+			vertex_ids.encode_u32(position_index * 4,
+				slot_id * TASK_GROUP_SIZE * MAX_MESHLET_VERTICES + position_index)
+		var triangle_count: int = idx.size() / 3
+		for k in triangle_count:
+			var a: int = idx[k * 3]
+			var b: int = idx[k * 3 + 1]
+			var c: int = idx[k * 3 + 2]
+			if a < 0 or b < 0 or c < 0 or a >= vids.size() or b >= vids.size() or c >= vids.size():
+				return {"error": "invalid local triangle"}
+			triangles.encode_u32((local_id * MAX_MESHLET_TRIANGLES + k) * 4,
+				a | (b << 8) | (c << 16))
+		var offset: int = local_id * DESCRIPTOR_STRIDE
+		descriptors.encode_u32(offset,
+			slot_id * TASK_GROUP_SIZE * MAX_MESHLET_VERTICES + local_id * MAX_MESHLET_VERTICES)
+		descriptors.encode_u32(offset + 4,
+			slot_id * TASK_GROUP_SIZE * MAX_MESHLET_TRIANGLES + local_id * MAX_MESHLET_TRIANGLES)
+		descriptors.encode_u32(offset + 8, vids.size())
+		descriptors.encode_u32(offset + 12, triangle_count)
+		var center: Vector3 = meshlet["bounds_center"]
+		var axis: Vector3 = meshlet["cone_axis"]
+		var radius: float = float(meshlet["bounds_radius"])
+		var cutoff: float = float(meshlet["cone_cutoff"])
+		if not center.is_finite() or not axis.is_finite() or \
+				not is_finite(radius) or not is_finite(cutoff):
+			return {"error": "nonfinite meshlet bounds"}
+		for j in 3:
+			descriptors.encode_float(offset + 16 + j * 4, center[j])
+			descriptors.encode_float(offset + 32 + j * 4, axis[j])
+		descriptors.encode_float(offset + 28, radius)
+		descriptors.encode_float(offset + 44, cutoff)
+	return {
+		"error": "", "positions": positions, "vertex_ids": vertex_ids,
+		"triangles": triangles, "descriptors": descriptors,
+		"page_id": page_id, "slot_id": slot_id, "meshlet_count": count,
 	}
 
 
@@ -274,11 +356,23 @@ func setup(vertices: PackedVector3Array, meshlets: Array) -> bool:
 	_packed = result
 	meshlet_count = int(result["meshlet_count"])
 	vertex_count = int(result["vertex_count"])
+	_page_bounds = PagePolicy.build_bounds(meshlets)
 	return true
 
 
 func get_packed() -> Dictionary:
 	return _packed
+
+
+func page_count() -> int:
+	return _page_bounds.size()
+
+
+func get_page_stats() -> Dictionary:
+	return {"total_pages": page_count(), "resident_pages": PagePolicy.resident_count(_slot_pages),
+		"slot_count": _slot_pages.size(), "bytes_per_slot": PagePolicy.PAGE_BYTES,
+		"gpu_capacity_bytes": _slot_pages.size() * PagePolicy.PAGE_BYTES,
+		"last_page_uploads": last_page_uploads, "slots": _slot_pages.duplicate()}
 
 
 func mesh_shader_supported() -> bool:
