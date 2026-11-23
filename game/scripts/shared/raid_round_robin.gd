@@ -60,11 +60,18 @@ static func _validated_rule(bag: Dictionary) -> Dictionary:
 			return {}
 		seen[identity] = true
 	var original: Dictionary = original_raw
+	var contents: Dictionary = items_raw
 	for item_id in original:
 		var amount: Variant = original[item_id]
-		if not (amount is int or amount is float) or \
+		if not (item_id is String) or not (amount is int or amount is float) or \
 				not is_finite(float(amount)) or float(amount) < 0.0 or \
-				float(amount) != floor(float(amount)):
+				float(amount) > 1000000000.0 or float(amount) != floor(float(amount)):
+			return {}
+	for item_id in contents:
+		var amount: Variant = contents[item_id]
+		if not (item_id is String) or not (amount is int or amount is float) or \
+				not is_finite(float(amount)) or float(amount) < 0.0 or \
+				float(amount) > 1000000000.0 or float(amount) != floor(float(amount)):
 			return {}
 	return rule
 
