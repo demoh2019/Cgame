@@ -536,6 +536,10 @@ func _build_environment() -> void:
 		return float(client.world.chunk_cache_evictions()) if client != null and client.world != null else 0.0)
 	_perf.add_source("cache_hit_pct", func() -> float:
 		return client.world.chunk_cache_hit_percent() if client != null and client.world != null else 0.0)
+	_perf.add_source("build_grid_tiles", func() -> float:
+		return float(client.world.dynamic_blocker_stats()["tiles"]) if client != null and client.world != null else 0.0)
+	_perf.add_source("build_candidates", func() -> float:
+		return float(client.world.dynamic_blocker_query_candidates()) if client != null and client.world != null else 0.0)
 	# Hardware ray-traced sun shadows + AO (ray query): Ultra only, and only where the GPU
 	# reports SUPPORTS_RAY_QUERY on Forward+. attach() is a no-op everywhere else.
 	if GraphicsQuality.level() >= 3:
