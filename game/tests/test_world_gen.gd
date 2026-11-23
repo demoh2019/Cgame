@@ -167,6 +167,15 @@ func run(t) -> void:
 					nearest = minf(nearest, p.distance_to(start + delta * fraction))
 				t.check(nearest <= 9.01, "roadside supply caches are reachable from a nearby road")
 			for node in data["nodes"]:
+				var node_id: int = int(node["id"])
+				var slot: int = (node_id - 1) % 1000
+				if slot >= WorldGen.PICKUP_ID_BASE and slot < WorldGen.PICKUP_ID_BASE + 20:
+					var pickup_at := Vector2(float(node["x"]), float(node["z"]))
+					t.check(str(node["kind"]) in ["pebble", "branch"],
+							"ground pickups remain real collectable stones or branches")
+					t.check(a.roads.coverage_on_land(pickup_at.x, pickup_at.y) <= 0.0,
+							"hand-pickable ground resources stay out of roads")
+					t.check(not bool(node["blocks"]), "ground pickups never block movement")
 				if node.has("stone_model"):
 					var model_index: int = int(node["stone_model"])
 					t.check(model_index >= 0 and model_index < StoneResources.MODELS.size(),
@@ -215,6 +224,20 @@ func run(t) -> void:
 	t.check(seen.has("water") and seen.has("plains") and seen.has("forest"), "water, plains and forest exist: %s" % str(seen.keys()))
 
 	t.current = "blockers"
+	var cache_before_invalid: Dictionary = a.chunk_cache_stats()
+	for invalid_query in [
+			Vector3(INF, 0.0, 1.0),
+			Vector3(-INF, 0.0, 1.0),
+			Vector3(NAN, 0.0, 1.0),
+			Vector3(0.0, INF, 1.0),
+			Vector3(0.0, NAN, 1.0),
+			Vector3(0.0, 0.0, -1.0),
+			Vector3(0.0, 0.0, NAN),
+			Vector3(0.0, 0.0, INF)]:
+		t.check(a.blockers_near(invalid_query.x, invalid_query.y, invalid_query.z).is_empty(),
+				"invalid collision queries return no obstacles")
+	t.eq(a.chunk_cache_stats(), cache_before_invalid,
+			"invalid collision queries cannot generate or evict world chunks")
 	var data := a.chunk(Vector2i(8, 8))
 	for node in data["nodes"]:
 		if node["blocks"]:
