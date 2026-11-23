@@ -122,7 +122,7 @@ Array CgameMeshletPages::build_pages(const PackedVector3Array &p_vertices,
 		uint32_t count = 0;
 		uint32_t vertices = 0;
 		uint32_t triangle_bytes = 0;
-		while (first + count < meshlets.size()) {
+		while (first + count < meshlets.size() && count < 128) {
 			const CgameMeshlets::Meshlet &candidate = meshlets[first + count];
 			if (candidate.vertex_ids.is_empty() || candidate.indices.is_empty() ||
 					candidate.vertex_ids.size() > 64 || candidate.indices.size() > 124 * 3 ||
