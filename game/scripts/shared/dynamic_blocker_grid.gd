@@ -94,7 +94,7 @@ func query(blockers: Dictionary, x: float, z: float, radius: float) -> Array:
 			continue
 		var blocker: Dictionary = blockers[key]
 		var reach: float = radius + float(blocker["radius"])
-		if absf(float(blocker["x"]) - x) < reach and absf(float(blocker["z"]) - z) < reach:
+		if absf(float(blocker["x"]) - x) <= reach and absf(float(blocker["z"]) - z) <= reach:
 			result.append(blocker)
 	return result
 
@@ -104,7 +104,7 @@ func _scan_all(blockers: Dictionary, x: float, z: float, radius: float) -> Array
 	last_candidates = blockers.size()
 	for blocker in blockers.values():
 		var reach: float = radius + float(blocker["radius"])
-		if absf(float(blocker["x"]) - x) < reach and absf(float(blocker["z"]) - z) < reach:
+		if absf(float(blocker["x"]) - x) <= reach and absf(float(blocker["z"]) - z) <= reach:
 			result.append(blocker)
 	return result
 
