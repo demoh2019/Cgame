@@ -8,6 +8,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const PcgGraphs = preload("res://scripts/shared/pcg_graphs.gd")
 const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 
 const CELL_SIZE := 64.0
@@ -257,13 +258,62 @@ func set_debug_draw(enabled: bool) -> void:
 			c.clear()
 
 
-## Far stand-in for a mesh (HLOD level 1): a box with the mesh's bounds and the base colour of its first surface.
+## Native cluster HLOD for medium-size cosmetic props; gameplay/collisions stay untouched.
+## Existing box proxy remains the fallback on stock Godot and unsimplifiable art.
+static func cluster_proxy_for(mesh: Mesh) -> Mesh:
+	if mesh == null or not EngineFeatures.has("CgameClusterLOD"):
+		return null
+	if mesh.get_surface_count() != 1 or mesh.get_blend_shape_count() > 0:
+		return null
+	if mesh.surface_get_primitive_type(0) != Mesh.PRIMITIVE_TRIANGLES:
+		return null
+	var arrays: Array = mesh.surface_get_arrays(0)
+	if arrays.size() != Mesh.ARRAY_MAX or not arrays[Mesh.ARRAY_VERTEX] is PackedVector3Array:
+		return null
+	if not arrays[Mesh.ARRAY_INDEX] is PackedInt32Array:
+		return null
+	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	# Limit one-time simplification during streaming; tiny meshes stay boxes.
+	if indices.size() < 384 or indices.size() > 12000 or vertices.size() > 8000:
+		return null
+	var native: Object = EngineFeatures.make("CgameClusterLOD")
+	if native == null or not native.has_method("build_cut_surface"):
+		return null
+	var hierarchy: Dictionary = native.call("build_hierarchy", vertices, indices, 5)
+	if not hierarchy.has("roots"):
+		return null
+	var cut: PackedInt32Array = hierarchy["roots"]
+	var triangles: int = int(native.call("triangle_count", hierarchy, cut))
+	# Absolute budget and at least 40% fewer triangles than the source.
+	if triangles < 12 or triangles > 256 or triangles * 5 > indices.size():
+		return null
+	var selected: Array = native.call("build_cut_surface", hierarchy, cut, arrays)
+	if selected.size() != Mesh.ARRAY_MAX:
+		return null
+	var proxy := ArrayMesh.new()
+	# Original vertex format retains custom attributes, skinning and tangents.
+	proxy.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, selected, [], {}, mesh.surface_get_format(0))
+	if proxy.get_surface_count() == 0:
+		return null
+	var material: Material = mesh.surface_get_material(0)
+	if material != null:
+		proxy.surface_set_material(0, material)
+	proxy.resource_name = mesh.resource_name + "_ClusterHLOD"
+	return proxy
+
+
+## Far stand-in for a mesh (HLOD level 1); cached for each unique source asset.
 ## Shared per source mesh; null in, null out.
 static func proxy_for(mesh: Mesh) -> Mesh:
 	if mesh == null:
 		return null
 	if _proxy_cache.has(mesh):
 		return _proxy_cache[mesh]
+	var cluster_proxy: Mesh = cluster_proxy_for(mesh)
+	if cluster_proxy != null:
+		_proxy_cache[mesh] = cluster_proxy
+		return cluster_proxy
 	var bounds := mesh.get_aabb()
 	var box := BoxMesh.new()
 	box.size = Vector3(maxf(bounds.size.x, 0.05), maxf(bounds.size.y, 0.05), maxf(bounds.size.z, 0.05)) * 0.9
