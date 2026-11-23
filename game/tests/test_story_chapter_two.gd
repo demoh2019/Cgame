@@ -232,6 +232,7 @@ func run(t) -> void:
 	t.check(not sim.valid_character_data(forged),
 		"Chapter II checkpoint cannot be loaded without a completed Chapter I")
 	_hub(world, survivor)
+	var silver_before_final: int = survivor.inventory.count("silver")
 	var finish: Dictionary = sim.cmd_story(survivor.id, "broadcast")
 	t.check(bool(finish.get("ok", false)), "genuine workbench broadcasts the branch-specific finale")
 	if not bool(finish.get("ok", false)):
@@ -241,8 +242,8 @@ func run(t) -> void:
 		"broadcast choice persists in private recovered radio journal")
 	t.eq(sim.cmd_story(survivor.id, "seal")["reason"], "already_complete",
 		"switching to alternate branch cannot earn a second reward")
-	t.eq(survivor.inventory.count("silver"), int(ChapterTwo.BROADCAST_REWARD["silver"]),
-		"real server rewards exactly once")
+	t.eq(survivor.inventory.count("silver"), silver_before_final + int(ChapterTwo.BROADCAST_REWARD["silver"]),
+		"real server adds only the one-time chapter reward to existing dungeon loot")
 	var saved_final: Dictionary = sim.character_data(survivor)
 	t.check(sim.valid_character_data(saved_final), "chosen ending is a valid account save")
 	var final_server := GameServer.new(WorldGen.new(42), 42)
