@@ -1,0 +1,76 @@
+name: Virtual geometry material attribute integrity
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/cgame_virtual_geometry/**'
+      - 'game/scripts/shared/cluster_lod.gd'
+      - 'game/scripts/client/meshlet_renderer.gd'
+      - 'game/tests/test_virtual_geometry.gd'
+      - 'game/tests/test_meshlet_renderer.gd'
+      - 'game/tests/run_virtual_geometry_attributes.gd'
+      - '.github/workflows/virtual-geometry-attributes.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/cgame_virtual_geometry/**'
+      - 'game/scripts/shared/cluster_lod.gd'
+      - 'game/scripts/client/meshlet_renderer.gd'
+      - 'game/tests/test_virtual_geometry.gd'
+      - 'game/tests/test_meshlet_renderer.gd'
+      - 'game/tests/run_virtual_geometry_attributes.gd'
+      - '.github/workflows/virtual-geometry-attributes.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: virtual-geometry-attributes-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-build-and-attributes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-virtual-geometry-attributes
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-virtual-geometry-attributes
+        continue-on-error: true
+      - name: Validate native CgameClusterLOD tests
+        run: |
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --test --test-case="*[CgameClusterLOD]*" --no-colors 2>&1 | tee virtual-geometry-native.log
+          if grep -Ei 'FAILED|AssertionError|error:' virtual-geometry-native.log; then exit 1; fi
+      - name: Import Albion After
+        run: |
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee virtual-geometry-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' virtual-geometry-import.log; then exit 1; fi
+      - name: CPU and fallback material attribute parity
+        run: |
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_virtual_geometry_attributes.gd 2>&1 | tee virtual-geometry-game.log
+          grep -E '^CLUSTER ATTRIBUTE TOTAL: [0-9]+ checks, 0 failures$' virtual-geometry-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' virtual-geometry-game.log; then exit 1; fi
+      - name: Save failure logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtual-geometry-attributes-logs
+          if-no-files-found: ignore
+          path: |
+            virtual-geometry-native.log
+            virtual-geometry-import.log
+            virtual-geometry-game.log
