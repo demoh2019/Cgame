@@ -65,6 +65,23 @@ func run(t) -> void:
 		Vector3.ONE, 0.1, 0.5), start,
 		"invalid target falls back to the last valid server position")
 
+	t.current = "malformed snapshots cannot corrupt visual entity transforms"
+	t.eq(Smooth.sample_position([], [1.0, start], [1.0, Vector3.INF], [], 0.5),
+		start, "duplicate timestamp with invalid destination stays finite")
+	t.eq(Smooth.sample_position([], [1.0, Vector3.INF], [0.5, finish], [], 0.5),
+		finish, "out-of-order timestamp with invalid source uses valid destination")
+	t.eq(Smooth.sample_position([], [], b, [], 0.5), Vector3.ZERO,
+		"missing source position cannot trigger an out-of-range array access")
+	t.eq(Smooth.sample_position([], [1.0, start], [1.1, "not-a-position"], [], 0.5),
+		Vector3.ZERO, "bad position type cannot crash snapshot interpolation")
+	t.eq(Smooth.sample_position([], ["bad-time", start], b, [], 0.5),
+		b[1], "nonnumeric snapshot timestamp uses latest authoritative position")
+	t.eq(Smooth.sample_position([], [NAN, start], b, [], 0.5),
+		b[1], "nonfinite snapshot time uses latest authoritative position")
+	t.check(Smooth.sample_position(["bad-time", "bad-position"],
+		a, b, ["bad-time", "bad-position"], 0.5).is_finite(),
+		"malformed velocity neighbors cannot poison a valid network segment")
+
 	t.current = "native Godot engine and stock fallback agree"
 	var host := Node3D.new()
 	if host.has_method("interpolate_network_snapshot"):

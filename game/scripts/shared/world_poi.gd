@@ -92,11 +92,20 @@ func sites_in_region(rx: int, rz: int) -> Array:
 ## Every site whose area may touch a circle: for chunk generation, map markers and the HUD.
 func sites_near(x: float, z: float, radius: float) -> Array:
 	var result: Array = []
+	if not is_finite(x) or not is_finite(z) or not is_finite(radius) or radius < 0.0:
+		return result
 	var margin: float = radius + 100.0
+	if not is_finite(margin):
+		return result
 	for rx in range(int(floor((x - margin) / REGION_SIZE)), int(floor((x + margin) / REGION_SIZE)) + 1):
 		for rz in range(int(floor((z - margin) / REGION_SIZE)), int(floor((z + margin) / REGION_SIZE)) + 1):
 			for site in sites_in_region(rx, rz):
-				if Vector2(float(site["x"]) - x, float(site["z"]) - z).length() <= radius + float(site["radius"]):
+				var dx: float = float(site["x"]) - x
+				var dz: float = float(site["z"]) - z
+				var limit: float = radius + float(site["radius"])
+				# Squared checks avoid a square root for every candidate across
+				# foliage, NPC, map and discovery queries.
+				if dx * dx + dz * dz <= limit * limit:
 					result.append(site)
 	return result
 
@@ -104,15 +113,25 @@ func sites_near(x: float, z: float, radius: float) -> Array:
 ## The site whose area covers a point, or {}.
 func site_at(x: float, z: float) -> Dictionary:
 	for site in sites_near(x, z, 0.0):
-		if Vector2(float(site["x"]) - x, float(site["z"]) - z).length() <= float(site["radius"]):
+		var dx: float = float(site["x"]) - x
+		var dz: float = float(site["z"]) - z
+		var radius: float = float(site["radius"])
+		if dx * dx + dz * dz <= radius * radius:
 			return site
 	return {}
 
 
 ## Whether a workbench station of any settlement is within `reach` of a point.
 func station_near(x: float, z: float, reach: float = STATION_RANGE) -> bool:
+	if not is_finite(reach) or reach < 0.0:
+		return false
+	var reach_sq: float = reach * reach
 	for site in sites_near(x, z, reach):
-		if bool(site["station"]) and Vector2(float(site["station_x"]) - x, float(site["station_z"]) - z).length() <= reach:
+		if not bool(site["station"]):
+			continue
+		var dx: float = float(site["station_x"]) - x
+		var dz: float = float(site["station_z"]) - z
+		if dx * dx + dz * dz <= reach_sq:
 			return true
 	return false
 
