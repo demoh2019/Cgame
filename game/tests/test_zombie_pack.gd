@@ -118,6 +118,13 @@ func run(t) -> void:
 		PackedInt32Array([3]), "equal-distance ties favor first input index")
 	t.check(PackNeighborSelection.choose(sample, 0, candidate_ids, 18.0, 0).is_empty(),
 		"invalid neighbor cap is rejected")
+	var duplicates: Array[int] = [3, 3, 3, 6, 6, 1]
+	t.eq(PackNeighborSelection.choose(sample, 0, duplicates, 18.0, 3),
+		PackedInt32Array([1, 3, 6]),
+		"duplicate grid hits count each infected only once")
+	var duplicate_tie: Array[int] = [6, 3, 3, 6]
+	t.eq(PackNeighborSelection.choose(sample, 0, duplicate_tie, 18.0, 1),
+		PackedInt32Array([3]), "duplicate allies preserve nearest tie ordering")
 	if nearest_native:
 		var query: Object = ClassDB.instantiate("AIProximityGrid2D")
 		var source_ids := PackedInt32Array([0])

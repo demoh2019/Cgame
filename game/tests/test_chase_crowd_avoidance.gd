@@ -5,6 +5,7 @@ extends RefCounted
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
+const ScriptORCA = preload("res://scripts/shared/crowd_avoidance.gd")
 
 
 func _pack(server, world, ids: Array, target_id: int) -> Array:
@@ -115,3 +116,34 @@ func run(t) -> void:
 	for infected in pack:
 		finite = finite and infected.position.is_finite()
 	t.check(finite, "a full zombie tick with avoidance keeps positions finite")
+
+	t.current = "script crowd avoidance survives malformed and sparse agents"
+	var sites := PackedVector2Array([Vector2.ZERO, Vector2(0.6, 0.0)])
+	var actual := PackedVector2Array([Vector2.ZERO, Vector2.ZERO])
+	var desired := PackedVector2Array([Vector2(3.0, 0.0), Vector2(-3.0, 0.0)])
+	var plain: PackedVector2Array = ScriptORCA.compute_velocities(
+		sites, actual, desired, 0.4, 2.0, 2.0, 3.0, 0)
+	t.eq(plain, PackedVector2Array([Vector2(2.0, 0.0), Vector2(-2.0, 0.0)]),
+		"zero neighbors returns bounded input without accessing empty indices")
+	t.eq(ScriptORCA.compute_velocities(sites, actual, desired,
+		0.4, 2.0, 0.0, 3.0, 8), plain,
+		"zero horizon uses safe bounded movement rather than dividing by zero")
+	t.eq(ScriptORCA.compute_velocities(sites, actual, desired,
+		0.4, 2.0, 2.0, 0.0, 8), plain,
+		"zero neighbor radius skips collision solver safely")
+	var malformed: PackedVector2Array = ScriptORCA.compute_velocities(
+		sites, PackedVector2Array([Vector2.ZERO]), desired, 0.4, 2.0, 2.0, 3.0, 8)
+	t.eq(malformed, PackedVector2Array([Vector2.ZERO, Vector2.ZERO]),
+		"mismatched packed arrays give safe stationary velocities")
+	var crowd: PackedVector2Array = ScriptORCA.compute_velocities(
+		sites, actual, desired, 0.4, 2.0, 2.0, 3.0, 8)
+	t.eq(crowd.size(), sites.size(), "close NPCs still run the ORCA solver")
+	for velocity in crowd:
+		t.check(velocity.is_finite() and velocity.length() <= 2.0001,
+			"collision correction is finite and within max speed")
+	var contaminated := PackedVector2Array([Vector2(INF, 0.0), Vector2(1.0, 0.0)])
+	var filtered: PackedVector2Array = ScriptORCA.compute_velocities(
+		contaminated, actual, desired, 0.4, 2.0, 2.0, 3.0, 8)
+	t.eq(filtered[0], Vector2.ZERO, "invalid NPC is excluded from spatial hash")
+	t.eq(filtered[1], Vector2(-2.0, 0.0),
+		"valid NPC keeps moving when another entity is invalid")

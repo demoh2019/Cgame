@@ -15,14 +15,16 @@ static func choose(positions: PackedVector2Array, source_index: int,
 	if not origin.is_finite():
 		return picked
 	var ranked: Array[Dictionary] = []
+	var seen: Dictionary = {}
 	for index in candidates:
 		if index < 0 or index >= positions.size():
 			return PackedInt32Array()
-		if index == source_index:
+		if index == source_index or seen.has(index):
 			continue
 		var point: Vector2 = positions[index]
 		if not point.is_finite():
 			return PackedInt32Array()
+		seen[index] = true
 		var distance_squared: float = origin.distance_squared_to(point)
 		if distance_squared <= radius * radius:
 			ranked.append({"index": index, "distance_squared": distance_squared})

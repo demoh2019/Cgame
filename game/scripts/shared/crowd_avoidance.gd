@@ -23,9 +23,24 @@ static func compute_velocities(positions: PackedVector2Array, velocities: Packed
 	out.resize(n)
 	if n == 0:
 		return out
-	var cell := maxf(neighbor_dist, 0.001)
+	# Bad array lengths or unsafe simulation parameters must not send NaNs
+	# into the navigation/physics pipeline.
+	if velocities.size() != n or preferred.size() != n or 			not is_finite(max_speed) or max_speed <= 0.0 or 			not is_finite(radius) or radius < 0.0 or 			not is_finite(neighbor_dist) or not is_finite(time_horizon) or 			not is_finite(time_step):
+		return out
+	# No neighbors/no prediction: use bounded navigation without a grid or LP.
+	if max_neighbors <= 0 or neighbor_dist <= 0.0 or time_horizon <= 0.0 or 			time_step <= 0.0 or radius <= 0.0:
+		for i in n:
+			var target: Vector2 = preferred[i]
+			if target.is_finite():
+				out[i] = target.limit_length(max_speed)
+		return out
+	var cell: float = maxf(neighbor_dist, 0.001)
 	var grid: Dictionary = {}
 	for i in n:
+		# Corrupt actors are excluded from the spatial hash rather than
+		# contaminating the velocities of all nearby infected.
+		if not positions[i].is_finite() or not velocities[i].is_finite() or 				absf(positions[i].x) > 10000000.0 or absf(positions[i].y) > 10000000.0:
+			continue
 		var key := Vector2i(floori(positions[i].x / cell), floori(positions[i].y / cell))
 		if grid.has(key):
 			var bucket: PackedInt32Array = grid[key]
@@ -41,6 +56,8 @@ static func compute_velocities(positions: PackedVector2Array, velocities: Packed
 	for i in n:
 		var pi := positions[i]
 		var vi := velocities[i]
+		if not pi.is_finite() or not vi.is_finite() or 				absf(pi.x) > 10000000.0 or absf(pi.y) > 10000000.0:
+			continue
 		neigh_idx.clear()
 		neigh_d.clear()
 		var cx := floori(pi.x / cell)
@@ -68,9 +85,14 @@ static func compute_velocities(positions: PackedVector2Array, velocities: Packed
 					if neigh_idx.size() > max_neighbors:
 						neigh_idx.resize(max_neighbors)
 						neigh_d.resize(max_neighbors)
+		# Singletons are common in open terrain and need no linear program.
+		if neigh_idx.is_empty():
+			if preferred[i].is_finite():
+				out[i] = preferred[i].limit_length(max_speed)
+			continue
 		line_p.clear()
 		line_d.clear()
-		var inv_t := 1.0 / time_horizon
+		var inv_t := 1.0 / maxf(time_horizon, 0.0001)
 		var inv_dt := 1.0 / maxf(time_step, 0.0001)
 		var combined := radius * 2.0
 		var combined_sq := combined * combined
@@ -106,14 +128,17 @@ static func compute_velocities(positions: PackedVector2Array, velocities: Packed
 				u = (combined * inv_dt - w_len) * unit_w
 			line_p.append(vi + 0.5 * u)
 			line_d.append(dir)
-		var pref := preferred[i]
+		var pref: Vector2 = preferred[i]
+		if not pref.is_finite():
+			pref = Vector2.ZERO
 		if pref.length_squared() > max_speed * max_speed:
 			pref = pref.normalized() * max_speed
 		var res := PackedFloat32Array([0.0, 0.0])
 		var fail := _lp2(line_p, line_d, max_speed, pref, false, res)
 		if fail < line_p.size():
 			_lp3(line_p, line_d, fail, max_speed, res)
-		out[i] = Vector2(res[0], res[1])
+		var chosen := Vector2(res[0], res[1])
+		out[i] = chosen.limit_length(max_speed) if chosen.is_finite() else pref
 	return out
 
 
