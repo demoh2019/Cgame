@@ -28,6 +28,16 @@ func run(t) -> void:
 	t.eq(UiSettings.sanitize("ui_scale", 9.0), UiSettings.UI_SCALE_MAX, "scale clamped high")
 	t.eq(UiSettings.sanitize("ui_scale", "abc"), 1.0, "bad scale falls back")
 	t.eq(UiSettings.sanitize("colorblind", 99), 3, "filter index clamped")
+	t.eq(UiSettings.sanitize("colorblind", NAN), 0, "NaN colorblind index uses default")
+	t.eq(UiSettings.sanitize("caption_size", INF), 1, "infinite caption size uses default")
+	t.eq(UiSettings.sanitize("colorblind", 1e100), 3,
+		"huge finite UI index clamps before integer conversion")
+	t.eq(UiSettings.sanitize("reduce_flashes", "false"), false,
+		"malformed boolean string never enables a visual effect")
+	t.eq(UiSettings.sanitize("toggle_sprint", "true"), false,
+		"corrupt text cannot silently switch hold/toggle input")
+	t.eq(UiSettings.sanitize("captions", 1), true,
+		"legacy numeric boolean remains compatible")
 	t.eq(UiSettings.sanitize("locale", "de"), "", "unsupported locale rejected")
 	t.eq(UiSettings.sanitize("show_fps", 1), true, "bool coerced")
 	UiSettings.set_value("colorblind", 2)
@@ -71,6 +81,29 @@ func run(t) -> void:
 	t.eq(TranslationServer.translate("Join server"), "Join server", "English passes through")
 
 	t.current = "key rebinding"
+	var swapped_codes: Dictionary = UiInputRebind.resolved_saved({
+		"access_up": KEY_S, "access_down": KEY_W})
+	t.eq(swapped_codes["access_up"], KEY_S,
+		"persisted key swap respects first action")
+	t.eq(swapped_codes["access_down"], KEY_W,
+		"persisted key swap respects second action")
+	var single_override: Dictionary = UiInputRebind.resolved_saved({"access_up": KEY_S})
+	t.eq(single_override["access_down"], KEY_W,
+		"binding to another action's default swaps that action safely")
+	var malformed_codes: Dictionary = UiInputRebind.resolved_saved({
+		"access_up": NAN, "access_down": -5,
+		"access_left": "bad", "access_right": 999999999999})
+	for entry in UiInputRebind.ACTIONS:
+		t.eq(malformed_codes[entry[0]], entry[2],
+			"corrupt saved keys leave a valid default for " + str(entry[0]))
+	var unique: Dictionary = UiInputRebind.resolved_saved({
+		"access_up": KEY_T, "access_down": KEY_T, "access_left": KEY_S})
+	t.eq(unique.values().size(), UiInputRebind.ACTIONS.size(),
+		"all actions remain bound after conflicting overrides")
+	var occupied: Dictionary = {}
+	for binding in unique.values():
+		t.check(not occupied.has(binding), "saved key layout has no duplicate actions")
+		occupied[binding] = true
 	UiInputRebind.install(TMP)
 	t.eq(UiInputRebind.key_of("access_up"), KEY_W, "default up is W")
 	t.eq(UiInputRebind.rebind("access_up", KEY_I, true, TMP), "", "free key rebinds without swap")
@@ -91,6 +124,10 @@ func run(t) -> void:
 	cfg2.load(TMP)
 	t.check(not cfg2.has_section_key("bindings", "access_down"), "defaults are not stored")
 	t.eq(UiInputRebind.rebind("nope", KEY_Q, false), "", "unknown action ignored")
+	t.eq(UiInputRebind.rebind("access_up", -1, false), "",
+		"invalid physical key codes are ignored")
+	t.eq(UiInputRebind.rebind("access_up", 999999999, false), "",
+		"oversized forged key codes cannot be saved")
 
 	t.current = "colorblind filters"
 	t.eq(UiColorblind.rows(0)[0], Vector3(1, 0, 0), "mode 0 is identity")
