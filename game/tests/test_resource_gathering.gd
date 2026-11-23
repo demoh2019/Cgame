@@ -61,6 +61,11 @@ func run(t) -> void:
 	t.eq(ResourceGathering.reach_margin(malformed_rock), 0.0,
 		"negative model radius is ignored")
 
+	var malformed_marker: Dictionary = {"id": 15, "kind": "rock", "radius": NAN,
+		"x": 3.0, "y": 2.0, "z": 1.0}
+	t.check(ResourceGathering.weakspot_position(malformed_marker, 1).is_finite(),
+		"malformed model radius cannot corrupt a gathering weak spot")
+
 	t.current = "mining large modeled stones uses their actual solid footprint"
 	var edge_x: float = Defs.REACH + 0.5 + 2.4
 	var large_stone: Dictionary = {
