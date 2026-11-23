@@ -17,6 +17,14 @@ static func activate(bag: Dictionary, identities: Array, boss_id: int, now: floa
 			int(bag.get("items", {}).get(ITEM_ID, 0)) <= 0 or \
 			not bag.has("raid_reserved_until") or bag.has("raid_need_greed"):
 		return false
+	# An invalid or already-expired raid reservation must never open an
+	# election with a negative, infinite, or unbounded voting deadline.
+	var raw_lock: Variant = bag.get("raid_reserved_until", null)
+	if not (raw_lock is int or raw_lock is float):
+		return false
+	var lock_until: float = float(raw_lock)
+	if not is_finite(lock_until) or lock_until <= now:
+		return false
 	var tokens: Array[String] = []
 	for identity in identities:
 		if not identity is String or str(identity).is_empty() or tokens.has(str(identity)):
@@ -27,7 +35,7 @@ static func activate(bag: Dictionary, identities: Array, boss_id: int, now: floa
 		"amount": int(bag["items"][ITEM_ID]),
 		"eligible": tokens,
 		"votes": {},
-		"until": minf(now + VOTE_SECONDS, float(bag["raid_reserved_until"])),
+		"until": minf(now + VOTE_SECONDS, lock_until),
 		"status": "voting",
 		"winner": "",
 		"roll": 0,
@@ -76,6 +84,8 @@ static func resolve(bag: Dictionary, now: float) -> Dictionary:
 ## A remote client sends only a choice and a bag ID. The server supplies
 ## the real authenticated Player, time, bag and frozen entitlement list.
 static func vote(bag: Dictionary, player, choice: String, now: float) -> Dictionary:
+	if player == null:
+		return {"ok": false, "reason": "not_eligible"}
 	if not CHOICES.has(choice):
 		return {"ok": false, "reason": "invalid_choice"}
 	if RaidLoot.remaining(bag, now) <= 0.0:
@@ -98,6 +108,8 @@ static func vote(bag: Dictionary, player, choice: String, now: float) -> Diction
 ## Protect the original trophy only until the existing raid lock expires.
 ## Other items in the same physical bag can be looted normally.
 static func protection(bag: Dictionary, player, now: float) -> Dictionary:
+	if player == null:
+		return {"locked": true, "reason": "not_eligible"}
 	if RaidLoot.remaining(bag, now) <= 0.0 or \
 			int(bag.get("items", {}).get(ITEM_ID, 0)) <= 0:
 		return {"locked": false}
@@ -117,7 +129,7 @@ static func protection(bag: Dictionary, player, now: float) -> Dictionary:
 ## Only viewer-specific vote status: no account/session tokens, rolls of
 ## opponents, or private ballots are serialized to the network.
 static func visible(bag: Dictionary, player, now: float) -> Dictionary:
-	if RaidLoot.remaining(bag, now) <= 0.0:
+	if player == null or RaidLoot.remaining(bag, now) <= 0.0:
 		return {}
 	var state: Dictionary = resolve(bag, now)
 	if state.is_empty():

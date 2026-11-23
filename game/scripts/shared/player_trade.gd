@@ -48,9 +48,18 @@ static func exchange(first, second, first_offer: Dictionary, second_offer: Dicti
 	for item_id in first_offer:
 		if working_second.add(item_id, int(first_offer[item_id])) != 0:
 			return {"ok": false, "reason": "no_space"}
+		# A traded damaged weapon must not become pristine in another backpack.
+		# Durability is stored per item type, so mixed stacks retain the lower
+		# (more damaged) value instead of silently repairing existing equipment.
+		var incoming_wear: float = first.durability(item_id)
+		if incoming_wear < 100.0:
+			working_second.wear[item_id] = minf(working_second.durability(item_id), incoming_wear)
 	for item_id in second_offer:
 		if working_first.add(item_id, int(second_offer[item_id])) != 0:
 			return {"ok": false, "reason": "no_space"}
+		var incoming_wear: float = second.durability(item_id)
+		if incoming_wear < 100.0:
+			working_first.wear[item_id] = minf(working_first.durability(item_id), incoming_wear)
 	working_first.unequip_missing()
 	working_second.unequip_missing()
 	first.load_dict(working_first.to_dict())

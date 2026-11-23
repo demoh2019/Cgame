@@ -30,6 +30,30 @@ func _defeat(sim, world, helper, killer) -> int:
 
 
 func run(t) -> void:
+	t.current = "malformed raid lock never creates a broken or endless election"
+	var valid_core_bag: Dictionary = {"items": {"infected_core": 1},
+		"raid_reserved_until": 75.0}
+	var voters: Array = ["account:a", "account:b"]
+	for broken_lock in [NAN, INF, "75", -1.0, 0.0]:
+		var invalid_bag: Dictionary = valid_core_bag.duplicate(true)
+		invalid_bag["raid_reserved_until"] = broken_lock
+		t.check(not RaidNeedGreed.activate(invalid_bag, voters, 42, 0.0),
+			"invalid or expired raid reservation cannot start a vote")
+		t.check(not invalid_bag.has("raid_need_greed"),
+			"rejected election leaves physical loot bag untouched")
+	var short_bag: Dictionary = valid_core_bag.duplicate(true)
+	short_bag["raid_reserved_until"] = 4.0
+	t.check(RaidNeedGreed.activate(short_bag, voters, 42, 0.0),
+		"short but valid reservation can still hold a vote")
+	t.eq(short_bag["raid_need_greed"]["until"], 4.0,
+		"ballot cannot outlive its underlying exclusive raid loot window")
+	t.eq(RaidNeedGreed.vote(short_bag, null, "need", 0.0).get("reason", ""),
+		"not_eligible", "missing identity cannot submit a vote")
+	t.eq(RaidNeedGreed.visible(short_bag, null, 0.0), {},
+		"missing identity receives no private ballot data")
+	t.check(bool(RaidNeedGreed.protection(short_bag, null, 0.0).get("locked", false)),
+		"missing identity cannot bypass trophy protection")
+
 	t.current = "valid, bounded, immutable player ballots"
 	var world := WorldGen.new(47)
 	var server := GameServer.new(world, 47)
