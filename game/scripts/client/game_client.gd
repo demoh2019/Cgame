@@ -576,6 +576,11 @@ func contract(action: String) -> void:
 	net.c_contract.rpc_id(1, action)
 
 
+func story(action: String) -> void:
+	if action == "listen" or action == "transmit":
+		net.c_story.rpc_id(1, action)
+
+
 func outpost_supplies(site_id: int) -> void:
 	net.c_outpost_supplies.rpc_id(1, site_id)
 

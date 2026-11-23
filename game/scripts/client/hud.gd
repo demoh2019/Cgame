@@ -26,6 +26,7 @@ const ExpeditionLoadout = preload("res://scripts/shared/expedition_loadout.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const FirstSteps = preload("res://scripts/client/first_steps.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
+const StoryCampaign = preload("res://scripts/shared/story_campaign.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
@@ -47,6 +48,7 @@ var _vendor_water_button: Button
 var _vendor_food_button: Button
 var _radar
 var _contract_label: Label
+var _story_journal: Label # Chapter transcripts in the inventory's mission section.
 var _caravan_status: Label
 var _prompt: Label
 var _log: Label
@@ -781,6 +783,31 @@ func _build() -> void:
 	daily_claim.tooltip_text = "One repeatable camp bounty each UTC day. Collect only at the camp workbench."
 	daily_claim.pressed.connect(func() -> void: client.contract("daily_claim"))
 	contract_actions.add_child(daily_claim)
+
+	# Narrative chapter is independent from the recurring camp contracts:
+	# evidence and combat milestones are awarded only by authoritative play.
+	var story_heading := Label.new()
+	story_heading.text = StoryCampaign.TITLE + " (hub radio)"
+	inventory_box.add_child(story_heading)
+	var story_actions := HBoxContainer.new()
+	inventory_box.add_child(story_actions)
+	var tune_radio := Button.new()
+	tune_radio.name = "StoryListen"
+	tune_radio.text = "Listen to Beacon Seven"
+	tune_radio.tooltip_text = "At any camp workbench: begin Chapter I. Only a real dangerous-zone ruin opens the evidence stage."
+	tune_radio.pressed.connect(func() -> void: client.story("listen"))
+	story_actions.add_child(tune_radio)
+	var transmit := Button.new()
+	transmit.name = "StoryTransmit"
+	transmit.text = "Transmit the recording"
+	transmit.tooltip_text = "Finish the chapter after recovering a ruin cache and defeating three infected; requires inventory space."
+	transmit.pressed.connect(func() -> void: client.story("transmit"))
+	story_actions.add_child(transmit)
+	_story_journal = Label.new()
+	_story_journal.name = "StoryJournal"
+	_story_journal.text = "Waiting for an encrypted survivor radio channel..."
+	_story_journal.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	inventory_box.add_child(_story_journal)
 
 	var cache_heading := Label.new()
 	cache_heading.text = "Frontier cache (capture a red/black outpost)"
@@ -2324,6 +2351,10 @@ func say(text: String) -> void:
 func _on_event(event: Dictionary) -> void:
 	var my_group: int = int(client.you.get("party", {}).get("id", 0))
 	match event["type"]:
+		"story":
+			if int(event.get("peer", -1)) == client.peer_id:
+				banner("BEACON SEVEN / CHAPTER I", Color(0.85, 0.75, 0.42))
+				say(str(event.get("line", "")))
 		# Territory and sieges: the server tells everyone, so the world hears when an outpost falls.
 		"outpost_taken":
 			if my_group > 0 and int(event.get("owner", 0)) == my_group:
@@ -3494,6 +3525,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Dismantle denied: %s" % str(data.get("reason", "rejected")))
 		return
+	if kind == "story":
+		if bool(data.get("ok", false)):
+			say(str(data.get("line", StoryCampaign.TITLE)))
+			say("Next objective: " + str(data.get("objective", "")))
+		else:
+			say("Beacon Seven: " + str(data.get("reason", "transmission rejected")))
+		return
 	if kind == "contract":
 		if bool(data.get("ok", false)):
 			say("Camp mission: " + str(data.get("title", data.get("active", "updated"))))
@@ -3943,6 +3981,18 @@ func _process(_delta: float) -> void:
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
 	_contract_label.text += "\n" + str(client.you.get("daily_description", "Daily bounty pending server"))
+	var story_data: Dictionary = client.you.get("story",
+		StoryCampaign.public_state(StoryCampaign.empty_state()))
+	if not story_data.is_empty():
+		var chapter_objective: String = str(story_data.get("objective", ""))
+		_contract_label.text += "\nSTORY: " + chapter_objective
+		if _story_journal != null:
+			var transcript_text: String = str(story_data.get("title", StoryCampaign.TITLE)) \
+				+ "\nOBJECTIVE: " + chapter_objective
+			for recovered_line in story_data.get("transcript", []):
+				transcript_text += "\n\n" + str(recovered_line)
+			if _story_journal.text != transcript_text:
+				_story_journal.text = transcript_text
 	_info_label.text += "  Rest %.0fs" % float(client.you.get("rest_cooldown", 0.0))
 	var combat_tag: float = float(client.you.get("combat_tag_seconds", 0.0))
 	if combat_tag > 0.0:

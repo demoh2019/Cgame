@@ -12,6 +12,11 @@ const MeshLOD = preload("res://scripts/client/mesh_lod_preservation.gd")
 const GpuCulling = preload("res://scripts/native/cgame_gpu_culling.gd")
 
 const FOLDER := "res://assets/models/polyhaven/baked/plants/"
+# User-supplied Fab/Quixel Wild Grass. Install locally with game/tools/install_user_wild_grass.py.
+# Do not commit the licensed archive or extracted meshes to this public repository.
+const USER_GRASS_GLTF := "res://assets/models/community_grass/wild_grass/standard/vlkhcbxia_tier_3_nonUE.gltf"
+const USER_GRASS_VARIANTS := ["A", "B", "C", "D", "E", "F", "G", "H"]
+const USER_GRASS_DISTANCE := 28.0
 const DRAW_DISTANCE := 34.0
 const TILE := 16.0
 
@@ -35,6 +40,11 @@ const SPECIES := {
 	# ~16 triangles a tuft, so thousands per tile; this is what covers the terrain.
 	"lush_grass": {"cards": true, "biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 1150, "scale": [0.6, 1.5],
 		"big": 0.1, "cluster": false, "variants": 3, "distance": 72.0},
+	# When the uploaded meshes are installed, use the cheap old carpet only outside
+	# the 28m 3D range. Never overlay fake geometrical blades on the scanned tufts.
+	"lush_grass_far": {"cards": true, "biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 950,
+		"scale": [0.6, 1.5], "big": 0.1, "cluster": false, "variants": 3, "distance": 72.0,
+		"begin": USER_GRASS_DISTANCE},
 	# The grass carpet itself: the most common, everywhere, many variants, every size from short tufts to big clumps.
 	"grass_medium_01": {"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 180, "scale": [1.2, 4.4], "big": 0.2,
 		"cluster": false, "variants": 3, "distance": 60.0},
@@ -74,6 +84,40 @@ const SPECIES := {
 
 static var _manifest: Dictionary = {}
 static var _meshes: Dictionary = {}
+static var _user_grass_scene: PackedScene
+
+
+## Source glTF has eight photogrammetric variants with LOD0, LOD1 and billboard LOD2.
+## Loading is optional: on machines without the separately licensed asset pack,
+## the original photo-card grass remains fully functional.
+static func user_grass_available() -> bool:
+	if _user_grass_scene == null and ResourceLoader.exists(USER_GRASS_GLTF):
+		_user_grass_scene = load(USER_GRASS_GLTF) as PackedScene
+	return _user_grass_scene != null
+
+
+static func _user_grass_mesh(variant: String) -> Mesh:
+	if not user_grass_available() or not (variant in USER_GRASS_VARIANTS):
+		return null
+	var scene: Node = _user_grass_scene.instantiate()
+	var result: Mesh = null
+	# Some Godot importer versions merge authored _LOD1 nodes into the base
+	# mesh. Try explicit LOD1 first, then the full-detail variant as fallback.
+	for suffix in ["_LOD1", ""]:
+		var name_to_find := "SM_vlkhcbxia_Var%s%s" % [variant, suffix]
+		for node in scene.find_children("*", "MeshInstance3D", true, false):
+			if str(node.name) != name_to_find:
+				continue
+			var model := node as MeshInstance3D
+			if model.mesh != null:
+				result = _foliage_ready(model.mesh, null)
+				# Original glTF vertices are in centimetres and rotate X->Y.
+				result.set_meta("source_grass_basis", model.transform.basis)
+			break
+		if result != null:
+			break
+	scene.free()
+	return result
 
 
 static func variants(species: String) -> Array:
@@ -150,6 +194,10 @@ static func card_mesh(region_index: int, planes: int = 5) -> Mesh:
 
 
 static func mesh(file: String, dry: bool = false, max_triangles: int = 0) -> Mesh:
+	if file.begins_with("#usergrass"):
+		if not _meshes.has(file):
+			_meshes[file] = _user_grass_mesh(file.trim_prefix("#usergrass"))
+		return _meshes[file]
 	if file.begins_with("#card"):
 		var card_key: String = "%s|%d" % [file, card_planes]
 		if not _meshes.has(card_key):
@@ -233,10 +281,27 @@ static func build_tile(origin: Vector2, tile: int, tiles_per_side: int, sample: 
 	var tile_z: float = float(tile / tiles_per_side) * TILE
 	var rng := RandomNumberGenerator.new()
 	rng.seed = WorldGen.mix(int(origin.x), int(origin.y), 4421, tile)
+	var use_real_grass: bool = user_grass_available()
 	for species in SPECIES:
-		var info: Dictionary = SPECIES[species]
+		if species == "lush_grass_far" and not use_real_grass:
+			continue
+		# When available, remove the original large flattened scanned grass,
+		# not just its smallest cards: it caused the ugly giant 1px leaves.
+		if use_real_grass and species in ["grass_medium_01", "grass_medium_02"]:
+			continue
+		var info: Dictionary = SPECIES[species].duplicate()
 		var choices: Array = []
-		if bool(info.get("cards", false)):
+		if species == "lush_grass" and use_real_grass:
+			info["cards"] = false
+			info["user_grass"] = true
+			info["count"] = 170 # LOD1 is ~800-1000 triangles, not 16/card.
+			info["scale"] = [1.1, 1.8]
+			info["big"] = 0.08
+			info["distance"] = USER_GRASS_DISTANCE
+			info["variants"] = 3
+			for variant in USER_GRASS_VARIANTS:
+				choices.append({"file": "#usergrass" + variant})
+		elif bool(info.get("cards", false)):
 			for c in CARD_REGIONS.size():
 				choices.append({"file": "#card%d" % c})
 		elif info.has("files"):
@@ -270,7 +335,7 @@ static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted
 	if true:
 		var centers: Array = []
 		# The carpet covers the ground evenly: a jittered grid leaves no bald patches.
-		var grid: bool = bool(info.get("cards", false))
+		var grid: bool = bool(info.get("cards", false)) or bool(info.get("user_grass", false))
 		var grid_side: int = maxi(1, int(ceil(sqrt(float(wanted)))))
 		var grid_cell: float = TILE / float(grid_side)
 		if bool(info["cluster"]):
@@ -324,6 +389,9 @@ static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted
 			if rng.randf() < float(info.get("big", 0.0)):
 				s = float(info["scale"][1]) * rng.randf_range(1.0, 1.8) # The odd huge clump or boulder.
 			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s * rng.randf_range(0.85, 1.15), s))
+			if plant_mesh.has_meta("source_grass_basis"):
+				var asset_basis: Basis = plant_mesh.get_meta("source_grass_basis")
+				basis = basis * asset_basis
 			var h: float = float(here["h"])
 			var sink: float = 0.03
 			if info.has("embed"):
@@ -347,12 +415,17 @@ static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted
 		instance.multimesh = multimesh
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		instance.visibility_range_end = float(info.get("distance", DRAW_DISTANCE)) * distance_scale
+		instance.visibility_range_begin = float(info.get("begin", 0.0)) * distance_scale
 		# Per instance, not per 16 m tile; foliage thins out with distance (fewer, larger tufts).
 		var thin: bool = not info.has("files")
 		GpuCulling.enable(multimesh, instance.visibility_range_end, instance.visibility_range_end * 0.3,
 			far_density if thin else 1.0)
 		# No fade: a fading range forces the whole multimesh into the slow transparent pass.
-		var top: float = plant_mesh.get_aabb().size.y * float(info["scale"][1]) * 1.8 + 0.5
+		var bounds: AABB = plant_mesh.get_aabb()
+		if plant_mesh.has_meta("source_grass_basis"):
+			var asset_basis: Basis = plant_mesh.get_meta("source_grass_basis")
+			bounds = Transform3D(asset_basis, Vector3.ZERO) * bounds
+		var top: float = bounds.size.y * float(info["scale"][1]) * 1.8 + 0.5
 		instance.custom_aabb = AABB(Vector3(tile_x - 1.0, low - 0.3, tile_z - 1.0), Vector3(TILE + 2.0, high - low + top, TILE + 2.0))
 		return instance
 	return null

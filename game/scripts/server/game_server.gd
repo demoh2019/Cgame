@@ -51,6 +51,7 @@ const OutpostProvisions = preload("res://scripts/shared/outpost_provisions.gd")
 const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
+const StoryCampaign = preload("res://scripts/shared/story_campaign.gd")
 const CaravanRoutes = preload("res://scripts/shared/caravan_routes.gd")
 const CaravanAmbush = preload("res://scripts/shared/caravan_ambush.gd")
 const RuinAmbush = preload("res://scripts/shared/ruin_ambush.gd")
@@ -250,6 +251,7 @@ class Player:
 	var stash_sent_at: float = -100.0
 	var equipment_presets: Array = [] # Persistent owned weapon/armor shortcuts.
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
+	var story_state: Dictionary = {} # Character-bound narrative chapter checkpoint.
 	var caravan_state: Dictionary = {} # Saved canonical source/destination IDs only.
 	var caravan_view: Dictionary = {} # Verified route details for this private client.
 	var caravan_ambushed: bool = false # One PvE ambush per active route, persisted.
@@ -590,6 +592,7 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.progression = Progression.new()
 	player.skills = Skills.new()
 	player.contract_state = Contracts.empty_state()
+	player.story_state = StoryCampaign.empty_state()
 	player.equipment_presets = EquipmentPresets.empty_slots()
 	player.caravan_state = {}
 	player.caravan_view = {}
@@ -644,6 +647,7 @@ func character_data(player: Player) -> Dictionary:
 		"skills": player.skills.to_dict(),
 		"equipment_presets": player.equipment_presets.duplicate(true),
 		"contracts": player.contract_state.duplicate(true),
+		"story": player.story_state.duplicate(true),
 		"caravan": player.caravan_state.duplicate(true),
 		"caravan_ambushed": player.caravan_ambushed,
 		"caravan_defended": player.caravan_defended,
@@ -836,6 +840,11 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	var loaded_contracts: Variant = data.get("contracts", Contracts.empty_state())
 	if not Contracts.valid_state(loaded_contracts):
 		return false
+	# Old saves predate the chapter; invalid new saves must never skip
+	# checkpoints or mint a story reward by forging completed stage data.
+	var loaded_story: Variant = data.get("story", StoryCampaign.empty_state())
+	if not StoryCampaign.valid_state(loaded_story):
+		return false
 	var loaded_presets: Variant = data.get("equipment_presets", EquipmentPresets.empty_slots())
 	if not EquipmentPresets.valid_state(loaded_presets):
 		return false
@@ -883,6 +892,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.skills = loaded_skills
 	player.dirty_skills = true
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
+	player.story_state = (loaded_story as Dictionary).duplicate(true)
 	player.equipment_presets = (loaded_presets as Array).duplicate(true)
 	player.caravan_state = (loaded_caravan as Dictionary).duplicate(true)
 	player.caravan_view = caravan_view.duplicate(true)
@@ -3601,6 +3611,32 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 	_earn_renown(player, 4, "caravan")
 	outcome["action"] = "deliver"
 	return outcome
+
+
+## Chapter I: only authenticated workbench listening/transmission is
+## client-invocable. Ruin evidence and kills come from authoritative gameplay.
+func cmd_story(peer_id: int, action: String) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if action != "listen" and action != "transmit":
+		return {"ok": false, "reason": "unknown_action"}
+	var position := Vector2(player.position.x, player.position.z)
+	if not _at_workbench(position):
+		return {"ok": false, "reason": "no_station"}
+	var result: Dictionary = StoryCampaign.listen(player.story_state) if action == "listen" \
+		else StoryCampaign.transmit(player.story_state, player.inventory)
+	if bool(result.get("ok", false)):
+		player.dirty_character = true
+		if action == "transmit":
+			player.dirty_inventory = true
+		# Private transcript entries: never send another survivor's chapter
+		# progress or unlocked information to a different network peer.
+		events.append({"type": "story", "peer": peer_id,
+			"stage": int(player.story_state["stage"]),
+			"line": StoryCampaign.current_line(player.story_state),
+			"objective": StoryCampaign.objective(player.story_state)})
+	return result
 
 
 func cmd_contract(peer_id: int, action: String) -> Dictionary:
@@ -6373,6 +6409,14 @@ func cmd_loot(peer_id: int, entity_id: int, requested_item: String = "") -> Dict
 				"level": player.progression.scavenging_level()})
 		if Contracts.record_crate(player.contract_state, entity_id):
 			player.dirty_character = true
+		# Evidence counts only after this actual unopened, nearby cache has
+		# been committed as looted. Client-supplied cache IDs never advance story.
+		if StoryCampaign.record_ruin_cache(player.story_state, entity_id, zone):
+			player.dirty_character = true
+			events.append({"type": "story", "peer": peer_id,
+				"stage": int(player.story_state["stage"]),
+				"line": StoryCampaign.current_line(player.story_state),
+				"objective": StoryCampaign.objective(player.story_state)})
 		if DailyBounties.record_crate(player.daily_bounty, _refresh_daily(player), entity_id):
 			player.dirty_character = true
 		events.append({"type": "crate", "peer": peer_id, "id": entity_id})
@@ -6776,6 +6820,15 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 			_award(attacker, "slayer", float(Defs.ZOMBIES[zombie.type].get("xp", 5)) * 2.0)
 			if Contracts.record_kill(attacker.contract_state):
 				attacker.dirty_character = true
+			# Only this confirmed lethal PvE branch can record story combat.
+			var previous_story_stage: int = int(attacker.story_state["stage"])
+			if StoryCampaign.record_infected_kill(attacker.story_state):
+				attacker.dirty_character = true
+				if int(attacker.story_state["stage"]) != previous_story_stage:
+					events.append({"type": "story", "peer": attacker.id,
+						"stage": int(attacker.story_state["stage"]),
+						"line": StoryCampaign.current_line(attacker.story_state),
+						"objective": StoryCampaign.objective(attacker.story_state)})
 			if DailyBounties.record_kill(attacker.daily_bounty, _refresh_daily(attacker)):
 				attacker.dirty_character = true
 			_on_zombie_death(zombie, attacker)
@@ -10095,6 +10148,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"fame": int(player.progression.weapon_fame.get(Progression.weapon_family(player.inventory.weapon), 0)),
 				"item_power": Defs.item_power(player.inventory.weapon) + player.progression.mastery_item_power(player.inventory.weapon)},
 			"contract": player.contract_state.duplicate(true),
+			"story": StoryCampaign.public_state(player.story_state),
 			"discovered_site_ids": WorldDiscovery.ids(player.discovered_sites),
 			"discovered_count": player.discovered_sites.size(),
 			"daily_bounty": player.daily_bounty.duplicate(true),
