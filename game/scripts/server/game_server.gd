@@ -52,6 +52,7 @@ const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const StoryCampaign = preload("res://scripts/shared/story_campaign.gd")
+const StoryChapterTwo = preload("res://scripts/shared/story_chapter_two.gd")
 const CaravanRoutes = preload("res://scripts/shared/caravan_routes.gd")
 const CaravanAmbush = preload("res://scripts/shared/caravan_ambush.gd")
 const RuinAmbush = preload("res://scripts/shared/ruin_ambush.gd")
@@ -252,6 +253,7 @@ class Player:
 	var equipment_presets: Array = [] # Persistent owned weapon/armor shortcuts.
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
 	var story_state: Dictionary = {} # Character-bound narrative chapter checkpoint.
+	var story2_state: Dictionary = {} # Independent, persistent Chapter II and ending choice.
 	var caravan_state: Dictionary = {} # Saved canonical source/destination IDs only.
 	var caravan_view: Dictionary = {} # Verified route details for this private client.
 	var caravan_ambushed: bool = false # One PvE ambush per active route, persisted.
@@ -593,6 +595,7 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.skills = Skills.new()
 	player.contract_state = Contracts.empty_state()
 	player.story_state = StoryCampaign.empty_state()
+	player.story2_state = StoryChapterTwo.empty_state()
 	player.equipment_presets = EquipmentPresets.empty_slots()
 	player.caravan_state = {}
 	player.caravan_view = {}
@@ -648,6 +651,7 @@ func character_data(player: Player) -> Dictionary:
 		"equipment_presets": player.equipment_presets.duplicate(true),
 		"contracts": player.contract_state.duplicate(true),
 		"story": player.story_state.duplicate(true),
+		"story2": player.story2_state.duplicate(true),
 		"caravan": player.caravan_state.duplicate(true),
 		"caravan_ambushed": player.caravan_ambushed,
 		"caravan_defended": player.caravan_defended,
@@ -845,6 +849,14 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	var loaded_story: Variant = data.get("story", StoryCampaign.empty_state())
 	if not StoryCampaign.valid_state(loaded_story):
 		return false
+	# The second chapter has a separate saved journal so stage 4 of the
+	# original campaign stays a completed, immutable Chapter I ending.
+	var loaded_story2: Variant = data.get("story2", StoryChapterTwo.empty_state())
+	if not StoryChapterTwo.valid_state(loaded_story2):
+		return false
+	if int((loaded_story2 as Dictionary)["stage"]) > 0 and \
+			int((loaded_story as Dictionary)["stage"]) != StoryCampaign.LAST_STAGE:
+		return false
 	var loaded_presets: Variant = data.get("equipment_presets", EquipmentPresets.empty_slots())
 	if not EquipmentPresets.valid_state(loaded_presets):
 		return false
@@ -893,6 +905,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.dirty_skills = true
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
 	player.story_state = (loaded_story as Dictionary).duplicate(true)
+	player.story2_state = (loaded_story2 as Dictionary).duplicate(true)
 	player.equipment_presets = (loaded_presets as Array).duplicate(true)
 	player.caravan_state = (loaded_caravan as Dictionary).duplicate(true)
 	player.caravan_view = caravan_view.duplicate(true)
@@ -1437,6 +1450,9 @@ func cmd_dungeon(peer_id: int, down: bool) -> Dictionary:
 			return {"ok": false, "reason": "no_hatch"}
 		var below: Vector2 = Dungeon.arrival(region)
 		player.position = Vector3(below.x, Dungeon.FLOOR_Y, below.y)
+		if StoryChapterTwo.record_descent(player.story2_state):
+			player.dirty_character = true
+			_story2_event(player)
 		events.append({"type": "dungeon_entered", "peer": peer_id, "zone": world.zone_at(below.x, below.y)})
 		return {"ok": true, "down": true, "zone": world.zone_at(below.x, below.y)}
 	if not Dungeon.is_underground(at.x) or not Dungeon.at_stairs(at.x, at.y):
@@ -3613,25 +3629,44 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 	return outcome
 
 
-## Chapter I: only authenticated workbench listening/transmission is
-## client-invocable. Ruin evidence and kills come from authoritative gameplay.
+## Only owner-visible server-authored narrative events; no targets, location,
+## chapter checkpoint or rewards are accepted from remote client RPC data.
+func _story2_event(player: Player) -> void:
+	events.append({"type": "story2", "peer": player.id,
+		"stage": int(player.story2_state["stage"]),
+		"line": StoryChapterTwo.current_line(player.story2_state),
+		"objective": StoryChapterTwo.objective(player.story2_state)})
+
+
+## Chapter I and Chapter II radio commands are server-side, always requiring
+## a live actor physically at a workbench and a completed previous chapter.
 func cmd_story(peer_id: int, action: String) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
-	if action != "listen" and action != "transmit":
+	if action != "listen" and action != "transmit" and action != "decode" \
+			and action != "seal" and action != "broadcast":
 		return {"ok": false, "reason": "unknown_action"}
 	var position := Vector2(player.position.x, player.position.z)
 	if not _at_workbench(position):
 		return {"ok": false, "reason": "no_station"}
+	if action == "decode" or action == "seal" or action == "broadcast":
+		if int(player.story_state.get("stage", 0)) != StoryCampaign.LAST_STAGE:
+			return {"ok": false, "reason": "chapter_one_incomplete"}
+		var followup: Dictionary = StoryChapterTwo.begin(player.story2_state) if action == "decode" \
+			else StoryChapterTwo.resolve(player.story2_state, player.inventory, action)
+		if bool(followup.get("ok", false)):
+			player.dirty_character = true
+			if action == "seal" or action == "broadcast":
+				player.dirty_inventory = true
+			_story2_event(player)
+		return followup
 	var result: Dictionary = StoryCampaign.listen(player.story_state) if action == "listen" \
 		else StoryCampaign.transmit(player.story_state, player.inventory)
 	if bool(result.get("ok", false)):
 		player.dirty_character = true
 		if action == "transmit":
 			player.dirty_inventory = true
-		# Private transcript entries: never send another survivor's chapter
-		# progress or unlocked information to a different network peer.
 		events.append({"type": "story", "peer": peer_id,
 			"stage": int(player.story_state["stage"]),
 			"line": StoryCampaign.current_line(player.story_state),
@@ -6417,6 +6452,12 @@ func cmd_loot(peer_id: int, entity_id: int, requested_item: String = "") -> Dict
 				"stage": int(player.story_state["stage"]),
 				"line": StoryCampaign.current_line(player.story_state),
 				"objective": StoryCampaign.objective(player.story_state)})
+		if bool(crate.get("dungeon", false)) and Dungeon.is_underground(player.position.x) \
+				and Dungeon.region_of(player.position.x, player.position.z) == \
+				Dungeon.region_of(float(crate["x"]), float(crate["z"])) \
+				and StoryChapterTwo.record_underground_cache(player.story2_state, entity_id):
+			player.dirty_character = true
+			_story2_event(player)
 		if DailyBounties.record_crate(player.daily_bounty, _refresh_daily(player), entity_id):
 			player.dirty_character = true
 		events.append({"type": "crate", "peer": peer_id, "id": entity_id})
@@ -6829,6 +6870,15 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 						"stage": int(attacker.story_state["stage"]),
 						"line": StoryCampaign.current_line(attacker.story_state),
 						"objective": StoryCampaign.objective(attacker.story_state)})
+			# Exactly the real, server-spawned deepest-room guardian, killed
+			# by a character still in that same underground dungeon.
+			if zombie.elite and bool(zombie.get_meta("_story_dungeon_guardian", false)) \
+					and Dungeon.is_underground(attacker.position.x) \
+					and Dungeon.region_of(attacker.position.x, attacker.position.z) == \
+					Dungeon.region_of(zombie.position.x, zombie.position.z) \
+					and StoryChapterTwo.record_guardian(attacker.story2_state):
+				attacker.dirty_character = true
+				_story2_event(attacker)
 			if DailyBounties.record_kill(attacker.daily_bounty, _refresh_daily(attacker)):
 				attacker.dirty_character = true
 			_on_zombie_death(zombie, attacker)
@@ -9189,6 +9239,11 @@ func _manage_zombie_population() -> void:
 				if not tree.is_empty():
 					z.perched = true
 					z.position = Vector3(float(tree["x"]) + 0.45, world.height_at(float(tree["x"]), float(tree["z"])) + TreeAmbush.PERCH_HEIGHT, float(tree["z"]))
+			# WorldGen flags precisely one deepest-room dungeon boss per
+			# bunker; keep its identity in server-owned actor metadata so an
+			# ordinary elite cannot spoof the story guardian milestone.
+			if bool(spawn.get("dungeon_boss", false)):
+				z.set_meta("_story_dungeon_guardian", true)
 			zombies[zombie_id] = z
 			state["zombie"] = zombie_id
 	# Batch the proximity checks for living, unprotected infected. One native
@@ -10149,6 +10204,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"item_power": Defs.item_power(player.inventory.weapon) + player.progression.mastery_item_power(player.inventory.weapon)},
 			"contract": player.contract_state.duplicate(true),
 			"story": StoryCampaign.public_state(player.story_state),
+			"story2": StoryChapterTwo.public_state(player.story2_state) \
+				if int(player.story_state.get("stage", 0)) == StoryCampaign.LAST_STAGE else {},
 			"discovered_site_ids": WorldDiscovery.ids(player.discovered_sites),
 			"discovered_count": player.discovered_sites.size(),
 			"daily_bounty": player.daily_bounty.duplicate(true),
