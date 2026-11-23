@@ -371,12 +371,20 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Sparse colors and custom-normal edits p
 	normals.resize(65 * 65);
 	normals.fill(Vector3(0, 1, 0));
 	terrain->set_normal_data(normals);
+	Node3D *focus = memnew(Node3D);
 	SceneTree::get_singleton()->get_root()->add_child(terrain);
+	SceneTree::get_singleton()->get_root()->add_child(focus);
+	focus->set_global_position(Vector3(-22, 10, -22));
+	terrain->set_focus(terrain->get_path_to(focus));
+	terrain->set_collision_distance(100.0);
 	terrain->force_update();
+	const int collision_before = terrain->get_collision_chunk_count();
+	REQUIRE(collision_before > 0);
 
 	CHECK(terrain->apply_color_patch(Rect2i(7, 7, 2, 1),
 			PackedColorArray({ Color(1, 0, 0), Color(0, 1, 0) })));
 	CHECK(terrain->get_last_region_invalidated_chunks() == 1);
+	CHECK(terrain->get_collision_chunk_count() == collision_before);
 	CHECK(terrain->get_color_data()[7 * 65 + 7] == Color(1, 0, 0));
 	CHECK(terrain->get_color_data()[7 * 65 + 8] == Color(0, 1, 0));
 	CHECK(terrain->get_color_data()[8 * 65 + 8] == Color(0.2, 0.3, 0.4, 1.0));
@@ -395,6 +403,7 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Sparse colors and custom-normal edits p
 	CHECK(terrain->get_normal_data()[7 * 65 + 7].is_equal_approx(Vector3(0, 1, 0)));
 	terrain->force_update();
 	CHECK(terrain->get_chunk_count() == 4);
+	memdelete(focus);
 	memdelete(terrain);
 }
 
