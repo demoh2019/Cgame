@@ -3,6 +3,7 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const StoneResources = preload("res://scripts/shared/stone_resources.gd")
+const LootCachePalette = preload("res://scripts/shared/loot_cache_palette.gd")
 const DynamicBlockerGrid = preload("res://scripts/shared/dynamic_blocker_grid.gd")
 
 
@@ -49,6 +50,33 @@ func run(t) -> void:
 		if chunk_a["nodes"][i] != chunk_b["nodes"][i]:
 			identical = false
 	t.check(identical, "same seed, identical chunk content")
+
+	t.current = "world entity IDs locate their own chunk"
+	for cell in [Vector2i(-1024, -1024), Vector2i(-51, 37),
+			Vector2i(-1, -1), Vector2i.ZERO, Vector2i(5, -3),
+			Vector2i(1023, 1023)]:
+		for index in [0, 1, 45, 550, 790, 820, 950, 999]:
+			var entity: int = WorldGen.entity_id(cell, index)
+			t.eq(WorldGen.entity_cell(entity), cell,
+					"the seeded resource ID maps to its original cell")
+	t.eq(WorldGen.entity_cell(0), Vector2i(1024, 1024),
+			"an invalid nonpositive world ID cannot route into a normal chunk")
+	for group in ["nodes", "crates", "spawns", "structures"]:
+		for object in chunk_a[group]:
+			if object.has("id"):
+				t.eq(WorldGen.entity_cell(int(object["id"])), Vector2i(5, -3),
+						"actual seeded world object has a decodable chunk ID")
+
+	t.current = "loot cache colors reuse existing instance rendering"
+	t.eq(LootCachePalette.tint({"kind": "crate"}), Color.WHITE,
+			"ordinary crate keeps its original tint")
+	var roadside_color: Color = LootCachePalette.tint({"roadside_cache": true})
+	var urban_color: Color = LootCachePalette.tint({"urban_cache": true})
+	t.check(roadside_color != Color.WHITE and urban_color != Color.WHITE,
+			"special caches are visually distinguishable from regular loot")
+	t.check(roadside_color != urban_color, "roadside and ruined-city caches are distinct")
+	t.eq(LootCachePalette.tint({"roadside_cache": true}), roadside_color,
+			"cache colors depend only on immutable world flags")
 
 	t.current = "hub"
 	for angle in 8:
