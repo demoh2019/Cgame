@@ -236,9 +236,17 @@ func run(t) -> void:
 	source_arrays[Mesh.ARRAY_COLOR] = colors
 	source_arrays[Mesh.ARRAY_TEX_UV] = uv
 	source_arrays[Mesh.ARRAY_NORMAL] = normals
+	var custom0 := PackedByteArray()
+	custom0.resize(verts.size() * 12) # one RGB float custom channel per vertex
+	for i in verts.size():
+		custom0.encode_float(i * 12, float(i) * 0.015)
+		custom0.encode_float(i * 12 + 4, 0.5)
+		custom0.encode_float(i * 12 + 8, 1.0)
+	source_arrays[Mesh.ARRAY_CUSTOM0] = custom0
+	var custom_flags: int = Mesh.ARRAY_CUSTOM_RGB_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT
 	var authored := ArrayMesh.new()
 	authored.resource_name = "AlbionTerrainFixture"
-	authored.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, source_arrays)
+	authored.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, source_arrays, [], {}, custom_flags)
 	var authored_material := StandardMaterial3D.new()
 	authored.surface_set_material(0, authored_material)
 	# Compare to Godot's uploaded surface arrays rather than the authoring
@@ -261,6 +269,11 @@ func run(t) -> void:
 			"scanned terrain vertex colors survive LOD construction")
 		t.eq(output_arrays[Mesh.ARRAY_NORMAL], canonical[Mesh.ARRAY_NORMAL],
 			"PBR lighting normals survive the cut")
+		t.eq(output_arrays[Mesh.ARRAY_CUSTOM0], canonical[Mesh.ARRAY_CUSTOM0],
+			"custom packed attributes retain their original byte layout")
+		t.eq(output.surface_get_format(0) & Mesh.ARRAY_FORMAT_CUSTOM_MASK,
+			authored.surface_get_format(0) & Mesh.ARRAY_FORMAT_CUSTOM_MASK,
+			"per-vertex custom attribute format bits survive LOD construction")
 		t.check((output_arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() > 0,
 			"chosen clusters are built as indexed triangles")
 		t.check((output_arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() <= indices.size(),
