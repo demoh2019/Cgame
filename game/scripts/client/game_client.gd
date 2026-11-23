@@ -182,6 +182,10 @@ func on_snapshot(snapshot: Dictionary) -> void:
 		next_crates[id] = true
 	if next_depleted != depleted or next_crates != crates_used:
 		world_state_revision += 1
+		# Prediction must see the same gaps as the server's depleted geometry
+		# before replaying input; otherwise mining creates invisible walls.
+		if next_depleted != depleted:
+			world.sync_depleted_nodes(next_depleted)
 	depleted = next_depleted
 	crates_used = next_crates
 	_reconcile(snapshot)
