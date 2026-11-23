@@ -363,6 +363,25 @@ static func entity_id(cell: Vector2i, index: int) -> int:
 	return ((cell.x + 1024) * 2048 + (cell.y + 1024)) * 1000 + index + 1
 
 
+## Reverse the seeded entity ID for an authoritative, single-chunk lookup.
+## Generated resource and crate slot indices are 0..999. Out-of-range IDs
+## decode outside the active world and are still checked against actual data.
+## Never trust an ID alone: the server also checks player proximity and
+## verifies the exact ID inside the decoded chunk before granting actions.
+static func entity_cell(entity: int) -> Vector2i:
+	# The canonical 2048x2048 cell domain uses exactly 4,194,304,000 IDs.
+	# Reject huge network integers before narrowing them to Vector2i's
+	# 32-bit axes, which would otherwise wrap into an unrelated world cell.
+	if entity <= 0 or entity > 2048 * 2048 * 1000:
+		return Vector2i(1024, 1024)
+	@warning_ignore("integer_division")
+	var packed_cell: int = (entity - 1) / 1000
+	@warning_ignore("integer_division")
+	var cx: int = packed_cell / 2048 - 1024
+	var cz: int = packed_cell % 2048 - 1024
+	return Vector2i(cx, cz)
+
+
 ## Everything in a chunk, derived from the seed: gatherable nodes, ruins with loot crates and the
 ## places where zombies spawn. The same call always gives the same answer.
 func chunk(cell: Vector2i) -> Dictionary:
