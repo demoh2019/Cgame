@@ -26,7 +26,7 @@ func run(t) -> void:
 	if not ClassDB.class_exists("ChunkedTerrain3D"):
 		t.check(true, "stock Godot does not provide Cgame chunked terrain")
 		return
-	var terrain: Node3D = ClassDB.instantiate("ChunkedTerrain3D")
+	var terrain: Node3D = ClassDB.instantiate("ChunkedTerrain3D") as Node3D
 	t.check(terrain != null, "native terrain class instantiated")
 	if terrain == null:
 		return
