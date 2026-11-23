@@ -66,9 +66,13 @@ func build_packet(client_id: int, sequence: int, state: Dictionary, tolerances: 
 	# The server can read its private baseline directly without cloning the
 	# entire entity set on every snapshot tick.
 	var baseline: Dictionary = slot["acked_state"]
-	var delta: Dictionary = SnapshotDelta.diff(baseline, state, tolerances)
+	var pending: Dictionary = slot["pending"]
+	# A retransmission must encode the ORIGINAL snapshot for its sequence.
+	# Otherwise an ACK could confirm a different state from what was received.
+	var packet_state: Dictionary = pending[sequence] if pending.has(sequence) else state
+	var delta: Dictionary = SnapshotDelta.diff(baseline, packet_state, tolerances)
 	var packet: Dictionary = {"sequence": sequence, "baseline": int(slot["acked_seq"]), "delta": delta}
-	record_sent(client_id, sequence, state)
+	record_sent(client_id, sequence, packet_state)
 	return packet
 
 
