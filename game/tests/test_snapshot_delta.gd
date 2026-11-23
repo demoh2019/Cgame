@@ -128,6 +128,14 @@ func run(t) -> void:
 	replay.acknowledge(42, 6)
 	t.eq((replay.baseline_for(42)["unit"] as Dictionary)["hp"], 60,
 		"newer sequence is still acknowledged and applied normally")
+	var retry := SnapshotBaselines.new()
+	var sent: Dictionary = retry.build_packet(8, 7, {1: {"hp": 30}})
+	var resent: Dictionary = retry.build_packet(8, 7, {1: {"hp": 1}})
+	t.eq(resent["delta"], sent["delta"],
+		"retrying the same sequence retransmits identical world state")
+	retry.acknowledge(8, 7)
+	t.eq((retry.baseline_for(8)[1] as Dictionary)["hp"], 30,
+		"acknowledged baseline matches both copies of the retried packet")
 
 	var bl2 := SnapshotBaselines.new()
 	for i in 100:
