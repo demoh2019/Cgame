@@ -5,6 +5,7 @@ extends RefCounted
 const TerrainEditLayers = preload("res://scripts/shared/terrain_edit_layers.gd")
 const TerrainEditBridge = preload("res://scripts/client/terrain_edit_bridge.gd")
 const TerrainPanel = preload("res://addons/cgame_terrain_tools/terrain_panel.gd")
+const TerrainPlugin = preload("res://addons/cgame_terrain_tools/plugin.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 
 
