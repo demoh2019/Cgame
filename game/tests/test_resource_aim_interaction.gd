@@ -3,6 +3,7 @@ extends RefCounted
 ## different rock or stone is closer. Fallback preserves no-aim accessibility.
 
 const GameClient = preload("res://scripts/client/game_client.gd")
+const Defs = preload("res://scripts/shared/defs.gd")
 
 
 class NetStub:
@@ -14,8 +15,13 @@ class ChunkStub:
 	extends RefCounted
 	var nodes: Array = []
 	var crates: Array = []
+	var crates_by_cell: Dictionary = {}
+	var calls: Array[Vector2i] = []
 
 	func chunk(cell: Vector2i) -> Dictionary:
+		calls.append(cell)
+		if crates_by_cell.has(cell):
+			return {"nodes": [], "crates": crates_by_cell[cell]}
 		if cell == Vector2i.ZERO:
 			return {"nodes": nodes, "crates": crates}
 		return {"nodes": [], "crates": []}
@@ -148,3 +154,49 @@ func run(t) -> void:
 	client.fish_traps[30].erase("own")
 	t.eq(client.nearest_fish_trap(Vector3.ZERO, 2.0), 30,
 		"legacy snapshots without rights flags remain compatible")
+
+	t.current = "loot selection prefers the crate under the crosshair"
+	var loot_stub := ChunkStub.new()
+	loot_stub.crates = [{"id": 82, "x": 2.0, "z": 0.0}]
+	client.world = loot_stub
+	client.bags.clear()
+	client.crates_used.clear()
+	client.bags[81] = {"id": 81, "x": 0.8, "z": 0.8}
+	client.bags[89] = {"id": 89, "x": NAN, "z": 0.0}
+	t.eq(int(client.nearest_loot(Vector3.ZERO, 2.6).get("id", -1)), 81,
+		"without aim, E still targets the nearest bag")
+	t.eq(int(client.nearest_loot(Vector3.ZERO, 2.6, Vector2.RIGHT).get("id", -1)), 82,
+		"aiming at the crate selects it despite a closer side bag")
+	t.eq(int(client.nearest_loot(Vector3.ZERO, 2.6, Vector2(1.0, 1.0)).get("id", -1)), 81,
+		"turning back to the bag selects the bag")
+	client.crates_used[82] = true
+	t.eq(int(client.nearest_loot(Vector3.ZERO, 2.6, Vector2.RIGHT).get("id", -1)), 81,
+		"used crate is excluded even while aimed at")
+	t.check(client.nearest_loot(Vector3.ZERO, 2.6, Vector2(INF, 0.0)).get("id", -1) == 81,
+		"non-finite aim falls back to the nearest reachable loot")
+	client.bags.clear()
+	t.check(client.nearest_loot(Vector3.ZERO, 2.6, Vector2.RIGHT).is_empty(),
+		"invalid replicated bag coordinates cannot produce phantom loot")
+
+	t.current = "loot streaming searches only intersecting world chunks"
+	var spatial := ChunkStub.new()
+	client.world = spatial
+	var middle: float = float(Defs.CHUNK_SIZE) * 0.5
+	var center: Vector3 = Vector3(middle, 0.0, middle)
+	t.check(client.nearest_loot(center, Defs.REACH).is_empty(),
+		"empty center chunk has no phantom loot")
+	t.eq(spatial.calls.size(), 1, "center-of-chunk E searches one chunk, not nine")
+	spatial.calls.clear()
+	spatial.crates_by_cell[Vector2i(1, 0)] = [
+		{"id": 91, "x": float(Defs.CHUNK_SIZE) + 0.3, "z": middle}]
+	var seam := Vector3(float(Defs.CHUNK_SIZE) - 0.5, 0.0, middle)
+	t.eq(int(client.nearest_loot(seam, Defs.REACH).get("id", -1)), 91,
+		"adjacent-chunk crate remains reachable")
+	t.eq(spatial.calls.size(), 2,
+		"query near seam reads two chunks, rather than generating nine")
+	spatial.calls.clear()
+	spatial.crates_by_cell[Vector2i(-1, 0)] = [
+		{"id": 92, "x": -0.2, "z": middle}]
+	t.eq(int(client.nearest_loot(Vector3(0.5, 0.0, middle), Defs.REACH).get("id", -1)), 92,
+		"negative-coordinate seam remains functional")
+	t.eq(spatial.calls.size(), 2, "negative seam search also reads only two chunks")

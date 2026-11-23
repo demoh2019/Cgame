@@ -1066,31 +1066,69 @@ func nearest_pickup_node(point: Vector3, radius: float,
 	return best
 
 
-func nearest_loot(point: Vector3, radius: float) -> Dictionary:
+## Select reachable loot. Prefer what the player actually faces while retaining
+## nearest-item fallback when the camera gives no usable aim direction.
+## Reuses chunk bounds: opening a crate no longer generates all 9 neighbors.
+func nearest_loot(point: Vector3, radius: float, direction: Vector2 = Vector2.ZERO) -> Dictionary:
 	if world == null or not point.is_finite() or not (radius > 0.0 and radius < INF):
 		return {}
 	var best: Dictionary = {}
-	var best_distance_squared: float = radius * radius
+	var aimed: Dictionary = {}
+	var max_distance_squared: float = radius * radius
+	var best_distance_squared: float = max_distance_squared
+	var best_aim_score: float = -INF
+	var has_aim: bool = direction.is_finite() and direction.length_squared() > 0.01
+	var aim: Vector2 = direction.normalized() if has_aim else Vector2.ZERO
 	for bag in bags.values():
-		var dx: float = float(bag["x"]) - point.x
-		var dz: float = float(bag["z"]) - point.z
-		var distance_squared: float = dx * dx + dz * dz
+		# Replication can contain a malformed/obsolete coordinate. Do not let
+		# NaNs enter aim scores or dominate the nearest-item comparison.
+		var x: float = float(bag.get("x", NAN))
+		var z: float = float(bag.get("z", NAN))
+		if not is_finite(x) or not is_finite(z):
+			continue
+		var offset := Vector2(x - point.x, z - point.z)
+		var distance_squared: float = offset.length_squared()
+		if distance_squared >= max_distance_squared or not is_finite(distance_squared):
+			continue
+		var candidate: Dictionary = {"id": bag["id"], "kind": "bag", "x": x, "z": z}
 		if distance_squared < best_distance_squared:
-			best = {"id": bag["id"], "kind": "bag", "x": bag["x"], "z": bag["z"]}
 			best_distance_squared = distance_squared
-	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
-	for dx in range(-1, 2):
-		for dz in range(-1, 2):
-			for crate in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["crates"]:
+			best = candidate
+		if has_aim and distance_squared > 0.0001:
+			var distance: float = sqrt(distance_squared)
+			var alignment: float = offset.dot(aim) / distance
+			if alignment >= 0.82:
+				var score: float = alignment * 6.0 - distance * 0.22
+				if score > best_aim_score:
+					best_aim_score = score
+					aimed = candidate
+	var bounds: Rect2i = _resource_cell_bounds(point, radius, 0.0)
+	for cx in range(bounds.position.x, bounds.position.x + bounds.size.x):
+		for cz in range(bounds.position.y, bounds.position.y + bounds.size.y):
+			for crate in world.chunk(Vector2i(cx, cz))["crates"]:
 				if crates_used.has(crate["id"]):
 					continue
 				var offset := Vector2(float(crate["x"]) - point.x,
 					float(crate["z"]) - point.z)
+				if not offset.is_finite():
+					continue
 				var distance_squared: float = offset.length_squared()
+				if distance_squared >= max_distance_squared or not is_finite(distance_squared):
+					continue
+				var candidate: Dictionary = {
+					"id": crate["id"], "kind": "crate", "x": crate["x"], "z": crate["z"]}
 				if distance_squared < best_distance_squared:
-					best = {"id": crate["id"], "kind": "crate", "x": crate["x"], "z": crate["z"]}
 					best_distance_squared = distance_squared
-	return best
+					best = candidate
+				if has_aim and distance_squared > 0.0001:
+					var distance: float = sqrt(distance_squared)
+					var alignment: float = offset.dot(aim) / distance
+					if alignment >= 0.82:
+						var score: float = alignment * 6.0 - distance * 0.22
+						if score > best_aim_score:
+							best_aim_score = score
+							aimed = candidate
+	return aimed if not aimed.is_empty() else best
 
 
 

@@ -2445,7 +2445,7 @@ func _update_resource_weakspot(node: Dictionary) -> void:
 func _update_prompt() -> void:
 	var text := ""
 	var p: Vector3 = client.predicted
-	var loot: Dictionary = client.nearest_loot(p, Defs.REACH)
+	var loot: Dictionary = client.nearest_loot(p, Defs.REACH, _aim_direction())
 	var node: Dictionary = client.nearest_aimed_node(p, _aim_direction(), Defs.REACH)
 	# A pickup closer than the tree must not hide the tree's weak spot.
 	# Scan a forward-facing candidate 8x/s instead of scanning every frame.
@@ -3293,7 +3293,7 @@ func _interact() -> void:
 	if door_id != -1:
 		client.toggle_door(door_id)
 		return
-	var loot: Dictionary = client.nearest_loot(p, Defs.REACH)
+	var loot: Dictionary = client.nearest_loot(p, Defs.REACH, _aim_direction())
 	if not loot.is_empty():
 		client.loot(loot["id"])
 		return
