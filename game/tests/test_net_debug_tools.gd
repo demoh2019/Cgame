@@ -45,6 +45,20 @@ func run(t) -> void:
 
 
 func _test_conditioner(t) -> void:
+	t.current = "net conditioner sanitizes invalid diagnostic settings"
+	var guard := NetConditioner.new()
+	guard.configure({"latency_ms": NAN, "jitter_ms": INF, "loss": NAN,
+		"duplicate": INF, "reorder": -INF, "bandwidth_kbps": NAN,
+		"max_queue_ms": NAN, "seed": 3})
+	t.eq(guard.latency_ms, 0.0, "NaN latency resets to zero")
+	t.eq(guard.jitter_ms, 0.0, "infinite jitter is rejected")
+	t.eq(guard.loss, 0.0, "invalid packet-loss value is rejected")
+	t.eq(guard.duplicate, 0.0, "invalid duplicate ratio is rejected")
+	t.eq(guard.reorder, 0.0, "invalid reorder ratio is rejected")
+	t.eq(guard.bandwidth_kbps, 0.0, "invalid bandwidth is unlimited")
+	t.eq(guard.max_queue_ms, 1000.0, "invalid queue duration uses safe fallback")
+	guard.send(0, PackedByteArray([1]), 0.0)
+	t.eq(guard.receive(0.0).size(), 1, "packet delivery remains usable")
 	t.current = "net conditioner latency/jitter"
 	var nc: RefCounted = NetConditioner.new()
 	nc.configure({"latency_ms": 100.0, "jitter_ms": 20.0, "seed": 7})

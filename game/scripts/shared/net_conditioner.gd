@@ -28,14 +28,23 @@ var _link_free: float = 0.0
 var _max_delivered: float = -1.0
 
 
+## Reject invalid diagnostic settings before they poison packet timing.
+static func _finite_option(cfg: Dictionary, key: String, fallback: float) -> float:
+	var raw: Variant = cfg.get(key, fallback)
+	if not (raw is float or raw is int):
+		return fallback
+	var number: float = float(raw)
+	return number if is_finite(number) else fallback
+
+
 func configure(cfg: Dictionary) -> void:
-	latency_ms = maxf(0.0, float(cfg.get("latency_ms", 0.0)))
-	jitter_ms = maxf(0.0, float(cfg.get("jitter_ms", 0.0)))
-	loss = clampf(float(cfg.get("loss", 0.0)), 0.0, 1.0)
-	duplicate = clampf(float(cfg.get("duplicate", 0.0)), 0.0, 1.0)
-	reorder = clampf(float(cfg.get("reorder", 0.0)), 0.0, 1.0)
-	bandwidth_kbps = maxf(0.0, float(cfg.get("bandwidth_kbps", 0.0)))
-	max_queue_ms = maxf(1.0, float(cfg.get("max_queue_ms", 1000.0)))
+	latency_ms = maxf(0.0, _finite_option(cfg, "latency_ms", 0.0))
+	jitter_ms = maxf(0.0, _finite_option(cfg, "jitter_ms", 0.0))
+	loss = clampf(_finite_option(cfg, "loss", 0.0), 0.0, 1.0)
+	duplicate = clampf(_finite_option(cfg, "duplicate", 0.0), 0.0, 1.0)
+	reorder = clampf(_finite_option(cfg, "reorder", 0.0), 0.0, 1.0)
+	bandwidth_kbps = maxf(0.0, _finite_option(cfg, "bandwidth_kbps", 0.0))
+	max_queue_ms = maxf(1.0, _finite_option(cfg, "max_queue_ms", 1000.0))
 	_rng.seed = int(cfg.get("seed", 1))
 	_log.clear()
 	_pending.clear()

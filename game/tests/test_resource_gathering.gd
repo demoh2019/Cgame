@@ -3,6 +3,7 @@ extends RefCounted
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const ResourceGathering = preload("res://scripts/shared/resource_gathering.gd")
+const GatheringNoise = preload("res://scripts/shared/gathering_noise.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const GameClient = preload("res://scripts/client/game_client.gd")
@@ -147,9 +148,15 @@ func run(t) -> void:
 		player.position.x = float(pickup["x"]) + reach - 0.05
 		var item: String = "stone_1" if kind == "pebble" else "wood_1"
 		var before: int = player.inventory.count(item)
+		player.noise_radius = 0.0
+		player.noise_timer = 0.0
 		var picked: Dictionary = server.cmd_resource_pickup(801, int(pickup["id"]))
 		t.check(bool(picked.get("ok", false)), "E pickup of %s succeeds" % kind)
 		t.check(player.inventory.count(item) > before, "pickup adds to inventory")
+		t.near(player.noise_radius, GatheringNoise.radius(kind, player.crouching, 1),
+			0.0001, "real %s pickup emits the correct quiet noise" % kind)
+		t.near(player.noise_timer, GatheringNoise.SOUND_SECONDS,
+			0.0001, "successful pickup activates the hearing timer")
 		t.eq(server.cmd_resource_pickup(801, int(pickup["id"])).get("reason", ""),
 			"depleted", "pickup cannot be collected twice")
 

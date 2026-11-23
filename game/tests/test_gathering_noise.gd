@@ -22,6 +22,15 @@ func _tree(world) -> Dictionary:
 
 func run(t) -> void:
 	t.current = "gathering sound is bounded by work type"
+	t.near(GatheringNoise.radius("pebble", false, 1),
+		GatheringNoise.PEBBLE_RADIUS, 0.0001, "loose pebbles rustle only at close range")
+	t.near(GatheringNoise.radius("branch", false, 1),
+		GatheringNoise.BRANCH_RADIUS, 0.0001, "picking up branches makes light noise")
+	t.near(GatheringNoise.radius("branch", true, 1),
+		GatheringNoise.BRANCH_RADIUS * GatheringNoise.CROUCHED_FORAGING_FACTOR, 0.0001,
+		"crouching makes branch pickup quieter")
+	t.check(GatheringNoise.BRANCH_RADIUS < GatheringNoise.BUSH_RADIUS,
+		"loose pickups are quieter than active gathering")
 	t.near(GatheringNoise.radius("tree", false, 4),
 		GatheringNoise.TREE_RADIUS, 0.0001, "chopping is audible")
 	t.near(GatheringNoise.radius("rock", false, 4),
