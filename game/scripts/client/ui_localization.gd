@@ -43,6 +43,7 @@ const RU := {
 	"Interface sounds volume": "Громкость интерфейса",
 	"Ambience volume": "Громкость окружения",
 	"Reset sound levels": "Сбросить громкость",
+	"Reset display settings": "Сбросить настройки экрана",
 	"Controls": "Управление",
 	"Accessibility": "Доступность",
 	"Language": "Язык",

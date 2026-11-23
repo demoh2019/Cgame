@@ -22,6 +22,7 @@ var _tabs: TabContainer
 var _graphics_picker: OptionButton
 var _display_pickers: Dictionary = {}
 var _audio_sliders: Dictionary = {} # Existing AudioMix buses, not another settings store.
+var _audio_value_labels: Dictionary = {} # Readouts for exact 0..100 percent.
 
 
 func _init() -> void:
@@ -50,6 +51,8 @@ func _init() -> void:
 	column.add_child(title)
 	_tabs = TabContainer.new()
 	_tabs.custom_minimum_size = Vector2(0, 370)
+	# TabBar may default to no keyboard focus in some Godot builds.
+	_tabs.get_tab_bar().focus_mode = Control.FOCUS_ALL
 	column.add_child(_tabs)
 	_build_gameplay()
 	_build_graphics()
@@ -75,6 +78,7 @@ func open() -> void:
 	_capturing = ""
 	_refresh_bindings()
 	_refresh_audio_sliders()
+	_refresh_display_pickers()
 	visible = true
 	_tabs.get_tab_bar().grab_focus()
 
@@ -183,6 +187,21 @@ func set_graphics_choice(level: int, auto_enabled: bool) -> void:
 		_graphics_picker.select(graphics_selection(level, auto_enabled))
 
 
+func _refresh_display_pickers() -> void:
+	for key in _display_pickers:
+		var picker: OptionButton = _display_pickers[key]
+		var item_id: int = DisplaySettings.get_value(key)
+		var index: int = picker.get_item_index(item_id)
+		if index >= 0:
+			picker.select(index)
+
+
+func _reset_display_settings() -> void:
+	DisplaySettings.reset()
+	DisplaySettings.apply(get_window() if is_inside_tree() else null)
+	_refresh_display_pickers()
+
+
 func _build_graphics() -> void:
 	var page := _page("Graphics")
 	_graphics_picker = OptionButton.new()
@@ -201,6 +220,10 @@ func _build_graphics() -> void:
 	_display_option(page, "FPS limit", "fps_limit",
 		DisplaySettings.FPS_LIMITS, ["Unlimited", "30 FPS", "60 FPS",
 		"120 FPS", "144 FPS", "240 FPS"])
+	var reset_display := Button.new()
+	reset_display.text = "Reset display settings"
+	reset_display.pressed.connect(_reset_display_settings)
+	page.add_child(reset_display)
 	var hint := Label.new()
 	hint.text = "Auto adjusts 3D resolution and details to GPU load."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -230,6 +253,9 @@ func _refresh_audio_sliders() -> void:
 	for bus in _audio_sliders:
 		var slider: HSlider = _audio_sliders[bus]
 		slider.set_value_no_signal(roundf(float(AudioMix.volumes.get(bus, 1.0)) * 100.0))
+		var readout: Label = _audio_value_labels.get(bus)
+		if is_instance_valid(readout):
+			readout.text = "%d%%" % int(roundf(slider.value))
 
 
 func _build_audio() -> void:
@@ -252,8 +278,19 @@ func _build_audio() -> void:
 		slider.value_changed.connect(_set_audio_volume.bind(bus))
 		slider.drag_ended.connect(func(_moved: bool) -> void: AudioMix.save())
 		slider.focus_exited.connect(AudioMix.save)
+		var percent_label := Label.new()
+		percent_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		percent_label.custom_minimum_size = Vector2(44, 0)
+		percent_label.text = "%d%%" % int(roundf(slider.value))
+		slider.value_changed.connect(func(value: float) -> void:
+			percent_label.text = "%d%%" % int(roundf(value)))
+		var slider_and_value := HBoxContainer.new()
+		slider_and_value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		slider_and_value.add_child(slider)
+		slider_and_value.add_child(percent_label)
 		_audio_sliders[bus] = slider
-		_row(page, labels[bus], slider)
+		_audio_value_labels[bus] = percent_label
+		_row(page, labels[bus], slider_and_value)
 	var reset := Button.new()
 	reset.text = "Reset sound levels"
 	reset.pressed.connect(func() -> void:

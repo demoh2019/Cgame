@@ -60,10 +60,11 @@ static func save() -> void:
 
 static func load_all() -> void:
 	var config := ConfigFile.new()
-	if config.load(path) != OK:
-		return
+	# A missing or deleted config must restore the live buses to unity;
+	# retaining an older session's static volumes would be surprising.
+	var loaded: bool = config.load(path) == OK
 	for bus in SLIDERS:
-		var stored: Variant = config.get_value("volume", bus, 1.0)
+		var stored: Variant = config.get_value("volume", bus, 1.0) if loaded else 1.0
 		var normalized: float = float(stored) if stored is float or stored is int else 1.0
 		set_volume(bus, normalized, false)
 

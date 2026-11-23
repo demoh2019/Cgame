@@ -31,6 +31,13 @@ static func sanitize(key: String, value) -> int:
 	return int(DEFAULTS[key])
 
 
+## Restore only display options; preserve graphics quality, Auto, and UI.
+static func reset(persist: bool = true) -> void:
+	values = DEFAULTS.duplicate()
+	if persist:
+		save()
+
+
 static func load_all() -> void:
 	values = DEFAULTS.duplicate()
 	var config := ConfigFile.new()
