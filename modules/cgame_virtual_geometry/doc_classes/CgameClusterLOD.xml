@@ -20,6 +20,15 @@
 		[/codeblock]
 	</description>
 	<methods>
+		<method name="build_cut_arrays" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="source_arrays" type="Array" />
+			<param index="1" name="hierarchy" type="Dictionary" />
+			<param index="2" name="cut" type="PackedInt32Array" />
+			<description>
+				Assembles the selected LOD cut as [Mesh.ARRAY_MAX] surface arrays, preserving all original vertex attribute arrays and replacing only [constant Mesh.ARRAY_INDEX]. The [param source_arrays] must contain the exact [constant Mesh.ARRAY_VERTEX] positions used to build [param hierarchy]. Each selected cluster uses original global vertex indices; invalid, repeated or out-of-range cluster IDs are rejected. The returned surface arrays may be passed to [method ArrayMesh.add_surface_from_arrays]; set its original material separately. Geometry simplification is still position-only; these preserved attributes are not weighted in the simplifier's error metric. This API is CPU-side and does not perform GPU cluster traversal or streaming.
+			</description>
+		</method>
 		<method name="build_hierarchy" qualifiers="static">
 			<return type="Dictionary" />
 			<param index="0" name="vertices" type="PackedVector3Array" />
