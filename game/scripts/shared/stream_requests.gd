@@ -97,6 +97,39 @@ static func _before(a: Req, b: Req) -> bool:
 	return a.seq < b.seq
 
 
+## A min-heap by scheduling rank: the weakest request stays at index 0.
+## This lets each candidate compete with only the current worst in O(log K).
+static func _heap_push_worst(heap: Array[Req], candidate: Req) -> void:
+	heap.append(candidate)
+	var child: int = heap.size() - 1
+	while child > 0:
+		var parent: int = (child - 1) >> 1
+		if not _before(heap[parent], heap[child]):
+			break
+		var previous: Req = heap[parent]
+		heap[parent] = heap[child]
+		heap[child] = previous
+		child = parent
+
+
+static func _heap_fix_worst_root(heap: Array[Req]) -> void:
+	var parent: int = 0
+	while true:
+		var left: int = parent * 2 + 1
+		if left >= heap.size():
+			break
+		var worst: int = left
+		var right: int = left + 1
+		if right < heap.size() and _before(heap[left], heap[right]):
+			worst = right
+		if not _before(heap[parent], heap[worst]):
+			break
+		var previous: Req = heap[parent]
+		heap[parent] = heap[worst]
+		heap[worst] = previous
+		parent = worst
+
+
 ## Pops up to `budget` highest-priority queued requests and marks them in flight.
 func next_batch(budget: int) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
@@ -106,24 +139,23 @@ func next_batch(budget: int) -> Array[Vector2i]:
 	if allowed <= 0:
 		return out
 	var queued: Array[Req] = []
-	# Typical frame budgets request at most 16 chunks. Keep a bounded,
-	# priority-ordered top-K rather than sorting all queued cells each frame.
-	# Larger bulk budgets retain the full-sort path for better complexity.
+	# Normal 1..32 chunk/frame budgets use O(N log K) comparisons and
+	# O(K) temporary memory instead of sorting every outstanding chunk.
+	# Large bulk budgets use the original full-sort path.
+	var use_heap: bool = allowed <= 32
 	for r: Req in _reqs.values():
 		if r.state != State.QUEUED:
 			continue
-		if allowed <= 16:
-			var pos: int = 0
-			while pos < queued.size() and not _before(r, queued[pos]):
-				pos += 1
-			if pos < allowed:
-				queued.insert(pos, r)
-				if queued.size() > allowed:
-					queued.pop_back()
+		if use_heap:
+			if queued.size() < allowed:
+				_heap_push_worst(queued, r)
+			elif _before(r, queued[0]):
+				queued[0] = r
+				_heap_fix_worst_root(queued)
 		else:
 			queued.append(r)
-	if allowed > 16:
-		queued.sort_custom(_before)
+	# Only the chosen K entries need sorting; tie order stays stable.
+	queued.sort_custom(_before)
 	for i in mini(allowed, queued.size()):
 		queued[i].state = State.IN_FLIGHT
 		out.append(queued[i].cell)
