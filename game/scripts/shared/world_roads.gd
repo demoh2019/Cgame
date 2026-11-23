@@ -123,7 +123,8 @@ func _build() -> void:
 ## Index the local streets with the same terrain mask and authoritative road grip as intercity roads.
 func _lay_city_streets(site: Dictionary) -> void:
 	var center := Vector2(float(site["x"]), float(site["z"]))
-	var paths: Array = CityLayout.streets(str(site["layout"]), float(site["radius"]), float(site["layout_rotation"]))
+	var plan: Dictionary = world.poi.city_plan(site)
+	var paths: Array = plan["paths"]
 	for offsets in paths:
 		var points := PackedVector2Array()
 		for offset in offsets:
