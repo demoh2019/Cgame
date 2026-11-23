@@ -190,7 +190,10 @@ func to_dict() -> Dictionary:
 ## A save is data, never an authority to grow the backpack or mint stacks.
 ## Preserve the inventory's constructed capacity and valid historical saves.
 func load_dict(data: Dictionary) -> void:
-	var source_slots: Array = (data["slots"] as Array).duplicate(true) 		if data.get("slots", null) is Array else []
+	var source_slots: Array = []
+	var loaded_slots: Variant = data.get("slots", [])
+	if loaded_slots is Array:
+		source_slots = loaded_slots.duplicate(true)
 	for i in slots.size():
 		slots[i] = {}
 		if i >= source_slots.size() or not (source_slots[i] is Dictionary):
@@ -203,7 +206,7 @@ func load_dict(data: Dictionary) -> void:
 		if not (raw_count is int or raw_count is float):
 			continue
 		var count_value: float = float(raw_count)
-		if not is_finite(count_value) or count_value <= 0.0 or 				count_value != floor(count_value):
+		if not is_finite(count_value) or count_value <= 0.0 or count_value != floor(count_value):
 			continue
 		var item_id: String = raw_id
 		var limit: int = Defs.stack_size(item_id)
@@ -223,14 +226,14 @@ func load_dict(data: Dictionary) -> void:
 	if saved_gear is Dictionary:
 		for slot in GEAR_SLOTS:
 			var gear_id: Variant = saved_gear.get(slot, "")
-			if gear_id is String and count(gear_id) > 0 and 					str(Defs.item(gear_id).get("kind", "")) == slot:
+			if gear_id is String and count(gear_id) > 0 and str(Defs.item(gear_id).get("kind", "")) == slot:
 				gear[slot] = gear_id
 	wear = {}
 	var saved_wear: Variant = data.get("wear", {})
 	if saved_wear is Dictionary:
 		for id in saved_wear:
 			var raw_durability: Variant = saved_wear[id]
-			if not (id is String) or count(id) < 1 or 					not (raw_durability is int or raw_durability is float):
+			if not (id is String) or count(id) < 1 or not (raw_durability is int or raw_durability is float):
 				continue
 			var durability_value: float = GearDurability.clamp_durability(
 				float(raw_durability))
