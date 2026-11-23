@@ -138,6 +138,34 @@ func _city_layouts(t) -> void:
 	t.near(CityLayout.street_distance(Vector2(5.0, 0.0), probe), 0.0, 0.0001,
 			"obstacles lying on a street have zero clearance")
 
+	t.current = "street distances match independent scalar geometry after squared fast path"
+	var sample_streets: Array = [
+		PackedVector2Array([Vector2(-10.0, -4.0), Vector2(5.0, 4.0),
+			Vector2(14.0, -3.0)]),
+		PackedVector2Array([Vector2(7.0, 2.0), Vector2(7.0, 2.0),
+			Vector2(8.0, 12.0)]),
+	]
+	var sample_rng := RandomNumberGenerator.new()
+	sample_rng.seed = 482156
+	for sample in 100:
+		var point := Vector2(sample_rng.randf_range(-20.0, 20.0),
+			sample_rng.randf_range(-20.0, 20.0))
+		var scalar_distance: float = INF
+		for street in sample_streets:
+			var path: PackedVector2Array = street
+			for i in path.size() - 1:
+				var a: Vector2 = path[i]
+				var delta: Vector2 = path[i + 1] - a
+				if delta.length_squared() < 0.00001:
+					continue
+				var fraction: float = clampf((point - a).dot(delta) /
+					delta.length_squared(), 0.0, 1.0)
+				scalar_distance = minf(scalar_distance,
+					point.distance_to(a + delta * fraction))
+		t.near(CityLayout.street_distance(point, sample_streets),
+			scalar_distance, 0.0001,
+			"seeded road clearance agrees with scalar geometry sample %d" % sample)
+
 	var world := WorldGen.new(1337)
 	var seen: Dictionary = {}
 	var first_city: Dictionary = {}
