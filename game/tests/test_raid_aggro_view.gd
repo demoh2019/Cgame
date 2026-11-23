@@ -93,6 +93,30 @@ func run(t) -> void:
 		"nonfinite player positions cannot leak a boss status")
 	archer.position = _at(world, 852.0, 0.0)
 
+	t.current = "very large but finite threat cannot overflow raid percentages"
+	boss.target_id = guardian.id
+	boss.threat[guardian.id] = 8.0e307
+	boss.threat[archer.id] = 6.0e307
+	var huge: Dictionary = View.for_viewer(boss, archer, sim.players, sim.parties, world)
+	t.eq(int(huge.get("your_pct", -1)), 75,
+		"finite extreme threat retains its accurate share without overflow")
+	t.eq(int(huge.get("pull_pct", -1)), 60,
+		"pull threshold divides before multiplying into display percent")
+	boss.threat[guardian.id] = 1.0e-300
+	boss.threat[archer.id] = 1.0e307
+	var dominant: Dictionary = View.for_viewer(boss, archer, sim.players, sim.parties, world)
+	t.eq(int(dominant.get("pull_pct", -1)), 999,
+		"unrepresentable threat ratio saturates rather than converting INF to int")
+	boss.forced_target_seconds = INF
+	boss.forced_target_id = guardian.id
+	var invalid_taunt: Dictionary = View.for_viewer(boss, archer, sim.players, sim.parties, world)
+	t.check(not bool(invalid_taunt.get("taunted", true)),
+		"invalid taunt timer cannot create a permanent HUD warning")
+	boss.forced_target_seconds = 0.0
+	boss.forced_target_id = -1
+	boss.threat[guardian.id] = 30.0
+	boss.threat[archer.id] = 20.0
+
 	t.current = "actual snapshots carry only private server fields"
 	var tank_snapshot: Dictionary = sim.snapshot_for(101)
 	t.eq(int(tank_snapshot["you"]["raid_aggro"].get("target", -1)), guardian.id,

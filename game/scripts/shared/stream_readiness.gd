@@ -75,6 +75,7 @@ func begin(cell: Vector2i, now: float) -> void:
 
 func release(cell: Vector2i) -> void:
 	_cells.erase(cell)
+	warmup_failed.erase(cell)
 	for i in range(_warmups.size() - 1, -1, -1):
 		if _warmups[i]["cell"] == cell:
 			_warmups.remove_at(i)
@@ -178,6 +179,9 @@ func warmup_navmesh(cell: Vector2i, bake: Callable) -> void:
 	# A ready cell should never restart a completed bake.
 	if c.warmup_queued or (ready_mask(cell) & Stage.NAVMESH_READY) != 0:
 		return
+	# An explicit request is a deliberate retry after the previous bake budget
+	# was exhausted. Automatic retries remain suppressed until requested.
+	warmup_failed.erase(cell)
 	c.warmup_queued = true
 	_warmups.append({"cell": cell, "bake": bake, "attempts": 0})
 
@@ -208,14 +212,19 @@ func process_warmup(max_count: int, max_usec: int = 0) -> int:
 		# Never re-create a released cell (or touch a new cell using an old job).
 		if not _warmups.has(item) or _cells.get(cell) != state:
 			continue
-		if ok:
+		if ok or (ready_mask(cell) & Stage.NAVMESH_READY) != 0:
 			_warmups.erase(item)
-			mark(cell, Stage.NAVMESH_READY)
+			state.warmup_queued = false
+			warmup_failed.erase(cell)
+			if ok:
+				mark(cell, Stage.NAVMESH_READY)
 			continue
 		item["attempts"] = int(item["attempts"]) + 1
-		if int(item["attempts"]) >= max_warmup_attempts:
+		if int(item["attempts"]) >= maxi(1, max_warmup_attempts):
 			_warmups.erase(item)
-			warmup_failed.append(cell)
+			state.warmup_queued = false
+			if not warmup_failed.has(cell):
+				warmup_failed.append(cell)
 	return ran
 
 
@@ -227,7 +236,7 @@ func _refresh(cell: Vector2i, c: CellState) -> void:
 		c.last_eff = eff
 		c.since = _now
 	if _auto_bake.is_valid() and (eff & Stage.PHYSICS_READY) != 0 and (eff & Stage.NAVMESH_READY) == 0 \
-			and not c.warmup_queued:
+			and not c.warmup_queued and not warmup_failed.has(cell):
 		warmup_navmesh(cell, _auto_bake)
 
 

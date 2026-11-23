@@ -23,6 +23,13 @@ func run(t) -> void:
 	scout.crouching = true
 	t.near(Ambush.multiplier(scout, infected, "club_1"), Ambush.DAMAGE_MULTIPLIER,
 		0.001, "quiet crouched rear opener qualifies")
+	var normal_infected_position: Vector3 = infected.position
+	infected.position.y = scout.position.y + Ambush.MAX_HEIGHT_DIFFERENCE + 1.0
+	t.eq(Ambush.multiplier(scout, infected, "club_1"), 1.0,
+		"rear attacks from another floor never gain stealth bonus")
+	infected.position = normal_infected_position
+	t.near(Ambush.multiplier(scout, infected, "club_1"), Ambush.DAMAGE_MULTIPLIER,
+		0.001, "backstab works again when both actors are at ground level")
 	t.eq(Ambush.multiplier(scout, infected, ""), 1.0, "fists cannot ambush")
 	scout.noise_timer = 1.0
 	t.eq(Ambush.multiplier(scout, infected, "club_1"), 1.0,
