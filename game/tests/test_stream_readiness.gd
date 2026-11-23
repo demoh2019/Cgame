@@ -30,6 +30,25 @@ func run(t) -> void:
 	t.eq(gate.update(0.3), [cell], "fully ready cell is revealed exactly once")
 	t.eq(gate.update(0.4).size(), 0, "subsequent updates do not replay reveal")
 
+	t.current = "late auto warmup schedules already physical-ready cells"
+	var late := Readiness.new()
+	var late_cell := Vector2i(12, 8)
+	late.mark(late_cell, Readiness.Stage.DATA_LOADED)
+	late.mark(late_cell, Readiness.Stage.PHYSICS_READY)
+	late.set_auto_warmup(bake)
+	t.eq(late.pending_warmups(), 1,
+		"enabling auto warmup after physics readiness schedules the missing bake")
+	late.set_auto_warmup(bake)
+	t.eq(late.pending_warmups(), 1,
+		"re-enabling auto warmup does not create duplicates")
+	t.eq(late.process_warmup(1), 1,
+		"late scheduled navigation work runs within normal CPU budget")
+	t.check(late.is_stage_ready(late_cell, Readiness.Stage.NAVMESH_READY),
+		"late auto warmup completes the existing cell's navigation")
+	late.set_auto_warmup(bake)
+	t.eq(late.pending_warmups(), 0,
+		"completed late cell cannot be queued again")
+
 	t.current = "unloading during a bake cannot resurrect the stale world cell"
 	var unloaded := Readiness.new()
 	var old_cell := Vector2i(9, 7)

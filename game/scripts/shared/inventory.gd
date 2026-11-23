@@ -187,17 +187,64 @@ func to_dict() -> Dictionary:
 	return {"slots": slots.duplicate(true), "weapon": weapon, "armor": armor, "gear": gear.duplicate(), "wear": wear.duplicate()}
 
 
+## A save is data, never an authority to grow the backpack or mint stacks.
+## Preserve the inventory's constructed capacity and valid historical saves.
 func load_dict(data: Dictionary) -> void:
-	slots = data.get("slots", []).duplicate(true)
-	weapon = data.get("weapon", "")
-	armor = data.get("armor", "")
-	gear = (data.get("gear", {}) as Dictionary).duplicate() if data.get("gear", {}) is Dictionary else {}
+	var source_slots: Array = []
+	var loaded_slots: Variant = data.get("slots", [])
+	if loaded_slots is Array:
+		source_slots = (loaded_slots as Array).duplicate(true)
+	for i in slots.size():
+		slots[i] = {}
+		if i >= source_slots.size() or not (source_slots[i] is Dictionary):
+			continue
+		var entry: Dictionary = source_slots[i]
+		var raw_id: Variant = entry.get("id", null)
+		var raw_count: Variant = entry.get("count", null)
+		if not (raw_id is String) or not Defs.is_item(raw_id):
+			continue
+		if not (raw_count is int or raw_count is float):
+			continue
+		var count_value: float = float(raw_count)
+		if not is_finite(count_value) or count_value <= 0.0 or count_value != floor(count_value):
+			continue
+		var item_id: String = str(raw_id)
+		var limit: int = Defs.stack_size(item_id)
+		# Clamp before conversion: huge JSON counts cannot overflow int64.
+		slots[i] = {"id": item_id, "count": int(minf(count_value, float(limit)))}
+
+	var saved_weapon: Variant = data.get("weapon", "")
+	var saved_armor: Variant = data.get("armor", "")
+	weapon = str(saved_weapon) if saved_weapon is String else ""
+	armor = str(saved_armor) if saved_armor is String else ""
+	if count(weapon) < 1 or str(Defs.item(weapon).get("kind", "")) != "weapon":
+		weapon = ""
+	if count(armor) < 1 or str(Defs.item(armor).get("kind", "")) != "armor":
+		armor = ""
+	gear = {}
+	var saved_gear: Variant = data.get("gear", {})
+	if saved_gear is Dictionary:
+		for slot in GEAR_SLOTS:
+			var gear_id: Variant = saved_gear.get(slot, "")
+			if not (gear_id is String):
+				continue
+			var gear_name: String = str(gear_id)
+			if count(gear_name) > 0 and str(Defs.item(gear_name).get("kind", "")) == slot:
+				gear[slot] = gear_name
 	wear = {}
 	var saved_wear: Variant = data.get("wear", {})
 	if saved_wear is Dictionary:
 		for id in saved_wear:
-			if not Defs.item(str(id)).is_empty():
-				wear[str(id)] = GearDurability.clamp_durability(float(saved_wear[id]))
+			var raw_durability: Variant = saved_wear[id]
+			if not (id is String) or not (raw_durability is int or raw_durability is float):
+				continue
+			var owned_id: String = str(id)
+			if count(owned_id) < 1:
+				continue
+			var durability_value: float = GearDurability.clamp_durability(
+				float(raw_durability))
+			if durability_value < GearDurability.MAX:
+				wear[owned_id] = durability_value
 
 
 ## Durability of an item (100 when never damaged).

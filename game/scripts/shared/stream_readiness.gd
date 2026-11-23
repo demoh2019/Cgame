@@ -53,6 +53,15 @@ func set_probe(stage: int, probe: Callable) -> void:
 ## -> bool) is queued on the warmup queue.
 func set_auto_warmup(bake: Callable) -> void:
 	_auto_bake = bake
+	if not bake.is_valid():
+		return
+	# Runtime modules may enable auto-bake after physics is already ready.
+	# Catch up existing cells without duplicating active or finished jobs.
+	for cell: Vector2i in _cells.keys():
+		var c: CellState = _cells[cell]
+		var ready: int = _effective(c.marked)
+		if (ready & Stage.PHYSICS_READY) != 0 and (ready & Stage.NAVMESH_READY) == 0:
+			warmup_navmesh(cell, bake)
 
 
 func begin(cell: Vector2i, now: float) -> void:
