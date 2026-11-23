@@ -27,6 +27,7 @@ const SUITES := [
 	"res://tests/test_user_grass_assets.gd",
 	"res://tests/test_world_map_focus.gd",
 	"res://tests/test_terrain_mesh_streaming.gd",
+	"res://tests/test_terrain_mesh_residency.gd",
 	"res://tests/test_staged_scenery_streaming.gd",
 	"res://tests/test_graphics_stone_microdetail.gd",
 	"res://tests/test_native_detail_normal_blend.gd",
