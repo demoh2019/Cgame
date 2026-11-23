@@ -6499,7 +6499,8 @@ func cmd_loot(peer_id: int, entity_id: int, requested_item: String = "") -> Dict
 			_story2_event(player)
 		# Evidence is a real unopened surface cache in a dangerous region,
 		# never a dungeon chest, a fake RPC ID, or a safe-zone supply box.
-		if not bool(crate.get("dungeon", false)) and not Dungeon.is_underground(player.position.x) \
+		if not bool(crate.get("dungeon", false)) and not bool(crate.get("sunken", false)) \
+				and not Dungeon.is_underground(player.position.x) \
 				and StoryChapterThree.record_manifest(player.story3_state, entity_id, zone):
 			player.dirty_character = true
 			_story3_event(player)
