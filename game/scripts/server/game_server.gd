@@ -9618,13 +9618,15 @@ func _tick_herds(player_positions: Array[Vector2], presence) -> void:
 	var budget: int = mini(HERD_PROMOTE_PER_PASS, WorldIncidents.MAX_ACTIVE_INFECTED - zombies.size())
 	budget = mini(budget, clampi(incident_spawn_cap, 0, HERD_PROMOTE_PER_PASS))
 	if budget > 0 and not player_positions.is_empty():
-		var regions: Array = []
+		var regions: Array[int] = []
+		var seen_regions: Dictionary = {}
 		for herd_id in _herds.herd_ids():
 			var herd: Dictionary = CrowdFacade.herd_info(_herds, int(herd_id))
 			var pos: Vector2 = herd.get("pos", Vector2.INF)
 			if pos.is_finite() and presence.any_within(pos, HERD_PROMOTE_RADIUS, true):
 				var region: int = int(herd["region"])
-				if not regions.has(region):
+				if not seen_regions.has(region):
+					seen_regions[region] = true
 					regions.append(region)
 		regions.sort()
 		for region in regions:
