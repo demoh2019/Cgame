@@ -81,6 +81,44 @@ func run(t) -> void:
 	copy.add("wood_1", 1)
 	t.eq(inv.count("wood_1"), 0, "a copy is independent")
 
+	t.current = "save recovery never creates item stacks or phantom equipment"
+	var guarded := Inventory.new(3)
+	guarded.add("bandage", 1)
+	guarded.load_dict({"slots": [
+		{"id": "wood_1", "count": 999999999999.0},
+		{"id": "club_1", "count": 1.0},
+		{"id": "silver", "count": -4},
+		{"id": "jacket_2", "count": 1}],
+		"weapon": "jacket_2", "armor": "club_1",
+		"gear": {"head": "club_1", "feet": "jacket_2"},
+		"wear": {"club_1": 45.0, "jacket_2": 10.0,
+			"silver": 0.0, "bogus": 12.0}})
+	t.eq(guarded.slots.size(), 3, "loaded data cannot expand backpack capacity")
+	t.eq(guarded.count("wood_1"), Defs.stack_size("wood_1"),
+		"corrupt oversized stack is bounded by the item catalog")
+	t.eq(guarded.count("club_1"), 1, "integral JSON float count remains compatible")
+	t.eq(guarded.count("silver"), 0, "negative stacks are discarded")
+	t.eq(guarded.count("jacket_2"), 0, "extra saved slots are discarded")
+	t.eq(guarded.count("bandage"), 0, "loading replaces rather than appends items")
+	t.eq(guarded.weapon, "", "wrong-kind saved weapon is cleared")
+	t.eq(guarded.armor, "", "unowned saved armor is cleared")
+	t.eq(guarded.gear, {}, "invalid gear slots are cleared")
+	t.near(guarded.durability("club_1"), 45.0, 0.0001,
+		"valid owned gear durability survives recovery")
+	t.eq(guarded.wear.size(), 1, "stale durability of absent items is dropped")
+	guarded.load_dict({"slots": ["not_a_slot", {"id": "wood_1", "count": NAN},
+		{"id": "wood_1", "count": 2.5}]})
+	t.eq(guarded.count("wood_1"), 0,
+		"malformed fields and fractional or nonfinite quantities are discarded")
+	t.eq(guarded.slots.size(), 3, "malformed saves keep the original capacity")
+	guarded.load_dict({"slots": [{"id": "club_1", "count": 1},
+		{"id": "jacket_2", "count": 1}], "weapon": "club_1",
+		"armor": "jacket_2", "wear": {"jacket_2": NAN}})
+	t.eq(guarded.weapon, "club_1", "legitimate saved weapon remains equipped")
+	t.eq(guarded.armor, "jacket_2", "legitimate saved armor remains equipped")
+	t.eq(guarded.durability("jacket_2"), 100.0,
+		"nonfinite saved wear safely restores pristine durability")
+
 	t.current = "item data"
 	for id in Defs.items():
 		var data: Dictionary = Defs.items()[id]

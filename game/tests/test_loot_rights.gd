@@ -34,6 +34,31 @@ func run(t) -> void:
 	t.check(LootRights.can_loot(rights, outsider, 21.0),
 		"reservation expires exactly at boundary")
 	t.check(LootRights.can_loot({}, outsider, 0.0), "unreserved loot remains public")
+	t.current = "bad timestamps never leak private loot or UI NaNs"
+	t.check(not LootRights.can_loot(rights, outsider, NAN),
+		"invalid server time cannot release protected loot")
+	t.check(not LootRights.can_loot({}, outsider, INF),
+		"invalid server time cannot authorize even public collection")
+	var broken_rights: Dictionary = {"allowed_tokens": rights["allowed_tokens"],
+		"reserved_until": NAN}
+	t.check(LootRights.reserved(broken_rights, 5.0),
+		"nonfinite reservation expiry remains locked")
+	t.check(not LootRights.can_loot(broken_rights, outsider, 5.0),
+		"malformed expiration never makes another player's bag public")
+	t.check(LootRights.can_loot(broken_rights, first, 5.0),
+		"original owner can still recover their own reserved loot")
+	var malformed_tokens: Dictionary = {"allowed_tokens": "not-an-array",
+		"reserved_until": 100.0}
+	t.check(not LootRights.can_loot(malformed_tokens, outsider, 5.0),
+		"malformed ownership roster is rejected")
+	var invisible: Dictionary = {"id": 3, "x": 1.0, "y": 0.0, "z": 2.0,
+		"allowed_tokens": rights["allowed_tokens"], "reserved_until": NAN}
+	var visible: Dictionary = LootRights.visible_state(invisible, outsider, 5.0)
+	t.check(bool(visible["reserved"]) and not bool(visible["can_loot"]),
+		"UI correctly identifies corrupted private bag as locked")
+	t.eq(float(visible["reserved_seconds"]), 0.0,
+		"lock countdown cannot contain NaN")
+	t.current = "loot reservation policy and identity isolation"
 	var account = GameServer.Player.new()
 	account.user_id = "account-test-11"
 	var reconnected = GameServer.Player.new()
