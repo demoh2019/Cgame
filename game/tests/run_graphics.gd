@@ -7,6 +7,7 @@ const TestCase = preload("res://tests/test_case.gd")
 const SUITES := [
 	"res://tests/test_graphics_lightning_flash.gd",
 	"res://tests/test_render_benchmark.gd",
+	"res://tests/test_perf_overlay.gd",
 	"res://tests/test_combat_camera_feedback.gd",
 	"res://tests/test_sky_lighting_budget.gd",
 	"res://tests/test_dungeon_torch_cookie.gd",
