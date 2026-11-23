@@ -37,7 +37,8 @@ static func build(barricades: Dictionary) -> Dictionary:
 static func candidates(index: Dictionary, here: Vector2, toward: Vector2,
 		reach: float) -> Array[int]:
 	var result: Array[int] = []
-	if not here.is_finite() or not toward.is_finite() or not is_finite(reach) 			or reach < 0.0 or toward.length_squared() <= 0.01:
+	if (not here.is_finite() or not toward.is_finite() or not is_finite(reach)
+			or reach < 0.0 or toward.length_squared() <= 0.01):
 		return result
 	var cells: Dictionary = index.get("cells", {})
 	var positions: Array = index.get("positions", [])
