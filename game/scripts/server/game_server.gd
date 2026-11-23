@@ -1614,7 +1614,11 @@ func cmd_resource_hit(peer_id: int, node_id: int, dir_x: float, dir_z: float) ->
 		return {"ok": false, "reason": "depleted"}
 	var current_hits: int = int(progress.get("hits", 0))
 	var hit: int = mini(current_hits + 1, hits_needed)
-	var amount: int = ResourceGathering.strike_yield(kind, hit)
+	var accurate: bool = ResourceGathering.precise_strike(
+		player.position, node, Vector2(dir_x, dir_z), current_hits)
+	# A perfect weak-spot strike adds one resource immediately. Neither the
+	# client nor a repeated RPC can invent or replay this bonus.
+	var amount: int = ResourceGathering.strike_yield(kind, hit) + (1 if accurate else 0)
 	var item_id: String = "%s_%d" % [str(Defs.node_info(kind)["yield"]), tier]
 	if amount > 0 and player.inventory.free_space_for(item_id) < amount:
 		return {"ok": false, "reason": "inventory_full"}
@@ -1623,10 +1627,11 @@ func cmd_resource_hit(peer_id: int, node_id: int, dir_x: float, dir_z: float) ->
 	if not finished:
 		resource_hit_progress[node_id] = {"hits": hit,
 			"expires": time + ResourceGathering.PROGRESS_EXPIRE_SECONDS,
-			"respawn": float(Defs.node_info(kind)["respawn"])}
-	_finish_gather(player, node, amount, finished, true)
+			"respawn": float(Defs.node_info(kind)["respawn"]),
+			"x": float(node["x"]), "z": float(node["z"])}
+	_finish_gather(player, node, amount, finished, true, hit, accurate)
 	return {"ok": true, "hit": hit, "total_hits": hits_needed,
-		"finished": finished, "item": item_id}
+		"finished": finished, "item": item_id, "precise": accurate}
 
 
 func cmd_craft(peer_id: int, recipe_id: String, times: int = 1,
@@ -7951,7 +7956,8 @@ func _finish_fishing(player: Player) -> void:
 
 
 func _finish_gather(player: Player, node: Dictionary, base_amount: int = -1,
-		finish_node: bool = true, from_strike: bool = false) -> void:
+		finish_node: bool = true, from_strike: bool = false,
+		hit_number: int = 0, precise: bool = false) -> void:
 	var info := Defs.node_info(node["kind"])
 	var item_id: String = info["yield"]
 	if item_id in ["wood", "stone", "ore", "fiber"]:
@@ -8016,6 +8022,7 @@ func _finish_gather(player: Player, node: Dictionary, base_amount: int = -1,
 		SurveySignal.clear_depleted(parties, int(node["id"]))
 	events.append({"type": "gathered", "peer": player.id, "item": item_id,
 		"amount": amount - left, "node": node["id"], "final": finish_node, "strike": from_strike,
+		"hit": hit_number, "precise": precise,
 		"x": float(node["x"]), "z": float(node["z"]),
 		"herbs": herbs_added, "harvest_noise": harvest_noise,
 		"outpost_bonus": paid_outpost_bonus,
@@ -10189,6 +10196,16 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var gone_nodes: Array = []
 	for id in depleted:
 		gone_nodes.append(id)
+	# Share only live strike progress near this viewer. New joiners see the
+	# correct rotating marker without scanning full world chunks every tick.
+	var nearby_resource_hits: Array = []
+	for node_id in resource_hit_progress:
+		var progress: Dictionary = resource_hit_progress[node_id]
+		if time >= float(progress.get("expires", 0.0)):
+			continue
+		var point := Vector2(float(progress["x"]), float(progress["z"]))
+		if here.distance_squared_to(point) <= 144.0:
+			nearby_resource_hits.append({"id": node_id, "hits": int(progress["hits"])})
 	var used_crates: Array = []
 	for id in opened_crates:
 		used_crates.append(id)
@@ -10396,6 +10413,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"fish_traps": nearby_fish_traps,
 		"infected_snares": nearby_snares,
 		"depleted": gone_nodes, "crates_used": used_crates,
+		"resource_hits": nearby_resource_hits,
 	}
 	# A lightning warning is public only to nearby survivors, not to global
 	# clients watching a different part of the island.
