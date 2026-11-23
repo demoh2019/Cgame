@@ -488,6 +488,7 @@ func _add_outposts(cell: Vector2i, origin: Vector2, zone: int, ruin: bool, struc
 ## clustered around them, densest in forest, thinner in swamp and plains. Real gatherable,
 ## collidable tree nodes (server and client agree), on their own random stream so every other
 ## node of the chunk keeps its place. Ids 960-999.
+const PICKUP_ID_BASE := 790 # 790..809: between loose-stone and outpost IDs.
 const GROVE_ID_BASE := 960
 const GROVE_ID_MAX := 40
 const GROVE_TREES := {"forest": [18, 30], "swamp": [8, 14], "plains": [4, 10]}
@@ -531,6 +532,36 @@ func _add_groves(cell: Vector2i, origin: Vector2, tier: int, nodes: Array, sites
 		nodes.append({
 			"id": entity_id(cell, GROVE_ID_BASE + placed), "kind": "tree", "tier": tier,
 			"x": p.x, "z": p.y, "y": height_at(p.x, p.y), "radius": info["radius"], "blocks": info["blocks"],
+		})
+		placed += 1
+
+
+## Small items are real server/client-shared resource nodes, not cosmetic PCG meshes.
+## Separate random stream and reserved IDs keep all existing tree/ore placement stable.
+func _add_ground_pickups(cell: Vector2i, origin: Vector2, nodes: Array, sites: Array) -> void:
+	var prng := RandomNumberGenerator.new()
+	prng.seed = mix(cell.x, cell.y, world_seed, 109)
+	var wanted: int = prng.randi_range(4, 8)
+	var placed: int = 0
+	for _attempt in 48:
+		if placed >= wanted:
+			break
+		var p: Vector2 = origin + Vector2(prng.randf(), prng.randf()) * Defs.CHUNK_SIZE
+		if is_water(p.x, p.y) or is_safe(p.x, p.y) or _in_site_clearing(p, sites):
+			continue
+		var too_close: bool = false
+		for existing in nodes:
+			if Vector2(float(existing["x"]), float(existing["z"])).distance_to(p) < 1.5:
+				too_close = true
+				break
+		if too_close:
+			continue
+		var kind: String = "pebble" if prng.randf() < 0.52 else "branch"
+		var info: Dictionary = Defs.node_info(kind)
+		nodes.append({
+			"id": entity_id(cell, PICKUP_ID_BASE + placed), "kind": kind, "tier": 1,
+			"x": p.x, "z": p.y, "y": height_at(p.x, p.y),
+			"radius": info["radius"], "blocks": false,
 		})
 		placed += 1
 
@@ -789,6 +820,7 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 	_add_hostiles(cell, origin, zone, ruin, spawns)
 	_add_groves(cell, origin, tier, nodes, sites)
 	_add_outposts(cell, origin, zone, ruin, structures, crates, props, sites)
+	_add_ground_pickups(cell, origin, nodes, sites)
 	_add_loose_stones(cell, origin, tier, nodes, sites)
 	var generated := {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
 	if spawn_extender != null:

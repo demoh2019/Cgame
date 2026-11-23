@@ -3,6 +3,7 @@ extends Node
 ## and on every client (Godot needs that), and `role` decides which half of it does anything.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const ResourceGathering = preload("res://scripts/shared/resource_gathering.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const CaravanEscort = preload("res://scripts/shared/caravan_escort.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
@@ -545,7 +546,25 @@ func c_fish(baited: bool = false, storm_cast: bool = false) -> void:
 func c_gather(node_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
-		s_result.rpc_id(peer, "gather", sim.cmd_gather(peer, node_id))
+		var node: Dictionary = sim._find_node(node_id)
+		if ResourceGathering.is_strike(str(node.get("kind", ""))):
+			s_result.rpc_id(peer, "gather", {"ok": false, "reason": "use_strikes"})
+		else:
+			s_result.rpc_id(peer, "gather", sim.cmd_gather(peer, node_id))
+
+
+@rpc("any_peer", "reliable")
+func c_resource_pickup(node_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "resource_pickup", sim.cmd_resource_pickup(peer, node_id))
+
+
+@rpc("any_peer", "reliable")
+func c_resource_hit(node_id: int, dir_x: float, dir_z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "resource_hit", sim.cmd_resource_hit(peer, node_id, dir_x, dir_z))
 
 
 @rpc("any_peer", "reliable")

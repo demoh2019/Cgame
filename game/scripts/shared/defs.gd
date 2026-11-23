@@ -878,6 +878,8 @@ static func node_info(kind: String) -> Dictionary:
 			return {"yield": "fiber", "amount": 3, "seconds": 1.6, "respawn": 90.0, "radius": 0.4, "blocks": false}
 		"berry":
 			return {"yield": "berries", "amount": 3, "seconds": 1.2, "respawn": 90.0, "radius": 0.4, "blocks": false}
+		"branch":
+			return {"yield": "wood", "amount": 2, "seconds": 0.0, "respawn": 65.0, "radius": 0.18, "blocks": false}
 	return {}
 
 

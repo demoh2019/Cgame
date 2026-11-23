@@ -3,6 +3,7 @@ extends RefCounted
 ## and a predicted position for the local player that is corrected whenever the server answers.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const ResourceGathering = preload("res://scripts/shared/resource_gathering.gd")
 const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
@@ -281,6 +282,14 @@ func join(player_name: String, token: String = "", refresh: String = "") -> void
 
 func gather(node_id: int) -> void:
 	net.c_gather.rpc_id(1, node_id)
+
+
+func resource_pickup(node_id: int) -> void:
+	net.c_resource_pickup.rpc_id(1, node_id)
+
+
+func resource_hit(node_id: int, direction: Vector2) -> void:
+	net.c_resource_hit.rpc_id(1, node_id, direction.x, direction.y)
 
 
 func place_fish_trap() -> void:
@@ -847,6 +856,28 @@ func nearest_node(point: Vector3, radius: float) -> Dictionary:
 				if distance < best_distance:
 					best = node
 					best_distance = distance
+	return best
+
+
+## Select a mineable node in front of the player's actual swing, ignoring ground pickups.
+func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Defs.REACH) -> Dictionary:
+	var best: Dictionary = {}
+	var best_distance: float = radius
+	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			for node in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["nodes"]:
+				if depleted.has(node["id"]) or not ResourceGathering.is_strike(str(node["kind"])):
+					continue
+				if not ResourceGathering.aimed_at(point, node, direction, radius):
+					continue
+				var center_distance: float = Vector2(float(node["x"]) - point.x,
+					float(node["z"]) - point.z).length()
+				var margin: float = minf(float(node.get("radius", 0.0)), 1.8) if str(node["kind"]) in ["rock", "ore"] else 0.0
+				var distance: float = maxf(0.0, center_distance - margin)
+				if distance < best_distance:
+					best_distance = distance
+					best = node
 	return best
 
 
