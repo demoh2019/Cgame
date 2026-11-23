@@ -288,6 +288,19 @@ static func coverage_on_segments(point: Vector2, segments: Array) -> float:
 			return 1.0
 	return closest
 
+## World generation calls this only after it has already verified dry land.
+## Avoid sampling water/terrain a second time for every rejected resource spot.
+## Never use this for movement/grip, where submerged roads must stay inactive.
+func coverage_on_land(x: float, z: float) -> float:
+	if not is_finite(x) or not is_finite(z):
+		return 0.0
+	var cell := Vector2i(floori(x / Defs.CHUNK_SIZE), floori(z / Defs.CHUNK_SIZE))
+	var pieces: Array = pieces_in_cell(cell)
+	if pieces.is_empty():
+		return 0.0
+	return _coverage_in_cell(x, z, cell, pieces)
+
+
 func coverage_at(x: float, z: float) -> float:
 	if not is_finite(x) or not is_finite(z):
 		return 0.0
@@ -297,6 +310,10 @@ func coverage_at(x: float, z: float) -> float:
 	var pieces: Array = pieces_in_cell(cell)
 	if pieces.is_empty() or world.is_water(x, z):
 		return 0.0
+	return _coverage_in_cell(x, z, cell, pieces)
+
+
+func _coverage_in_cell(x: float, z: float, cell: Vector2i, pieces: Array) -> float:
 	if _native_nearest_segments:
 		var packed: PackedVector2Array = _packed_pieces_by_cell.get(cell, PackedVector2Array())
 		if not packed.is_empty():
