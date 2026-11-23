@@ -75,6 +75,7 @@ const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const GraphicsTextureStreaming = preload("res://scripts/client/graphics_texture_streaming.gd")
 const TerrainLivePatch = preload("res://scripts/client/terrain_live_patch.gd")
+const VirtualGeometryProbe = preload("res://scripts/client/virtual_geometry_probe.gd")
 const VirtualGeometryPageInspector = preload("res://scripts/client/virtual_geometry_page_inspector.gd")
 const ObjectPopulationProfiler = preload("res://scripts/client/object_population_profiler.gd")
 const AmbientTickBudget = preload("res://scripts/client/ambient_tick_budget.gd")
@@ -139,6 +140,7 @@ var _stream_velocity := Vector3.ZERO
 var chunk_root: Node3D
 var entities: Node3D
 var camera: Camera3D
+var _meshlet_page_probe: RefCounted = null # Optional task/mesh GPU residency probe.
 var _wound_fx: Node3D # Cuts, bullet wounds, blood spray and severed limbs on struck enemies.
 var sun: DirectionalLight3D
 var environment: Environment
@@ -295,6 +297,9 @@ var _demo_frames := 0 # Frames since the first snapshot arrived.
 
 
 func _exit_tree() -> void:
+	if _meshlet_page_probe != null:
+		VirtualGeometryProbe.detach_for_debug(_meshlet_page_probe, camera)
+		_meshlet_page_probe = null
 	if _trace.enabled and _trace_path != "":
 		_trace.save(_trace_path)
 	for monitor_name in _ambient_monitors:
@@ -549,6 +554,9 @@ func _build_environment() -> void:
 	_lightning_visual.name = "StormLightningWarning"
 	add_child(_lightning_visual)
 	camera.current = true
+	# Opt-in GPU-resident meshlet draw of the actual rock mesh; all production
+	# geometry, materials, collision and mining remain unchanged.
+	_meshlet_page_probe = VirtualGeometryProbe.attach_for_debug(Meshes.get_mesh("rock"), camera)
 	# The project supports occlusion, but the title screen and open world should
 	# never start with the extra software-culling pass enabled.
 	DungeonOcclusion.update_viewport(get_viewport(), GraphicsQuality.level(),
@@ -1897,6 +1905,9 @@ func _physics_process(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	if _meshlet_page_probe != null and camera != null:
+		RenderingServer.call_on_render_thread(Callable(_meshlet_page_probe, "set_view").bind(
+			camera.global_position, camera.get_frustum()))
 	if _capture_path != "" and client != null and client.welcomed:
 		_capture_time += delta
 		if _capture_time >= 60.0:

@@ -1,0 +1,80 @@
+name: P1 virtual geometry GPU meshlet resident pages and Albion probe
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'game/scripts/shared/meshlet_page_streaming.gd'
+      - 'game/scripts/client/meshlet_renderer.gd'
+      - 'game/scripts/client/meshlet_compositor_effect.gd'
+      - 'game/scripts/client/virtual_geometry_probe.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/shaders/compute/meshlet.task.glsl'
+      - 'game/shaders/compute/meshlet.mesh.glsl'
+      - 'game/tests/test_meshlet_page_streaming.gd'
+      - 'game/tests/test_meshlet_renderer.gd'
+      - 'game/tests/run_all.gd'
+      - 'game/docs/P1_GPU_MESHLET_RESIDENCY.md'
+      - 'tests/scene/test_gpu_meshlet_pages_contract.py'
+      - '.github/workflows/gpu-meshlet-residency.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'game/scripts/shared/meshlet_page_streaming.gd'
+      - 'game/scripts/client/meshlet_renderer.gd'
+      - 'game/scripts/client/meshlet_compositor_effect.gd'
+      - 'game/scripts/client/virtual_geometry_probe.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/shaders/compute/meshlet.task.glsl'
+      - 'game/shaders/compute/meshlet.mesh.glsl'
+      - 'game/tests/test_meshlet_page_streaming.gd'
+      - 'game/tests/test_meshlet_renderer.gd'
+      - 'game/tests/run_all.gd'
+      - 'game/docs/P1_GPU_MESHLET_RESIDENCY.md'
+      - 'tests/scene/test_gpu_meshlet_pages_contract.py'
+      - '.github/workflows/gpu-meshlet-residency.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  geometry-page-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Validate fixed GPU page layout and canonical game integration
+        run: python3 -m unittest tests/scene/test_gpu_meshlet_pages_contract.py -v
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Import Albion After and reject GDScript parse errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee gpu-meshlet-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' gpu-meshlet-import.log; then exit 1; fi
+      - name: Run headless meshlet packing, culling and page scheduler tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_one.gd -- test_meshlet_renderer test_meshlet_page_streaming 2>&1 | tee gpu-meshlet-tests.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' gpu-meshlet-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' gpu-meshlet-tests.log; then exit 1; fi
+      - name: Save headless geometry page logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-meshlet-page-logs
+          if-no-files-found: ignore
+          path: |
+            gpu-meshlet-import.log
+            gpu-meshlet-tests.log

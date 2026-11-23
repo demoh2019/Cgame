@@ -126,6 +126,10 @@ Relevant tests:
 `tests/scene/test_meshlet_page_contract.py` and
 `.github/workflows/native-meshlet-page-serialization.yml`.
 
+## P1: GPU-resident meshlet pages in the game rendering-device path
+
+In addition to the native `CgameMeshletPages` CPU serialization ABI, the canonical game has an experimental fixed-slot **GPU resident page pool** in `game/scripts/client/meshlet_renderer.gd` and `game/scripts/shared/meshlet_page_streaming.gd`. It uploads up to a configurable per-frame budget of logical pages and uses existing task/mesh shaders for GPU visibility. The CPU still selects coarse pages, and source meshes are CPU-resident. Normal game models keep their PBR/material fidelity; a separate explicitly enabled debug draw uses the actual game rock. This is **not** GPU indirect rendering or on-disk async streaming. See [GPU Meshlet Residency](../../game/docs/P1_GPU_MESHLET_RESIDENCY.md).
+
 ## Limitations
 
 - No GPU path and no streaming; hierarchy building is single threaded and intended for offline or load-time use.
