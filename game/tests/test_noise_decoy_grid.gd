@@ -11,7 +11,49 @@ func _lure(id: int, x: float, z: float, expiry: float) -> Dictionary:
 	return {"id": id, "x": x, "z": z, "expires": expiry}
 
 
+class TestLandingGround:
+	extends RefCounted
+	var slope_y: float = 1.0
+	var elevation: float = 5.0
+
+	func is_safe(_x: float, _z: float) -> bool:
+		return false
+
+	func is_water(_x: float, _z: float) -> bool:
+		return false
+
+	func normal_at(_x: float, _z: float) -> Vector3:
+		return Vector3(0.0, slope_y, 0.0)
+
+	func blockers_near(_x: float, _z: float, _reach: float) -> Array:
+		return []
+
+	func height_at(_x: float, _z: float) -> float:
+		return elevation
+
+
 func run(t) -> void:
+	t.current = "malformed sound cues and terrain cannot mislead infected"
+	var at := Vector3(150.0, 5.0, 120.0)
+	for bad_lure in [
+		{"x": 1.0, "z": 0.0, "expires": NAN},
+		{"x": 1.0, "z": 0.0, "expires": INF},
+		{"x": NAN, "z": 0.0, "expires": 20.0},
+		{"z": 0.0, "expires": 20.0},
+	]:
+		t.check(not NoiseDecoy.is_audible(bad_lure, Vector3.ZERO, 10.0),
+			"corrupt sound cue cannot trigger investigation")
+	var ground := TestLandingGround.new()
+	t.check(not NoiseDecoy.landing(ground, at, Vector2.RIGHT).is_empty(),
+		"normal stable ground accepts a server-selected lure position")
+	ground.slope_y = NAN
+	t.check(NoiseDecoy.landing(ground, at, Vector2.RIGHT).is_empty(),
+		"invalid terrain normal rejects the lure before charging an item")
+	ground.slope_y = 1.0
+	ground.elevation = INF
+	t.check(NoiseDecoy.landing(ground, at, Vector2.RIGHT).is_empty(),
+		"invalid ground elevation rejects the lure")
+
 	t.current = "spatial index chooses closest audible active decoy"
 	var now := 10.0
 	var decoys: Dictionary = {

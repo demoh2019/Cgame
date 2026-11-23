@@ -27,7 +27,54 @@ class GridOnlyDangerWorld:
 		return []
 
 
+class InvalidSupplyGround:
+	extends RefCounted
+	var safe: bool = false
+	var normal_y: float = 1.0
+	var elevation: float = 7.0
+
+	func zone_at(_x: float, _z: float) -> int:
+		return 2
+
+	func is_safe(_x: float, _z: float) -> bool:
+		return safe
+
+	func is_water(_x: float, _z: float) -> bool:
+		return false
+
+	func normal_at(_x: float, _z: float) -> Vector3:
+		return Vector3(0.0, normal_y, 0.0)
+
+	func height_at(_x: float, _z: float) -> float:
+		return elevation
+
+	func blockers_near(_x: float, _z: float, _radius: float) -> Array:
+		return []
+
+
 func run(t) -> void:
+	t.current = "public drop and escort placement reject unsafe or corrupt terrain"
+	var fake_ground := InvalidSupplyGround.new()
+	var probe_rng := RandomNumberGenerator.new()
+	probe_rng.seed = 101
+	var probe := Vector3(300.0, 7.0, 300.0)
+	t.check(not SupplyDrops.site_near(fake_ground, probe, probe_rng).is_empty(),
+		"danger-zone supply drops accept stable dry ground")
+	fake_ground.normal_y = NAN
+	t.check(SupplyDrops.site_near(fake_ground, probe, probe_rng).is_empty(),
+		"NaN ground normal cannot create a supply cache")
+	t.eq(SupplyDrops.guard_sites(fake_ground,
+		{"x": 300.0, "z": 300.0, "zone": 2}, [], {}, 1).size(), 0,
+		"escorts cannot spawn on malformed terrain")
+	fake_ground.normal_y = 1.0
+	fake_ground.elevation = INF
+	t.check(SupplyDrops.site_near(fake_ground, probe, probe_rng).is_empty(),
+		"infinite elevation cannot create an unlootable cache")
+	fake_ground.elevation = 7.0
+	fake_ground.safe = true
+	t.check(SupplyDrops.site_near(fake_ground, probe, probe_rng).is_empty(),
+		"safe outposts cannot receive public PvP caches")
+
 	t.current = "EQS oriented fallback grid for public cache guards"
 	var test_center := Vector2(250.0, 200.0)
 	var test_survivors: Array[Vector3] = [Vector3(250, 3, 190), Vector3(260, 3, 200)]
