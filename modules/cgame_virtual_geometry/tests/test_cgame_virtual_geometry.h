@@ -452,14 +452,14 @@ static Ref<CgameOcclusionRaster> make_wall_raster() {
 
 
 TEST_CASE("[CgameClusterLOD] Indexed LOD cuts preserve source material attributes") {
-	const SphereMeshData mesh = make_sphere(16, 22, 1.0f);
+	const Mesh mesh = make_sphere(16, 22, 1.0f);
 	const Dictionary hierarchy = CgameClusterLOD::build_hierarchy(mesh.vertices, mesh.indices, 4);
 	const PackedInt32Array cut = CgameClusterLOD::select_cut(hierarchy, Vector3(0, 0, 300), FOV, SCREEN_H, 1.0);
 	REQUIRE(!cut.is_empty());
 	Array source;
-	source.resize(Mesh::ARRAY_MAX);
-	source[Mesh::ARRAY_VERTEX] = mesh.vertices;
-	source[Mesh::ARRAY_INDEX] = mesh.indices;
+	source.resize(::Mesh::ARRAY_MAX);
+	source[::Mesh::ARRAY_VERTEX] = mesh.vertices;
+	source[::Mesh::ARRAY_INDEX] = mesh.indices;
 	PackedVector3Array normals;
 	PackedVector2Array uvs;
 	PackedColorArray colors;
@@ -475,24 +475,24 @@ TEST_CASE("[CgameClusterLOD] Indexed LOD cuts preserve source material attribute
 		tangents.set(i * 4, 1.0f);
 		tangents.set(i * 4 + 3, 1.0f);
 	}
-	source[Mesh::ARRAY_NORMAL] = normals;
-	source[Mesh::ARRAY_TEX_UV] = uvs;
-	source[Mesh::ARRAY_COLOR] = colors;
-	source[Mesh::ARRAY_TANGENT] = tangents;
+	source[::Mesh::ARRAY_NORMAL] = normals;
+	source[::Mesh::ARRAY_TEX_UV] = uvs;
+	source[::Mesh::ARRAY_COLOR] = colors;
+	source[::Mesh::ARRAY_TANGENT] = tangents;
 	const Array output = CgameClusterLOD::build_cut_arrays(source, hierarchy, cut);
-	REQUIRE(output.size() == Mesh::ARRAY_MAX);
-	CHECK(output[Mesh::ARRAY_VERTEX] == source[Mesh::ARRAY_VERTEX]);
-	CHECK(output[Mesh::ARRAY_NORMAL] == source[Mesh::ARRAY_NORMAL]);
-	CHECK(output[Mesh::ARRAY_TEX_UV] == source[Mesh::ARRAY_TEX_UV]);
-	CHECK(output[Mesh::ARRAY_COLOR] == source[Mesh::ARRAY_COLOR]);
-	CHECK(output[Mesh::ARRAY_TANGENT] == source[Mesh::ARRAY_TANGENT]);
-	const PackedInt32Array indices = output[Mesh::ARRAY_INDEX];
+	REQUIRE(output.size() == ::Mesh::ARRAY_MAX);
+	CHECK(output[::Mesh::ARRAY_VERTEX] == source[::Mesh::ARRAY_VERTEX]);
+	CHECK(output[::Mesh::ARRAY_NORMAL] == source[::Mesh::ARRAY_NORMAL]);
+	CHECK(output[::Mesh::ARRAY_TEX_UV] == source[::Mesh::ARRAY_TEX_UV]);
+	CHECK(output[::Mesh::ARRAY_COLOR] == source[::Mesh::ARRAY_COLOR]);
+	CHECK(output[::Mesh::ARRAY_TANGENT] == source[::Mesh::ARRAY_TANGENT]);
+	const PackedInt32Array indices = output[::Mesh::ARRAY_INDEX];
 	CHECK(indices.size() == CgameClusterLOD::triangle_count(hierarchy, cut) * 3);
 	CHECK(indices.size() <= mesh.indices.size());
 	for (int i = 0; i < indices.size(); i++) {
 		CHECK(indices[i] >= 0 && indices[i] < mesh.vertices.size());
 	}
-	CHECK(source[Mesh::ARRAY_INDEX] == mesh.indices); // Input cannot be mutated.
+	CHECK(source[::Mesh::ARRAY_INDEX] == mesh.indices); // Input cannot be mutated.
 
 	PackedInt32Array bad;
 	bad.push_back(1000000);
@@ -500,7 +500,7 @@ TEST_CASE("[CgameClusterLOD] Indexed LOD cuts preserve source material attribute
 	CHECK(CgameClusterLOD::build_cut_arrays(source, hierarchy, bad).is_empty());
 	CHECK(CgameClusterLOD::build_cut_arrays(source, hierarchy, PackedInt32Array()).is_empty());
 	Array mismatched = source.duplicate();
-	mismatched[Mesh::ARRAY_VERTEX] = PackedVector3Array();
+	mismatched[::Mesh::ARRAY_VERTEX] = PackedVector3Array();
 	CHECK(CgameClusterLOD::build_cut_arrays(mismatched, hierarchy, cut).is_empty());
 	ERR_PRINT_ON;
 }
