@@ -481,11 +481,24 @@ func _city_salvage(result: Dictionary, rng: RandomNumberGenerator, site: Diction
 	var plan: Dictionary = _city_content_plan(site)
 	var street_index: Dictionary = plan["index"]
 	var lots: Array[Dictionary] = plan["lots"]
-	var placed := 0
+	var candidates: Array[Vector2] = []
 	for lot in lots:
+		candidates.append(lot["offset"])
+	# Extra courtyards give highly built-up city shapes a chance to spawn salvage.
+	# This separate random stream does not move buildings, enemies or normal loot.
+	var cache_rng := RandomNumberGenerator.new()
+	cache_rng.seed = int(site["seed"]) ^ 0x73ab5e14
+	for attempt in 64:
+		var offset: Vector2 = Vector2.from_angle(cache_rng.randf() * TAU)
+		offset *= sqrt(cache_rng.randf()) * float(site["radius"]) * 0.78
+		candidates.append(offset.rotated(float(site["layout_rotation"])))
+	var placed := 0
+	for offset in candidates:
 		if placed >= 3:
 			break
-		var offset: Vector2 = lot["offset"]
+		if not CityLayout.contains(offset, str(site["layout"]), float(site["radius"]),
+				float(site["layout_rotation"])):
+			continue
 		var p: Vector2 = center + offset
 		if world.is_water(p.x, p.y) or CityLayout.street_blocked(offset, 4.0, street_index):
 			continue
