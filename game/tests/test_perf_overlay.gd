@@ -2,6 +2,7 @@ extends RefCounted
 ## Performance overlay: ring buffers, percentiles, custom sources, hitch markers, modes, snapshot.
 
 const PerfOverlay = preload("res://scripts/client/perf_overlay.gd")
+const StreamingProfiler = preload("res://scripts/client/streaming_profiler.gd")
 
 var _counter: int = 0
 
@@ -89,6 +90,46 @@ func run(t) -> void:
 	t.check(fm.has("p50") and fm.has("p95") and fm.has("p99"), "snapshot has percentiles")
 	t.check(int(snap["frame_index"]) > 40, "snapshot frame index")
 	t.check(JSON.stringify(snap).length() > 10, "snapshot is JSON-serialisable")
+
+	t.current = "streaming profiler fixed ring and p95/p99 hitch counters"
+	var stream := StreamingProfiler.new()
+	var initial: Dictionary = stream.frame_history_summary()
+	t.eq(int(initial["samples"]), 0, "no preallocated zeroes enter first sample")
+	t.eq(float(initial["p99_ms"]), 0.0, "empty ring has zero tail latency")
+	t.eq(stream._history.size(), StreamingProfiler.FRAME_HISTORY,
+		"fixed ring allocated once")
+	stream.visible = true
+	for i in 120:
+		stream._process(0.016)
+	var steady: Dictionary = stream.frame_history_summary()
+	t.eq(int(steady["samples"]), 120, "ring fills to fixed capacity")
+	t.near(float(steady["avg_ms"]), 16.0, 0.001, "steady 60fps mean")
+	t.near(float(steady["p95_ms"]), 16.0, 0.001, "steady p95")
+	t.eq(int(steady["slow_frames"]), 0, "steady frames meet frame budget")
+	for i in 3:
+		stream._process(0.05)
+	var mixed: Dictionary = stream.frame_history_summary()
+	t.eq(int(mixed["samples"]), 120, "oldest samples overwritten in place")
+	t.eq(stream._history.size(), 120, "frame samples never grow the buffer")
+	t.near(float(mixed["avg_ms"]), (117.0 * 16.0 + 3.0 * 50.0) / 120.0,
+		0.001, "wrapped mean counts only the last 120 samples")
+	t.near(float(mixed["p95_ms"]), 16.0, 0.001, "p95 ignores three rare hitches")
+	t.near(float(mixed["p99_ms"]), 50.0, 0.001, "p99 reveals rare stalls")
+	t.near(float(mixed["worst_ms"]), 50.0, 0.001, "worst spike retained")
+	t.eq(int(mixed["slow_frames"]), 3, "over-budget frame counter reports hitches")
+	t.check(str(stream._lines[2]).contains("p95") and
+		str(stream._lines[2]).contains("p99"),
+		"Ctrl+F3 world profiler displays new tail-latency diagnostics")
+	stream._process(-0.1)
+	stream._process(NAN)
+	stream._process(INF)
+	t.eq(int(stream.frame_history_summary()["slow_frames"]), 3,
+		"invalid deltas never pollute hitch metrics")
+	stream.visible = false
+	stream._process(0.05)
+	t.eq(int(stream.frame_history_summary()["slow_frames"]), 3,
+		"hidden profiler avoids sampling")
+	stream.free()
 
 	t.current = "overlay in tree"
 	ov.free()
