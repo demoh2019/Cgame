@@ -126,6 +126,52 @@ func run(t) -> void:
 			t.check(contains, "a blocking node is found near itself")
 			break
 
+	t.current = "depleted stone collision matches visible model"
+	var blocked_stone: Dictionary = {}
+	for candidate in a.chunk(Vector2i(8, 8))["nodes"]:
+		if str(candidate["kind"]) == "rock" and candidate.has("stone_model"):
+			blocked_stone = candidate
+			break
+	if blocked_stone.is_empty():
+		for cx in range(6, 10):
+			if not blocked_stone.is_empty():
+				break
+			for cz in range(6, 10):
+				if not blocked_stone.is_empty():
+					break
+				for candidate in a.chunk(Vector2i(cx, cz))["nodes"]:
+					if str(candidate["kind"]) == "rock" and candidate.has("stone_model"):
+						blocked_stone = candidate
+						break
+	t.check(not blocked_stone.is_empty(), "found an authoritative collidable model boulder")
+	if not blocked_stone.is_empty():
+		var bx: float = float(blocked_stone["x"])
+		var bz: float = float(blocked_stone["z"])
+		var b_id: int = int(blocked_stone["id"])
+		var initially_blocked := false
+		for obstacle in a.blockers_near(bx, bz, 0.5):
+			if int(obstacle.get("id", -1)) == b_id:
+				initially_blocked = true
+		t.check(initially_blocked, "visible modeled boulder blocks movement")
+		a.set_node_depleted(b_id, true)
+		var mined_blocked := false
+		for obstacle in a.blockers_near(bx, bz, 0.5):
+			if int(obstacle.get("id", -1)) == b_id:
+				mined_blocked = true
+		t.check(not mined_blocked, "mined modeled boulder has no invisible collision")
+		a.set_node_depleted(b_id, false)
+		var regrown_blocked := false
+		for obstacle in a.blockers_near(bx, bz, 0.5):
+			if int(obstacle.get("id", -1)) == b_id:
+				regrown_blocked = true
+		t.check(regrown_blocked, "respawn restores modeled boulder collision")
+		var snapshot_depleted: Dictionary = {}
+		snapshot_depleted[b_id] = true
+		a.sync_depleted_nodes(snapshot_depleted)
+		t.check(a.depleted_blockers.has(b_id), "snapshot-depleted node disables local prediction blocker")
+		a.sync_depleted_nodes({})
+		t.check(not a.depleted_blockers.has(b_id), "snapshot correction restores local blocker")
+
 	t.current = "structures"
 	var hub: Array = a.hub_structures()
 	t.check(hub.size() >= 10, "the hub has a fountain, a workbench and houses (%d)" % hub.size())
