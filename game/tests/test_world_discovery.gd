@@ -114,7 +114,7 @@ func run(t) -> void:
 		"region cache stays bounded during long-distance travel")
 	t.check(world.poi._region_lru.has(recent_region),
 		"recently viewed region remains cached")
-	t.check(not world.poi._regions.has(Vector2i(101, -201)),
+	t.check(not world.poi._regions.has(Vector2i(103, -203)),
 		"least recently used region is evicted first")
 	for i in range(280):
 		world.poi.levellers(300 + i, 400 + i)
