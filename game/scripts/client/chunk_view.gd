@@ -226,6 +226,7 @@ void fragment() {
 static var _ground_material: ShaderMaterial
 static var _textured_material: ShaderMaterial
 static var _textured_checked := false
+static var _solid_wood_fallbacks: Dictionary = {}
 static var terrain_filter_quality := 1
 static var terrain_geomorph_enabled := false
 static var terrain_horizon_enabled := false
@@ -990,12 +991,14 @@ func _mesh_for(kind: String) -> Mesh:
 				if wood_mesh != null:
 					return wood_mesh
 			# No downloaded pack: the same physical node is still visible.
-			var fallback := BoxMesh.new()
-			fallback.size = Vector3(float(entry["size"]), 0.55, 0.65)
-			var material := StandardMaterial3D.new()
-			material.albedo_color = Color(0.34, 0.23, 0.14)
-			fallback.material = material
-			return fallback
+			if not _solid_wood_fallbacks.has(variant):
+				var fallback := BoxMesh.new()
+				fallback.size = Vector3(float(entry["size"]), 0.55, 0.65)
+				var material := StandardMaterial3D.new()
+				material.albedo_color = Color(0.34, 0.23, 0.14)
+				fallback.material = material
+				_solid_wood_fallbacks[variant] = fallback
+			return _solid_wood_fallbacks[variant]
 		return Meshes.get_mesh("tree")
 	if kind.begins_with("stone:"):
 		var model_index: int = int(kind.get_slice(":", 1))
