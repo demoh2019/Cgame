@@ -1,4 +1,5 @@
 """Source contracts for Albion After UI (native runtime tests still required)."""
+
 import unittest
 from pathlib import Path
 
@@ -9,8 +10,13 @@ CLIENT = ROOT / "game" / "scripts" / "client"
 class AlbionSettingsMenuContract(unittest.TestCase):
     def test_five_scrollable_categories_and_real_mixer(self):
         pause = (CLIENT / "ui_pause_menu.gd").read_text()
-        for code in ("_build_gameplay()", "_build_graphics()", "_build_audio()",
-                     "_build_controls()", "_build_accessibility()"):
+        for code in (
+            "_build_gameplay()",
+            "_build_graphics()",
+            "_build_audio()",
+            "_build_controls()",
+            "_build_accessibility()",
+        ):
             self.assertIn(code, pause)
         self.assertIn("var scroll := ScrollContainer.new()", pause)
         self.assertIn("signal graphics_selected(index: int)", pause)
@@ -36,8 +42,7 @@ class AlbionSettingsMenuContract(unittest.TestCase):
         online = (CLIENT / "online_main.gd").read_text()
         self.assertIn('_access.menu.connect("graphics_selected", Callable(self, "_apply_graphics_selection"))', online)
         self.assertIn("func _apply_graphics_selection(index: int) -> void:", online)
-        shared = online.split("func _apply_graphics_selection(", 1)[1].split(
-            "func _set_auto_graphics(", 1)[0]
+        shared = online.split("func _apply_graphics_selection(", 1)[1].split("func _set_auto_graphics(", 1)[0]
         self.assertIn("GraphicsQuality.set_level(", shared)
         self.assertIn("_adaptive_resolution.configure(", shared)
         self.assertIn("GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,", shared)
@@ -53,12 +58,17 @@ class AlbionSettingsMenuContract(unittest.TestCase):
         pause = (CLIENT / "ui_pause_menu.gd").read_text()
         layer = (CLIENT / "ui_accessibility_layer.gd").read_text()
         tests = (ROOT / "game/tests/test_ui_parity.gd").read_text()
-        for needle in ('"window_mode": 0', '"vsync": 1', '"fps_limit": 0',
-                       'Engine.max_fps = get_value("fps_limit")', 'window.mode = mode',
-                       'DisplayServer.window_set_vsync_mode(vsync)',
-                       'DisplayServer.get_name() == "headless"',
-                       'config.load(path) # Keep quality, Auto',
-                       'config.save(path)'):
+        for needle in (
+            '"window_mode": 0',
+            '"vsync": 1',
+            '"fps_limit": 0',
+            'Engine.max_fps = get_value("fps_limit")',
+            'window.mode = mode',
+            'DisplayServer.window_set_vsync_mode(vsync)',
+            'DisplayServer.get_name() == "headless"',
+            'config.load(path) # Keep quality, Auto',
+            'config.save(path)',
+        ):
             self.assertIn(needle, display)
         self.assertIn('DisplaySettings.load_all()', pause)
         self.assertIn('DisplaySettings.apply(get_window() if is_inside_tree() else null)', pause)
