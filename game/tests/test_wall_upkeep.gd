@@ -113,7 +113,11 @@ func run(t) -> void:
 	owner.position = Vector3(0.0, 0.0, 0.0)
 	var same_account = guarded.add_player(74, "Relogged owner", "owner-acc")
 	same_account.position = close
+	account_wall["upkeep_until"] = guarded.time - 1.0
+	var before_relog: float = float(account_wall["hp"])
 	guarded._tick_barricade_upkeep(60.0)
+	t.eq(float(account_wall["hp"]), before_relog,
+		"reconnected account prevents decay despite a different network peer")
 	t.eq(float(account_wall["upkeep_until"]), guarded.time + Structures.UPKEEP_SECONDS,
 		"same authenticated account can maintain a wall after peer ID changes")
 	same_account.position = Vector3(0.0, 0.0, 0.0)
