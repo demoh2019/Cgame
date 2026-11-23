@@ -87,6 +87,24 @@ func run(t) -> void:
 	t.eq(inv.count("silver"), 0, "the inventory is empty afterwards")
 	t.eq(inv.weapon, "", "equipment is cleared")
 
+	t.current = "durability ignores nonfinite combat damage"
+	var damaged := Inventory.new()
+	damaged.add("club_1", 1)
+	damaged.equip("club_1")
+	damaged.damage_item("club_1", 30.0)
+	t.near(damaged.durability("club_1"), 70.0, 0.0001,
+		"normal melee hits consume gear condition")
+	damaged.damage_item("club_1", NAN)
+	damaged.damage_item("club_1", INF)
+	damaged.damage_item("club_1", -INF)
+	t.near(damaged.durability("club_1"), 70.0, 0.0001,
+		"nonfinite combat effects cannot accidentally repair worn items")
+	damaged.take_everything()
+	t.check(damaged.wear.is_empty(), "full-loot removes old durability ledger")
+	damaged.add("club_1", 1)
+	t.near(damaged.durability("club_1"), 100.0, 0.0001,
+		"reacquired gear has its own pristine durability")
+
 	t.current = "round trip"
 	inv = Inventory.new()
 	inv.add("canned_food", 3)

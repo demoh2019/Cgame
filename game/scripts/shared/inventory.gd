@@ -276,7 +276,9 @@ func effectiveness(id: String) -> float:
 
 
 func damage_item(id: String, amount: float) -> void:
-	if id == "" or amount <= 0.0 or count(id) < 1:
+	# Invalid damage must not reset wear to pristine by passing NaN or
+	# infinity through the durability clamp's fallback.
+	if id == "" or not is_finite(amount) or amount <= 0.0 or count(id) < 1:
 		return
 	var left: float = GearDurability.clamp_durability(durability(id) - amount)
 	if left >= GearDurability.MAX:
