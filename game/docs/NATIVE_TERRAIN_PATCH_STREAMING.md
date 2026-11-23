@@ -20,7 +20,7 @@ When `set_normal_data()` has installed a custom normal grid, height patches must
 ## In the actual game
 
 - `game/scripts/client/terrain_edit_bridge.gd` bridges `TerrainEditLayers` to the native patch method by processing dirty authoring chunks, merging a 1-sample halo and computing consistent normals from the composed heightfield (when custom normals are enabled).
-- `game/addons/cgame_terrain_tools/plugin.gd` now binds the selected `ChunkedTerrain3D` in the scene to the existing terrain dock; brush strokes, layer visibility/opacity/order and Undo/Redo update the selected real node rather than just an isolated preview.
+- `game/addons/cgame_terrain_tools/plugin.gd` now binds the selected `ChunkedTerrain3D` in the scene to the existing terrain dock; brush strokes, layer visibility/opacity/order and Undo/Redo update the selected real node rather than just an isolated preview. To sculpt directly in the 3D viewport, select the node, enable **Sculpt selected terrain (3D viewport)** in the dock, then left-click the ground. Disable the toggle to restore normal object picking; modifier-clicks continue to navigate the editor. This increment supports discrete click strokes, not continuous dragged strokes.
 - `game/scripts/client/chunk_view.gd` uses `apply_color_patch()` to update the canonical Albion After terrain's cached curvature/sky-visibility vertex colors when lighting quality changes, falling back to `set_color_data()` on older binaries.
 - The existing game collision policy is intentionally preserved: online clients render their terrain without local terrain collision; the **server** remains authoritative for survivability, navigation and movement. Editor terrain nodes with collision enabled get localized physics updates.
 
