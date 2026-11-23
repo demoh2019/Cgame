@@ -3,7 +3,7 @@ extends RefCounted
 ## Buses: Master, Music, SFX (reverb + low-pass, see reverb_zones.gd), UI, Ambience.
 
 const PATH := "user://albion_after_audio.cfg"
-static var path := PATH # Testable without touching the player\u0027s real preferences.
+static var path := PATH # Tests may redirect persistence without editing player settings.
 const BUSES := ["Music", "UI", "Ambience"] # SFX is created by ReverbZones.
 const SLIDERS := ["Master", "Music", "SFX", "UI", "Ambience"]
 static var volumes := {"Master": 1.0, "Music": 1.0, "SFX": 1.0, "UI": 1.0, "Ambience": 1.0}
@@ -37,7 +37,7 @@ static func ensure_lowpass(bus: String) -> int:
 
 
 static func set_volume(bus: String, linear: float, persist: bool = true) -> void:
-	if not bus in SLIDERS:
+	if not SLIDERS.has(bus):
 		return
 	linear = clampf(linear if is_finite(linear) else 1.0, 0.0, 1.0)
 	volumes[bus] = linear
@@ -50,7 +50,7 @@ static func set_volume(bus: String, linear: float, persist: bool = true) -> void
 
 static func save() -> void:
 	var config := ConfigFile.new()
-	config.load(PATH)
+	config.load(path) # Preserve other audio preferences in the same file.
 	for bus in SLIDERS:
 		config.set_value("volume", bus, volumes[bus])
 	var error: int = config.save(path)

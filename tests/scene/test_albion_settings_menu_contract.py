@@ -48,7 +48,7 @@ class AlbionSettingsMenuContract(unittest.TestCase):
         self.assertIn("static var path := PATH", mix)
         self.assertIn("config.load(path)", mix)
         self.assertIn("config.save(path)", mix)
-        self.assertIn("if not bus in SLIDERS:", mix)
+        self.assertIn("if not SLIDERS.has(bus):", mix)
         self.assertIn("linear if is_finite(linear) else 1.0", mix)
         self.assertIn("static func reset_volumes(", mix)
         self.assertIn('"Graphics": "Графика"', locale)
