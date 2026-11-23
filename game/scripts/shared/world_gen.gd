@@ -1085,7 +1085,10 @@ func blockers_near(x: float, z: float, radius: float) -> Array:
 				# ghost barrier when a model is mined or reappear too early.
 				if bool(entry[1]) and depleted_blockers.has(n["id"]):
 					continue
-				if bool(n["blocks"]) and absf(float(n["x"]) - x) < radius + float(n["radius"]) 						and absf(float(n["z"]) - z) < radius + float(n["radius"]):
+				if bool(n["blocks"]) and (
+						absf(float(n["x"]) - x) < radius + float(n["radius"]) and
+						absf(float(n["z"]) - z) < radius + float(n["radius"])
+					):
 					result.append(n)
 	# Include built obstacles without erasing the procedural hub/terrain blockers.
 	for barricade in dynamic_blockers.values():
