@@ -9,7 +9,7 @@ func run(t) -> void:
 	t.current = "server result RPC keeps current and older envelope formats"
 	var net: Node = Net.new()
 	var delivered: Array = []
-	net.result_received.connect(func(kind: String, data: Dictionary) -> void:
+	net.connect("result_received", func(kind: String, data: Dictionary) -> void:
 		delivered.append({"kind": kind, "data": data})
 	)
 	# callv uses the same Object.callp() argument-count path as incoming RPC.
@@ -34,5 +34,5 @@ func run(t) -> void:
 	net.callv("s_result", ["craft"])
 	net.callv("s_result", [{"ok": true}])
 	t.eq(delivered.size(), 2, "invalid replies never reach gameplay")
-	t.check(net._bad_result_packet_warned, "incompatible reply is diagnosed once")
+	t.check(bool(net.get("_bad_result_packet_warned")), "incompatible reply is diagnosed once")
 	net.free()
