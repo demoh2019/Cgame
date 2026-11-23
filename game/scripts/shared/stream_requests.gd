@@ -106,12 +106,13 @@ func next_batch(budget: int) -> Array[Vector2i]:
 	if allowed <= 0:
 		return out
 	var queued: Array[Req] = []
-	# Most frame budgets request only a handful of chunks. Keep a bounded,
-	# sorted top-K instead of sorting every queued cell on each frame.
+	# Typical frame budgets request at most 16 chunks. Keep a bounded,
+	# priority-ordered top-K rather than sorting all queued cells each frame.
+	# Larger bulk budgets retain the full-sort path for better complexity.
 	for r: Req in _reqs.values():
 		if r.state != State.QUEUED:
 			continue
-		if allowed <= 4:
+		if allowed <= 16:
 			var pos: int = 0
 			while pos < queued.size() and not _before(r, queued[pos]):
 				pos += 1
@@ -121,7 +122,7 @@ func next_batch(budget: int) -> Array[Vector2i]:
 					queued.pop_back()
 		else:
 			queued.append(r)
-	if allowed > 4:
+	if allowed > 16:
 		queued.sort_custom(_before)
 	for i in mini(allowed, queued.size()):
 		queued[i].state = State.IN_FLIGHT

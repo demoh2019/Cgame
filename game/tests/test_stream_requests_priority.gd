@@ -6,7 +6,7 @@ const StreamRequests = preload("res://scripts/shared/stream_requests.gd")
 
 func run(t) -> void:
 	t.current = "top-K streaming batches match the full priority sort"
-	for budget in [1, 2, 4, 5]:
+	for budget in [1, 2, 4, 5, 8, 16, 17]:
 		var queue := StreamRequests.new()
 		var expected: Array[Dictionary] = []
 		for i in 32:
@@ -26,6 +26,25 @@ func run(t) -> void:
 		for index in batch.size():
 			t.eq(batch[index], expected[index]["cell"],
 				"small and large budgets use the same stable priority ordering")
+
+	t.current = "large priority queues match full sorting for all interactive budgets"
+	for budget in [1, 6, 12, 16, 17]:
+		var dense := StreamRequests.new()
+		var reference: Array[Dictionary] = []
+		for i in 512:
+			var priority: float = float((i * 47) % 39) * 0.25
+			var cell := Vector2i(i - 256, i % 23)
+			dense.request(cell, priority, 14)
+			reference.append({"cell": cell, "priority": priority, "seq": i})
+		reference.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			if float(a["priority"]) != float(b["priority"]):
+				return float(a["priority"]) > float(b["priority"])
+			return int(a["seq"]) < int(b["seq"]))
+		var batch: Array[Vector2i] = dense.next_batch(budget)
+		t.eq(batch.size(), budget, "requested large-scene streaming budget is respected")
+		for i in batch.size():
+			t.eq(batch[i], reference[i]["cell"],
+				"stable priority of 512 requests agrees with the full sort")
 
 	t.current = "non-finite priorities are rejected without changing the generation"
 	var invalid := StreamRequests.new()
