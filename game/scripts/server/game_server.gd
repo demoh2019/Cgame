@@ -8868,24 +8868,30 @@ func _prepare_passive_target_candidates(cohort: Array, info: Dictionary,
 
 func _tick_zombies(delta: float) -> void:
 	var info: Dictionary = {}
+	# Day/night and detection multipliers are global for this server tick.
+	# Reuse each survivor's server-verified status for noise, firelight and
+	# blood scent; those checks were previously repeated several times.
+	var night: bool = WorldCycle.is_night(time)
+	var notice: float = WorldCycle.notice_multiplier(time)
 	for player in players.values():
-		info[player.id] = {"position": player.position, "alive": _alive(player),
+		var alive: bool = _alive(player)
+		var safe: bool = _is_safe(player.position)
+		var weather_here: Dictionary = Weather.conditions(
+			world, player.position.x, player.position.z, time)
+		info[player.id] = {"position": player.position, "alive": alive,
 			"health_fraction": player.survival.health / maxf(1.0, player.survival.max_health),
-			"safe": _is_safe(player.position), "noise": player.noise_radius if player.noise_timer > 0.0 else 0.0,
+			"safe": safe, "noise": player.noise_radius if player.noise_timer > 0.0 else 0.0,
 			"wind": Weather.wind_at(world, player.position.x, player.position.z, time),
-			"notice_multiplier": WorldCycle.notice_multiplier(time),
-			"weather_sight": Weather.sight_multiplier(
-				Weather.conditions(world, player.position.x, player.position.z, time)),
+			"notice_multiplier": notice,
+			"weather_sight": Weather.sight_multiplier(weather_here),
 			"firelight": maxf(BikeLantern.reveal_radius(player.inventory, player.mounted,
-				_alive(player), WorldCycle.is_night(time), player.bike_lamp_enabled),
-				maxf(CampfireThreat.reveal_radius(campfires,
-					player.position, time, WorldCycle.is_night(time)),
-					HandFlare.infected_radius(player.flare_seconds, _alive(player),
-						WorldCycle.is_night(time), _is_safe(player.position)))),
+				alive, night, player.bike_lamp_enabled),
+				maxf(CampfireThreat.reveal_radius(campfires, player.position, time, night),
+					HandFlare.infected_radius(player.flare_seconds, alive, night, safe))),
 			"visual_signature": _visual_signature_for(player),
 			# Only actual server wounds contribute; never trust client input.
 			"scent": BloodScent.detection_radius(player.survival.bleeding,
-				_alive(player), _is_safe(player.position), FieldScentMask.active(player.survival))}
+				alive, safe, FieldScentMask.active(player.survival))}
 	# One server-owned claim table for the entire infected pack; simulation
 	# delta expires abandoned leases, including dead and despawned agents.
 	if _flank_slot_reservations == null:
