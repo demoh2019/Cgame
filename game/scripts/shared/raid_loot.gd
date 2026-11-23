@@ -53,13 +53,28 @@ static func reserve(bag: Dictionary, identities: Array, now: float) -> void:
 
 
 static func remaining(bag: Dictionary, now: float) -> float:
-	var expiry: float = float(bag.get("raid_reserved_until", 0.0))
-	if not is_finite(expiry) or not is_finite(now):
+	if not bag.has("raid_reserved_until"):
 		return 0.0
+	# A corrupt lock must never be presented as expired to the player.
+	var raw_expiry: Variant = bag["raid_reserved_until"]
+	if not is_finite(now) or now < 0.0 or not (raw_expiry is float or raw_expiry is int):
+		return LOCK_SECONDS
+	var expiry: float = float(raw_expiry)
+	if not is_finite(expiry):
+		return LOCK_SECONDS
 	return maxf(0.0, expiry - now)
 
 
 static func can_open(bag: Dictionary, player, now: float) -> bool:
+	if player == null or not is_finite(now) or now < 0.0:
+		return false
+	if not bag.has("raid_reserved_until"):
+		return true
+	var allowed: Variant = bag.get("raid_eligible_tokens", null)
+	if not (allowed is Array):
+		return false
+	# Corrupt boss lock timestamps fail closed for strangers, while the
+	# original contributors can still recover the physical reward bag.
 	if remaining(bag, now) <= 0.0:
 		return true
-	return token(player) in bag.get("raid_eligible_tokens", [])
+	return token(player) in allowed

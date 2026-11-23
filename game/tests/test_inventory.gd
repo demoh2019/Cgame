@@ -27,6 +27,25 @@ func run(t) -> void:
 			all_empty = false
 	t.check(all_empty, "emptied stacks free their slot")
 
+	t.current = "recipe requirements reject corrupt resource counts"
+	var recipe_inv := Inventory.new(3)
+	recipe_inv.add("wood_1", 7)
+	t.check(recipe_inv.has_all({"wood_1": 7.0}),
+		"integral numeric recipe requirements remain compatible")
+	t.check(not recipe_inv.has_all({"wood_1": 8}),
+		"missing crafting materials are rejected")
+	t.check(not recipe_inv.has_all({"wood_1": -1}),
+		"negative material requirements cannot pass validation")
+	t.check(not recipe_inv.has_all({"wood_1": NAN}),
+		"nonfinite material quantities are rejected")
+	t.check(not recipe_inv.has_all({"wood_1": 1.5}),
+		"fractional materials cannot be rounded into a valid recipe")
+	t.check(not recipe_inv.has_all({"wood_1": "2"}),
+		"numeric strings cannot bypass the recipe type check")
+	t.check(not recipe_inv.has_all({"not_an_item": 1}),
+		"unknown items are never treated as free crafting inputs")
+	t.check(recipe_inv.has_all({}), "recipe without required materials stays valid")
+
 	t.current = "stacks"
 	inv = Inventory.new(3)
 	inv.add("bandage", 10)

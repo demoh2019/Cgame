@@ -46,7 +46,17 @@ func movement_factor(capacity_bonus: float = 0.0) -> float:
 
 func has_all(inputs: Dictionary) -> bool:
 	for id in inputs:
-		if count(id) < int(inputs[id]):
+		# Recipes are server-owned, but corrupted or modded recipes must
+		# not convert negative/fractional material counts into free crafting.
+		if not (id is String) or not Defs.is_item(str(id)):
+			return false
+		var raw_amount: Variant = inputs[id]
+		if not (raw_amount is int or raw_amount is float):
+			return false
+		var amount: float = float(raw_amount)
+		if not is_finite(amount) or amount < 0.0 or amount > 1000000000.0 or amount != floor(amount):
+			return false
+		if count(str(id)) < int(amount):
 			return false
 	return true
 

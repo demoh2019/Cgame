@@ -39,6 +39,24 @@ func run(t) -> void:
 		changed_gpu = c.sample_frame(1.0 / 120.0, 33.0) or changed_gpu
 	t.check(changed_gpu and c.scale < 0.77,
 		"GPU-bound rendering scales down despite a short CPU process delta")
+	t.current = "CPU-bound frames do not trigger resolution recovery"
+	c.configure(1)
+	for i in 500:
+		c.sample_frame(1.0 / 120.0, 33.0)
+	var reduced_scale: float = c.scale
+	t.check(reduced_scale < 0.77,
+		"sustained slow GPU first reduces pixel load")
+	var premature_upgrade := false
+	for i in 1600:
+		premature_upgrade = c.sample_frame(1.0 / 25.0, 7.0) or premature_upgrade
+	t.check(not premature_upgrade and c.scale <= reduced_scale + 0.00001,
+		"slow game CPU cannot drive premature GPU resolution increases")
+	var legitimate_upgrade := false
+	for i in 500:
+		legitimate_upgrade = c.sample_frame(1.0 / 60.0, 7.0) or legitimate_upgrade
+	t.check(legitimate_upgrade and c.scale > reduced_scale,
+		"healthy GPU and game thread restore resolution after hysteresis")
+
 	t.near(Adaptive.render_frame_seconds(1.0 / 30.0, 0.0), 1.0 / 30.0, 0.00001,
 		"zero/unavailable GPU timer preserves legacy frame-pacing fallback")
 	t.near(Adaptive.render_frame_seconds(1.0 / 30.0, 8.0), 0.008, 0.00001,
