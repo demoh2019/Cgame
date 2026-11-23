@@ -12,15 +12,17 @@ const SHORE_SAMPLES := 8
 
 
 static func can_access_lake(world, position: Vector3) -> bool:
-	if not position.is_finite() or world.is_water(position.x, position.z):
+	if world == null or not position.is_finite() or \
+			world.is_water(position.x, position.z):
 		return false
 	var here := Vector2(position.x, position.z)
 	for index in SHORE_SAMPLES:
 		var point := here + Vector2.from_angle(float(index) * TAU / SHORE_SAMPLES) * SHORE_REACH
-		if world.is_water(point.x, point.y):
+		if point.is_finite() and world.is_water(point.x, point.y):
 			return true
 	return false
 
 
 static func needs_drink(vitals) -> bool:
-	return vitals.alive and is_finite(vitals.thirst) and vitals.thirst <= 95.0
+	return vitals != null and vitals.alive and is_finite(vitals.thirst) and \
+		vitals.thirst >= 0.0 and vitals.thirst <= 95.0
