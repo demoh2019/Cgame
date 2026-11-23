@@ -387,7 +387,8 @@ static func configure_terrain_geomorph(quality: int) -> void:
 static func apply_terrain_geomorph(node: Node) -> void:
 	if node is ChunkedTerrain3D:
 		var terrain := node as ChunkedTerrain3D
-		terrain.lod_geomorph_enabled = terrain_geomorph_enabled
+		if terrain.has_method("set_lod_geomorph_enabled"):
+			terrain.lod_geomorph_enabled = terrain_geomorph_enabled
 		# A slightly faster update preserves smooth movement while the native
 		# engine changes only one per-instance uniform, never reuploads meshes.
 		terrain.update_interval = 0.16 if terrain_geomorph_enabled else 0.5
