@@ -74,6 +74,37 @@ func run(t) -> void:
 	t.eq(ChunkView.get_pending_decor_count(), 0,
 		"completed and unadopted debug-only chunks do not pollute live backlog")
 
+	t.current = "cached biome palettes preserve exact seeded tree selection"
+	for biome_variant in ChunkView.TREES_BY_BIOME:
+		var biome: String = str(biome_variant)
+		var authored: Array = ChunkView.TREES_BY_BIOME[biome]
+		var expected: Array = []
+		for name_variant in authored:
+			var name: String = str(name_variant)
+			if not name.begins_with("painted"):
+				expected.append(name)
+		t.eq(ChunkView._tree_options_for_biome(biome, false), expected,
+			"no-pack selection keeps original order, duplicates and weights for " + biome)
+		t.eq(ChunkView._tree_options_for_biome(biome, false), expected,
+			"repeat lookup reuses the same palette for " + biome)
+		t.eq(ChunkView._tree_options_for_biome(biome, true), authored,
+			"installed painted pack retains full biome palette for " + biome)
+	t.eq(ChunkView._tree_options_for_biome("unknown", false),
+		ChunkView._tree_options_for_biome("forest", false),
+		"unrecognized biomes retain the forest fallback")
+	t.eq(ChunkView._tree_options_for_biome("unknown", true),
+		ChunkView.TREES_BY_BIOME["forest"],
+		"painted-pack fallback still uses the original forest weighting")
+	var chunk_source: String = (ChunkView as Script).source_code
+	t.check(chunk_source.contains("transforms.resize(list.size())") and
+		chunk_source.contains("tints.resize(list.size())") and
+		chunk_source.contains("transforms[i] = transform") and
+		chunk_source.contains("tints[i] = "),
+		"streamed resource group preallocates transforms and colors before filling slots")
+	t.check(chunk_source.contains("var painted_available: bool =") and
+		chunk_source.contains("_tree_key(node, painted_available)"),
+		"painted pack capability is checked once per chunk, not once per tree")
+
 	t.current = "native streamer tracks optional visual staging separately"
 	var world := WorldStreamer.new()
 	world.axes = WorldStreamer.AXES_XZ
