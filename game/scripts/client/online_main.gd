@@ -1829,7 +1829,7 @@ func _physics_process(delta: float) -> void:
 		# Mining/chopping takes priority over combat only when aimed at a nearby node.
 		_charge_msec = -1
 		if _attack_cooldown <= 0.0:
-			client.resource_hit(int(hit_node["id"]), aim)
+			client.resource_hit(int(hit_node["id"]), _resource_swing_aim(hit_node, aim))
 			var tool: String = Defs.tool_tier_for_node(str(hit_node["kind"]))
 			var equipped: String = client.inventory.best_tool(tool)
 			var tier: int = Defs.tier_of(equipped) if not equipped.is_empty() else 0
@@ -2328,6 +2328,25 @@ func _typing() -> bool:
 
 ## A single bright, pulsing impact marker. It is positioned using the same
 ## deterministic server rules and replicated strike count, not client guesses.
+## Map a click on the glowing 3D marker to its horizontal world bearing.
+## Without this, isometric aiming projects to the ground below the elevated
+## marker and exact mouse clicks would frequently miss the precision check.
+func _resource_swing_aim(node: Dictionary, fallback: Vector2) -> Vector2:
+	if node.is_empty() or camera == null or client == null:
+		return fallback
+	var hit_count: int = int(client.resource_hits.get(int(node["id"]), 0))
+	var spot: Vector3 = ResourceGathering.weakspot_position(node, hit_count)
+	if camera.is_position_behind(spot):
+		return fallback
+	var screen: Vector2 = camera.unproject_position(spot)
+	var cursor: Vector2 = get_viewport().get_visible_rect().size * 0.5 if _first_person \
+		else get_viewport().get_mouse_position()
+	if not screen.is_finite() or cursor.distance_to(screen) > 36.0:
+		return fallback
+	var offset := Vector2(spot.x - client.predicted.x, spot.z - client.predicted.z)
+	return offset.normalized() if offset.length_squared() > 0.01 else fallback
+
+
 func _update_resource_weakspot(node: Dictionary) -> void:
 	var can_show: bool = not node.is_empty() and ResourceGathering.is_strike(
 		str(node.get("kind", ""))) and bool(client.you.get("alive", false)) \
@@ -3169,7 +3188,7 @@ func _interact() -> void:
 			var facing: Vector2 = _aim_direction()
 			if facing == Vector2.ZERO:
 				facing = _look_direction()
-			client.resource_hit(int(node["id"]), facing)
+			client.resource_hit(int(node["id"]), _resource_swing_aim(node, facing))
 		else:
 			client.gather(int(node["id"]))
 
