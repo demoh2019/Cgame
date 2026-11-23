@@ -249,6 +249,7 @@ var _underwater_tint: ColorRect # Blue murk while the camera is below the surfac
 var _breath_label: Label # Air left while diving.
 var _dof_elapsed := 0.35 # Coalesce cinematic focus updates to ~3 Hz.
 var _attack_cooldown := 0.0
+var _resource_weakspot: MeshInstance3D # One reusable marker, never one object per resource.
 var _charge_msec := -1 # Melee attack held since (ms); release = light swing or power blow.
 const CHARGE_START_MS := 220 # A shorter press is a quick swing.
 const CHARGE_FULL_MS := 850
@@ -1303,6 +1304,13 @@ func _spawn_effects(event: Dictionary) -> void:
 			elif item.begins_with("stone") or item.begins_with("ore"):
 				chips = Color(0.6, 0.6, 0.62)
 			effects.gathered(at, chips)
+			if bool(event.get("precise", false)):
+				var node_for_impact: Dictionary = client.node_by_id(
+					int(event.get("node", -1)), at)
+				if not node_for_impact.is_empty():
+					var impact: Vector3 = ResourceGathering.weakspot_position(
+						node_for_impact, maxi(0, int(event.get("hit", 1)) - 1))
+					effects.ring(impact, Color(1.0, 0.77, 0.25), 0.65, 0.32)
 		"crate":
 			effects.loot(here)
 		"skill_up":
@@ -1314,8 +1322,9 @@ func _on_skill_event(event: Dictionary) -> void:
 	if event["type"] == "gathered":
 		var gatherer: int = int(event.get("peer", -1))
 		if gatherer == client.peer_id and int(event.get("amount", 0)) > 0:
-			hud.say("+%d %s" % [int(event["amount"]),
-				str(Defs.item(str(event.get("item", ""))).get("name", event.get("item", "")))])
+			var reward: String = "+%d %s" % [int(event["amount"]),
+				str(Defs.item(str(event.get("item", ""))).get("name", event.get("item", "")))]
+			hud.say(("WEAK SPOT! " if bool(event.get("precise", false)) else "") + reward)
 		if bool(event.get("strike", false)):
 			var source: Dictionary = client.node_by_id(int(event.get("node", -1)),
 				Vector3(float(event.get("x", client.predicted.x)), 0.0,
@@ -2313,11 +2322,48 @@ func _typing() -> bool:
 	return focus is LineEdit or (_access != null and _access.is_open()) # The settings menu swallows game hotkeys too.
 
 
+## A single bright, pulsing impact marker. It is positioned using the same
+## deterministic server rules and replicated strike count, not client guesses.
+func _update_resource_weakspot(node: Dictionary) -> void:
+	var can_show: bool = not node.is_empty() and ResourceGathering.is_strike(
+		str(node.get("kind", ""))) and bool(client.you.get("alive", false)) \
+		and not bool(client.you.get("mounted", false)) and not hud.is_menu_open()
+	if not can_show:
+		if _resource_weakspot != null:
+			_resource_weakspot.visible = false
+		return
+	if _resource_weakspot == null:
+		_resource_weakspot = MeshInstance3D.new()
+		_resource_weakspot.name = "MiningWeakspotMarker"
+		var ball := SphereMesh.new()
+		ball.radius = 0.12
+		ball.height = 0.24
+		ball.radial_segments = 10
+		ball.rings = 5
+		var glow := StandardMaterial3D.new()
+		glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		glow.albedo_color = Color(1.0, 0.72, 0.18, 0.92)
+		glow.emission_enabled = true
+		glow.emission = Color(1.0, 0.48, 0.08)
+		glow.emission_energy_multiplier = 2.0
+		ball.material = glow
+		_resource_weakspot.mesh = ball
+		_resource_weakspot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(_resource_weakspot)
+	var node_id: int = int(node["id"])
+	var completed: int = int(client.resource_hits.get(node_id, 0))
+	_resource_weakspot.position = ResourceGathering.weakspot_position(node, completed)
+	var pulse: float = 1.0 + 0.17 * sin(float(Time.get_ticks_msec()) * 0.008)
+	_resource_weakspot.scale = Vector3.ONE * pulse
+	_resource_weakspot.visible = not client.depleted.has(node_id)
+
+
 func _update_prompt() -> void:
 	var text := ""
 	var p: Vector3 = client.predicted
 	var loot: Dictionary = client.nearest_loot(p, Defs.REACH)
 	var node: Dictionary = client.nearest_node(p, Defs.REACH)
+	_update_resource_weakspot(node)
 	var below: bool = Dungeon.is_underground(p.x)
 	if below and Dungeon.at_stairs(p.x, p.z):
 		text = "[E] Climb the stairs back to the surface"
@@ -2337,7 +2383,11 @@ func _update_prompt() -> void:
 			}.get(resource_kind, "Collect resources"))
 			text = "[E] %s" % pickup_label
 		elif ResourceGathering.is_strike(resource_kind):
-			text = "[LMB] %s %s (tier %d)" % ["Chop" if resource_kind == "tree" else "Mine", resource_kind, int(node["tier"])]
+			var hits_done: int = int(client.resource_hits.get(int(node["id"]), 0))
+			var total_hits: int = ResourceGathering.strikes_needed(resource_kind)
+			text = "[LMB] %s %s (T%d) | %d/%d hits | Aim at golden spot for +1" % [
+				"Chop" if resource_kind == "tree" else "Mine", resource_kind,
+				int(node["tier"]), hits_done, total_hits]
 		else:
 			text = "[E] Gather %s (tier %d)" % [resource_kind, int(node["tier"])]
 		var needed := Defs.tool_tier_for_node(node["kind"])
