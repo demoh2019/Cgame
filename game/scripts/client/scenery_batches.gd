@@ -32,17 +32,20 @@ static func _single_cluster_indices(count: int) -> Array:
 
 
 static func _cluster_indices_fallback(points: PackedVector3Array, cell_size: float,
-		min_split_count: int, max_clusters: int, unsplit_on_overflow: bool = true) -> Array:
+		min_split_count: int, max_clusters: int, unsplit_on_overflow: bool = true,
+		points_prevalidated: bool = false) -> Array:
 	var result: Array = []
 	if points.size() > MAX_SCENERY_INSTANCES or min_split_count < 1 or \
 			min_split_count > MAX_SCENERY_INSTANCES or max_clusters < 1 or \
 			max_clusters > MAX_SCENERY_CLUSTERS or not is_finite(cell_size) or \
 			cell_size < 0.5 or cell_size > 10000.0:
 		return result
-	for p in points:
-		if not p.is_finite() or absf(p.x) > 10000000.0 or \
-				absf(p.y) > 10000000.0 or absf(p.z) > 10000000.0:
-			return result
+	# Adaptive retries have already validated every point before the first pass.
+	if not points_prevalidated:
+		for p in points:
+			if not p.is_finite() or absf(p.x) > 10000000.0 or \
+					absf(p.y) > 10000000.0 or absf(p.z) > 10000000.0:
+				return result
 	if points.is_empty():
 		return result
 	if points.size() < min_split_count or max_clusters == 1:
@@ -57,12 +60,13 @@ static func _cluster_indices_fallback(points: PackedVector3Array, cell_size: flo
 			if order.size() >= max_clusters:
 				return _single_cluster_indices(points.size()) if unsplit_on_overflow else []
 			order.append(cell)
-			buckets[cell] = PackedInt32Array()
-		var indices: PackedInt32Array = buckets[cell]
+			# Arrays are reference-backed; appending does not copy all earlier indices.
+			buckets[cell] = []
+		var indices: Array = buckets[cell]
 		indices.append(i)
-		buckets[cell] = indices
 	for cell in order:
-		result.append(buckets[cell])
+		# The public planner still returns PackedInt32Array groups in stable order.
+		result.append(PackedInt32Array(buckets[cell]))
 	return result
 
 
@@ -109,7 +113,7 @@ static func _cluster_indices_adaptive_fallback(points: PackedVector3Array,
 	var size: float = cell_size
 	for attempt in range(max_coarsen_passes + 1):
 		var attempt_groups: Array = _cluster_indices_fallback(
-			points, size, min_split_count, max_clusters, false)
+			points, size, min_split_count, max_clusters, false, true)
 		if not attempt_groups.is_empty():
 			return attempt_groups
 		if size >= 10000.0:
