@@ -879,29 +879,47 @@ func nearest_node(point: Vector3, radius: float) -> Dictionary:
 	return best
 
 
-## Holding interact collects loose stones and fallen sticks one at a time.
-## Exclusions prevent duplicate RPCs while the server's depletion snapshot is
-## still in transit. Bushes/berries retain intentional one-press gathering.
-func nearest_ground_pickup(point: Vector3, radius: float,
-		pending: Dictionary = {}) -> Dictionary:
-	var closest: Dictionary = {}
+## Prefer the resource under the player's gaze while keeping a forgiving
+## fallback to the nearest valid object when no model is directly aimed at.
+## This is one pass over nearby chunks, without physics rays or new nodes.
+func nearest_aimed_node(point: Vector3, direction: Vector2, radius: float) -> Dictionary:
+	var nearest: Dictionary = {}
+	var aimed: Dictionary = {}
 	if world == null or not point.is_finite():
-		return closest
-	var best_distance: float = radius
+		return nearest
+	var default_distance: float = radius
+	var best_aim_score: float = -INF
+	var has_aim: bool = direction.is_finite() and direction.length_squared() > 0.01
+	var aim: Vector2 = direction.normalized() if has_aim else Vector2.ZERO
 	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
 	for dx in range(-1, 2):
 		for dz in range(-1, 2):
 			for node in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["nodes"]:
-				if str(node["kind"]) not in ["pebble", "branch"]:
+				if depleted.has(node["id"]):
 					continue
-				if depleted.has(node["id"]) or pending.has(node["id"]):
+				var offset := Vector2(float(node["x"]) - point.x,
+					float(node["z"]) - point.z)
+				var centre_distance: float = offset.length()
+				var distance: float = maxf(0.0,
+					centre_distance - ResourceGathering.reach_margin(node))
+				if distance >= radius:
 					continue
-				var distance: float = Vector2(float(node["x"]) - point.x,
-					float(node["z"]) - point.z).length()
-				if distance < best_distance:
-					best_distance = distance
-					closest = node
-	return closest
+				if distance < default_distance:
+					default_distance = distance
+					nearest = node
+				if not has_aim:
+					continue
+				var alignment: float = offset.dot(aim) / maxf(centre_distance, 0.001)
+				if alignment < 0.82:
+					continue
+				# Aim accuracy dominates distance; small distance preference
+				# makes adjacent stones easier to distinguish at close range.
+				var score: float = alignment * 6.0 - distance * 0.22
+				if score > best_aim_score:
+					best_aim_score = score
+					aimed = node
+	return aimed if not aimed.is_empty() else nearest
+
 
 ## Select a mineable node in front of the player's actual swing, ignoring ground pickups.
 func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Defs.REACH + 0.5) -> Dictionary:
