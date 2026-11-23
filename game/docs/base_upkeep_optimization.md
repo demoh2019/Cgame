@@ -41,11 +41,24 @@ servers that do not provide this field.
 
 No new RPCs, saves, persistent player fields or world seeds were added.
 
+## Additional NPC tick optimization
+
+The infected simulation now computes global night/notice values once per
+server tick and reuses each survivor's already validated alive/safe state
+across visibility, firelight and blood-scent calculations. Weather
+information is evaluated once per survivor for the same tick.
+
+This is a work-reduction refactor, **not** an AI balance change: targeting,
+combat, noise propagation and infected simulation continue running on the
+same authoritative schedule.
+
 ## Regression
 
 `game/tests/test_wall_upkeep.gd` covers unauthorized players standing by
 a base, guest/registered ownership, account reconnect, exact-distance
 renewals, expired-wall decay, warning thresholds and owner-only information.
+Existing `test_zombie_pack.gd` and `test_zombie_ai.gd` exercise infected
+target acquisition and the shared authoritative server tick.
 
 ```sh
 bin/godot.macos.editor.arm64 --headless --path game --script res://tests/run_one.gd -- test_wall_upkeep
