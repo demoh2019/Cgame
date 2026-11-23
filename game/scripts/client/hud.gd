@@ -27,6 +27,7 @@ const Vendor = preload("res://scripts/shared/vendor.gd")
 const FirstSteps = preload("res://scripts/client/first_steps.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const StoryCampaign = preload("res://scripts/shared/story_campaign.gd")
+const StoryChapterTwo = preload("res://scripts/shared/story_chapter_two.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
@@ -49,6 +50,7 @@ var _vendor_food_button: Button
 var _radar
 var _contract_label: Label
 var _story_journal: Label # Chapter transcripts in the inventory's mission section.
+var _story2_journal: Label # New chapter is independent of Chapter I saves.
 var _caravan_status: Label
 var _prompt: Label
 var _log: Label
@@ -808,6 +810,35 @@ func _build() -> void:
 	_story_journal.text = "Waiting for an encrypted survivor radio channel..."
 	_story_journal.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	inventory_box.add_child(_story_journal)
+
+	var chapter_two_heading := Label.new()
+	chapter_two_heading.text = StoryChapterTwo.TITLE + " (requires Chapter I)"
+	inventory_box.add_child(chapter_two_heading)
+	var chapter_two_actions := HBoxContainer.new()
+	inventory_box.add_child(chapter_two_actions)
+	var decode := Button.new()
+	decode.name = "StoryDecode"
+	decode.text = "Decode the underground signal"
+	decode.tooltip_text = "Once Chapter I ends, decode the second radio transmission at a workbench."
+	decode.pressed.connect(func() -> void: client.story("decode"))
+	chapter_two_actions.add_child(decode)
+	var seal := Button.new()
+	seal.name = "StorySeal"
+	seal.text = "Seal the signal"
+	seal.tooltip_text = "Final choice: silence the research relay. This decision cannot be undone."
+	seal.pressed.connect(func() -> void: client.story("seal"))
+	chapter_two_actions.add_child(seal)
+	var broadcast := Button.new()
+	broadcast.name = "StoryBroadcast"
+	broadcast.text = "Broadcast the truth"
+	broadcast.tooltip_text = "Final choice: warn all surviving settlements. This decision cannot be undone."
+	broadcast.pressed.connect(func() -> void: client.story("broadcast"))
+	chapter_two_actions.add_child(broadcast)
+	_story2_journal = Label.new()
+	_story2_journal.name = "StoryChapterTwoJournal"
+	_story2_journal.text = "Complete Chapter I to unlock the underground story."
+	_story2_journal.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	inventory_box.add_child(_story2_journal)
 
 	var cache_heading := Label.new()
 	cache_heading.text = "Frontier cache (capture a red/black outpost)"
@@ -2354,6 +2385,10 @@ func _on_event(event: Dictionary) -> void:
 		"story":
 			if int(event.get("peer", -1)) == client.peer_id:
 				banner("BEACON SEVEN / CHAPTER I", Color(0.85, 0.75, 0.42))
+				say(str(event.get("line", "")))
+		"story2":
+			if int(event.get("peer", -1)) == client.peer_id:
+				banner("CHAPTER II / THE DEEP SIGNAL", Color(0.5, 0.85, 0.96))
 				say(str(event.get("line", "")))
 		# Territory and sieges: the server tells everyone, so the world hears when an outpost falls.
 		"outpost_taken":
@@ -3993,6 +4028,17 @@ func _process(_delta: float) -> void:
 				transcript_text += "\n\n" + str(recovered_line)
 			if _story_journal.text != transcript_text:
 				_story_journal.text = transcript_text
+	var followup: Dictionary = client.you.get("story2", {})
+	if not followup.is_empty():
+		var followup_objective: String = str(followup.get("objective", ""))
+		_contract_label.text += "\nCHAPTER II: " + followup_objective
+		if _story2_journal != null:
+			var chapter_two_text: String = str(followup.get("title", StoryChapterTwo.TITLE)) \
+				+ "\nOBJECTIVE: " + followup_objective
+			for entry in followup.get("transcript", []):
+				chapter_two_text += "\n\n" + str(entry)
+			if _story2_journal.text != chapter_two_text:
+				_story2_journal.text = chapter_two_text
 	_info_label.text += "  Rest %.0fs" % float(client.you.get("rest_cooldown", 0.0))
 	var combat_tag: float = float(client.you.get("combat_tag_seconds", 0.0))
 	if combat_tag > 0.0:
