@@ -43,7 +43,7 @@ static func build_bounds(meshlets: Array) -> Array[Dictionary]:
 ## Desired logical page ids ordered closest first, with stable ties.
 ## A page budget of zero means all pages (legacy behavior).
 static func wanted_pages(bounds: Array[Dictionary], camera_pos: Vector3,
-		transform: Transform3D, budget: int = 0) -> PackedInt32Array:
+		transform: Transform3D, budget: int = 0, frustum_planes: Array = []) -> PackedInt32Array:
 	var ranked: Array[Dictionary] = []
 	var scale: float = maxf(transform.basis.x.length(),
 		maxf(transform.basis.y.length(), transform.basis.z.length()))
@@ -51,9 +51,18 @@ static func wanted_pages(bounds: Array[Dictionary], camera_pos: Vector3,
 		var center: Vector3 = transform * (page["center"] as Vector3)
 		var radius: float = float(page["radius"]) * scale
 		var distance: float = maxf(0.0, center.distance_to(camera_pos) - radius)
-		ranked.append({"id": int(page["index"]), "distance": distance})
+		var offscreen: bool = false
+		for item in frustum_planes:
+			var plane: Plane = item
+			if plane.normal.dot(center) - plane.d > radius:
+				offscreen = true
+				break
+		ranked.append({"id": int(page["index"]), "distance": distance,
+			"offscreen": offscreen})
 	ranked.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		if is_equal_approx(float(a["distance"]), float(b["distance"])):
+		if bool(a["offscreen"]) != bool(b["offscreen"]):
+			return not bool(a["offscreen"])
+		if float(a["distance"]) == float(b["distance"]):
 			return int(a["id"]) < int(b["id"])
 		return float(a["distance"]) < float(b["distance"])
 	)
