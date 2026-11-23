@@ -870,6 +870,8 @@ static func node_info(kind: String) -> Dictionary:
 			return {"yield": "wood", "amount": 4, "seconds": 3.0, "respawn": 120.0, "radius": 0.5, "blocks": true}
 		"rock":
 			return {"yield": "stone", "amount": 4, "seconds": 3.5, "respawn": 150.0, "radius": 0.8, "blocks": true}
+		"pebble":
+			return {"yield": "stone", "amount": 1, "seconds": 0.0, "respawn": 90.0, "radius": 0.25, "blocks": false}
 		"ore":
 			return {"yield": "ore", "amount": 3, "seconds": 4.5, "respawn": 200.0, "radius": 0.7, "blocks": true}
 		"bush":

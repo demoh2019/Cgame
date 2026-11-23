@@ -1306,7 +1306,7 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 					player.action = {}
 			else:
 				var node := _find_node(int(player.action["node"]))
-				if node.is_empty() or _distance_xz(player.position, node) > Defs.REACH + 0.8:
+				if node.is_empty() or _distance_xz(player.position, node) > Defs.REACH + 0.8 + _stone_reach_margin(node):
 					player.action = {}
 
 
@@ -1516,7 +1516,7 @@ func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
 		return {"ok": false, "reason": "no_such_node"}
 	if depleted.has(node_id):
 		return {"ok": false, "reason": "depleted"}
-	if _distance_xz(player.position, node) > Defs.REACH + 0.5:
+	if _distance_xz(player.position, node) > Defs.REACH + 0.5 + _stone_reach_margin(node):
 		return {"ok": false, "reason": "too_far"}
 	var info := Defs.node_info(node["kind"])
 	var required_tool := Defs.tool_tier_for_node(node["kind"])
@@ -1535,6 +1535,14 @@ func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
 	var gather_skill := Skills.skill_for_node(String(node["kind"]))
 	if gather_skill != "":
 		speed *= 1.0 + player.skills.bonus("gather_speed." + gather_skill)
+	# Loose pebbles are picked up immediately and do not start mining.
+	# Still use the authoritative inventory/depletion/event pipeline.
+	if str(node["kind"]) == "pebble":
+		if player.inventory.free_space_for("stone_1") < 1:
+			return {"ok": false, "reason": "inventory_full"}
+		player.action = {"node": node_id, "remaining": 0.0, "total": 0.0}
+		_finish_gather(player, node)
+		return {"ok": true, "pickup": true}
 	var total := float(info["seconds"]) / speed
 	player.action = {"node": node_id, "remaining": total, "total": total}
 	return {"ok": true, "seconds": total}
@@ -6713,6 +6721,11 @@ func cmd_perk(peer_id: int, perk_id: String) -> Dictionary:
 
 # --- Helpers ----------------------------------------------------------------------------------------------
 
+## Large rock models can be approached from their edge, not only the mesh origin.
+func _stone_reach_margin(node: Dictionary) -> float:
+	return minf(float(node.get("radius", 0.0)), 1.8) if str(node.get("kind", "")) in ["rock", "ore", "pebble"] else 0.0
+
+
 func _distance_xz(position: Vector3, thing: Dictionary) -> float:
 	return Vector2(position.x - float(thing["x"]), position.z - float(thing["z"])).length()
 
@@ -7861,7 +7874,7 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	var item_id: String = info["yield"]
 	if item_id in ["wood", "stone", "ore", "fiber"]:
 		item_id = "%s_%d" % [item_id, int(node["tier"])]
-	var amount: int = int(info["amount"]) + (1 if rng.randf() < 0.3 else 0)
+	var amount: int = 1 if str(node["kind"]) == "pebble" else int(info["amount"]) + (1 if rng.randf() < 0.3 else 0)
 	var gather_skill := Skills.skill_for_node(String(node["kind"]))
 	if gather_skill != "" and rng.randf() < player.skills.bonus("gather_yield." + gather_skill):
 		amount += 1 # Skill: a lucky harvest.
@@ -7872,7 +7885,7 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	# Only the actual server-started, in-range and skill/tool-qualified mine
 	# may spend a paid wedge charge. A full bag keeps all remaining charges.
 	var wedge_authenticated: bool = int(player.action.get("node", -1)) == int(node["id"]) and (
-		player.position.is_finite() and _distance_xz(player.position, node) <= Defs.REACH + 0.5 and
+		player.position.is_finite() and _distance_xz(player.position, node) <= Defs.REACH + 0.5 + _stone_reach_margin(node) and
 		player.progression.can_gather(String(node["kind"]), int(node["tier"])) and
 		Defs.tier_of(player.inventory.best_tool("pickaxe")) >= int(node["tier"]))
 	var wedge_bonus: int = MiningWedges.bonus(String(node["kind"]), int(node["tier"]),

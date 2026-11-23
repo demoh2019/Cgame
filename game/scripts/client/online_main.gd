@@ -2299,7 +2299,15 @@ func _update_prompt() -> void:
 	elif not loot.is_empty():
 		text = "[E] Loot" if loot["kind"] == "bag" else "[E] Search the crate"
 	elif not node.is_empty():
-		text = "[E] Gather %s (tier %d)" % [node["kind"], node["tier"]]
+		var kind: String = str(node["kind"])
+		if kind == "pebble":
+			text = "[E] Pick up stone"
+		elif kind == "rock":
+			text = "[E] Mine stone (tier %d)" % int(node["tier"])
+		elif kind == "ore":
+			text = "[E] Mine ore (tier %d)" % int(node["tier"])
+		else:
+			text = "[E] Gather %s (tier %d)" % [kind, node["tier"]]
 		var needed := Defs.tool_tier_for_node(node["kind"])
 		if needed != "":
 			var tool_id: String = client.inventory.best_tool(needed)

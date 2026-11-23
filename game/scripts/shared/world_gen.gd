@@ -8,6 +8,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
+const StoneResources = preload("res://scripts/shared/stone_resources.gd")
 
 var world_seed: int
 var _continent: FastNoiseLite
@@ -555,6 +556,84 @@ func _add_sunken_caches(cell: Vector2i, origin: Vector2, zone: int, crates: Arra
 		placed += 1
 
 
+## Loose rocks have stable, independently seeded resource ids. The older
+## generated chunks use < 550; outposts start at 850, hostiles at 900,
+## sunken caches at 950, and grove trees at 960.
+const STONE_ID_BASE := 550
+const STONE_ID_LIMIT := 240
+
+
+func _try_add_stone(cell: Vector2i, origin: Vector2, point: Vector2, small: bool,
+		tier: int, sites: Array, nodes: Array, placed: Array[Vector2],
+		rng: RandomNumberGenerator, position_index: int) -> bool:
+	if position_index >= STONE_ID_LIMIT:
+		return false
+	if point.x < origin.x or point.y < origin.y or point.x >= origin.x + Defs.CHUNK_SIZE or point.y >= origin.y + Defs.CHUNK_SIZE:
+		return false
+	if is_water(point.x, point.y) or is_safe(point.x, point.y) or _in_site_clearing(point, sites):
+		return false
+	if roads != null and roads.coverage_at(point.x, point.y) > 0.0:
+		return false
+	for other in placed:
+		if other.distance_squared_to(point) < (0.9 if small else 3.0) ** 2:
+			return false
+	var biome: String = biome_at(point.x, point.y)
+	var variant: int = StoneResources.pick_model(biome, small, rng)
+	if variant < 0:
+		return false
+	var entry: Dictionary = StoneResources.MODELS[variant]
+	# A tiny pickable stone uses the real scanned/kit model; a large rock is
+	# a normal mineable resource and requires tools/skill according to tier.
+	var scale: float = rng.randf_range(0.4, 0.75) if small else rng.randf_range(0.75, 1.2)
+	var kind: String = "pebble" if small else "rock"
+	var info: Dictionary = Defs.node_info(kind)
+	var visual_radius: float = clampf(float(entry["size"]) * scale * 0.4, 0.12, 1.8)
+	nodes.append({
+		"id": entity_id(cell, STONE_ID_BASE + position_index),
+		"kind": kind, "tier": 1 if small else tier,
+		"stone_model": variant, "scale": scale, "yaw": rng.randf() * TAU,
+		"x": point.x, "z": point.y, "y": height_at(point.x, point.y),
+		"radius": visual_radius if not small else float(info["radius"]),
+		"blocks": not small,
+	})
+	placed.append(point)
+	return true
+
+
+## This is server/client shared world content, not decorative MultiMeshes.
+## Every visible loose stone has an authoritative id, depletion and inventory
+## reward. The separate random stream leaves original trees, ores and crates
+## unchanged and limits the resource overhead of each chunk.
+func _add_loose_stones(cell: Vector2i, origin: Vector2, tier: int, nodes: Array,
+		sites: Array) -> void:
+	var center: Vector2 = origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
+	if center.length() < Defs.HUB_SAFE_RADIUS + 30.0:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = mix(cell.x, cell.y, world_seed, 233)
+	var anchors: Array[Dictionary] = []
+	for node in nodes:
+		if str(node["kind"]) in ["rock", "ore"]:
+			anchors.append(node)
+	var placed: Array[Vector2] = []
+	var count := 0
+	for anchor in anchors:
+		if count >= STONE_ID_LIMIT:
+			break
+		var center_at := Vector2(float(anchor["x"]), float(anchor["z"]))
+		for _attempt in rng.randi_range(2, 5):
+			var at: Vector2 = center_at + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(1.3, 3.7)
+			if _try_add_stone(cell, origin, at, true, tier, sites, nodes, placed, rng, count):
+				count += 1
+	# Isolated boulders still appear when a chunk has few regular rock nodes.
+	for _attempt in 3:
+		if count >= STONE_ID_LIMIT:
+			break
+		var at := origin + Vector2(rng.randf(), rng.randf()) * Defs.CHUNK_SIZE
+		if _try_add_stone(cell, origin, at, false, tier, sites, nodes, placed, rng, count):
+			count += 1
+
+
 func _generate_chunk(cell: Vector2i) -> Dictionary:
 	var origin := cell_origin(cell)
 	if Dungeon.is_underground(origin.x + Defs.CHUNK_SIZE):
@@ -710,6 +789,7 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 	_add_hostiles(cell, origin, zone, ruin, spawns)
 	_add_groves(cell, origin, tier, nodes, sites)
 	_add_outposts(cell, origin, zone, ruin, structures, crates, props, sites)
+	_add_loose_stones(cell, origin, tier, nodes, sites)
 	var generated := {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
 	if spawn_extender != null:
 		spawn_extender.extend(cell, generated)

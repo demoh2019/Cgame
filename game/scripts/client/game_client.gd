@@ -838,7 +838,12 @@ func nearest_node(point: Vector3, radius: float) -> Dictionary:
 			for node in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["nodes"]:
 				if depleted.has(node["id"]):
 					continue
-				var distance := Vector2(node["x"] - point.x, node["z"] - point.z).length()
+				var center_distance: float = Vector2(float(node["x"]) - point.x, float(node["z"]) - point.z).length()
+				# A modeled rock is interactable from its visible edge. Trees and
+				# foliage keep their original centre-based distance checks.
+				var margin: float = minf(float(node.get("radius", 0.0)), 1.8) if \
+					str(node["kind"]) in ["rock", "ore", "pebble"] else 0.0
+				var distance: float = maxf(0.0, center_distance - margin)
 				if distance < best_distance:
 					best = node
 					best_distance = distance
