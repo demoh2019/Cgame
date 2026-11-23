@@ -2442,7 +2442,7 @@ func _update_prompt() -> void:
 	var text := ""
 	var p: Vector3 = client.predicted
 	var loot: Dictionary = client.nearest_loot(p, Defs.REACH)
-	var node: Dictionary = client.nearest_node(p, Defs.REACH)
+	var node: Dictionary = client.nearest_aimed_node(p, _aim_direction(), Defs.REACH)
 	# A pickup closer than the tree must not hide the tree's weak spot.
 	# Scan a forward-facing candidate 8x/s instead of scanning every frame.
 	var now_ms: int = Time.get_ticks_msec()
@@ -3293,7 +3293,7 @@ func _interact() -> void:
 	if not loot.is_empty():
 		client.loot(loot["id"])
 		return
-	var node: Dictionary = client.nearest_node(p, Defs.REACH)
+	var node: Dictionary = client.nearest_aimed_node(p, _aim_direction(), Defs.REACH)
 	if not node.is_empty():
 		if ResourceGathering.is_pickup(str(node["kind"])):
 			var pickup_id: int = int(node["id"])

@@ -6,7 +6,7 @@ const ENTRIES := [
 		["WASD", "move"], ["Shift", "sprint"], ["F4", "ride / dismount crafted bike"], ["[", "toggle crafted bike dynamo lamp: night light or stealth"], ["PgUp", "service bike drive on foot"], ["PgDn", "repair damaged bike frame"], ["Space", "dodge"], ["Mouse", "aim; left click attacks"], ["G", "weapon skill"],
 		["F1", "guardian taunt"], ["Delete", "prepare ranged sight kit"], ["End", "sharpen melee weapon"], ["4", "next weapon"], ["5", "equip armor"], ["Wheel", "zoom"]]],
 	["GATHER AND CRAFT", [
-		["E", "gather (trees and mining attract infected) / loot"], ["Shift+E / Shift+Q", "collect up to five nearby PvE bags"], ["C", "crafting window"], ["0", "quick-cook best fish"], ["Shift+0", "craft fish stew from fish, clean water and wood at a fire"],
+		["E", "interact with aimed resource / pick up / loot"], ["Hold E", "collect nearby resources"], ["Hold LMB", "mine rocks / chop trees"], ["Shift+E / Shift+Q", "collect up to five nearby PvE bags"], ["C", "crafting window"], ["0", "quick-cook best fish"], ["Shift+0", "craft fish stew from fish, clean water and wood at a fire"],
 		["T", "cast fishing rod (Shift: baited)"], ["I / Tab", "inventory (click: use or equip; right click: stash)"], ["B", "stash (at the hub)"]]],
 	["SURVIVE", [
 		["1", "eat"], ["Ctrl+1", "smart safe food"], ["Shift+1", "eat fish stew: restores hunger and thirst"], ["2", "drink bottle"], ["Ctrl+2", "smart safe drink"], ["3", "bandage"], ["Shift+3", "trauma kit"], ["Ctrl+3", "smart medicine"], ["6", "antiseptic"], ["7", "antibiotics"], ["8", "heat pack"], ["F11", "herbal poultice"],

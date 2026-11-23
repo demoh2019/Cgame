@@ -9,6 +9,7 @@ const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 const StoneResources = preload("res://scripts/shared/stone_resources.gd")
+const StaticBlockerGrid = preload("res://scripts/shared/static_blocker_grid.gd")
 const SolidScenery = preload("res://scripts/shared/solid_scenery.gd")
 
 var world_seed: int
@@ -19,7 +20,7 @@ var _temperature: FastNoiseLite
 var _moisture: FastNoiseLite
 var _cache: Dictionary = {}
 var _cache_ages: Dictionary = {} # Last use of each live chunk; incremental LRU eviction.
-var _static_blockers: Dictionary = {} # Per-chunk solid-only broadphase, same lifetime as _cache.
+var _static_blockers: Dictionary = {} # Per-chunk 8m tile broadphase, same LRU lifetime as _cache.
 var _cache_clock: int = 0
 var _cache_hits: int = 0
 var _cache_misses: int = 0
@@ -386,14 +387,9 @@ func chunk(cell: Vector2i) -> Dictionary:
 	var data: Dictionary = _generate_chunk(cell)
 	_cache[cell] = data
 	_cache_ages[cell] = _cache_clock
-	# Index only solid objects, preserving the original group iteration order.
-	# Depleted resource IDs are deliberately checked at query time.
-	var solids: Array = []
-	for group in ["nodes", "crates", "structures", "props"]:
-		for item in data[group]:
-			if bool(item.get("blocks", false)):
-				solids.append([item, group == "nodes"])
-	_static_blockers[cell] = solids
+	# Build the footprint-aware 8m tile index only on a cache miss.
+	# The existing per-chunk LRU evicts this index together with its data.
+	_static_blockers[cell] = StaticBlockerGrid.build(data, cell_origin(cell))
 	return data
 
 
@@ -1077,19 +1073,10 @@ func blockers_near(x: float, z: float, radius: float) -> Array:
 	for cx in range(cell_a.x, cell_b.x + 1):
 		for cz in range(cell_a.y, cell_b.y + 1):
 			var cell: Vector2i = Vector2i(cx, cz)
-			chunk(cell) # Ensures a matching solid-only index exists on cache miss.
-			for entry in _static_blockers[cell]:
-				var n: Dictionary = entry[0]
-				# Depletion affects actual collisions, not just MultiMesh
-				# visibility. The cached geometry must never become a
-				# ghost barrier when a model is mined or reappear too early.
-				if bool(entry[1]) and depleted_blockers.has(n["id"]):
-					continue
-				if bool(n["blocks"]) and (
-						absf(float(n["x"]) - x) < radius + float(n["radius"]) and
-						absf(float(n["z"]) - z) < radius + float(n["radius"])
-					):
-					result.append(n)
+			chunk(cell) # Existing LRU keeps this tile index in sync with chunk data.
+			result.append_array(StaticBlockerGrid.query(
+				_static_blockers[cell], cell_origin(cell), x, z, radius,
+				depleted_blockers))
 	# Include built obstacles without erasing the procedural hub/terrain blockers.
 	for barricade in dynamic_blockers.values():
 		if absf(float(barricade["x"]) - x) <= radius + float(barricade["radius"]) and absf(float(barricade["z"]) - z) <= radius + float(barricade["radius"]):
