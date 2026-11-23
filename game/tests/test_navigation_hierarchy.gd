@@ -160,6 +160,32 @@ func run(t) -> void:
 	t.eq(limited.cached_route_count(), 0,
 		"dynamic geometry changes invalidate resident corridors and FIFO order")
 
+	t.current = "repeated navigation updates recycle abstract graph slots"
+	_walls.clear()
+	var reused := HierarchicalPathfinder.new()
+	reused.build(w, h, 8, _is_open)
+	var initial_capacity: int = reused.allocated_node_count()
+	for iteration in 80:
+		var changed := Vector2i(8, 3)
+		if iteration % 2 == 0:
+			_walls[changed] = true
+		else:
+			_walls.erase(changed)
+		reused.invalidate_cluster(changed)
+		if iteration % 10 == 0:
+			var route: PackedVector2Array = reused.find_path(a, b)
+			t.check(_valid(route, a, b), "dynamic navigation still finds a valid route")
+	t.check(reused.allocated_node_count() <= initial_capacity + 32,
+		"retired graph slots are recycled rather than leaked every update")
+	t.check(reused.node_count() <= reused.allocated_node_count(),
+		"active nodes never exceed reserved graph slots")
+	_walls.clear()
+	reused.build(w, h, 8, _is_open)
+	t.eq(reused.allocated_node_count(), initial_capacity,
+		"full rebuild resets retired nodes and slot capacity")
+	t.check(_valid(reused.find_path(a, b), a, b),
+		"fresh graph still routes after repeated dynamic edits")
+
 	t.current = "off-mesh links"
 	# Rows 0 and 4 are three cells apart so they never link vertically.
 	var heights := {}

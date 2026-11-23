@@ -10,10 +10,24 @@ func run(t) -> void:
 	t.check(LootBeam.color_for({"raid": true}).r > 0.9, "raid caches glow legendary orange")
 	t.check(LootBeam.color_for({"supply_drop": true}).b > 0.9, "supply drops glow blue")
 	t.eq(LootBeam.color_for({"reserved": true, "can_loot": false}).a, 0.0, "locked loot has no beam")
+	for kind in ["raid", "horde_cache", "supply_drop"]:
+		var locked: Dictionary = {"reserved": true, "can_loot": false}
+		locked[kind] = true
+		t.eq(LootBeam.color_for(locked).a, 0.0,
+			"protected %s reward beam is hidden from nonrecipients" % kind)
+		locked["can_loot"] = true
+		t.check(LootBeam.color_for(locked).a > 0.0,
+			"eligible survivor still sees %s reward beam" % kind)
 	var root := Node3D.new()
 	root.add_child(LootBeam.make())
 	LootBeam.update(root, {"raid": true})
 	t.check((root.get_node("LootBeam") as Node3D).visible, "beam shows for raid loot")
+	LootBeam.update(root, {"raid": true, "reserved": true, "can_loot": false})
+	t.check(not (root.get_node("LootBeam") as Node3D).visible,
+		"loot beam hides immediately when eligibility is revoked")
+	LootBeam.update(root, {"raid": true, "reserved": true, "can_loot": true})
+	t.check((root.get_node("LootBeam") as Node3D).visible,
+		"loot beam returns when recipient eligibility is restored")
 	LootBeam.update(root, {})
 	t.check(not (root.get_node("LootBeam") as Node3D).visible, "and hides when it becomes ordinary")
 	root.free()

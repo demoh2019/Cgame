@@ -29,6 +29,7 @@ var _ch: int = 0
 var _n_cell: Array[Vector2i] = []
 var _n_cluster := PackedInt32Array()
 var _n_alive := PackedByteArray()
+var _free_nodes: Array[int] = [] # Recycled entrances for dynamic obstacles.
 var _adj: Array[Dictionary] = []
 var _node_at: Dictionary = {}
 var _cluster_nodes: Array = []
@@ -100,6 +101,7 @@ func build(w: int, h: int, cluster: int, walkable: Callable) -> void:
 	_n_cell.clear()
 	_n_cluster.clear()
 	_n_alive.clear()
+	_free_nodes.clear()
 	_adj.clear()
 	_node_at.clear()
 	_route_cache.clear()
@@ -195,6 +197,11 @@ func cached_route_count() -> int:
 	return _route_cache.size()
 
 
+## Total allocated slots, including recyclable nodes (debug/memory diagnostics).
+func allocated_node_count() -> int:
+	return _n_cell.size()
+
+
 ## Number of live abstract nodes (for tests and debug overlays).
 func node_count() -> int:
 	var total := 0
@@ -224,13 +231,22 @@ func _cluster_rect(c: Vector2i) -> Rect2i:
 
 func _add_node(cell: Vector2i) -> int:
 	if _node_at.has(cell):
-		return _node_at[cell]
-	var id: int = _n_cell.size()
+		return int(_node_at[cell])
 	var c := _cluster_of(cell)
-	_n_cell.append(cell)
-	_n_cluster.append(_cidx(c))
-	_n_alive.append(1)
-	_adj.append({})
+	var id: int
+	if not _free_nodes.is_empty():
+		# _remove_node detached every inbound and outbound edge.
+		id = _free_nodes.pop_back()
+		_n_cell[id] = cell
+		_n_cluster[id] = _cidx(c)
+		_n_alive[id] = 1
+		_adj[id].clear()
+	else:
+		id = _n_cell.size()
+		_n_cell.append(cell)
+		_n_cluster.append(_cidx(c))
+		_n_alive.append(1)
+		_adj.append({})
 	_node_at[cell] = id
 	_cluster_nodes[_cidx(c)].append(id)
 	return id
@@ -246,6 +262,7 @@ func _remove_node(id: int) -> void:
 	_n_alive[id] = 0
 	_node_at.erase(_n_cell[id])
 	_cluster_nodes[_n_cluster[id]].erase(id)
+	_free_nodes.append(id)
 
 
 func _has_inter_edge(id: int) -> bool:
