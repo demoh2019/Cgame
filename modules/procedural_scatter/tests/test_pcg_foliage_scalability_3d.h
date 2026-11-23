@@ -65,7 +65,7 @@ TEST_CASE("[PCGFoliageScalability3D] atomic validation and bounded cluster count
 	CHECK(budget->plan_visible_counts({ 1 }, { 1 }, -1).is_empty());
 	CHECK(budget->plan_visible_counts({ 1 }, { 1 }, 4).is_empty());
 	CHECK(budget->plan_visible_counts({ 1 }, { Math::NaN }, 1).is_empty());
-	CHECK(budget->plan_visible_counts({ 1 }, { Math::INF }, 1).is_empty());
+	CHECK(budget->plan_visible_counts({ 1 }, { float(Math::INF) }, 1).is_empty());
 	CHECK(budget->plan_visible_counts({ 1 }, { -1 }, 1).is_empty());
 	CHECK(budget->plan_visible_counts({ 1 }, { 10000001 }, 1).is_empty());
 	CHECK(budget->plan_visible_counts({ -1 }, { 1 }, 1).is_empty());

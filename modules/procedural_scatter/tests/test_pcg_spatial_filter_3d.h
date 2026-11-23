@@ -346,7 +346,7 @@ TEST_CASE("[PCGSpatialFilter3D] density rejects invalid input atomically and cap
 	CHECK(filter->filter_indices_density(points, valid_densities, { -1, 2 }, 7).is_empty());
 	CHECK(filter->filter_indices_density(points, valid_densities, { 2147483647, 2 }, 7).is_empty());
 	CHECK(filter->filter_indices_density(points, { Math::NaN, 1.0f }, valid_ids, 7).is_empty());
-	CHECK(filter->filter_indices_density(points, { 1.0f, Math::INF }, valid_ids, 7).is_empty());
+	CHECK(filter->filter_indices_density(points, { 1.0f, float(Math::INF) }, valid_ids, 7).is_empty());
 	CHECK(filter->filter_indices_density(points, { -0.01f, 1.0f }, valid_ids, 7).is_empty());
 	CHECK(filter->filter_indices_density(points, { 1.01f, 1.0f }, valid_ids, 7).is_empty());
 	CHECK(filter->filter_indices_density(points, valid_densities, valid_ids, -1).is_empty());

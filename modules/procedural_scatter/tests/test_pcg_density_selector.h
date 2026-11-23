@@ -82,7 +82,7 @@ TEST_CASE("[PCGDensitySelector] reject invalid inputs atomically") {
 	CHECK(selector->select_indices(values, { 7, 2147483648ll }, 0).is_empty());
 	CHECK(selector->select_indices({ 0.3f, Math::NaN }, ids).is_empty());
 	CHECK(selector->select_indices({ 0.3f, 1.1f }, ids).is_empty());
-	CHECK(selector->remap_densities({ 0.3f, Math::INF }).is_empty());
+	CHECK(selector->remap_densities({ 0.3f, float(Math::INF) }).is_empty());
 	CHECK(selector->remap_densities(values, 0.5, 0.5).is_empty());
 	CHECK(selector->remap_densities(values, 0.8, 0.2).is_empty());
 	CHECK(selector->remap_densities(values, 0, 1, 0, Math::NaN).is_empty());

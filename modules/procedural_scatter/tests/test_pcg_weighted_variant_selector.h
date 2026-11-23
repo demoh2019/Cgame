@@ -75,7 +75,7 @@ TEST_CASE("[PCGWeightedVariantSelector] invalid input rejected without partial o
 	CHECK(selector->choose_variants({ 4, -1 }, { 1.0f, 2.0f }).is_empty());
 	CHECK(selector->choose_variants({ 4, 2147483648ll }, { 1.0f }).is_empty());
 	CHECK(selector->choose_variants({ 4, 5 }, { 1.0f, Math::NaN }).is_empty());
-	CHECK(selector->choose_variants({ 4, 5 }, { 1.0f, Math::INF }).is_empty());
+	CHECK(selector->choose_variants({ 4, 5 }, { 1.0f, float(Math::INF) }).is_empty());
 	CHECK(selector->choose_variants({ 4, 5 }, { 1.0f, -1.0f }).is_empty());
 	CHECK(selector->choose_variants({ 4, 5 }, { 0.0f, 0.0f }).is_empty());
 	CHECK(selector->choose_variants({ 4, 5 }, { 1000001.0f }).is_empty());
