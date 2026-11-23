@@ -296,7 +296,7 @@ func _exit_tree() -> void:
 func _ready() -> void:
 	Engine.physics_ticks_per_second = 30
 	# Prefer the native Godot scheduler when the fork exposes it. Standard
-	# Godot builds retain the same pure GDScript behaviour automatically.
+	# Godot builds retain the same pure GDScript behavior automatically.
 	if EngineFeatures.has("FrameUpdateBudget"):
 		var native_budget: Object = EngineFeatures.make("FrameUpdateBudget")
 		if native_budget != null and native_budget.has_method("record_cost") \
@@ -2652,7 +2652,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_profiler.visible = not _profiler.visible
 		get_viewport().set_input_as_handled()
 		return
-	# Ctrl+Shift+F9: PCG debugging — crosses at every procedurally placed point, coloured by asset.
+	# Ctrl+Shift+F9: PCG debugging — crosses at every procedurally placed point, colored by asset.
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.shift_pressed \
 			and event.keycode == KEY_F9 and _pcg_dressing != null:
 		_pcg_dressing.set_debug_draw(not PcgWorldDressing.debug_draw)
