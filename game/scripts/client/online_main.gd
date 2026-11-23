@@ -1945,10 +1945,14 @@ func _process(delta: float) -> void:
 			rd, _adaptive_resolution.at_floor(), _adaptive_resolution.at_ceiling(), delta, gpu_ms)
 		var step_down: bool = quality_limit and _auto_quality.sample_frame(delta, gpu_ms)
 		# GPU memory pressure steps down too, before the driver starts paging textures.
-		if not step_down and _auto_quality.mode == "auto" and _vram_budget.sample(
-				Rendering.vram_used_bytes(), _auto_quality.level, delta):
-			_auto_quality.level -= 1
-			step_down = true
+		# Gate samples before *both* native and GDScript budget trackers:
+		# a frozen/loading frame and an unavailable VRAM reading are not pressure.
+		if not step_down and _auto_quality.mode == "auto":
+			var vram_used: float = Rendering.vram_used_bytes()
+			if GraphicsVramBudget.valid_sample(vram_used, delta) and \
+					_vram_budget.sample(vram_used, _auto_quality.level, delta):
+				_auto_quality.level -= 1
+				step_down = true
 		if step_down:
 			GraphicsQuality.set_level(_auto_quality.level, false)
 			_adaptive_resolution.configure(GraphicsQuality.level(),
