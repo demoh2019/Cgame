@@ -950,7 +950,7 @@ func _add_roadside_caches(cell: Vector2i, origin: Vector2, tier: int, nodes: Arr
 		# A quiet-looking find can turn into an encounter. Roll after the cache
 		# is placed so its position and the existing world RNG streams do not move.
 		if tier >= 2 and rng.randf() < 0.42:
-			var ambush: Vector2 = p + side * (4.0 if bank < 0.0 else -4.0)
+			var ambush: Vector2 = p + side * (4.0 if bank > 0.0 else -4.0)
 			var ambush_local: Vector2 = ambush - origin
 			if ambush_local.x >= 2.0 and ambush_local.y >= 2.0 and \
 					ambush_local.x < Defs.CHUNK_SIZE - 2.0 and ambush_local.y < Defs.CHUNK_SIZE - 2.0:
