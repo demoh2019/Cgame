@@ -93,6 +93,12 @@ func _city_layouts(t) -> void:
 			t.check(offset.length() <= radius, "a city lot stays in the surrounding site circle")
 		var streets: Array = CityLayout.streets(layout, radius, angle)
 		t.check(streets.size() >= 3, "%s has a local road network" % layout)
+		var safe_lots := 0
+		for lot in lots:
+			var offset: Vector2 = lot["offset"]
+			if CityLayout.street_distance(offset, streets) >= 6.82:
+				safe_lots += 1
+		t.check(safe_lots >= 14, "%s retains enough building lots clear of streets (%d)" % [layout, safe_lots])
 		for street in streets:
 			var path: PackedVector2Array = street
 			t.check(path.size() >= 3, "city streets have enough points for road painting")
