@@ -38,5 +38,5 @@ Use `game_facade/cgame_virtual_geometry_facade.gd` to call the native classes wi
 ## Limitations
 
 - No GPU path and no streaming; hierarchy building is single threaded and intended for offline or load-time use.
-- Simplification ignores normals, UVs and other attributes (positions only).
+- Hierarchy simplification currently uses positions only; UV seams and normals are not considered as **simplification costs**, so high-distortion source meshes may still need seam-aware simplification. However, `CgameClusterLOD.build_cut_arrays(source_arrays, hierarchy, cut)` now preserves all original per-vertex source arrays (UV, UV2, tangents, normals, vertex colors, skin weights and custom channels) when assembling a cut, by reusing global vertex IDs and replacing only the triangle index array. This is an indexed CPU LOD assembly path, not a GPU/Nanite streaming implementation.
 - The occlusion rasterizer is scalar C++ written so that compilers can auto-vectorize the row loops; there is no explicit SIMD or tile binning yet.
