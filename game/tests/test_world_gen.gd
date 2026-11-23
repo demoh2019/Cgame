@@ -2,6 +2,7 @@ extends RefCounted
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const StoneResources = preload("res://scripts/shared/stone_resources.gd")
 
 
 func run(t) -> void:
@@ -59,6 +60,8 @@ func run(t) -> void:
 	var ruins := 0
 	var zombies := 0
 	var min_spacing := 1000.0
+	var loose_pickups := 0
+	var modeled_boulders := 0
 	for cx in range(-10, 11):
 		for cz in range(-10, 11):
 			var data := a.chunk(Vector2i(cx, cz))
@@ -66,6 +69,17 @@ func run(t) -> void:
 			ruins += 1 if data["ruin"] else 0
 			zombies += data["spawns"].size()
 			for node in data["nodes"]:
+				if node.has("stone_model"):
+					var model_index: int = int(node["stone_model"])
+					t.check(model_index >= 0 and model_index < StoneResources.MODELS.size(),
+						"stone node selects a valid renderable model")
+					if str(node["kind"]) == "pebble":
+						loose_pickups += 1
+						t.eq(int(node["tier"]), 1, "hand-pickable stones are always tier 1")
+						t.check(not bool(node["blocks"]), "small stones cannot block movement")
+					elif str(node["kind"]) == "rock":
+						modeled_boulders += 1
+						t.check(bool(node["blocks"]), "minable boulders have collision")
 				tiers_seen[node["tier"]] = true
 				kinds_seen[node["kind"]] = true
 				t.check(node["tier"] >= 1 and node["tier"] <= Defs.MAX_TIER, "node tier in range")
@@ -74,6 +88,8 @@ func run(t) -> void:
 				# A node belongs to its own chunk.
 				t.eq(WorldGen.cell_of(node["x"], node["z"]), Vector2i(cx, cz), "node lies in its chunk")
 	t.check(total_nodes > 3000, "the world has plenty to gather (%d)" % total_nodes)
+	t.check(loose_pickups > 100, "seeded world includes pickable modeled stones (%d)" % loose_pickups)
+	t.check(modeled_boulders > 20, "seeded world includes mineable modeled rocks (%d)" % modeled_boulders)
 	t.check(tiers_seen.size() >= 3, "several tiers exist near the hub (%d)" % tiers_seen.size())
 	t.check(kinds_seen.has("tree") and kinds_seen.has("rock") and kinds_seen.has("bush"), "trees, rocks and bushes exist")
 	t.check(ruins > 8, "ruins exist (%d)" % ruins)
