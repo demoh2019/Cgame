@@ -97,7 +97,12 @@ static func build_material_preserving_cut(source_mesh: ArrayMesh,
 	if arrays.is_empty():
 		return null
 	var output := ArrayMesh.new()
-	output.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	# Mesh arrays do not encode custom attribute layouts. Preserve their
+	# format bits (and eight-bone/compression options) explicitly, otherwise
+	# a custom0/1/2/3 stream can be silently interpreted with the wrong stride.
+	var src_format: int = source_mesh.surface_get_format(surface)
+	var flags: int = src_format & (Mesh.ARRAY_FORMAT_CUSTOM_MASK 			| Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS | Mesh.ARRAY_FLAG_COMPRESS_ATTRIBUTES)
+	output.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, flags)
 	output.surface_set_material(0, source_mesh.surface_get_material(surface))
 	output.resource_name = source_mesh.resource_name + "_cluster_lod"
 	return output
