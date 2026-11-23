@@ -16,8 +16,8 @@ extends RefCounted
 ## CPU culling and fallback paths are covered by tests/test_meshlet_renderer.gd.
 ##
 ## Packed GPU layout (all little endian, std430 / std140 compatible):
-##   positions   vec4 per source vertex (xyz, 1.0)
-##   vertex_ids  uint per meshlet vertex slot: index into positions, meshlets concatenated
+##   positions   vec4 per vertex slot in each resident page (xyz, 1.0)
+##   vertex_ids  uint per meshlet vertex slot: absolute physical GPU slot vertex offset
 ##   triangles   uint per triangle: a | b << 8 | c << 16 (local indices into the meshlet vertex list)
 ##   descriptors 48 bytes per meshlet: uvec4 (vertex_offset, triangle_offset, vertex_count,
 ##               triangle_count), vec4 (center.xyz, radius), vec4 (cone axis.xyz, cone cutoff)
@@ -178,9 +178,9 @@ static func pack_meshlets(vertices: PackedVector3Array, meshlets: Array) -> Dict
 @warning_ignore("integer_division")
 static func pack_resident_page(vertices: PackedVector3Array, meshlets: Array,
 		page_id: int, slot_id: int) -> Dictionary:
-	var start: int = page_id * TASK_GROUP_SIZE
-	if page_id < 0 or slot_id < 0 or slot_id >= 256 or start >= meshlets.size():
+	if page_id < 0 or slot_id < 0 or slot_id >= 256 or page_id >= ceili(float(meshlets.size()) / float(TASK_GROUP_SIZE)):
 		return {"error": "invalid page or slot"}
+	var start: int = page_id * TASK_GROUP_SIZE
 	var positions := PackedByteArray()
 	positions.resize(PagePolicy.POSITIONS_BYTES)
 	var vertex_ids := PackedByteArray()
@@ -577,7 +577,7 @@ func _stream_gpu_pages(camera_position: Vector3) -> bool:
 	var wanted: PackedInt32Array = PagePolicy.wanted_pages(
 		_page_bounds, camera_position, model, _slot_pages.size(), _planes)
 	var transfers: Dictionary = PagePolicy.plan(
-		_slot_pages, wanted, maxi(max_page_uploads_per_frame, 0))
+		_slot_pages, wanted, maxi(max_page_uploads_per_frame, 1))
 	var uploads: Array = transfers["uploads"]
 	for item in uploads:
 		var slot: int = int(item["slot"])
@@ -634,6 +634,13 @@ func _ensure_gpu(color: RID, depth: RID) -> bool:
 		empty_descriptors.resize(maxi(slots * PagePolicy.DESCRIPTORS_BYTES, 16))
 		_buffers.append(_rd.storage_buffer_create(empty_descriptors.size(), empty_descriptors))
 		_frame_buffer = _rd.uniform_buffer_create(FRAME_DATA_SIZE)
+		for buffer in _buffers:
+			if not buffer.is_valid():
+				last_error = "GPU meshlet page buffer allocation failed"
+				return false
+		if not _frame_buffer.is_valid():
+			last_error = "GPU meshlet frame uniform allocation failed"
+			return false
 	if not _framebuffer.is_valid():
 		var attachments: Array[RID] = [color, depth]
 		_framebuffer = _rd.framebuffer_create(attachments)
