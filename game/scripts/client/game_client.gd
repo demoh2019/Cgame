@@ -577,7 +577,7 @@ func contract(action: String) -> void:
 
 
 func story(action: String) -> void:
-	if action == "listen" or action == "transmit":
+	if action in ["listen", "transmit", "decode", "seal", "broadcast"]:
 		net.c_story.rpc_id(1, action)
 
 

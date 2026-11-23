@@ -460,7 +460,10 @@ func _draw_top_strip(you: Dictionary, view: Vector2) -> void:
 func _draw_quest_card(you: Dictionary, view: Vector2) -> void:
 	var lines: Array = []
 	var story: Dictionary = you.get("story", {})
-	if not story.is_empty():
+	var story2: Dictionary = you.get("story2", {})
+	if not story2.is_empty() and int(story2.get("stage", 0)) > 0:
+		lines.append(["CHAPTER II — THE DEEP SIGNAL", str(story2.get("objective", ""))])
+	elif not story.is_empty():
 		lines.append(["CHAPTER I — BEACON SEVEN", str(story.get("objective", ""))])
 	var guide: String = FirstSteps.current_text()
 	if guide != "":
