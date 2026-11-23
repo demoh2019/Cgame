@@ -418,8 +418,6 @@ func city_plan(site: Dictionary) -> Dictionary:
 
 ## City buildings follow the seeded district plan, leaving actual room for painted streets.
 func _city_buildings(result: Dictionary, rng: RandomNumberGenerator, site: Dictionary, center: Vector2, taken: Array) -> void:
-	var layout: String = str(site["layout"])
-	var rotation: float = float(site["layout_rotation"])
 	var plan: Dictionary = city_plan(site)
 	var candidates: Array[Dictionary] = plan["lots"]
 	var street_index: Dictionary = plan["index"]
@@ -481,7 +479,8 @@ func _city_salvage(result: Dictionary, rng: RandomNumberGenerator, site: Diction
 		for group in ["structures", "crates", "props"]:
 			for item in result[group]:
 				var obstacle := Vector2(float(item["x"]), float(item["z"]))
-				if p.distance_squared_to(obstacle) < pow(float(item.get("radius", 0.6)) + 2.0, 2.0):
+				var reach: float = float(item.get("radius", 0.6)) + 2.0
+				if p.distance_squared_to(obstacle) < reach * reach:
 					occupied = true
 					break
 			if occupied:
