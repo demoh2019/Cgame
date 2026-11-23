@@ -199,7 +199,7 @@ func _build_graphics() -> void:
 
 ## Source-of-truth: AudioMix. The audio bus responds immediately, but mouse
 ## dragging does not write the config file dozens of times per second.
-func _set_audio_volume(bus: String, percent: float) -> void:
+func _set_audio_volume(percent: float, bus: String) -> void:
 	AudioMix.set_volume(bus, percent / 100.0, false)
 
 
