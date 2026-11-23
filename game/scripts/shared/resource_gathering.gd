@@ -6,7 +6,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const PROGRESS_EXPIRE_SECONDS := 45.0
 
 static func is_pickup(kind: String) -> bool:
-	return kind == "pebble" or kind == "branch"
+	return kind in ["pebble", "branch", "bush", "berry"]
 
 
 static func is_strike(kind: String) -> bool:
