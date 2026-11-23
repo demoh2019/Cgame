@@ -58,7 +58,10 @@ static func ensure_tangents(arrays: Array) -> bool:
 	surface.create_from(input_mesh, 0)
 	surface.generate_tangents()
 	var generated: Array = surface.commit_to_arrays()
-	if generated.size() != Mesh.ARRAY_MAX or 			generated[Mesh.ARRAY_VERTEX] != vertices or 			generated[Mesh.ARRAY_INDEX] != arrays[Mesh.ARRAY_INDEX]:
+	if (generated.size() != Mesh.ARRAY_MAX or
+			generated[Mesh.ARRAY_VERTEX] != vertices or
+			generated[Mesh.ARRAY_INDEX] != arrays[Mesh.ARRAY_INDEX]):
+
 		return false
 	var tangent_data: Variant = generated[Mesh.ARRAY_TANGENT]
 	if not (tangent_data is PackedFloat32Array):
@@ -91,7 +94,7 @@ static func transform_frame(arrays: Array, basis: Basis) -> bool:
 		arrays[Mesh.ARRAY_TANGENT] = null
 		return false
 	var determinant: float = basis.determinant()
-	if absf(determinant) < 0.000001:
+	if not is_finite(determinant) or absf(determinant) < 0.000001:
 		arrays[Mesh.ARRAY_TANGENT] = null
 		return false
 	var normal_basis: Basis = basis.inverse().transposed()
@@ -117,7 +120,7 @@ static func transform_frame(arrays: Array, basis: Basis) -> bool:
 		var normal: Vector3 = transformed[i]
 		# Gram-Schmidt: keep the mapped tangent orthogonal to the normal.
 		tangent -= normal * tangent.dot(normal)
-		if tangent.length_squared() <= 0.00000001:
+		if not tangent.is_finite() or not normal.is_finite() or tangent.length_squared() <= 0.00000001:
 			# Invalid source tangent frame must never create NaNs or flicker.
 			arrays[Mesh.ARRAY_TANGENT] = null
 			return false

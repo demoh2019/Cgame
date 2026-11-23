@@ -425,20 +425,20 @@ static func bake(path: String, node_name: String, kind: String, size: float, tex
 		texture = load(PACKS + texture_path) as Texture2D
 	for surface in source.mesh.get_surface_count():
 		var arrays: Array = source.mesh.surface_get_arrays(surface)
+		# Imported scenes can override materials per mesh instance.
+		var material: Material = source.get_surface_override_material(surface)
+		if material == null:
+			material = source.mesh.surface_get_material(surface)
+		# Generate MikkTSpace using original UVs, normals and model-space
+		# positions. Applying the scene transform first would rotate twice.
+		if texture == null and MeshPBR.needs_tangents(material):
+			MeshPBR.ensure_tangents(arrays)
 		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 		var moved := PackedVector3Array()
 		moved.resize(vertices.size())
 		for i in vertices.size():
 			moved[i] = ((transform * vertices[i]) + offset) * factor
 		arrays[Mesh.ARRAY_VERTEX] = moved
-		# Imported scenes can override materials per mesh instance.
-		var material: Material = source.get_surface_override_material(surface)
-		if material == null:
-			material = source.mesh.surface_get_material(surface)
-		# glTF and kit meshes sometimes contain UVs and normals but no tangents.
-		# Restore MikkTSpace before the nonuniform scene transform if needed.
-		if texture == null and MeshPBR.needs_tangents(material):
-			MeshPBR.ensure_tangents(arrays)
 		var tangent_frame_valid: bool = MeshPBR.transform_frame(arrays, transform.basis)
 		baked.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], MeshLOD.copy_lods(source.mesh, surface, world_scale))
 		if texture != null:
