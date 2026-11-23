@@ -129,6 +129,7 @@ private:
 	void _free_collision(Chunk &r_chunk);
 	void _ensure_mesh(Chunk &r_chunk, int p_lod);
 	void _ensure_collision(Chunk &r_chunk);
+	void _invalidate_region(const Rect2i &p_region, bool p_geometry_changed);
 	void _update_transforms();
 	void _update_chunks(bool p_ignore_mesh_budget = false);
 	bool _get_viewer_position(Vector3 &r_position) const;
