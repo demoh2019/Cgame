@@ -535,7 +535,7 @@ func create_multimesh_instance(transforms: Array[Transform3D]) -> MultiMeshInsta
 ## Called from the CompositorEffect on the render thread. Draws all meshlets into the scene
 ## color + depth buffers after the opaque pass.
 func record_draw(render_data: RenderData) -> void:
-	if _packed.is_empty() or _gpu_failed or force_fallback:
+	if _packed.is_empty() or _page_bounds.is_empty() or _gpu_failed or force_fallback:
 		return
 	var rd: RenderingDevice = RenderingServer.get_rendering_device()
 	if rd == null or not rd.has_feature(FEATURE_MESH_SHADER as RenderingDevice.Features):
@@ -551,14 +551,56 @@ func record_draw(render_data: RenderData) -> void:
 		_gpu_failed = true
 		return
 	var cam: Transform3D = scene_data.get_cam_transform()
+	if not _stream_gpu_pages(cam.origin):
+		_gpu_failed = true
+		return
 	var view_proj: Projection = scene_data.get_cam_projection() * Projection(cam.affine_inverse())
-	var frame: PackedByteArray = pack_frame_data(view_proj, model, _planes, cam.origin, meshlet_count, cull_flags)
+	# Task ids address fixed resident slots, not original CPU meshlet ids.
+	var frame: PackedByteArray = pack_frame_data(view_proj, model, _planes, cam.origin,
+		_slot_pages.size() * TASK_GROUP_SIZE, cull_flags)
 	rd.buffer_update(_frame_buffer, 0, frame.size(), frame)
 	var draw_list: int = rd.draw_list_begin(_framebuffer, RenderingDevice.DRAW_DEFAULT_ALL)
 	rd.draw_list_bind_render_pipeline(draw_list, _pipeline)
 	rd.draw_list_bind_uniform_set(draw_list, _uniform_set, 0)
-	rd.call("draw_list_draw_mesh_tasks", draw_list, ceili(float(meshlet_count) / float(TASK_GROUP_SIZE)), 1, 1)
+	rd.call("draw_list_draw_mesh_tasks", draw_list, _slot_pages.size(), 1, 1)
 	rd.draw_list_end()
+
+
+## Refill at most max_page_uploads_per_frame fixed GPU slots. All four
+## payload buffers remain allocated until release; switching logical pages
+## changes only these small slot regions, never the whole meshlet hierarchy.
+## This runs on the rendering thread before draw_list_begin; no readback.
+func _stream_gpu_pages(camera_position: Vector3) -> bool:
+	last_page_uploads = 0
+	if _slot_pages.is_empty():
+		return true
+	var wanted: PackedInt32Array = PagePolicy.wanted_pages(
+		_page_bounds, camera_position, model, _slot_pages.size())
+	var transfers: Dictionary = PagePolicy.plan(
+		_slot_pages, wanted, maxi(max_page_uploads_per_frame, 0))
+	var uploads: Array = transfers["uploads"]
+	for item in uploads:
+		var slot: int = int(item["slot"])
+		var page: int = int(item["page"])
+		var packed: Dictionary = pack_resident_page(_vertices, _meshlets, page, slot)
+		if String(packed.get("error", "")) != "":
+			last_error = "meshlet page packing failed: " + String(packed["error"])
+			return false
+		var streams: Array = [
+			[packed["positions"], PagePolicy.POSITIONS_BYTES],
+			[packed["vertex_ids"], PagePolicy.VERTEX_IDS_BYTES],
+			[packed["triangles"], PagePolicy.TRIANGLES_BYTES],
+			[packed["descriptors"], PagePolicy.DESCRIPTORS_BYTES],
+		]
+		for index in 4:
+			var bytes: PackedByteArray = streams[index][0]
+			var stride: int = int(streams[index][1])
+			if _rd.buffer_update(_buffers[index], slot * stride, bytes.size(), bytes) != OK:
+				last_error = "uploading meshlet page %d to GPU slot %d failed" % [page, slot]
+				return false
+		last_page_uploads += 1
+	_slot_pages = transfers["slots"]
+	return true
 
 
 func _storage(binding: int, rid: RID) -> RDUniform:
@@ -580,10 +622,17 @@ func _ensure_gpu(color: RID, depth: RID) -> bool:
 	if not _shader.is_valid() and not _create_shader():
 		return false
 	if _buffers.is_empty():
-		_buffers.append(_rd.storage_buffer_create(maxi(_packed["positions"].size(), 16), _packed["positions"]))
-		_buffers.append(_rd.storage_buffer_create(maxi(_packed["vertex_ids"].size(), 16), _packed["vertex_ids"]))
-		_buffers.append(_rd.storage_buffer_create(maxi(_packed["triangles"].size(), 16), _packed["triangles"]))
-		_buffers.append(_rd.storage_buffer_create(maxi(_packed["descriptors"].size(), 16), _packed["descriptors"]))
+		# Bound the allocations by resident slots, not total scene meshlet count.
+		# Pages are uploaded on demand, and only resident payload is on GPU.
+		var slots: int = mini(_page_bounds.size(), clampi(max_resident_pages, 1, 256))
+		_slot_pages.resize(slots)
+		_slot_pages.fill(-1)
+		_buffers.append(_rd.storage_buffer_create(maxi(slots * PagePolicy.POSITIONS_BYTES, 16)))
+		_buffers.append(_rd.storage_buffer_create(maxi(slots * PagePolicy.VERTEX_IDS_BYTES, 16)))
+		_buffers.append(_rd.storage_buffer_create(maxi(slots * PagePolicy.TRIANGLES_BYTES, 16)))
+		var empty_descriptors := PackedByteArray()
+		empty_descriptors.resize(maxi(slots * PagePolicy.DESCRIPTORS_BYTES, 16))
+		_buffers.append(_rd.storage_buffer_create(empty_descriptors.size(), empty_descriptors))
 		_frame_buffer = _rd.uniform_buffer_create(FRAME_DATA_SIZE)
 	if not _framebuffer.is_valid():
 		var attachments: Array[RID] = [color, depth]
@@ -675,4 +724,6 @@ func release() -> void:
 	_shader = RID()
 	_frame_buffer = RID()
 	_buffers.clear()
+	_slot_pages.clear()
+	last_page_uploads = 0
 	_gpu_failed = false
