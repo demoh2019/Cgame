@@ -32,6 +32,7 @@
 
 #include "cgame_cluster_lod.h"
 #include "cgame_meshlets.h"
+#include "cgame_meshlet_pages.h"
 #include "cgame_occlusion_raster.h"
 
 #include "core/object/class_db.h"
@@ -39,6 +40,7 @@
 void initialize_cgame_virtual_geometry_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
 		GDREGISTER_CLASS(CgameMeshlets);
+		GDREGISTER_CLASS(CgameMeshletPages);
 		GDREGISTER_CLASS(CgameClusterLOD);
 		GDREGISTER_CLASS(CgameOcclusionRaster);
 	}
