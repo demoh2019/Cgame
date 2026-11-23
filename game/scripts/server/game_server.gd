@@ -109,6 +109,7 @@ const WorldEncounterDirector = preload("res://scripts/shared/world_encounter_dir
 const PlayerPresenceGrid = preload("res://scripts/server/player_presence_grid.gd")
 const PackNeighborSelection = preload("res://scripts/shared/pack_neighbor_selection.gd")
 const HousePieces = preload("res://scripts/shared/house_pieces.gd")
+const ZombieWallAttackGrid = preload("res://scripts/shared/zombie_wall_attack_grid.gd")
 const AntisepticEdge = preload("res://scripts/shared/antiseptic_edge.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const GearDurability = preload("res://scripts/shared/gear_durability.gd")
@@ -484,6 +485,10 @@ var next_ruin_ambush_at: float = 0.0 # Global anti-spam cooldown; no client time
 var caravan_escort_progress: Dictionary = {} # Session-only verified co-travel for live parties.
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {}
+# Only actual infected wall damage creates a temporary private base warning.
+var _wall_infected_attack_until: Dictionary = {}
+const WALL_ATTACK_WARNING_SECONDS := 12.0
+var last_zombie_wall_query_stats: Dictionary = {"queries": 0, "matches": 0, "walls": 0}
 var siege_charges: Dictionary = {} # Armed, paid PvP devices: transient world state only.
 var siege_braces: Dictionary = {} # Temporary one-hit barricade shields; never saved.
 var siege_last_by_wall: Dictionary = {} # Session timers only; no character persistence.
@@ -7451,6 +7456,10 @@ func tick(delta: float) -> void:
 	_tick_recalls()
 	if tick_count % Defs.TICK_RATE == 0:
 		_tick_barricade_upkeep(float(Defs.TICK_RATE) * delta)
+		# Prevent destroyed/replaced wall IDs from accumulating in session state.
+		for wall_id in _wall_infected_attack_until.keys():
+			if not barricades.has(wall_id) or time >= float(_wall_infected_attack_until[wall_id]):
+				_wall_infected_attack_until.erase(wall_id)
 	_tick_world(delta)
 
 
@@ -9002,6 +9011,11 @@ func _tick_zombies(delta: float) -> void:
 	var eqs_cpu_us: int = 0
 	var eqs_scored_candidates: int = 0
 	var eqs_timed_steps: int = 0
+	# Construct once only if a real chase reaches a stuck wall. The same
+	# immutable grid serves all infected in this server tick.
+	var wall_attack_index: Dictionary = {}
+	var wall_attack_queries: int = 0
+	var wall_attack_matches: int = 0
 	for i in range(ai_cohort.size()):
 		var zombie = ai_cohort[i]
 		zombie.flank_reservations = _flank_slot_reservations
@@ -9064,14 +9078,22 @@ func _tick_zombies(delta: float) -> void:
 				var here := Vector2(zombie.position.x, zombie.position.z)
 				var toward := Vector2(chase_target.position.x, chase_target.position.z) - here
 				if toward.length_squared() > 0.01:
-					for wall_id in barricades.keys():
-						var wall: Dictionary = barricades[wall_id]
-						if str(wall.get("piece", "")) != "" and not HousePieces.blocks(str(wall["piece"])):
-							continue # Floors and roofs are not in the way.
-						var offset := Vector2(float(wall["x"]), float(wall["z"])) - here
-						if offset.length() <= Structures.ZOMBIE_REACH and offset.dot(toward) > 0.0:
-							damage_barricade(wall_id, float(zombie.data["damage"]) * delta * 2.0)
-							break
+					if wall_attack_index.is_empty():
+						wall_attack_index = ZombieWallAttackGrid.build(barricades)
+					var nearby_walls: Array[int] = ZombieWallAttackGrid.candidates(
+						wall_attack_index, here, toward, Structures.ZOMBIE_REACH)
+					wall_attack_queries += 1
+					wall_attack_matches += nearby_walls.size()
+					for wall_id in nearby_walls:
+						# An earlier infected may have demolished a wall during
+						# this tick; never attack the stale indexed ID.
+						if not barricades.has(wall_id):
+							continue
+						var damage: float = float(zombie.data["damage"]) * delta * 2.0
+						if damage > 0.0 and is_finite(damage):
+							_wall_infected_attack_until[wall_id] = time + WALL_ATTACK_WARNING_SECONDS
+							damage_barricade(wall_id, damage)
+						break
 		if result.has("spit_warning"):
 			events.append({"type": "spit_warning", "id": zombie.id,
 				"x": float(result["x"]), "z": float(result["z"]),
@@ -9165,6 +9187,8 @@ func _tick_zombies(delta: float) -> void:
 				events.append({"type": "hit", "kind": "player", "id": victim.id, "damage": damage, "by": -zombie.id})
 				if not _alive(victim):
 					_on_player_death(victim, -zombie.id)
+	last_zombie_wall_query_stats = {"queries": wall_attack_queries,
+		"matches": wall_attack_matches, "walls": barricades.size()}
 	last_ai_schedule_stats = {
 		"enabled": stagger_decisions,
 		"population": zombies.size(),
@@ -10183,12 +10207,15 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			nearby_ember_pools.append(EmberFlask.public_state(field, time))
 	var nearby_barricades: Array = []
 	var owner_upkeep_at_risk: int = 0
+	var owner_upkeep_under_attack: int = 0
 	var owner_upkeep_damaged: int = 0
 	var owner_upkeep_soonest: float = INF
 	for wall in barricades.values():
 		# Reuse this existing interest scan: reminders are derived from the
 		# full authoritative wall set and sent only to its owning survivor.
 		if Structures.can_manage(wall, player.id, player.user_id):
+			if float(_wall_infected_attack_until.get(int(wall["id"]), -INF)) > time:
+				owner_upkeep_under_attack += 1
 			if WallUpkeepIndex.needs_attention(wall, time):
 				owner_upkeep_at_risk += 1
 				owner_upkeep_soonest = minf(owner_upkeep_soonest,
@@ -10305,6 +10332,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"outposts": siege_contracts.public_state(territory.public_state(time, players, parties), time),
 		"you": {
 			"base_upkeep": {"at_risk": owner_upkeep_at_risk, "damaged": owner_upkeep_damaged,
+				"under_attack": owner_upkeep_under_attack,
 				"soonest_seconds": owner_upkeep_soonest if owner_upkeep_at_risk > 0 else 0.0},
 			"party": _party_state_for(peer_id),
 			"raid_aggro": raid_aggro_state,

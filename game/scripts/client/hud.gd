@@ -3818,6 +3818,9 @@ func _process(_delta: float) -> void:
 	# These counts come from the authenticated owner's wall set, including
 	# distant bases. Never infer ownership from the public wall snapshots.
 	var base_upkeep: Dictionary = client.you.get("base_upkeep", {})
+	var under_attack: int = int(base_upkeep.get("under_attack", 0))
+	if under_attack > 0:
+		_info_label.text += "\nBASE UNDER ATTACK: infected are damaging %d owned structure(s)!" % under_attack
 	var upkeep_at_risk: int = int(base_upkeep.get("at_risk", 0))
 	if upkeep_at_risk > 0:
 		var minutes_remaining: int = ceili(maxf(0.0,
