@@ -14,7 +14,10 @@ static func candidates(bags: Dictionary, at: Vector3, player, now: float) -> Arr
 	if player == null or not at.is_finite() or not is_finite(now):
 		return result
 	var origin := Vector2(at.x, at.z)
-	var ordered: Array[Dictionary] = []
+	# The server only claims up to five bags. Maintain a bounded nearest list
+	# instead of sorting the entire visible loot population on every command.
+	var nearest: Array[Dictionary] = []
+	var max_distance_sq: float = RADIUS * RADIUS
 	for key in bags.keys():
 		var value: Variant = bags[key]
 		if not (key is int) or not (value is Dictionary):
@@ -38,22 +41,25 @@ static func candidates(bags: Dictionary, at: Vector3, player, now: float) -> Arr
 				not is_finite(x) or not is_finite(z):
 			continue
 		var distance: float = origin.distance_squared_to(Vector2(x, z))
-		if distance > RADIUS * RADIUS:
+		if distance > max_distance_sq:
 			continue
-		# Keep only the closest five bags, rather than sorting every world bag.
-		# Exact distance and stable ID ties form a transitive ordering.
-		var insert_at: int = ordered.size()
-		for i in ordered.size():
-			var existing: Dictionary = ordered[i]
-			var existing_distance: float = float(existing["distance"])
-			if distance < existing_distance or (distance == existing_distance and int(key) < int(existing["id"])):
-				insert_at = i
+		var id: int = int(key)
+		var insert_at: int = nearest.size()
+		# Same deterministic ordering as the full sort: distance first, then
+		# server-generated bag ID when positions are approximately tied.
+		while insert_at > 0:
+			var previous: Dictionary = nearest[insert_at - 1]
+			var previous_distance: float = float(previous["distance"])
+			if is_equal_approx(distance, previous_distance):
+				if id >= int(previous["id"]):
+					break
+			elif distance >= previous_distance:
 				break
-		if insert_at >= MAX_BAGS:
-			continue
-		ordered.insert(insert_at, {"id": int(key), "distance": distance})
-		if ordered.size() > MAX_BAGS:
-			ordered.pop_back()
-	for entry in ordered:
+			insert_at -= 1
+		if insert_at < MAX_BAGS:
+			nearest.insert(insert_at, {"id": id, "distance": distance})
+			if nearest.size() > MAX_BAGS:
+				nearest.pop_back()
+	for entry in nearest:
 		result.append(int(entry["id"]))
 	return result
