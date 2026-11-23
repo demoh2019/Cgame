@@ -5,6 +5,7 @@ extends Node3D
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const StoneResources = preload("res://scripts/shared/stone_resources.gd")
 const GroundPlants = preload("res://scripts/client/ground_plants.gd")
 const TerrainRvt = preload("res://scripts/client/terrain_rvt.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
@@ -975,6 +976,19 @@ func _tree_key(node: Dictionary) -> String:
 ## Mesh of a group. Kinds with a number ("tree:3", "building:5") are variants; the catalog picks the model installed for it,
 ## and each branch falls back to the Kenney or procedural models when its packs are missing.
 func _mesh_for(kind: String) -> Mesh:
+	if kind.begins_with("stone:"):
+		var model_index: int = int(kind.get_slice(":", 1))
+		if model_index >= 0 and model_index < StoneResources.MODELS.size():
+			var entry: Dictionary = StoneResources.MODELS[model_index]
+			var model: Mesh = null
+			if entry.has("nature"):
+				if _use_nature:
+					model = Assets.nature_mesh(str(entry["nature"]))
+			else:
+				model = ModelCatalog.entry_mesh(entry)
+			if model != null:
+				return model
+		return Meshes.get_mesh("rock")
 	if _use_nature and kind.begins_with("tree:") and not kind.substr(5).is_valid_int():
 		var tree_id: String = kind.substr(5)
 		if tree_id.begins_with("painted:"):
@@ -1070,6 +1084,8 @@ func _size_for(kind: String, node: Dictionary, rng: RandomNumberGenerator) -> fl
 	if kind.begins_with("monument:"):
 		return 1.0 if ModelCatalog.monument(int(kind.get_slice(":", 1))) != null else 3.0
 	match base:
+		"stone":
+			return float(node.get("scale", 1.0))
 		"tree":
 			if _use_nature:
 				# Mostly mature trees, a few saplings and now and then an old giant that towers over the canopy: the
@@ -1146,7 +1162,9 @@ func _build_objects(data: Dictionary) -> void:
 	for node in data["nodes"]:
 		var kind: String = node["kind"]
 		var variant: int = WorldGen.mix(int(node["id"]), 3, 5)
-		if kind == "tree":
+		if node.has("stone_model"):
+			kind = "stone:%d" % int(node["stone_model"])
+		elif kind == "tree":
 			kind = _tree_key(node) if _use_nature else "tree:%d" % (variant % tree_variants)
 		elif kind == "rock" and (_use_nature or rock_variants > Assets.ROCK_FILES.size() or ModelCatalog.has_scanned_rocks()):
 			kind = "rock:%d" % (variant % rock_variants)
@@ -1195,7 +1213,7 @@ func _build_objects(data: Dictionary) -> void:
 			# Keep the original tier tint exactly as before; submit the
 			# complete group only after every resource slot is prepared.
 			var tier: int = node.get("tier", 1)
-			if kind.begins_with("rock") or kind.begins_with("ore"):
+			if kind.begins_with("rock") or kind.begins_with("ore") or kind.begins_with("stone:"):
 				tints.append(Color.WHITE.lerp(Color(0.8, 0.85, 1.0), (tier - 1) * 0.2))
 			else:
 				tints.append(Color.WHITE.darkened((tier - 1) * 0.07) if kind.begins_with("tree:") else Color.WHITE)
@@ -1900,8 +1918,12 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary)
 	_decor_next = 0
 	if _use_nature:
 		for entry in DECOR:
+			if str(entry["file"]).begins_with("Pebble"):
+				continue # Replaced by server-authoritative pickup stone instances.
 			_decor_tasks.append({"type": "nature", "entry": entry})
 	for entry in ModelCatalog.available("decor", ModelCatalog.DECOR_EXTRA):
+		if StoneResources.is_loose_stone_entry(entry):
+			continue # No inert stone meshes; all loose stones are resource nodes.
 		_decor_tasks.append({"type": "extra", "entry": entry})
 	if not _decor_tasks.is_empty():
 		_decor_pending.append(weakref(self))
