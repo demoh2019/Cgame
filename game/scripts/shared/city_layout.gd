@@ -90,15 +90,19 @@ static func building_lots(seed: int, layout: String, radius: float, rotation: fl
 					var warp: float = 0.06 * sin(theta * 3.0) + 0.04 * cos(theta * 5.0)
 					candidates.append(Vector2.from_angle(theta) * radius * (base + warp))
 		"linear":
-			for i in 8:
-				for row in [-2, -1, 1, 2]:
-					candidates.append(Vector2((float(i) - 3.5) * radius * 0.18,
-							float(row) * radius * 0.14))
+			# Two building rows behind three parallel streets; keep houses clear of cross-roads.
+			for i in 10:
+				for row in [-1, 1]:
+					candidates.append(Vector2((float(i) - 4.5) * radius * 0.16,
+							float(row) * radius * 0.255))
 		"triangular":
-			for row in 7:
-				var y: float = radius * (-0.65 + float(row) * 0.17)
-				for column in range(-4, 5):
-					candidates.append(Vector2(float(column) * radius * 0.15, y))
+			# Dense staggered candidates compensate for the narrowing northern corner.
+			# The caller uses its regular minimum spacing to select the actual buildings.
+			for row in 14:
+				var y: float = radius * (-0.70 + float(row) * 0.09)
+				for column in range(-8, 9):
+					var x: float = radius * (float(column) * 0.10 + (0.05 if row % 2 == 1 else 0.0))
+					candidates.append(Vector2(x, y))
 		"crescent":
 			for ring in 3:
 				var count: int = int([12, 20, 28][ring])
@@ -165,7 +169,7 @@ static func streets(layout: String, radius: float, rotation: float) -> Array:
 				var direction: Vector2 = Vector2.from_angle(TAU * float(side) / 5.0)
 				result.append(_path([Vector2.ZERO, direction * radius * 0.48], rotation))
 		"linear":
-			for line in [-0.21, 0.0, 0.21]:
+			for line in [-0.12, 0.0, 0.12]:
 				var y: float = float(line) * radius
 				result.append(_path([Vector2(-radius * 0.78, y), Vector2(radius * 0.78, y)], rotation))
 			for x in [-0.45, 0.0, 0.45]:
