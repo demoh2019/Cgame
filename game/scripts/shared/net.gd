@@ -835,8 +835,8 @@ func c_contract(action: String) -> void:
 	if _allowed(peer):
 		s_result.rpc_id(peer, "contract", sim.cmd_contract(peer, str(action)))
 
-## The client chooses only listen/transmit; the server owns every story
-## milestone and refuses all invented stage, kill, reward or cache values.
+## The client chooses only a chapter radio action; the server owns every
+## stage, branch, evidence check and reward.
 @rpc("any_peer", "reliable")
 func c_story(action: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
@@ -1474,7 +1474,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"story", "story2", "site_discovered", "caravan_escort_paid", "caravan_defended", "recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "party_flank", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "barricade_shot", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "parried", "stagger_finisher", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
+		"story", "story2", "story3", "site_discovered", "caravan_escort_paid", "caravan_defended", "recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "party_flank", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "barricade_shot", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "parried", "stagger_finisher", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
 			return event.get("peer", -1) == peer
 		"camp_alarm":
 			# A former ally, distant player, enemy, or recycled peer ID
