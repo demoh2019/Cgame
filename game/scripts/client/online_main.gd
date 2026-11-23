@@ -72,6 +72,7 @@ const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const GraphicsTextureStreaming = preload("res://scripts/client/graphics_texture_streaming.gd")
+const TerrainLivePatch = preload("res://scripts/client/terrain_live_patch.gd")
 const ObjectPopulationProfiler = preload("res://scripts/client/object_population_profiler.gd")
 const AmbientTickBudget = preload("res://scripts/client/ambient_tick_budget.gd")
 const AMBIENT_CPU_BUDGET_US := [900, 1500, 2500, 4000] # Quality tiers, main-thread cosmetics only.
@@ -2583,6 +2584,22 @@ func _update_first_person_mouse() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# P1 large-world terrain editor validation: manually sculpt a small visual
+	# patch of the actually streamed ChunkedTerrain3D under the player. Debug
+	# only; collision is disabled here and server ground/AI are authoritative.
+	# Ctrl+Shift+F9 is consumed before the existing F9 smoke-charge action.
+	if OS.is_debug_build() and event is InputEventKey and event.pressed and \
+			not event.echo and event.ctrl_pressed and event.shift_pressed and \
+			event.keycode == KEY_F9:
+		var sculpted := false
+		if client != null and client.welcomed and client.you.has("x"):
+			sculpted = TerrainLivePatch.apply_to_streamed_world(
+				get_tree(), client.display_position())
+		if hud != null:
+			hud.say("Terrain patch: edited the current streamed tile." if sculpted else
+				"Terrain patch unavailable (native debug engine or surface required).")
+		get_viewport().set_input_as_handled()
+		return
 	# Unified perf panel (UE stat unit / Insights live view): Ctrl+Shift+F3 toggles,
 	# Ctrl+Shift+F4 cycles compact/full/graphs. Consumed before the gameplay F-keys.
 	if _perf != null and event is InputEventKey and event.pressed and not event.echo \
