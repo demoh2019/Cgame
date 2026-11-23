@@ -48,3 +48,31 @@ static func aimed_at(player_pos: Vector3, node: Dictionary, direction: Vector2, 
 	if offset.length() > reach + margin:
 		return false
 	return offset.length() <= 0.8 + margin or offset.normalized().dot(direction.normalized()) >= 0.35
+
+
+## Weak spots rotate around a node after each confirmed hit. The position is
+## reproducible from its stable world id + strike count; the client never
+## supplies coordinates, damage or bonus values to the server.
+static func weakspot_position(node: Dictionary, completed_hits: int) -> Vector3:
+	var id: int = int(node.get("id", 0))
+	var index: int = maxi(0, completed_hits)
+	var angle: float = deg_to_rad(float(posmod(id * 37 + index * 107, 360)))
+	var kind: String = str(node.get("kind", ""))
+	var radius: float = clampf(float(node.get("radius", 0.5)) * (0.6 if kind == "tree" else 0.72), 0.22, 1.1)
+	var height: float = 1.05 if kind == "tree" else clampf(float(node.get("radius", 0.6)) * 0.85, 0.38, 1.2)
+	return Vector3(float(node.get("x", 0.0)) + cos(angle) * radius,
+		float(node.get("y", 0.0)) + height,
+		float(node.get("z", 0.0)) + sin(angle) * radius)
+
+
+## The extra resource goes only to a real, aimed, in-range hit. This check
+## derives the target from the server's own progress, not a client hit flag.
+static func precise_strike(player_pos: Vector3, node: Dictionary,
+		direction: Vector2, completed_hits: int) -> bool:
+	if not aimed_at(player_pos, node, direction):
+		return false
+	var target: Vector3 = weakspot_position(node, completed_hits)
+	var to_target := Vector2(target.x - player_pos.x, target.z - player_pos.z)
+	if not to_target.is_finite() or to_target.length_squared() < 0.01:
+		return false
+	return to_target.normalized().dot(direction.normalized()) >= 0.985

@@ -47,6 +47,7 @@ var ember_pools: Dictionary = {} # Replicated server-owned burning ground.
 var outposts: Array = [] # Public server-controlled PvP objectives.
 var bags: Dictionary = {}
 var depleted: Dictionary = {}
+var resource_hits: Dictionary = {} # Server-verified nearby node id -> completed strikes.
 var crates_used: Dictionary = {}
 var world_state_revision: int = Time.get_ticks_usec() # Bumped only when depleted/crates_used really change, so views skip per-frame rescans.
 var server_time: float = 0.0
@@ -91,6 +92,12 @@ func active_supply_beacon() -> Dictionary:
 
 func on_events(list: Array) -> void:
 	for event in list:
+		if str(event.get("type", "")) == "gathered" and bool(event.get("strike", false)):
+			var node_id: int = int(event.get("node", -1))
+			if bool(event.get("final", false)):
+				resource_hits.erase(node_id)
+			else:
+				resource_hits[node_id] = int(event.get("hit", 0))
 		if str(event.get("type", "")) == "party_supply_request":
 			var seen: Dictionary = PartySupplyBeacon.read(
 				event, peer_id, you.get("party", {}), server_time)
@@ -174,6 +181,12 @@ func on_snapshot(snapshot: Dictionary) -> void:
 				world.add_structure_blockers(id, HousePieces.blockers_of(entity))
 			else:
 				world.add_dynamic_blocker(id, float(entity["x"]), float(entity["z"]), 0.85)
+	var next_resource_hits: Dictionary = {}
+	for entry in snapshot.get("resource_hits", []):
+		next_resource_hits[int(entry["id"])] = int(entry["hits"])
+	if resource_hits != next_resource_hits:
+		world_state_revision += 1
+	resource_hits = next_resource_hits
 	var next_depleted: Dictionary = {}
 	for id in snapshot["depleted"]:
 		next_depleted[id] = true
@@ -864,7 +877,7 @@ func nearest_node(point: Vector3, radius: float) -> Dictionary:
 
 
 ## Select a mineable node in front of the player's actual swing, ignoring ground pickups.
-func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Defs.REACH) -> Dictionary:
+func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Defs.REACH + 0.5) -> Dictionary:
 	var best: Dictionary = {}
 	var best_distance: float = radius
 	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
