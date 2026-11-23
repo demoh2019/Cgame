@@ -1302,7 +1302,7 @@ func _spawn_effects(event: Dictionary) -> void:
 				chips = Color(0.55, 0.38, 0.2)
 			elif item.begins_with("stone") or item.begins_with("ore"):
 				chips = Color(0.6, 0.6, 0.62)
-			effects.gathered(here, chips)
+			effects.gathered(at, chips)
 		"crate":
 			effects.loot(here)
 		"skill_up":
@@ -1311,6 +1311,20 @@ func _spawn_effects(event: Dictionary) -> void:
 
 func _on_skill_event(event: Dictionary) -> void:
 	_spawn_effects(event)
+	if event["type"] == "gathered":
+		var gatherer: int = int(event.get("peer", -1))
+		if gatherer == client.peer_id and int(event.get("amount", 0)) > 0:
+			hud.say("+%d %s" % [int(event["amount"]),
+				str(Defs.item(str(event.get("item", ""))).get("name", event.get("item", "")))])
+		if bool(event.get("strike", false)):
+			var source: Dictionary = client.node_by_id(int(event.get("node", -1)),
+				Vector3(float(event.get("x", client.predicted.x)), 0.0,
+					float(event.get("z", client.predicted.z))))
+			var clip: String = "TreeChopping_Loop" if str(source.get("kind", "")) == "tree" else "Farm_Harvest"
+			if gatherer == client.peer_id and avatar_model != null:
+				avatar_model.play_action(clip)
+			elif gatherer != client.peer_id:
+				entities.play_action_on("player", gatherer, clip)
 	if event["type"] == "attack" and avatar_model != null:
 		# Everyone's swings and shots: this player's own model, or the one drawn for that player.
 		if int(event.get("peer", -1)) == client.peer_id:
