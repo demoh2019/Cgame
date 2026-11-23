@@ -879,6 +879,30 @@ func nearest_node(point: Vector3, radius: float) -> Dictionary:
 	return best
 
 
+## Holding interact collects loose stones and fallen sticks one at a time.
+## Exclusions prevent duplicate RPCs while the server's depletion snapshot is
+## still in transit. Bushes/berries retain intentional one-press gathering.
+func nearest_ground_pickup(point: Vector3, radius: float,
+		pending: Dictionary = {}) -> Dictionary:
+	var closest: Dictionary = {}
+	if world == null or not point.is_finite():
+		return closest
+	var best_distance: float = radius
+	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			for node in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["nodes"]:
+				if str(node["kind"]) not in ["pebble", "branch"]:
+					continue
+				if depleted.has(node["id"]) or pending.has(node["id"]):
+					continue
+				var distance: float = Vector2(float(node["x"]) - point.x,
+					float(node["z"]) - point.z).length()
+				if distance < best_distance:
+					best_distance = distance
+					closest = node
+	return closest
+
 ## Select a mineable node in front of the player's actual swing, ignoring ground pickups.
 func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Defs.REACH + 0.5) -> Dictionary:
 	var best: Dictionary = {}
