@@ -2367,7 +2367,13 @@ func _update_prompt() -> void:
 	var p: Vector3 = client.predicted
 	var loot: Dictionary = client.nearest_loot(p, Defs.REACH)
 	var node: Dictionary = client.nearest_node(p, Defs.REACH)
-	_update_resource_weakspot(node)
+	# A pickup closer than the tree must not hide the tree's weak spot.
+	# Scan a forward-facing candidate 8x/s instead of scanning every frame.
+	var now_ms: int = Time.get_ticks_msec()
+	if now_ms >= _resource_marker_rescan_at:
+		_resource_marker_rescan_at = now_ms + 125
+		_resource_marker_target = client.nearest_strike_node(p, _aim_direction())
+	_update_resource_weakspot(_resource_marker_target)
 	var below: bool = Dungeon.is_underground(p.x)
 	if below and Dungeon.at_stairs(p.x, p.z):
 		text = "[E] Climb the stairs back to the surface"
