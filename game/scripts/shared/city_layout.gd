@@ -163,7 +163,7 @@ static func _ring(rx: float, ry: float, rotation: float) -> PackedVector2Array:
 	return _path(points, rotation)
 
 
-static func _path(points: Array[Vector2], rotation: float) -> PackedVector2Array:
+static func _path(points: Array, rotation: float) -> PackedVector2Array:
 	var result := PackedVector2Array()
 	for i in points.size() - 1:
 		var a: Vector2 = points[i]
