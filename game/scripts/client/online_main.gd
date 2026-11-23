@@ -285,6 +285,9 @@ var _demo_frames := 0 # Frames since the first snapshot arrived.
 
 
 func _exit_tree() -> void:
+	if _meshlet_page_probe != null:
+		VirtualGeometryProbe.detach_for_debug(_meshlet_page_probe, camera)
+		_meshlet_page_probe = null
 	if _trace.enabled and _trace_path != "":
 		_trace.save(_trace_path)
 	for monitor_name in _ambient_monitors:
