@@ -968,12 +968,30 @@ const TREES_BY_BIOME := {
 }
 
 
+## Filter each biome once when the optional painted tree pack is absent.
+## Retain duplicate model entries: they are intentional spawn probabilities.
+## Unknown biomes use the same forest fallback as before, without unbounded keys.
+static var _trees_without_painted: Dictionary = {}
+
+
+static func _tree_options_for_biome(biome: String, painted_available: bool) -> Array:
+	var key: String = biome if TREES_BY_BIOME.has(biome) else "forest"
+	if painted_available:
+		return TREES_BY_BIOME[key]
+	if not _trees_without_painted.has(key):
+		var filtered: Array = []
+		var source: Array = TREES_BY_BIOME[key]
+		for option in source:
+			if not str(option).begins_with("painted"):
+				filtered.append(option)
+		_trees_without_painted[key] = filtered
+	return _trees_without_painted[key]
+
+
 ## Which tree stands at a node: by biome, stable for the node id.
-func _tree_key(node: Dictionary) -> String:
+func _tree_key(node: Dictionary, painted_available: bool) -> String:
 	var biome: String = _world.biome_at(float(node["x"]), float(node["z"]))
-	var options: Array = TREES_BY_BIOME.get(biome, TREES_BY_BIOME["forest"])
-	if not ModelCatalog.has_painted_trees():
-		options = options.filter(func(name: String) -> bool: return not name.begins_with("painted"))
+	var options: Array = _tree_options_for_biome(biome, painted_available)
 	return "tree:" + str(options[WorldGen.mix(int(node["id"]), 3, 5) % options.size()])
 
 
@@ -1189,8 +1207,9 @@ func _build_objects(data: Dictionary) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = WorldGen.mix(cell.x, cell.y, 99)
 	var tree_variants: int = Assets.tree_meshes().size() + ModelCatalog.BUILTIN_TREES.size()
+	var painted_available: bool = ModelCatalog.has_painted_trees() if _use_nature else false
 	if _use_nature:
-		tree_variants = Assets.TREE_FILES.size() + (ModelCatalog.PAINTED_TREES.size() if ModelCatalog.has_painted_trees() else 0)
+		tree_variants = Assets.TREE_FILES.size() + (ModelCatalog.PAINTED_TREES.size() if painted_available else 0)
 	var rock_variants: int = Assets.ROCK_FILES.size() + (ModelCatalog.STONES.size() if ModelCatalog.has_stones() else 0)
 	if ModelCatalog.has_scanned_rocks():
 		rock_variants = ModelCatalog.SCANNED_ROCKS.size()
@@ -1203,7 +1222,7 @@ func _build_objects(data: Dictionary) -> void:
 		if node.has("stone_model"):
 			kind = "stone:%d" % int(node["stone_model"])
 		elif kind == "tree":
-			kind = _tree_key(node) if _use_nature else "tree:%d" % (variant % tree_variants)
+			kind = _tree_key(node, painted_available) if _use_nature else "tree:%d" % (variant % tree_variants)
 		elif kind == "pebble":
 			kind = "rock:%d" % (variant % rock_variants)
 		elif kind == "rock" and (_use_nature or rock_variants > Assets.ROCK_FILES.size() or ModelCatalog.has_scanned_rocks()):
@@ -1241,7 +1260,11 @@ func _build_objects(data: Dictionary) -> void:
 		multimesh.instance_count = list.size()
 		var index: Dictionary = {}
 		var transforms: Array = []
+		transforms.resize(list.size())
 		var tints := PackedColorArray()
+		tints.resize(list.size())
+		var is_tree: bool = kind.begins_with("tree:")
+		var is_mineral: bool = kind.begins_with("rock") or kind.begins_with("ore") or kind.begins_with("stone:")
 		var is_building: bool = kind.begins_with("wall") or kind.begins_with("building:") or kind.begins_with("tower") or kind == "workbench" or kind.begins_with("ruin:") or kind.begins_with("monument:")
 		for i in list.size():
 			var node: Dictionary = list[i]
@@ -1253,13 +1276,13 @@ func _build_objects(data: Dictionary) -> void:
 			# Keep the original tier tint exactly as before; submit the
 			# complete group only after every resource slot is prepared.
 			var tier: int = node.get("tier", 1)
-			if kind.begins_with("rock") or kind.begins_with("ore") or kind.begins_with("stone:"):
-				tints.append(Color.WHITE.lerp(Color(0.8, 0.85, 1.0), (tier - 1) * 0.2))
+			if is_mineral:
+				tints[i] = Color.WHITE.lerp(Color(0.8, 0.85, 1.0), (tier - 1) * 0.2)
 			else:
-				tints.append(Color.WHITE.darkened((tier - 1) * 0.07) if kind.begins_with("tree:") else Color.WHITE)
+				tints[i] = Color.WHITE.darkened((tier - 1) * 0.07) if is_tree else Color.WHITE
 			if node.has("id"):
 				index[node["id"]] = i
-			transforms.append(transform)
+			transforms[i] = transform
 		# Dense groups upload one complete GPU-ready buffer; tiny batches
 		# retain the original per-instance calls. Both preserve tier tints.
 		if not ResourceInstanceInitializer.initialize(multimesh, transforms, tints):
