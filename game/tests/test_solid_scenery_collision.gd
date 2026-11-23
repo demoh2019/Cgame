@@ -43,7 +43,12 @@ func run(t) -> void:
 	var id: int = int(found["id"])
 	t.check(id == WorldGen.entity_id(home, WorldGen.FALLEN_WOOD_ID_BASE),
 		"fallen wood uses a stable collision and depletion ID")
-	t.eq(found, other.chunk(home)["nodes"].filter(func(n): return n.has("solid_model"))[0],
+	var mirrored: Dictionary = {}
+	for node in other.chunk(home)["nodes"]:
+		if int(node.get("id", -1)) == id:
+			mirrored = node
+			break
+	t.eq(found, mirrored,
 		"same seed gives identical model, location and footprint on every peer")
 	t.check(bool(found["blocks"]) and str(found["kind"]) == "tree", "wood is both blocking and harvestable")
 	var x: float = float(found["x"])
@@ -57,7 +62,9 @@ func run(t) -> void:
 	t.check(seen, "server movement sees the visible log as a collision obstacle")
 
 	t.current = "resource depletion removes invisible blockers"
-	world.set_depleted_resources({id: true})
+	var depleted := {}
+	depleted[id] = true
+	world.set_depleted_resources(depleted)
 	seen = false
 	for blocker in world.blockers_near(x, z, 0.5):
 		if int(blocker.get("id", -1)) == id:
