@@ -177,6 +177,7 @@ const WorldDiscovery = preload("res://scripts/shared/world_discovery.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const RestedTraining = preload("res://scripts/shared/rested_training.gd")
 const CrossTraining = preload("res://scripts/shared/cross_training.gd")
+const DeepPractice = preload("res://scripts/shared/deep_practice.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const StormproofBriquette = preload("res://scripts/shared/stormproof_briquette.gd")
@@ -271,6 +272,7 @@ class Player:
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var rested_xp_credit: int = 0 # Paid rest creates a capped, persistent training XP reserve.
 	var practice_state: Dictionary = {} # Recent verified skill branches, session-only.
+	var deep_practice_state: Dictionary = {} # Distinct skills practised in each discipline, session-only.
 	var party_aid_timer: float = 0.0 # Shared medical/provisions support cooldown.
 	var medic_cover_cooldown: float = 0.0 # Server-only healer aggro rescue cooldown.
 	var supply_request_last_at: float = -INF # Session-only anti-spam for supply distress signals.
@@ -6702,8 +6704,9 @@ func _award(player: Player, skill: String, amount: float) -> void:
 	var base_scaled: int = clampi(roundi(amount * (1.0 + player.skills.bonus("xp_gain"))), 1, 100000)
 	var base_gained: int = maxi(0, mini(Skills.MAX_XP - old_xp, base_scaled))
 	var cross_active: bool = CrossTraining.active_for(player.practice_state, skill, amount, time)
+	var depth_active: bool = DeepPractice.active_for(player.deep_practice_state, skill, amount, time)
 	var extra: int = RestedTraining.bonus_for(amount, player.rested_xp_credit,
-		player.skills.level(skill), cross_active)
+		player.skills.level(skill), cross_active, depth_active)
 	var result: Dictionary = player.skills.add_xp(skill, amount + float(extra))
 	var gained: int = int(result["gained"])
 	if gained <= 0:
@@ -6711,6 +6714,7 @@ func _award(player: Player, skill: String, amount: float) -> void:
 	var bonus_gained: int = maxi(0, gained - base_gained)
 	player.rested_xp_credit = maxi(0, player.rested_xp_credit - mini(extra, bonus_gained))
 	player.practice_state = CrossTraining.record(player.practice_state, skill, amount, time)
+	player.deep_practice_state = DeepPractice.record(player.deep_practice_state, skill, amount, time)
 	player.pending_xp[skill] = int(player.pending_xp.get(skill, 0)) + int(result["gained"])
 	player.dirty_skills = true
 	player.dirty_character = true
@@ -10350,6 +10354,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"rest_cooldown": player.rest_cooldown,
 			"rested_xp_credit": player.rested_xp_credit,
 			"practice_branches": CrossTraining.branches_count(player.practice_state, time),
+			"deep_practice_branches": DeepPractice.trained_branches(player.deep_practice_state, time),
 			"cross_training_active": CrossTraining.branches_count(player.practice_state, time) >= CrossTraining.REQUIRED_BRANCHES,
 			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,
 			"medic_cover_cooldown": player.medic_cover_cooldown,
