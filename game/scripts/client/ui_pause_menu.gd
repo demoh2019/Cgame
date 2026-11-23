@@ -7,14 +7,19 @@ const UiTheme = preload("res://scripts/client/ui_theme.gd")
 const UiSettings = preload("res://scripts/client/ui_settings.gd")
 const UiInputRebind = preload("res://scripts/client/ui_input_rebind.gd")
 const UiLocalization = preload("res://scripts/client/ui_localization.gd")
+const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const AudioMix = preload("res://scripts/client/audio_mix.gd")
 
 signal changed(key: String)
+signal graphics_selected(index: int)
 signal closed
 
 var _capturing := ""
 var _bind_buttons: Dictionary = {}
 var _notice: Label
 var _tabs: TabContainer
+var _graphics_picker: OptionButton
+var _audio_sliders: Dictionary = {} # Existing AudioMix buses, not another settings store.
 
 
 func _init() -> void:
@@ -37,14 +42,16 @@ func _init() -> void:
 	column.add_theme_constant_override("separation", 8)
 	panel.add_child(column)
 	var title := Label.new()
-	title.text = "Paused"
+	title.text = "Settings"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 24)
 	column.add_child(title)
 	_tabs = TabContainer.new()
-	_tabs.custom_minimum_size = Vector2(0, 360)
+	_tabs.custom_minimum_size = Vector2(0, 370)
 	column.add_child(_tabs)
 	_build_gameplay()
+	_build_graphics()
+	_build_audio()
 	_build_controls()
 	_build_accessibility()
 	_notice = Label.new()
@@ -65,21 +72,32 @@ func is_open() -> bool:
 func open() -> void:
 	_capturing = ""
 	_refresh_bindings()
+	_refresh_audio_sliders()
 	visible = true
 	_tabs.get_tab_bar().grab_focus()
 
 
 func close() -> void:
 	_capturing = ""
+	# Save mouse-drag, keyboard and gamepad changes even if no drag-ended event occurs.
+	AudioMix.save()
 	visible = false
 	closed.emit()
 
 
 func _page(tab_name: String) -> VBoxContainer:
+	# Scroll in small windows and when using larger accessibility UI scale.
+	# TabContainer still owns a tab for each category.
+	var scroll := ScrollContainer.new()
+	scroll.name = tab_name
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_tabs.add_child(scroll)
 	var box := VBoxContainer.new()
-	box.name = tab_name
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_theme_constant_override("separation", 8)
-	_tabs.add_child(box)
+	scroll.add_child(box)
 	return box
 
 
@@ -149,6 +167,76 @@ func _slider(min_value: float, max_value: float, step: float, key: String) -> HS
 	slider.drag_ended.connect(func(_moved: bool) -> void:
 		UiSettings.set_value(key, slider.value))
 	return slider
+
+
+## Graphics are driven by the existing online_main quality/auto path, not by
+## a UI-only value that could disagree with active render/streaming budgets.
+static func graphics_selection(level: int, auto_enabled: bool) -> int:
+	return GraphicsQuality.NAMES.size() if auto_enabled \
+		else clampi(level, 0, GraphicsQuality.NAMES.size() - 1)
+
+
+func set_graphics_choice(level: int, auto_enabled: bool) -> void:
+	if is_instance_valid(_graphics_picker):
+		_graphics_picker.select(graphics_selection(level, auto_enabled))
+
+
+func _build_graphics() -> void:
+	var page := _page("Graphics")
+	_graphics_picker = OptionButton.new()
+	for tier in GraphicsQuality.NAMES.size():
+		_graphics_picker.add_item(GraphicsQuality.NAMES[tier], tier)
+	_graphics_picker.add_item("Auto (GPU-aware 3D + details)", GraphicsQuality.NAMES.size())
+	_graphics_picker.select(graphics_selection(GraphicsQuality.level(), true))
+	_graphics_picker.item_selected.connect(func(index: int) -> void:
+		graphics_selected.emit(_graphics_picker.get_item_id(index)))
+	_row(page, "Quality preset", _graphics_picker)
+	var hint := Label.new()
+	hint.text = "Auto adjusts 3D resolution and details to GPU load."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	page.add_child(hint)
+
+
+## Source-of-truth: AudioMix. The audio bus responds immediately, but mouse
+## dragging does not write the config file dozens of times per second.
+func _set_audio_volume(bus: String, percent: float) -> void:
+	AudioMix.set_volume(bus, percent / 100.0, false)
+
+
+func _refresh_audio_sliders() -> void:
+	for bus in _audio_sliders:
+		var slider: HSlider = _audio_sliders[bus]
+		slider.set_value_no_signal(roundf(float(AudioMix.volumes.get(bus, 1.0)) * 100.0))
+
+
+func _build_audio() -> void:
+	var page := _page("Audio")
+	AudioMix.load_all() # Also works before the game creates audio buses.
+	var labels := {
+		"Master": "Master volume",
+		"Music": "Music volume",
+		"SFX": "Sound effects volume",
+		"UI": "Interface sounds volume",
+		"Ambience": "Ambience volume",
+	}
+	for bus in AudioMix.SLIDERS:
+		var slider := HSlider.new()
+		slider.min_value = 0.0
+		slider.max_value = 100.0
+		slider.step = 5.0
+		slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		slider.value = roundf(float(AudioMix.volumes.get(bus, 1.0)) * 100.0)
+		slider.value_changed.connect(_set_audio_volume.bind(bus))
+		slider.drag_ended.connect(func(_moved: bool) -> void: AudioMix.save())
+		slider.focus_exited.connect(AudioMix.save)
+		_audio_sliders[bus] = slider
+		_row(page, labels[bus], slider)
+	var reset := Button.new()
+	reset.text = "Reset sound levels"
+	reset.pressed.connect(func() -> void:
+		AudioMix.reset_volumes()
+		_refresh_audio_sliders())
+	page.add_child(reset)
 
 
 func _build_controls() -> void:

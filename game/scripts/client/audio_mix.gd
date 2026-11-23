@@ -3,6 +3,7 @@ extends RefCounted
 ## Buses: Master, Music, SFX (reverb + low-pass, see reverb_zones.gd), UI, Ambience.
 
 const PATH := "user://albion_after_audio.cfg"
+static var path := PATH # Testable without touching the player\u0027s real preferences.
 const BUSES := ["Music", "UI", "Ambience"] # SFX is created by ReverbZones.
 const SLIDERS := ["Master", "Music", "SFX", "UI", "Ambience"]
 static var volumes := {"Master": 1.0, "Music": 1.0, "SFX": 1.0, "UI": 1.0, "Ambience": 1.0}
@@ -36,7 +37,9 @@ static func ensure_lowpass(bus: String) -> int:
 
 
 static func set_volume(bus: String, linear: float, persist: bool = true) -> void:
-	linear = clampf(linear, 0.0, 1.0)
+	if not bus in SLIDERS:
+		return
+	linear = clampf(linear if is_finite(linear) else 1.0, 0.0, 1.0)
 	volumes[bus] = linear
 	var i := AudioServer.get_bus_index(bus)
 	if i != -1:
@@ -50,15 +53,27 @@ static func save() -> void:
 	config.load(PATH)
 	for bus in SLIDERS:
 		config.set_value("volume", bus, volumes[bus])
-	config.save(PATH)
+	var error: int = config.save(path)
+	if error != OK:
+		push_warning("Could not save audio settings: %d" % error)
 
 
 static func load_all() -> void:
 	var config := ConfigFile.new()
-	if config.load(PATH) != OK:
+	if config.load(path) != OK:
 		return
 	for bus in SLIDERS:
-		set_volume(bus, float(config.get_value("volume", bus, 1.0)), false)
+		var stored: Variant = config.get_value("volume", bus, 1.0)
+		var normalized: float = float(stored) if stored is float or stored is int else 1.0
+		set_volume(bus, normalized, false)
+
+
+## Reset every sound bus and persist once, instead of rewriting per slider.
+static func reset_volumes(persist: bool = true) -> void:
+	for bus in SLIDERS:
+		set_volume(bus, 1.0, false)
+	if persist:
+		save()
 
 
 ## Moves the slider by `step` (0..1), snapped to 5 %; returns the new value.
