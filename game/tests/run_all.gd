@@ -18,6 +18,7 @@ const SUITES := [
 	"res://tests/test_pcg_world.gd",
 	"res://tests/test_model_catalog.gd",
 	"res://tests/test_imported_mesh_lod.gd",
+	"res://tests/test_virtual_geometry_attribute_lod.gd",
 	"res://tests/test_mesh_pbr_preservation.gd",
 	"res://tests/test_graphics_stone_microdetail.gd",
 	"res://tests/test_native_detail_normal_blend.gd",
