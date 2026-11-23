@@ -57,7 +57,14 @@ class TestPCGFoliageDensityHysteresisContract(unittest.TestCase):
         self.assertIn("if current.visible_instance_count != visible:", self.script)
 
     def test_real_albion_only_scales_cosmetic_multimesh(self):
-        self.assertIn("SceneryDensityLod.update_instances(_density_scenery_batches,", self.chunk)
+        # Albion now uses screen-projected foliage density, with distance-based
+        # update_instances() retained as a fallback for unsupported cameras.
+        self.assertIn("SceneryDensityLod.update_instances_projected(_density_scenery_batches,", self.chunk)
+        self.assertIn("camera, scenery_quality)", self.chunk)
+        self.assertIn("static func update_instances_projected(", self.script)
+        self.assertIn("static func _apply_projected_plan(", self.script)
+        self.assertIn("absi(previous - desired) <= DENSITY_DEADBAND", self.script)
+        self.assertIn("update_instances(instances, camera.global_position, quality, prefer_native)", self.script)
         self.assertIn("const DENSITY_LOD_INTERVAL := 0.6", self.chunk)
         self.assertIn("if density_scalable:", self.chunk)
         self.assertIn("file.begins_with(\"Flower\")", self.chunk)
