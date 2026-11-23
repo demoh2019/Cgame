@@ -230,15 +230,15 @@ func run(t) -> void:
 		"world never keeps more than its chunk cache capacity")
 	t.eq(int(first_stats["collision_chunks"]), int(first_stats["size"]),
 		"collision broadphase has one matching entry for each cached chunk")
-	var cold_cell := Vector2i(220, 220)
-	var hot_cell := Vector2i(221, 220)
+	var cold_cell := Vector2i(-220, -220)
+	var hot_cell := Vector2i(-221, -220)
 	var cold: Dictionary = a.chunk(cold_cell)
 	var hot: Dictionary = a.chunk(hot_cell)
 	cold["_cache_test_marker"] = "should_evicted"
 	hot["_cache_test_marker"] = "recently_used"
 	var evictions_before: int = int(a.chunk_cache_stats()["evictions"])
 	for index in range(WorldGen.CACHE_LIMIT + 8):
-		a.chunk(Vector2i(300 + index, 350))
+		a.chunk(Vector2i(-300 - index, -350))
 		if index % 4 == 0:
 			a.chunk(hot_cell)
 	var cache_report: Dictionary = a.chunk_cache_stats()
@@ -266,8 +266,8 @@ func run(t) -> void:
 
 	t.current = "collision broadphase stays live across eviction and build changes"
 	var dynamic_id: int = 735199
-	var wall_x: float = 15000.0
-	var wall_z: float = 15000.0
+	var wall_x: float = -15000.0
+	var wall_z: float = -15000.0
 	a.add_dynamic_blocker(dynamic_id, wall_x, wall_z, 1.1)
 	var dynamic_found: bool = false
 	for obstacle in a.blockers_near(wall_x, wall_z, 0.5):
