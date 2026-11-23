@@ -49,7 +49,7 @@ static func _run_dense_snare_tick(force_fallback: bool) -> Dictionary:
 			Vector2(470.0, 350.0) if j == 2 else
 			Vector2(5000.0 + float(j) * 10.0, 6000.0)))
 		sim.infected_snares[70000 + j] = {
-			"id": 70000 + j, "x": point.x, "z": point.y,
+			"id": 70000 + j, "x": point.x, "y": WorldGen.HUB_HEIGHT, "z": point.y,
 			"expires": 0.0 if j == 2 else 100.0,
 		}
 	sim._tick_zombies(0.05)
@@ -219,6 +219,19 @@ func run(t) -> void:
 		"expires": server.time + InfectedSnare.DURATION}
 	t.check(InfectedSnare.catches(trap, elite, server.time), "elite is a legal PvE trigger")
 	t.check(not InfectedSnare.catches(trap, boss, server.time), "boss cannot trigger trap")
+	var above := Zombie.new(999811, "walker", elite.position + Vector3.UP * 8.0)
+	var below := Zombie.new(999812, "walker", elite.position - Vector3.UP * 8.0)
+	t.check(not InfectedSnare.catches(trap, above, server.time),
+		"wire on the ground cannot trap a zombie on an upper floor")
+	t.check(not InfectedSnare.catches(trap, below, server.time),
+		"wire cannot reach an infected below a cliff")
+	var broken_height: Dictionary = trap.duplicate()
+	broken_height["y"] = NAN
+	t.check(not InfectedSnare.catches(broken_height, elite, server.time),
+		"NaN trap elevation cannot root an infected")
+	broken_height.erase("y")
+	t.check(not InfectedSnare.catches(broken_height, elite, server.time),
+		"missing trap elevation never becomes an infinite vertical trigger")
 	t.check(not InfectedSnare.catches(trap, elite, trap["expires"]),
 		"expired trap cannot trigger after expiry")
 	t.current = "corrupt snare state cannot trigger roots or leak bogus markers"

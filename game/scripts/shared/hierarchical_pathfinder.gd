@@ -13,6 +13,7 @@ const DIRS: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), 
 ## Border runs longer than this get extra entrance nodes at both ends (HPA* entrance rule).
 const LONG_RUN := 6
 const FAR := 1 << 30
+const MAX_CACHED_ROUTES := 128 # Bounded resident abstract corridors per pathfinder.
 
 ## Abstract-route reuses (same start/goal cluster pair).
 var cache_hits: int = 0
@@ -32,6 +33,7 @@ var _adj: Array[Dictionary] = []
 var _node_at: Dictionary = {}
 var _cluster_nodes: Array = []
 var _route_cache: Dictionary = {}
+var _route_cache_order: Array[Vector2i] = [] # FIFO, cheap cache hits.
 
 
 class _Heap:
@@ -101,6 +103,7 @@ func build(w: int, h: int, cluster: int, walkable: Callable) -> void:
 	_adj.clear()
 	_node_at.clear()
 	_route_cache.clear()
+	_route_cache_order.clear()
 	cache_hits = 0
 	_cluster_nodes = []
 	for i in _cw * _ch:
@@ -143,7 +146,15 @@ func find_path(start: Vector2i, goal: Vector2i) -> PackedVector2Array:
 		route = _abstract(start, goal, start_edges, goal_costs)
 		if route.is_empty():
 			return PackedVector2Array()
+		# Reusing the same cluster-pair key can replace an inaccessible
+		# corridor. Keep exactly one FIFO record for each retained key.
+		if _route_cache.has(key):
+			_route_cache_order.erase(key)
+		elif _route_cache.size() >= MAX_CACHED_ROUTES:
+			var evicted: Vector2i = _route_cache_order.pop_front()
+			_route_cache.erase(evicted)
 		_route_cache[key] = route
+		_route_cache_order.append(key)
 	return _refine(start, goal, route)
 
 
@@ -158,6 +169,7 @@ func invalidate_cluster(cell: Vector2i) -> void:
 		for x in range(rect.position.x, rect.end.x):
 			_grid[y * width + x] = 1 if _walkable.call(x, y) else 0
 	_route_cache.clear()
+	_route_cache_order.clear()
 	var neighbors: Array[Vector2i] = []
 	for d in DIRS:
 		var n := c + d
@@ -176,6 +188,11 @@ func invalidate_cluster(cell: Vector2i) -> void:
 	_build_intra(c)
 	for n in neighbors:
 		_build_intra(n)
+
+
+## Resident abstract corridors are bounded even after long navigation sessions.
+func cached_route_count() -> int:
+	return _route_cache.size()
 
 
 ## Number of live abstract nodes (for tests and debug overlays).

@@ -7,6 +7,7 @@ const DURATION := 150.0
 const ROOT_SECONDS := 3.0
 const ELITE_ROOT_SECONDS := 1.5
 const TRIGGER_RADIUS := 1.35
+const MAX_TRIGGER_HEIGHT_DIFFERENCE := 2.0 # A trap cannot root through ceilings.
 const BUILD_RANGE := 4.0
 const MIN_RANGE := 1.5
 const MIN_SEPARATION := 2.2
@@ -22,7 +23,8 @@ static func valid_site(world, site: Vector2, origin: Vector2, existing: Dictiona
 		return "out_of_range"
 	if world.is_safe(site.x, site.y):
 		return "safe_zone"
-	if world.is_water(site.x, site.y) or world.normal_at(site.x, site.y).y < 0.7:
+	var normal: Vector3 = world.normal_at(site.x, site.y)
+	if world.is_water(site.x, site.y) or not normal.is_finite() or normal.y < 0.7:
 		return "bad_terrain"
 	for obstacle in world.blockers_near(site.x, site.y, TRIGGER_RADIUS + 0.7):
 		var center := Vector2(float(obstacle["x"]), float(obstacle["z"]))
@@ -42,11 +44,16 @@ static func catches(trap: Dictionary, infected, now: float) -> bool:
 	var expiry_value: Variant = trap.get("expires", null)
 	if not (expiry_value is int or expiry_value is float) or \
 			not (trap.get("x", null) is int or trap.get("x", null) is float) or \
+			not (trap.get("y", null) is int or trap.get("y", null) is float) or \
 			not (trap.get("z", null) is int or trap.get("z", null) is float):
 		return false
 	var expiry: float = float(expiry_value)
 	var center := Vector2(float(trap["x"]), float(trap["z"]))
 	if not is_finite(expiry) or expiry <= now or not center.is_finite():
+		return false
+	var altitude: float = float(trap["y"])
+	if not is_finite(altitude) or \
+			absf(infected.position.y - altitude) > MAX_TRIGGER_HEIGHT_DIFFERENCE:
 		return false
 	var position := Vector2(infected.position.x, infected.position.z)
 	var distance_squared: float = position.distance_squared_to(center)
