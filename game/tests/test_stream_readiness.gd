@@ -99,3 +99,52 @@ func run(t) -> void:
 	t.check(not unloaded.is_tracked(old_cell), "unloaded cell stays released")
 	t.eq(unloaded.pending_warmups(), 0, "old bake leaves no pending work")
 	t.eq(unloaded.update(0.5).size(), 0, "stale completion cannot reveal a ghost cell")
+
+	t.current = "callbacks cannot resurrect stale streamed cells"
+	var replaced := Readiness.new()
+	var replaced_cell := Vector2i(13, 29)
+	replaced.begin(replaced_cell, 0.0)
+	var replacement_probe: Callable = func(check_cell: Vector2i) -> bool:
+		replaced.release(check_cell)
+		replaced.begin(check_cell, 0.0)
+		return true
+	replaced.set_probe(Readiness.Stage.DATA_LOADED, replacement_probe)
+	t.eq(replaced.update(1.0), [],
+		"old probe result cannot reveal a reloaded cell")
+	t.eq(replaced.ready_mask(replaced_cell), 0,
+		"new cell does not inherit the old cell's readiness")
+	replaced.set_probe(Readiness.Stage.DATA_LOADED, Callable())
+	replaced.mark(replaced_cell, Readiness.Stage.DATA_LOADED)
+	t.eq(replaced.ready_mask(replaced_cell), Readiness.Stage.DATA_LOADED,
+		"replacement still loads normally")
+
+	t.current = "unloading other cells during probe is safe"
+	var mutating := Readiness.new()
+	var a := Vector2i(1, 0)
+	var b := Vector2i(2, 0)
+	mutating.begin(a, 0.0)
+	mutating.begin(b, 0.0)
+	var unload_probe: Callable = func(probed_cell: Vector2i) -> bool:
+		if probed_cell == a:
+			mutating.release(b)
+		return true
+	mutating.set_probe(Readiness.Stage.DATA_LOADED, unload_probe)
+	mutating.update(1.0)
+	t.check(not mutating.is_tracked(b),
+		"probe callback unloads the next pending cell")
+	t.eq(mutating.ready_mask(a), Readiness.Stage.DATA_LOADED,
+		"remaining cell still reaches its data stage")
+
+	t.current = "streaming timeout history stays bounded"
+	var bounded := Readiness.new()
+	bounded.default_timeout = 0.25
+	for i in Readiness.MAX_STUCK_LOG + 25:
+		bounded.begin(Vector2i(i, 0), 0.0)
+	bounded.update(1.0)
+	t.eq(bounded.stuck_log.size(), Readiness.MAX_STUCK_LOG,
+		"loading-timeout diagnostics are memory bounded")
+	bounded.begin(Vector2i(9999, 0), NAN)
+	t.check(not bounded.is_tracked(Vector2i(9999, 0)),
+		"invalid stage-start clock does not poison readiness")
+	t.eq(bounded.update(NAN).size(), 0,
+		"invalid frame clock cannot reveal cells")

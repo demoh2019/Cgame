@@ -13,6 +13,8 @@ extends RefCounted
 enum Stage { DATA_LOADED = 1, GPU_UPLOADED = 2, PHYSICS_READY = 4, NAVMESH_READY = 8 }
 
 const ALL: int = 15
+## Maximum number of timeout reports retained across world reloads.
+const MAX_STUCK_LOG: int = 256
 const ORDER: Array[int] = [Stage.DATA_LOADED, Stage.GPU_UPLOADED, Stage.PHYSICS_READY, Stage.NAVMESH_READY]
 const STAGE_NAMES: Dictionary = {1: "data_loaded", 2: "gpu_uploaded", 4: "physics_ready", 8: "navmesh_ready"}
 
@@ -65,6 +67,8 @@ func set_auto_warmup(bake: Callable) -> void:
 
 
 func begin(cell: Vector2i, now: float) -> void:
+	if not is_finite(now) or now < 0.0:
+		return
 	_now = now
 	if _cells.has(cell):
 		return
@@ -125,18 +129,29 @@ func waiting_stage(cell: Vector2i) -> int:
 
 ## Polls probes, tracks timeouts and returns cells that just became revealable (once each).
 func update(now: float) -> Array[Vector2i]:
-	_now = now
 	var out: Array[Vector2i] = []
+	if not is_finite(now) or now < 0.0:
+		return out
+	_now = now
 	for cell: Vector2i in _cells.keys():
-		var c: CellState = _cells[cell]
+		# Earlier callbacks may have unloaded or recreated a cell.
+		var c: CellState = _cells.get(cell)
+		if c == null:
+			continue
 		var eff := _effective(c.marked)
 		for stage in ORDER:
 			if (eff & stage) != 0 or not _probes.has(stage) or not _prereqs_met(stage, eff):
 				continue
 			var probe: Callable = _probes[stage]
-			if probe.is_valid() and bool(probe.call(cell)):
+			var probed: bool = probe.is_valid() and bool(probe.call(cell))
+			# Never commit a stale probe result to a replacement instance.
+			if _cells.get(cell) != c:
+				break
+			if probed:
 				c.marked |= stage
 				eff = _effective(c.marked)
+		if _cells.get(cell) != c:
+			continue
 		_refresh(cell, c)
 		if eff == ALL and not c.revealed:
 			c.revealed = true
@@ -151,19 +166,28 @@ func update(now: float) -> Array[Vector2i]:
 func _report_stuck(now: float) -> Array[Dictionary]:
 	var fresh: Array[Dictionary] = []
 	for cell: Vector2i in _cells.keys():
-		var c: CellState = _cells[cell]
-		if c.revealed:
+		var c: CellState = _cells.get(cell)
+		if c == null or c.revealed:
 			continue
 		var w := _waiting(_effective(c.marked))
 		if w == 0 or (c.stuck_reported & w) != 0:
 			continue
-		var limit: float = float(stage_timeouts.get(w, default_timeout))
+		var raw_limit: Variant = stage_timeouts.get(w, default_timeout)
+		var limit: float = default_timeout
+		if raw_limit is float or raw_limit is int:
+			limit = float(raw_limit)
+		if not is_finite(limit) or limit < 0.0:
+			limit = default_timeout
+		if not is_finite(limit) or limit < 0.0:
+			limit = 10.0
 		var waited := now - c.since
 		if waited >= limit:
 			c.stuck_reported |= w
 			var rep := {"cell": cell, "stage": w, "stage_name": STAGE_NAMES[w], "waited": waited}
 			fresh.append(rep)
 			stuck_log.append(rep)
+			if stuck_log.size() > MAX_STUCK_LOG:
+				stuck_log.pop_front()
 			if on_stuck.is_valid():
 				on_stuck.call(rep)
 	return fresh
