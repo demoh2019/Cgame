@@ -877,7 +877,7 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 	_add_outposts(cell, origin, zone, ruin, structures, crates, props, sites)
 	_add_ground_pickups(cell, origin, nodes, sites)
 	_add_loose_stones(cell, origin, tier, nodes, sites)
-	_add_roadside_caches(cell, origin, tier, nodes, structures, crates, props, sites)
+	_add_roadside_caches(cell, origin, tier, nodes, structures, crates, spawns, props, sites)
 	_add_fallen_wood(cell, origin, tier, nodes, structures, crates, props, sites)
 	var generated := {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
 	if spawn_extender != null:
@@ -888,12 +888,13 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 ## Abandoned traveller supply crates appear beside some roads, never on the road.
 ## Each cache is an ordinary persistent/authoritative crate for the existing loot system.
 ## Separate seeded RNG and reserved 820..829 IDs preserve all existing node IDs.
+## In higher danger zones a rare crawler or stalker can lurk near the abandoned supplies.
 const ROADSIDE_CACHE_ID_BASE := 820
 const ROADSIDE_CACHE_CHANCE := 0.24
 
 
 func _add_roadside_caches(cell: Vector2i, origin: Vector2, tier: int, nodes: Array,
-		structures: Array, crates: Array, props: Array, sites: Array) -> void:
+		structures: Array, crates: Array, spawns: Array, props: Array, sites: Array) -> void:
 	if roads == null:
 		return
 	var pieces: Array = roads.pieces_in_cell(cell)
@@ -946,6 +947,35 @@ func _add_roadside_caches(cell: Vector2i, origin: Vector2, tier: int, nodes: Arr
 			"x": p.x, "z": p.y, "y": height_at(p.x, p.y),
 			"radius": 0.6, "blocks": true,
 		})
+		# A quiet-looking find can turn into an encounter. Roll after the cache
+		# is placed so its position and the existing world RNG streams do not move.
+		if tier >= 2 and rng.randf() < 0.42:
+			var ambush: Vector2 = p + side * (4.0 if bank > 0.0 else -4.0)
+			var ambush_local: Vector2 = ambush - origin
+			if ambush_local.x >= 2.0 and ambush_local.y >= 2.0 and \
+					ambush_local.x < Defs.CHUNK_SIZE - 2.0 and ambush_local.y < Defs.CHUNK_SIZE - 2.0:
+				if not is_water(ambush.x, ambush.y) and not is_safe(ambush.x, ambush.y) and \
+						roads.coverage_at(ambush.x, ambush.y) <= 0.01:
+					var hiding_spot_free := not _in_site_clearing(ambush, sites)
+					if hiding_spot_free:
+						for group in [nodes, structures, crates, props]:
+							for object in group:
+								if not bool(object.get("blocks", false)):
+									continue
+								var reach: float = float(object.get("radius", 0.5)) + 1.2
+								var other := Vector2(float(object["x"]), float(object["z"]))
+								if ambush.distance_squared_to(other) < reach * reach:
+									hiding_spot_free = false
+									break
+							if not hiding_spot_free:
+								break
+					if hiding_spot_free:
+						spawns.append({
+							"id": entity_id(cell, ROADSIDE_CACHE_ID_BASE + 1),
+							"x": ambush.x, "z": ambush.y,
+							"type": "stalker" if tier >= 3 else "crawler",
+							"ruin": false, "roadside_ambush": true,
+						})
 		return
 
 

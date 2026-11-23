@@ -83,12 +83,34 @@ func run(t) -> void:
 	var loose_pickups := 0
 	var modeled_boulders := 0
 	var roadside_caches := 0
+	var roadside_ambushes := 0
 	for cx in range(-10, 11):
 		for cz in range(-10, 11):
 			var data := a.chunk(Vector2i(cx, cz))
 			total_nodes += data["nodes"].size()
 			ruins += 1 if data["ruin"] else 0
 			zombies += data["spawns"].size()
+			for hostile in data["spawns"]:
+				if not bool(hostile.get("roadside_ambush", false)):
+					continue
+				roadside_ambushes += 1
+				var ambush_at := Vector2(float(hostile["x"]), float(hostile["z"]))
+				t.eq(int(hostile["id"]), WorldGen.entity_id(Vector2i(cx, cz),
+						WorldGen.ROADSIDE_CACHE_ID_BASE + 1), "roadside ambushers use reserved stable IDs")
+				t.eq(WorldGen.cell_of(ambush_at.x, ambush_at.y), Vector2i(cx, cz),
+						"ambushers remain within their spawning chunk")
+				t.check(not a.is_water(ambush_at.x, ambush_at.y) and not a.is_safe(ambush_at.x, ambush_at.y),
+						"ambushers spawn on unsafe dry ground")
+				t.check(a.roads.coverage_at(ambush_at.x, ambush_at.y) <= 0.01,
+						"ambushers do not block painted roads")
+				var near_cache := false
+				for crate in data["crates"]:
+					if bool(crate.get("roadside_cache", false)):
+						var cache_at := Vector2(float(crate["x"]), float(crate["z"]))
+						near_cache = ambush_at.distance_to(cache_at) <= 4.01
+				t.check(near_cache, "each ambusher protects an accessible roadside cache")
+				t.check(str(hostile["type"]) in ["crawler", "stalker"],
+						"roadside encounters use the standard infected AI")
 			for crate in data["crates"]:
 				if not bool(crate.get("roadside_cache", false)):
 					continue
@@ -136,6 +158,7 @@ func run(t) -> void:
 	t.check(loose_pickups > 100, "seeded world includes pickable modeled stones (%d)" % loose_pickups)
 	t.check(modeled_boulders > 20, "seeded world includes mineable modeled rocks (%d)" % modeled_boulders)
 	t.check(roadside_caches > 0, "roads contain collectible traveler caches (%d)" % roadside_caches)
+	t.check(roadside_ambushes > 0, "dangerous roadside caches can be guarded (%d)" % roadside_ambushes)
 	t.check(tiers_seen.size() >= 3, "several tiers exist near the hub (%d)" % tiers_seen.size())
 	t.check(kinds_seen.has("tree") and kinds_seen.has("rock") and kinds_seen.has("bush"), "trees, rocks and bushes exist")
 	t.check(ruins > 8, "ruins exist (%d)" % ruins)

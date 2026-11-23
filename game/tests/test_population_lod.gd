@@ -114,6 +114,51 @@ func run(t) -> void:
 	a.set_night(true)
 	t.check(a.night, "night flag set")
 
+	t.current = "local attraction bounds and day-night transitions"
+	var night_test := _make(2026)
+	var night_region := 44
+	night_test.add_attractor("night", night_test.region_center(night_region), 7.0, 110.0)
+	t.near(night_test.attraction(night_region), 0.0, 0.00001,
+			"night attraction remains dormant during daylight")
+	night_test.set_night(true)
+	t.check(night_test.attraction(night_region) > 0.0,
+			"night attraction activates immediately without an extra tick")
+	night_test.set_night(false)
+	t.near(night_test.attraction(night_region), 0.0, 0.00001,
+			"night attraction disappears immediately after sunrise")
+	night_test.set_night(true)
+	t.check(night_test.attraction(night_region) > 0.0,
+			"night attraction returns after a second dusk")
+
+	# Slow all-regions reference: local bounding must never change the
+	# deterministic attraction field, including off-map, overlapping and
+	# long-range sources.
+	var field := PopulationLOD.new()
+	field.setup(48, 36, 32.0, 91, Vector2(-400.0, -300.0))
+	field.set_night(true)
+	var slow := PackedFloat32Array()
+	slow.resize(field.region_count())
+	slow.fill(0.0)
+	var attr_rng := RandomNumberGenerator.new()
+	attr_rng.seed = 81239
+	for i in 48:
+		var kind: String = "night" if i % 7 == 0 else "noise"
+		var center: Vector2 = Vector2(attr_rng.randf_range(-600.0, 1500.0),
+				attr_rng.randf_range(-500.0, 1100.0))
+		var radius: float = attr_rng.randf_range(1.0, 420.0)
+		var strength: float = attr_rng.randf_range(0.1, 11.0)
+		field.add_attractor(kind, center, strength, radius)
+		var weight: float = float(field.kind_weight.get(kind, 1.0))
+		for region in field.region_count():
+			var distance: float = field.region_center(region).distance_to(center)
+			if distance < radius:
+				slow[region] += strength * weight * (1.0 - distance / radius)
+	var largest_error := 0.0
+	for region in field.region_count():
+		largest_error = maxf(largest_error, absf(field.attraction(region) - slow[region]))
+	t.check(largest_error < 0.0001,
+			"bounded attraction matches complete-grid reference (max error %f)" % largest_error)
+
 	t.current = "determinism"
 	var p1 := _make(99)
 	var p2 := _make(99)
