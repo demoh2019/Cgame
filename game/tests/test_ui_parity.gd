@@ -99,9 +99,9 @@ func run(t) -> void:
 	t.check(green.r < 0.05 and green.b > 0.5, "tritanopia moves green toward blue")
 	for mode in [1, 2, 3]:
 		var white := UiColorblind.transform(Color.WHITE, mode)
-		t.near(white.r, 1.0, 0.03, "greys stay grey r mode %d" % mode)
-		t.near(white.g, 1.0, 0.03, "greys stay grey g mode %d" % mode)
-		t.near(white.b, 1.0, 0.03, "greys stay grey b mode %d" % mode)
+		t.near(white.r, 1.0, 0.03, "grays stay gray r mode %d" % mode)
+		t.near(white.g, 1.0, 0.03, "grays stay gray g mode %d" % mode)
+		t.near(white.b, 1.0, 0.03, "grays stay gray b mode %d" % mode)
 	var mat := UiColorblind.make_material(2)
 	t.eq(mat.get_shader_parameter("row0"), UiColorblind.MATRICES[2][0], "material carries the matrix")
 	t.check(mat.shader.code.contains("hint_screen_texture"), "shader reads the screen")

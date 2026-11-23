@@ -524,3 +524,9 @@
 
 /thirdparty/                                  @godotengine/buildsystem
 /thirdparty/jolt_physics/                     @godotengine/buildsystem @godotengine/jolt-physics
+
+# Albion After game (the downstream game, not upstream engine code)
+/game/                                       @demoh2019
+/game/tests/                                 @demoh2019 @godotengine/tests
+/game/tests/**/*.py                           @demoh2019 @godotengine/tests @godotengine/buildsystem
+/game/tools/                                 @demoh2019 @godotengine/buildsystem
