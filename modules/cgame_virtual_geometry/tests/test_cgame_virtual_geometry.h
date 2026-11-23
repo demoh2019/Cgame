@@ -523,4 +523,117 @@ TEST_CASE("[CgameOcclusionRaster] Temporal reprojection and misuse") {
 	ERR_PRINT_ON;
 }
 
+
+TEST_CASE("[CgameClusterLOD] attribute aware surface simplification preserves authored channels") {
+	constexpr int GRID = 25;
+	PackedVector3Array vertices;
+	PackedVector3Array normals;
+	PackedVector2Array uvs;
+	PackedVector2Array uv2;
+	PackedColorArray colors;
+	PackedFloat32Array tangents;
+	PackedInt32Array indices;
+	for (int z = 0; z < GRID; z++) {
+		for (int x = 0; x < GRID; x++) {
+			vertices.push_back(Vector3(x, Math::sin(real_t(x) * real_t(0.14)) *
+					Math::cos(real_t(z) * real_t(0.14)) * real_t(0.4), z));
+			normals.push_back(Vector3(0, 1, 0));
+			uvs.push_back(Vector2(real_t(x) / (GRID - 1), real_t(z) / (GRID - 1)));
+			uv2.push_back(Vector2(real_t(x + 1) / GRID, real_t(z + 1) / GRID));
+			colors.push_back(Color(real_t(x) / GRID, real_t(z) / GRID, 0.45, 1.0));
+			tangents.push_back(1.0f);
+			tangents.push_back(0.0f);
+			tangents.push_back(0.0f);
+			tangents.push_back(1.0f);
+		}
+	}
+	for (int z = 0; z < GRID - 1; z++) {
+		for (int x = 0; x < GRID - 1; x++) {
+			const int a = z * GRID + x;
+			indices.push_back(a);
+			indices.push_back(a + GRID);
+			indices.push_back(a + 1);
+			indices.push_back(a + 1);
+			indices.push_back(a + GRID);
+			indices.push_back(a + GRID + 1);
+		}
+	}
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	arrays[Mesh::ARRAY_VERTEX] = vertices;
+	arrays[Mesh::ARRAY_NORMAL] = normals;
+	arrays[Mesh::ARRAY_TANGENT] = tangents;
+	arrays[Mesh::ARRAY_COLOR] = colors;
+	arrays[Mesh::ARRAY_TEX_UV] = uvs;
+	arrays[Mesh::ARRAY_TEX_UV2] = uv2;
+	arrays[Mesh::ARRAY_INDEX] = indices;
+
+	const Array reduced = CgameClusterLOD::simplify_surface_arrays(arrays, 320);
+	REQUIRE(reduced.size() == Mesh::ARRAY_MAX);
+	const PackedInt32Array out_indices = reduced[Mesh::ARRAY_INDEX];
+	CHECK(out_indices.size() >= 3);
+	CHECK(out_indices.size() < indices.size());
+	CHECK(out_indices.size() <= 320 * 3);
+	CHECK(out_indices.size() % 3 == 0);
+	for (int i = 0; i < out_indices.size(); i++) {
+		CHECK(out_indices[i] >= 0);
+		CHECK(out_indices[i] < vertices.size());
+	}
+	CHECK(PackedVector3Array(reduced[Mesh::ARRAY_VERTEX]) == vertices);
+	CHECK(PackedVector3Array(reduced[Mesh::ARRAY_NORMAL]) == normals);
+	CHECK(PackedVector2Array(reduced[Mesh::ARRAY_TEX_UV]) == uvs);
+	CHECK(PackedVector2Array(reduced[Mesh::ARRAY_TEX_UV2]) == uv2);
+	CHECK(PackedColorArray(reduced[Mesh::ARRAY_COLOR]) == colors);
+	CHECK(PackedFloat32Array(reduced[Mesh::ARRAY_TANGENT]) == tangents);
+	// The original buffers remain unchanged (no destructive simplification).
+	CHECK(PackedInt32Array(arrays[Mesh::ARRAY_INDEX]) == indices);
+	// Native attribute-less geometry can use the previous positional path.
+	Array position_only = arrays.duplicate();
+	position_only[Mesh::ARRAY_NORMAL] = Variant();
+	position_only[Mesh::ARRAY_TEX_UV] = Variant();
+	CHECK(CgameClusterLOD::simplify_surface_arrays(position_only, 320).size() == Mesh::ARRAY_MAX);
+}
+
+TEST_CASE("[CgameClusterLOD] attribute simplification rejects malformed late data atomically") {
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	arrays[Mesh::ARRAY_VERTEX] = PackedVector3Array({
+			Vector3(0, 0, 0), Vector3(0, 0, 1),
+			Vector3(1, 0, 0), Vector3(1, 0, 1) });
+	arrays[Mesh::ARRAY_NORMAL] = PackedVector3Array({
+			Vector3.UP, Vector3.UP, Vector3.UP, Vector3.UP });
+	arrays[Mesh::ARRAY_TEX_UV] = PackedVector2Array({
+			Vector2(0, 0), Vector2(0, 1), Vector2(1, 0), Vector2(1, 1) });
+	arrays[Mesh::ARRAY_INDEX] = PackedInt32Array({ 0, 1, 2, 2, 1, 3 });
+	CHECK(CgameClusterLOD::simplify_surface_arrays(arrays, 2).is_empty());
+	CHECK(CgameClusterLOD::simplify_surface_arrays(arrays, 0).is_empty());
+	CHECK(CgameClusterLOD::simplify_surface_arrays(arrays, 1, Math::NaN).is_empty());
+	CHECK(CgameClusterLOD::simplify_surface_arrays(arrays, 1, 0.6f, Math::INF).is_empty());
+	CHECK(CgameClusterLOD::simplify_surface_arrays(arrays, 1, -1.0f).is_empty());
+	CHECK(CgameClusterLOD::simplify_surface_arrays(arrays, 1, 0.6f, 9.0f).is_empty());
+
+	Array bad = arrays.duplicate();
+	bad[Mesh::ARRAY_INDEX] = PackedInt32Array({ 0, 1, 2, 2, 1, 999 });
+	CHECK(CgameClusterLOD::simplify_surface_arrays(bad, 1).is_empty());
+	bad = arrays.duplicate();
+	bad[Mesh::ARRAY_NORMAL] = PackedVector3Array({ Vector3.UP });
+	CHECK(CgameClusterLOD::simplify_surface_arrays(bad, 1).is_empty());
+	bad = arrays.duplicate();
+	bad[Mesh::ARRAY_TEX_UV] = PackedVector2Array({ Vector2(0, 0) });
+	CHECK(CgameClusterLOD::simplify_surface_arrays(bad, 1).is_empty());
+	bad = arrays.duplicate();
+	bad[Mesh::ARRAY_VERTEX] = PackedVector3Array({
+			Vector3(0, 0, 0), Vector3(0, 0, 1),
+			Vector3(1, 0, 0), Vector3(Math::NaN, 0, 1) });
+	CHECK(CgameClusterLOD::simplify_surface_arrays(bad, 1).is_empty());
+	bad = arrays.duplicate();
+	bad[Mesh::ARRAY_TEX_UV] = PackedVector2Array({
+			Vector2(0, 0), Vector2(0, 1), Vector2(1, 0), Vector2(Math::INF, 1) });
+	CHECK(CgameClusterLOD::simplify_surface_arrays(bad, 1).is_empty());
+	// Validation must not mutate a valid request after a bad attempt.
+	CHECK(PackedInt32Array(arrays[Mesh::ARRAY_INDEX]) ==
+			PackedInt32Array({ 0, 1, 2, 2, 1, 3 }));
+	CHECK(arrays.size() == Mesh::ARRAY_MAX);
+}
+
 } // namespace TestCgameVirtualGeometry
