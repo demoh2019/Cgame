@@ -221,6 +221,40 @@ func run(t) -> void:
 	t.check(not InfectedSnare.catches(trap, boss, server.time), "boss cannot trigger trap")
 	t.check(not InfectedSnare.catches(trap, elite, trap["expires"]),
 		"expired trap cannot trigger after expiry")
+	t.current = "corrupt snare state cannot trigger roots or leak bogus markers"
+	var clean_visible: Array = InfectedSnare.visible({777: trap}, elite.position,
+		server.time, 4.0)
+	t.eq(clean_visible.size(), 1, "valid trap remains visible to nearby survivors")
+	t.check(not clean_visible[0].has("expires") and not clean_visible[0].has("owner_key"),
+		"ordinary trap markers still redact private owner and expiry data")
+	for impossible_expiry in [NAN, INF, "never"]:
+		var bad_expiry: Dictionary = trap.duplicate(true)
+		bad_expiry["expires"] = impossible_expiry
+		t.check(not InfectedSnare.catches(bad_expiry, elite, server.time),
+			"corrupt expiry never authorizes a snare root")
+		t.eq(InfectedSnare.visible({777: bad_expiry}, elite.position,
+			server.time, 4.0), [],
+			"corrupt expiry never reaches player snapshots")
+	var bad_location: Dictionary = trap.duplicate(true)
+	bad_location["x"] = NAN
+	t.check(not InfectedSnare.catches(bad_location, elite, server.time),
+		"non-finite trap coordinates never trigger PvE control")
+	t.eq(InfectedSnare.visible({777: bad_location}, elite.position,
+		server.time, 4.0), [], "non-finite markers are suppressed")
+	bad_location = trap.duplicate(true)
+	bad_location["y"] = INF
+	t.eq(InfectedSnare.visible({777: bad_location}, elite.position,
+		server.time, 4.0), [], "bad marker altitude is not sent to clients")
+	for bad_radius in [NAN, INF, -1.0, 0.0]:
+		t.eq(InfectedSnare.visible({777: trap}, elite.position,
+			server.time, bad_radius), [],
+			"invalid/negative observer radius cannot reveal field traps")
+	t.eq(InfectedSnare.visible({777: trap}, elite.position, INF, 4.0), [],
+		"invalid simulation timestamp cannot reveal a trap")
+	t.check(not InfectedSnare.catches(trap, elite, NAN),
+		"invalid world time cannot trigger a trap")
+
+	t.current = "elite roots are shorter, usage caps and lifetime cleanup"
 	for j in InfectedSnare.MAX_PER_OWNER:
 		var t_id: int = 500000 + j
 		var entry: Dictionary = trap.duplicate(true)
