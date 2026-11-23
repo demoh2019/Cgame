@@ -956,12 +956,26 @@ func _add_roadside_caches(cell: Vector2i, origin: Vector2, tier: int, nodes: Arr
 					ambush_local.x < Defs.CHUNK_SIZE - 2.0 and ambush_local.y < Defs.CHUNK_SIZE - 2.0:
 				if not is_water(ambush.x, ambush.y) and not is_safe(ambush.x, ambush.y) and \
 						roads.coverage_at(ambush.x, ambush.y) <= 0.01:
-					spawns.append({
-						"id": entity_id(cell, ROADSIDE_CACHE_ID_BASE + 1),
-						"x": ambush.x, "z": ambush.y,
-						"type": "stalker" if tier >= 3 else "crawler",
-						"ruin": false, "roadside_ambush": true,
-					})
+					var hiding_spot_free := not _in_site_clearing(ambush, sites)
+					if hiding_spot_free:
+						for group in [nodes, structures, crates, props]:
+							for object in group:
+								if not bool(object.get("blocks", false)):
+									continue
+								var reach: float = float(object.get("radius", 0.5)) + 1.2
+								var other := Vector2(float(object["x"]), float(object["z"]))
+								if ambush.distance_squared_to(other) < reach * reach:
+									hiding_spot_free = false
+									break
+							if not hiding_spot_free:
+								break
+					if hiding_spot_free:
+						spawns.append({
+							"id": entity_id(cell, ROADSIDE_CACHE_ID_BASE + 1),
+							"x": ambush.x, "z": ambush.y,
+							"type": "stalker" if tier >= 3 else "crawler",
+							"ruin": false, "roadside_ambush": true,
+						})
 		return
 
 
