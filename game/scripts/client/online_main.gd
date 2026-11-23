@@ -1856,6 +1856,9 @@ func _physics_process(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	# One camera-level frustum update; individual meshlets remain GPU-culled.
+	if _meshlet_page_probe != null and camera != null:
+		_meshlet_page_probe.call("set_view", camera.global_position, camera.get_frustum())
 	if _capture_path != "" and client != null and client.welcomed:
 		_capture_time += delta
 		if _capture_time >= 60.0:
