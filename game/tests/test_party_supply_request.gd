@@ -26,6 +26,18 @@ func run(t) -> void:
 	t.check(SupplyRequest.can_send(30.0, 0.0), "cooldown boundary permits a new request")
 	t.check(not SupplyRequest.can_send(INF, -INF), "invalid time does not bypass cooldown")
 
+	t.current = "supply alert cooldown rejects invalid and future session timestamps"
+	t.check(not SupplyRequest.can_send(30.0, 31.0),
+		"future last-send timestamp cannot bypass the anti-spam timer")
+	t.check(not SupplyRequest.can_send(30.0, -2.0),
+		"negative corrupted last-send timestamp is not a first-request sentinel")
+	t.check(not SupplyRequest.can_send(30.0, NAN),
+		"nonfinite previous request time cannot grant another alert")
+	t.check(not SupplyRequest.can_send(1.0e30, 1.0e30),
+		"very large equal times still respect the cooldown")
+	t.check(SupplyRequest.can_send(60.0, 30.0),
+		"ordinary elapsed-time boundary still permits another request")
+
 	t.current = "server requires a living, genuinely hungry or thirsty party member"
 	var world := WorldGen.new(934)
 	var sim := GameServer.new(world, 934)
