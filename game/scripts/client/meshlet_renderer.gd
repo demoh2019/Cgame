@@ -61,6 +61,9 @@ var vertex_count: int = 0
 var last_error: String = ""
 ## GPU-only geometry page pool. The task shader still culls individual meshlets.
 ## Default keeps up to 64 pages (~3.5 MiB of meshlet payload) on the GPU.
+## Avoid allocating duplicate flattened CPU geometry for the page-streamed path.
+## The legacy full packed layout remains available when false.
+var gpu_streamed_source_only: bool = false
 var max_resident_pages: int = 64
 var max_page_uploads_per_frame: int = 4
 var last_page_uploads: int = 0
@@ -169,6 +172,41 @@ static func pack_meshlets(vertices: PackedVector3Array, meshlets: Array) -> Dict
 		"vertex_slots": total_vertex_slots,
 		"triangle_count": total_triangles,
 	}
+
+
+## Validates source meshlets without materializing full flattened CPU upload
+## streams. Streaming-only users keep the source mesh and page metadata on the
+## CPU and pack only the pages being uploaded to GPU slots.
+@warning_ignore("integer_division")
+static func inspect_streamable_meshlets(vertices: PackedVector3Array, meshlets: Array) -> Dictionary:
+	if meshlets.size() > MAX_MESHLETS:
+		return {"error": "too many meshlets"}
+	var slots: int = 0
+	var tris: int = 0
+	for i in meshlets.size():
+		var meshlet: Dictionary = meshlets[i]
+		var vids: PackedInt32Array = meshlet["vertex_ids"]
+		var indices: PackedInt32Array = meshlet["indices"]
+		if vids.is_empty() or vids.size() > MAX_MESHLET_VERTICES or \
+				indices.is_empty() or indices.size() % 3 != 0 or indices.size() / 3 > MAX_MESHLET_TRIANGLES:
+			return {"error": "invalid meshlet shape %d" % i}
+		for id in vids:
+			if id < 0 or id >= vertices.size():
+				return {"error": "invalid source vertex in meshlet %d" % i}
+		for index in indices:
+			if index < 0 or index >= vids.size():
+				return {"error": "invalid local triangle in meshlet %d" % i}
+		var center: Vector3 = meshlet["bounds_center"]
+		var axis: Vector3 = meshlet["cone_axis"]
+		if not center.is_finite() or not axis.is_finite() or \
+				not is_finite(float(meshlet["bounds_radius"])) or float(meshlet["bounds_radius"]) < 0.0 or \
+				not is_finite(float(meshlet["cone_cutoff"])):
+			return {"error": "invalid meshlet bounds %d" % i}
+		slots += vids.size()
+		tris += indices.size() / 3
+	return {"error": "", "meshlet_count": meshlets.size(),
+		"vertex_count": vertices.size(), "vertex_slots": slots,
+		"triangle_count": tris, "streaming_only": true}
 
 
 ## Encodes exactly one resident GPU slot. All vertex positions and triangle
@@ -344,7 +382,7 @@ func setup_from_mesh(vertices: PackedVector3Array, indices: PackedInt32Array) ->
 func setup(vertices: PackedVector3Array, meshlets: Array) -> bool:
 	release()
 	last_error = ""
-	var result: Dictionary = pack_meshlets(vertices, meshlets)
+	var result: Dictionary = inspect_streamable_meshlets(vertices, meshlets) if gpu_streamed_source_only else pack_meshlets(vertices, meshlets)
 	if result.is_empty() or String(result.get("error", "")) != "":
 		last_error = String(result.get("error", "packing failed"))
 		_packed = {}
