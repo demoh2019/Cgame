@@ -139,10 +139,10 @@ func next_batch(budget: int) -> Array[Vector2i]:
 	if allowed <= 0:
 		return out
 	var queued: Array[Req] = []
-	# Normal 1..32 chunk/frame budgets use O(N log K) comparisons and
-	# O(K) temporary memory instead of sorting every outstanding chunk.
-	# Large bulk budgets use the original full-sort path.
-	var use_heap: bool = allowed <= 32
+	# Normal and medium 1..128 cell/frame budgets use O(N log K)
+	# comparisons and O(K) temporary memory instead of sorting every
+	# outstanding world cell. Very large bulk loads retain full sort.
+	var use_heap: bool = allowed <= 128
 	for r: Req in _reqs.values():
 		if r.state != State.QUEUED:
 			continue

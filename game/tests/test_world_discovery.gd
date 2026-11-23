@@ -37,6 +37,35 @@ func run(t) -> void:
 	t.check(WorldDiscovery.renown(3) > WorldDiscovery.renown(0),
 		"high-risk landmarks award more renown")
 
+	t.current = "squared-distance POI queries match the original geometric oracle"
+	var query_x: float = float(site["x"]) + 12.5
+	var query_z: float = float(site["z"]) - 9.5
+	for radius in [0.0, 4.0, 30.0, 92.0]:
+		var oracle: Array = []
+		var margin: float = radius + 100.0
+		for rx in range(floori((query_x - margin) / 256.0),
+				floori((query_x + margin) / 256.0) + 1):
+			for rz in range(floori((query_z - margin) / 256.0),
+					floori((query_z + margin) / 256.0) + 1):
+				for nearby_site in world.poi.sites_in_region(rx, rz):
+					var position: Vector2 = Vector2(float(nearby_site["x"]),
+						float(nearby_site["z"]))
+					if position.distance_to(Vector2(query_x, query_z)) <= 							radius + float(nearby_site["radius"]):
+						oracle.append(nearby_site)
+		t.eq(world.poi.sites_near(query_x, query_z, radius), oracle,
+			"distance-squared query preserves exact world candidates")
+	t.eq(world.poi.site_at(float(site["x"]), float(site["z"]))["id"],
+		site["id"], "site-center lookup still identifies the true landmark")
+	t.check(world.poi.sites_near(NAN, 0.0, 1.0).is_empty(),
+		"invalid coordinates never expand into unbounded region scans")
+	t.check(world.poi.sites_near(0.0, 0.0, -1.0).is_empty(),
+		"negative query radius is rejected")
+	t.check(not world.poi.station_near(query_x, query_z, NAN),
+		"invalid workbench reach grants no interaction")
+	if bool(site.get("station", false)):
+		t.check(world.poi.station_near(float(site["station_x"]), float(site["station_z"])),
+			"settlement workbench remains reachable at its actual position")
+
 	t.current = "save records are finite, unique and world-seed verified"
 	var records: Array = WorldDiscovery.to_saved(journal)
 	t.eq(records.size(), 1, "one entry persisted")

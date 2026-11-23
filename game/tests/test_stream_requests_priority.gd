@@ -6,7 +6,7 @@ const StreamRequests = preload("res://scripts/shared/stream_requests.gd")
 
 func run(t) -> void:
 	t.current = "top-K streaming batches match the full priority sort"
-	for budget in [1, 2, 4, 5, 8, 16, 32, 40]:
+	for budget in [1, 2, 4, 5, 8, 16, 32, 40, 64, 96, 128]:
 		var queue := StreamRequests.new()
 		var expected: Array[Dictionary] = []
 		for i in 128:
@@ -30,6 +30,31 @@ func run(t) -> void:
 		for index in batch.size():
 			t.eq(batch[index], expected[index]["cell"],
 				"small and large budgets use the same stable priority ordering")
+
+	t.current = "medium-sized world streaming budgets retain stable ranking"
+	var many := StreamRequests.new()
+	var reference: Array[Dictionary] = []
+	for i in 330:
+		var priority: float = float((i * 29) % 41)
+		var cell := Vector2i(-i, i)
+		many.request(cell, priority, 9)
+		reference.append({"cell": cell, "priority": priority, "seq": i})
+	reference.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if float(a["priority"]) != float(b["priority"]):
+			return float(a["priority"]) > float(b["priority"])
+		return int(a["seq"]) < int(b["seq"]))
+	for index in 128:
+		var actual: Array[Vector2i] = [] if index != 0 else many.next_batch(128)
+		if index == 0:
+			t.eq(actual.size(), 128, "medium-size streaming batch uses bounded heap")
+			for j in 128:
+				t.eq(actual[j], reference[j]["cell"],
+					"large bounded top-K matches full priority order")
+	# Remaining cells still sort consistently beyond the heap threshold.
+	var remaining: Array[Vector2i] = many.next_batch(201)
+	for j in remaining.size():
+		t.eq(remaining[j], reference[128 + j]["cell"],
+			"bulk world loading preserves global priority after heap batch")
 
 	t.current = "non-finite priorities are rejected without changing the generation"
 	var invalid := StreamRequests.new()

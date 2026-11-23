@@ -53,27 +53,33 @@ static func hermite(from: Vector3, to: Vector3, v_from: Vector3,
 ## straight linear path exactly. Never derive tangents across a teleport.
 static func sample_position(previous: Array, older: Array, newer: Array,
 		following: Array, alpha: float, host: Node3D = null) -> Vector3:
+	if older.size() < 2 or newer.size() < 2 or 			not (older[1] is Vector3) or not (newer[1] is Vector3):
+		return Vector3.ZERO
 	var from: Vector3 = older[1]
 	var to: Vector3 = newer[1]
+	# Sanitize endpoints before the duplicate-timestamp shortcut; otherwise
+	# corrupt positions can escape without the Hermite safety checks.
+	if not from.is_finite() or not to.is_finite():
+		return hermite(from, to, Vector3.ZERO, Vector3.ZERO, 0.0, alpha)
+	if not (older[0] is float or older[0] is int) or 			not (newer[0] is float or newer[0] is int):
+		return to
 	var t0: float = float(older[0])
 	var t1: float = float(newer[0])
 	var span: float = t1 - t0
-	if span <= 0.00001:
+	if not is_finite(span) or span <= 0.00001:
 		return to
 	var segment_velocity: Vector3 = (to - from) / span
 	var v_from: Vector3 = segment_velocity
 	var v_to: Vector3 = segment_velocity
-	if previous.size() >= 2:
+	if previous.size() >= 2 and previous[1] is Vector3 and 			(previous[0] is float or previous[0] is int):
 		var previous_pos: Vector3 = previous[1]
 		var earlier_span: float = t1 - float(previous[0])
-		if earlier_span > 0.00001 and earlier_span <= MAX_SAMPLE_SECONDS * 3.0 \
-				and previous_pos.distance_to(from) <= TELEPORT_DISTANCE:
+		if is_finite(earlier_span) and earlier_span > 0.00001 and 				earlier_span <= MAX_SAMPLE_SECONDS * 3.0 and 				previous_pos.is_finite() and previous_pos.distance_to(from) <= TELEPORT_DISTANCE:
 			v_from = (to - previous_pos) / earlier_span
-	if following.size() >= 2:
+	if following.size() >= 2 and following[1] is Vector3 and 			(following[0] is float or following[0] is int):
 		var following_pos: Vector3 = following[1]
 		var later_span: float = float(following[0]) - t0
-		if later_span > 0.00001 and later_span <= MAX_SAMPLE_SECONDS * 3.0 \
-				and following_pos.distance_to(to) <= TELEPORT_DISTANCE:
+		if is_finite(later_span) and later_span > 0.00001 and 				later_span <= MAX_SAMPLE_SECONDS * 3.0 and 				following_pos.is_finite() and following_pos.distance_to(to) <= TELEPORT_DISTANCE:
 			v_to = (following_pos - from) / later_span
 	return hermite(from, to, v_from, v_to, span, alpha, host)
 
