@@ -5,6 +5,22 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 
 
+class FlatBlockerWorld:
+	extends RefCounted
+	var blocker: Dictionary = {}
+
+	func height_at(_x: float, _z: float) -> float:
+		return 0.0
+
+	func blockers_near(x: float, z: float, radius: float) -> Array:
+		if blocker.is_empty():
+			return []
+		if absf(float(blocker["x"]) - x) <= radius + float(blocker["radius"]) and \
+				absf(float(blocker["z"]) - z) <= radius + float(blocker["radius"]):
+			return [blocker]
+		return []
+
+
 func run(t) -> void:
 	var world := WorldGen.new(42)
 	t.current = "speed"
@@ -62,6 +78,41 @@ func run(t) -> void:
 		var gap := Vector2(tree["x"] - q.x, tree["z"] - q.z).length()
 		t.check(gap >= Defs.PLAYER_RADIUS + float(tree["radius"]) - 0.01, "a tree stops the player (gap %f)" % gap)
 		t.check(q.z < tree["z"], "the player did not pass through the tree")
+
+	t.current = "authoritative model footprints"
+	var building := {"kind": "building", "scale": 6.0, "yaw": 0.0,
+		"x": 0.0, "z": 0.0, "radius": 3.72}
+	# A circular 3.72 m blocker misses the visible 7 x 7 m house corners.
+	t.check(Movement.overlaps_blocker(Vector2(3.2, 3.2), building),
+		"house corner has a solid footprint beyond the old circular blocker")
+	t.check(not Movement.overlaps_blocker(Vector2(4.1, 4.1), building),
+		"outside the house and player radius is traversable")
+	var wall := {"kind": "wall", "scale": 3.0, "yaw": PI / 4.0,
+		"x": 0.0, "z": 0.0, "radius": 1.8}
+	var turn := Basis(Vector3.UP, PI / 4.0)
+	var along: Vector3 = turn * Vector3(1.8, 0.0, 0.0)
+	var across: Vector3 = turn * Vector3(0.0, 0.0, 2.3)
+	t.check(Movement.overlaps_blocker(Vector2(along.x, along.z), wall),
+		"oriented wall remains solid near its end")
+	t.check(not Movement.overlaps_blocker(Vector2(across.x, across.z), wall),
+		"a thin wall does not block a clear path beside it")
+	var tree := {"kind": "tree", "x": 0.0, "z": 0.0, "radius": 0.5}
+	t.check(Movement.overlaps_blocker(Vector2(0.9, 0.0), tree),
+		"trees retain their circular collision")
+
+	t.current = "swept movement across small models"
+	var flat := FlatBlockerWorld.new()
+	flat.blocker = {"kind": "crate", "x": 0.0, "z": 0.0, "radius": 0.15}
+	var jumped_crate: Vector3 = Movement.move(flat, Vector3(-1.0, 0.0, 0.0),
+		Vector2.RIGHT, 30.0, 0.1)
+	t.check(jumped_crate.x < -0.5,
+		"fast movement cannot tunnel from one side of a narrow model to the other")
+	flat.blocker = building
+	var corner_hit: Vector3 = Movement.move(flat, Vector3(-5.0, 0.0, 3.2),
+		Vector2.RIGHT, 30.0, 0.1)
+	t.check(corner_hit.x < -3.9,
+		"swept movement stops before a house corner")
+	flat.free()
 
 	t.current = "water"
 	# Walk toward the open water from the shore: wading is allowed, deep water is not.
