@@ -186,6 +186,10 @@ func run(t) -> void:
 	var menu := PauseMenu.new()
 	t.eq(menu.visible, false, "menu starts hidden")
 	t.eq(menu._tabs.get_tab_count(), 5, "five working Settings tabs")
+	t.eq(menu._tabs.get_tab_bar().focus_mode, Control.FOCUS_ALL,
+		"tabs allow keyboard and gamepad focus")
+	t.eq(menu._audio_value_labels.size(), AudioMix.SLIDERS.size(),
+		"all five sound sliders have visible numerical percentages")
 	t.eq(menu._bind_buttons.size(), UiInputRebind.ACTIONS.size(), "a button per rebindable action")
 	t.eq(menu._audio_sliders.size(), AudioMix.SLIDERS.size(), "one slider per real AudioMix bus")
 	t.eq(menu._display_pickers.size(), 3, "graphics page exposes window, vsync and FPS")
@@ -205,6 +209,16 @@ func run(t) -> void:
 	t.eq(video_cfg.get_value("display", "window_mode"), 1, "window mode survives restart")
 	t.eq(video_cfg.get_value("display", "vsync"), 0, "V-Sync survives restart")
 	t.check(video_cfg.has_section("interface"), "display writes preserve existing interface settings")
+	menu._reset_display_settings()
+	t.eq(DisplaySettings.get_value("fps_limit"), 0, "reset disables FPS cap")
+	t.eq(Engine.max_fps, 0, "reset updates active FPS cap immediately")
+	t.eq(fps_picker.get_item_id(fps_picker.selected), 0, "FPS picker refreshes after reset")
+	t.eq(window_picker.get_item_id(window_picker.selected), 0, "window picker resets")
+	t.eq(sync_picker.get_item_id(sync_picker.selected), 1, "V-Sync picker resets to enabled")
+	t.eq(DisplaySettings.get_value("vsync"), 1, "reset restores enabled V-Sync")
+	video_cfg.load(TMP)
+	t.eq(video_cfg.get_value("display", "fps_limit"), 0, "reset persists the default FPS")
+	t.check(video_cfg.has_section("interface"), "display reset never clears interface preferences")
 	for bus in AudioMix.SLIDERS:
 		var slider: HSlider = menu._audio_sliders[bus]
 		t.eq(slider.min_value, 0.0, "audio controls support silence")
@@ -226,6 +240,8 @@ func run(t) -> void:
 	var sfx: HSlider = menu._audio_sliders["SFX"]
 	sfx.value = 35.0
 	t.near(float(AudioMix.volumes["SFX"]), 0.35, 0.001, "slider applies to real SFX bus")
+	t.eq((menu._audio_value_labels["SFX"] as Label).text, "35%",
+		"SFX number updates while dragging")
 	menu.close()
 	var sound_cfg := ConfigFile.new()
 	t.eq(sound_cfg.load(AudioMix.path), OK, "closing settings persists changed sound volume")
@@ -233,11 +249,15 @@ func run(t) -> void:
 	AudioMix.set_volume("SFX", 0.7, false)
 	menu._refresh_audio_sliders()
 	t.near(sfx.value, 70.0, 0.01, "reopening the settings page refreshes externally changed volume")
+	t.eq((menu._audio_value_labels["SFX"] as Label).text, "70%",
+		"SFX number refreshes with external volume changes")
 	var audio_page: VBoxContainer = menu._tabs.get_node("Audio").get_child(0) as VBoxContainer
 	var audio_reset: Button = audio_page.get_child(audio_page.get_child_count() - 1) as Button
 	audio_reset.pressed.emit()
 	for bus in AudioMix.SLIDERS:
 		t.near(float(AudioMix.volumes[bus]), 1.0, 0.001, "audio reset restores all five buses")
+		t.eq((menu._audio_value_labels[bus] as Label).text, "100%",
+			"sound percentage readout refreshes after reset")
 	var online_source: String = FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
 	t.check(online_source.contains('menu.connect("graphics_selected"'),
 		"game connects pause graphics picker to real world rendering")
@@ -248,6 +268,8 @@ func run(t) -> void:
 		"graphics selection uses the full renderer / streamer path")
 	t.eq(UiLocalization.t("Graphics", "ru"), "Графика", "graphics tab translated")
 	t.eq(UiLocalization.t("Audio", "ru"), "Звук", "audio tab translated")
+	t.eq(UiLocalization.t("Reset display settings", "ru"), "Сбросить настройки экрана",
+		"video reset has a Russian label")
 	DisplaySettings.path = prior_display_path
 	DisplaySettings.load_all()
 	Engine.max_fps = prior_fps
@@ -255,6 +277,13 @@ func run(t) -> void:
 	AudioMix.reset_volumes(false)
 	AudioMix.load_all()
 	DirAccess.remove_absolute("user://test_albion_settings_audio.cfg")
+	AudioMix.set_volume("SFX", 0.2, false)
+	AudioMix.path = "user://test_albion_settings_audio.cfg"
+	AudioMix.load_all()
+	t.near(float(AudioMix.volumes["SFX"]), 1.0, 0.001,
+		"missing audio configuration restores default live mixer volumes")
+	AudioMix.path = prior_audio_path
+	AudioMix.load_all()
 	menu._capturing = "access_fps"
 	var press := InputEventKey.new()
 	press.physical_keycode = KEY_F6
