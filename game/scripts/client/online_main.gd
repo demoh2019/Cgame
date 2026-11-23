@@ -3,6 +3,7 @@ extends Node3D
 ## network state and what is drawn.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const ResourceGathering = preload("res://scripts/shared/resource_gathering.gd")
 const WoundFx = preload("res://scripts/client/wound_fx.gd")
 const BrawlMeter = preload("res://scripts/client/brawl_meter.gd")
 const FarField = preload("res://scripts/client/far_field.gd")
@@ -1796,7 +1797,20 @@ func _physics_process(delta: float) -> void:
 	var yaw: float = atan2(aim.x, aim.y) if aim != Vector2.ZERO else float(client.yaw)
 	client.send_input(move, sprint, yaw, delta, crouch)
 	var can_swing: bool = alive and not _build_mode and not hud.is_menu_open() and not _access.is_open() and aim != Vector2.ZERO
-	if can_swing and _melee_equipped():
+	var hit_node: Dictionary = {}
+	if can_swing and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		hit_node = client.nearest_strike_node(client.predicted, aim)
+	if not hit_node.is_empty():
+		# Mining/chopping takes priority over combat only when aimed at a nearby node.
+		_charge_msec = -1
+		if _attack_cooldown <= 0.0:
+			client.resource_hit(int(hit_node["id"]), aim)
+			var tool: String = Defs.tool_tier_for_node(str(hit_node["kind"]))
+			var equipped: String = client.inventory.best_tool(tool)
+			var tier: int = Defs.tier_of(equipped) if not equipped.is_empty() else 0
+			_attack_cooldown = ResourceGathering.swing_cooldown(tier)
+			_last_attack_msec = Time.get_ticks_msec()
+	elif can_swing and _melee_equipped():
 		# Brawling: tap to swing, hold to wind up a power blow, release to strike.
 		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 			if _charge_msec < 0 and _attack_cooldown <= 0.0:
@@ -2299,7 +2313,13 @@ func _update_prompt() -> void:
 	elif not loot.is_empty():
 		text = "[E] Loot" if loot["kind"] == "bag" else "[E] Search the crate"
 	elif not node.is_empty():
-		text = "[E] Gather %s (tier %d)" % [node["kind"], node["tier"]]
+		var resource_kind: String = str(node["kind"])
+		if ResourceGathering.is_pickup(resource_kind):
+			text = "[E] Pick up %s" % ("loose stones" if resource_kind == "pebble" else "fallen sticks")
+		elif ResourceGathering.is_strike(resource_kind):
+			text = "[LMB] %s %s (tier %d)" % ["Chop" if resource_kind == "tree" else "Mine", resource_kind, int(node["tier"])]
+		else:
+			text = "[E] Gather %s (tier %d)" % [resource_kind, int(node["tier"])]
 		var needed := Defs.tool_tier_for_node(node["kind"])
 		if needed != "":
 			var tool_id: String = client.inventory.best_tool(needed)
@@ -3063,7 +3083,15 @@ func _interact() -> void:
 		return
 	var node: Dictionary = client.nearest_node(p, Defs.REACH)
 	if not node.is_empty():
-		client.gather(node["id"])
+		if ResourceGathering.is_pickup(str(node["kind"])):
+			client.resource_pickup(int(node["id"]))
+		elif ResourceGathering.is_strike(str(node["kind"])):
+			var facing: Vector2 = _aim_direction()
+			if facing == Vector2.ZERO:
+				facing = _look_direction()
+			client.resource_hit(int(node["id"]), facing)
+		else:
+			client.gather(int(node["id"]))
 
 
 # --- Scripted demo for screenshots and videos --------------------------------------------------------------
