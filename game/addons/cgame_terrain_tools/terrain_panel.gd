@@ -8,12 +8,15 @@ extends VBoxContainer
 ## (Hans Beyer particle model / Sebastian Lague write-up, algorithm only). Panel code is original.
 
 const TerrainEditLayers = preload("res://scripts/shared/terrain_edit_layers.gd")
+const TerrainEditBridge = preload("res://scripts/client/terrain_edit_bridge.gd")
 const HydraulicErosion = preload("res://scripts/shared/hydraulic_erosion.gd")
 
 signal changed
 
 var edit: TerrainEditLayers = TerrainEditLayers.new()
 var selected_layer: int = -1
+var live_target: ChunkedTerrain3D = null # Selected editor terrain, not a separate preview.
+var viewport_sculpt_enabled: bool = false # Opt-in: leave normal editor selection unchanged.
 var brush_kind: int = TerrainEditLayers.Brush.RAISE
 var brush_radius: float = 4.0
 var brush_strength: float = 1.0
@@ -39,17 +42,46 @@ var _status: Label = null
 func _init() -> void:
 	name = "TerrainPanel"
 	_build_ui()
+	changed.connect(_sync_live_target)
 
 
 # ------------------------------------------------------------------ data API
 
 func setup(width: int, height: int, chunk_size: int, base_heights: PackedFloat32Array) -> void:
+	live_target = null
 	edit.setup(width, height, chunk_size, base_heights)
 	selected_layer = -1
 	_ops.clear()
 	_redo_ops.clear()
 	_refresh_layers()
 	_refresh_preview()
+
+
+## Bind the brush/layer editor directly to a ChunkedTerrain3D node in the scene.
+## Its existing heights become the immutable base of this editor session.
+func attach_terrain(terrain: ChunkedTerrain3D) -> bool:
+	if terrain == null or not is_instance_valid(terrain):
+		live_target = null
+		return false
+	var dimensions: Vector2i = terrain.get_height_dimensions()
+	if dimensions.x < 2 or dimensions.y < 2:
+		live_target = null
+		return false
+	if live_target == terrain:
+		return true
+	setup(dimensions.x, dimensions.y, terrain.chunk_quads, terrain.get_height_data())
+	# The initial base was copied from this exact terrain, so no patch is due.
+	edit.take_dirty_chunks()
+	live_target = terrain
+	return true
+
+
+func _sync_live_target() -> void:
+	if live_target == null or not is_instance_valid(live_target):
+		return
+	var result: Dictionary = TerrainEditBridge.flush_dirty(edit, live_target)
+	if not bool(result.get("ok", false)) and _status != null:
+		_status.text = "Terrain update refused: " + str(result.get("reason", "unknown"))
 
 
 func add_layer(layer_name: String, blend: int = TerrainEditLayers.Blend.ADD, opacity: float = 1.0) -> int:
@@ -75,6 +107,8 @@ func move_layer(id: int, to_index: int) -> bool:
 	var ok: bool = edit.move_layer(id, to_index)
 	_refresh_layers()
 	_refresh_preview()
+	if ok:
+		changed.emit()
 	return ok
 
 
@@ -86,16 +120,19 @@ func select_layer(id: int) -> void:
 func set_layer_visible(id: int, vis: bool) -> void:
 	edit.set_layer_visible(id, vis)
 	_refresh_preview()
+	changed.emit()
 
 
 func set_layer_opacity(id: int, opacity: float) -> void:
 	edit.set_layer_opacity(id, opacity)
 	_refresh_preview()
+	changed.emit()
 
 
 func set_layer_blend(id: int, blend: int) -> void:
 	edit.set_layer_blend(id, blend)
 	_refresh_preview()
+	changed.emit()
 
 
 func layer_ids() -> PackedInt32Array:
@@ -264,6 +301,11 @@ func preview_image() -> Image:
 # ------------------------------------------------------------------ UI
 
 func _build_ui() -> void:
+	var viewport_sculpt := CheckBox.new()
+	viewport_sculpt.text = "Sculpt selected terrain (3D viewport)"
+	viewport_sculpt.tooltip_text = "When enabled, left-click the selected ChunkedTerrain3D in the 3D view to sculpt. Disable to select or move objects normally."
+	viewport_sculpt.toggled.connect(func(enabled: bool) -> void: viewport_sculpt_enabled = enabled)
+	add_child(viewport_sculpt)
 	_brush_option = OptionButton.new()
 	for n in ["Raise", "Lower", "Smooth", "Flatten", "Noise", "Erode"]:
 		_brush_option.add_item(n)
