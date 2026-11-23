@@ -121,6 +121,40 @@ func run(t) -> void:
 	t.eq(sim.cmd_loot(103, bag_id).get("reason", ""), "raid_reserved",
 		"rotation cannot bypass the contributor reservation")
 
+	t.current = "malformed rotation metadata cannot bypass or crash a protected raid"
+	var bad_bag: Dictionary = {
+		"items": {"infected_core": 6}, "raid_reserved_until": 75.0,
+		"raid_round_robin": {"order": "broken", "index": 0,
+			"until": 12.0, "original": {"infected_core": 6}}
+	}
+	t.check(RaidRoundRobin.active(bad_bag, 0.0),
+		"corrupt rotation remains active while raid lock is held")
+	t.eq(RaidRoundRobin.turn(bad_bag, captain, 0.0).get("reason", ""),
+		"invalid_state", "malformed order is rejected safely")
+	t.eq(RaidRoundRobin.offer(bad_bag, captain, 0.0).get("reason", ""),
+		"invalid_state", "malformed rotation never offers free claims")
+	bad_bag["raid_round_robin"] = {"order": ["raid-captain", "raid-ally"],
+		"index": 99, "until": 12.0, "original": {"infected_core": 6}}
+	t.eq(RaidRoundRobin.turn(bad_bag, captain, 0.0).get("reason", ""),
+		"invalid_state", "out-of-range turn index is rejected")
+	bad_bag["raid_round_robin"] = {"order": ["raid-captain", "raid-ally"],
+		"index": 0, "until": NAN, "original": {"infected_core": 6}}
+	t.eq(RaidRoundRobin.turn(bad_bag, captain, 0.0).get("reason", ""),
+		"invalid_state", "non-finite turn deadline is rejected")
+	bad_bag["raid_round_robin"] = {"order": ["raid-captain", "raid-captain"],
+		"index": 0, "until": 12.0, "original": {"infected_core": 6}}
+	t.eq(RaidRoundRobin.offer(bad_bag, captain, 0.0).get("reason", ""),
+		"invalid_state", "duplicate participants cannot distort fair shares")
+	t.eq(RaidRoundRobin.turn(bad_bag, null, 0.0).get("reason", ""),
+		"invalid_state", "missing player identity is rejected")
+	var bad_activation: Dictionary = {"items": {"infected_core": 2},
+		"raid_reserved_until": NAN}
+	t.check(not RaidRoundRobin.activate(bad_activation,
+		["account:a", "account:b"], 99, 0.0),
+		"invalid raid lock cannot start rotation")
+	t.check(not bad_activation.has("raid_round_robin"),
+		"failed activation leaves loot unchanged")
+
 	t.current = "mode changes affect future victories, not frozen drops"
 	t.check(sim.cmd_party_loot_mode(101, "free").get("ok", false),
 		"leader switches mode for next boss")
