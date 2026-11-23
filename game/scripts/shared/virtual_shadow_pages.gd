@@ -103,13 +103,15 @@ func level_for_footprint(footprint: float) -> int:
 	return levels - 1
 
 
+@warning_ignore("integer_division")
 func _in_current_window(level: int, gx: int, gy: int) -> bool:
 	if level < 0 or level >= _center.size() or pages_per_axis < 1:
 		return false
 	var half: int = pages_per_axis / 2
 	var dx: int = gx - _center[level].x
 	var dy: int = gy - _center[level].y
-	return dx >= -half and dx < pages_per_axis - half 			and dy >= -half and dy < pages_per_axis - half
+	return (dx >= -half and dx < pages_per_axis - half
+			and dy >= -half and dy < pages_per_axis - half)
 
 
 func request_for_receivers(points: PackedVector3Array, pixel_footprints: PackedFloat32Array) -> void:
