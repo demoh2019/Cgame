@@ -41,6 +41,29 @@ func run(t) -> void:
 	t.eq(bag.durability("club_2"), 100.0, "back to 100%")
 	t.eq(bag.repair_cost(), 0, "nothing left to pay for")
 
+	t.current = "last-copy removal clears equipped and stale durability state"
+	var removal := Inventory.new(3)
+	t.eq(removal.add("club_2", 2), 0, "two independent weapons fit")
+	t.check(removal.equip("club_2"), "owned weapon can be equipped")
+	removal.damage_item("club_2", 35.0)
+	t.check(removal.remove("club_2", 1), "one of two weapons can leave the bag")
+	t.eq(removal.durability("club_2"), 65.0,
+		"shared stack wear stays until the final copy leaves")
+	t.eq(removal.weapon, "club_2", "remaining weapon stays equipped")
+	t.check(removal.remove("club_2", 1), "last weapon is removed")
+	t.eq(removal.weapon, "", "missing weapon is automatically unequipped")
+	t.check(not removal.wear.has("club_2"), "orphan durability is discarded")
+	removal.add("club_2", 1)
+	t.eq(removal.durability("club_2"), 100.0,
+		"newly acquired replacement cannot inherit previous damage")
+	removal.damage_item("club_2", 50.0)
+	removal.take_everything()
+	t.eq(removal.to_dict()["wear"], {},
+		"full-loot death clears old durability along with all carried items")
+	removal.add("club_2", 1)
+	t.eq(removal.durability("club_2"), 100.0,
+		"respawned survivor's fresh gear starts at pristine durability")
+
 	t.current = "armor wears on hits and protects less when broken"
 	var armor_id := _armor_id()
 	t.check(armor_id != "", "an armor item exists")
