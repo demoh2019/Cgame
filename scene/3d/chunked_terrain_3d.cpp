@@ -1133,54 +1133,54 @@ void ChunkedTerrain3D::_invalidate_region(const Rect2i &p_region, bool p_geometr
 		for (int cx = min_cx; cx <= max_cx; cx++) {
 			Chunk &chunk = chunks[cz * chunks_x + cx];
 			last_region_invalidated_chunks++;
-		for (int i = 0; i < MAX_LOD; i++) {
-			if (chunk.meshes[i].is_valid() && rs) {
-				if (chunk.lod == i && chunk.instance.is_valid()) {
-					// Detach before freeing; it is re-attached at the next update.
-					rs->instance_set_visible(chunk.instance, false);
+			for (int i = 0; i < MAX_LOD; i++) {
+				if (chunk.meshes[i].is_valid() && rs) {
+					if (chunk.lod == i && chunk.instance.is_valid()) {
+						// Detach before freeing; it is re-attached at the next update.
+						rs->instance_set_visible(chunk.instance, false);
+					}
+					rs->free_rid(chunk.meshes[i]);
+					chunk.meshes[i] = RID();
 				}
-				rs->free_rid(chunk.meshes[i]);
-				chunk.meshes[i] = RID();
 			}
-		}
-		if (chunk.instance.is_valid() && rs) {
-			rs->free_rid(chunk.instance);
-			chunk.instance = RID();
-		}
-		chunk.lod = -1;
-		chunk.morph = -1.0f;
-		chunk.geometric_error = -1.0f; // Height edits invalidate cached deviation.
-		chunk.visible = false;
-		if (!p_geometry_changed) {
-			// Repaint only: retain terrain collision, bounds and cached LOD errors.
-			continue;
-		}
-		_free_collision(chunk);
+			if (chunk.instance.is_valid() && rs) {
+				rs->free_rid(chunk.instance);
+				chunk.instance = RID();
+			}
+			chunk.lod = -1;
+			chunk.morph = -1.0f;
+			chunk.visible = false;
+			if (!p_geometry_changed) {
+				// Repaint only: retain terrain collision, bounds and cached LOD errors.
+				continue;
+			}
+			chunk.geometric_error = -1.0f; // Only height changes invalidate ruggedness.
+			_free_collision(chunk);
 
-		real_t low;
-		real_t high;
-		chunk_height_range(_field(), chunk.x0, chunk.z0, chunk_quads, low, high);
-		const int x1 = MIN(chunk.x0 + chunk_quads, data_width - 1);
-		const int z1 = MIN(chunk.z0 + chunk_quads, data_depth - 1);
-		const Vector3 a(params.origin.x + real_t(chunk.x0) * params.spacing.x, low * height_scale + height_offset, params.origin.y + real_t(chunk.z0) * params.spacing.y);
-		const Vector3 b(params.origin.x + real_t(x1) * params.spacing.x, high * height_scale + height_offset, params.origin.y + real_t(z1) * params.spacing.y);
-		chunk.bounds = AABB(a, b - a).abs();
-		// Edits also invalidate each coarser level's maximum height error.
-		// Without this recalculation steep newly sculpted hills could still
-		// select the same cheap LOD that was appropriate for a flat chunk.
-		chunk.lod_errors[0] = 0.0;
-		int previous_stride = 1;
-		for (int level = 1; level < MAX_LOD; ++level) {
-			const int stride = lod_stride(level, chunk_quads);
-			if (stride == previous_stride) {
-				chunk.lod_errors[level] = chunk.lod_errors[level - 1];
-			} else {
-				const real_t error = chunk_lod_max_error(_field(), chunk.x0, chunk.z0,
-						chunk_quads, stride) * Math::abs(height_scale);
-				chunk.lod_errors[level] = MAX(error, chunk.lod_errors[level - 1]);
+			real_t low;
+			real_t high;
+			chunk_height_range(_field(), chunk.x0, chunk.z0, chunk_quads, low, high);
+			const int x1 = MIN(chunk.x0 + chunk_quads, data_width - 1);
+			const int z1 = MIN(chunk.z0 + chunk_quads, data_depth - 1);
+			const Vector3 a(params.origin.x + real_t(chunk.x0) * params.spacing.x, low * height_scale + height_offset, params.origin.y + real_t(chunk.z0) * params.spacing.y);
+			const Vector3 b(params.origin.x + real_t(x1) * params.spacing.x, high * height_scale + height_offset, params.origin.y + real_t(z1) * params.spacing.y);
+			chunk.bounds = AABB(a, b - a).abs();
+			// Edits also invalidate each coarser level's maximum height error.
+			// Without this recalculation steep newly sculpted hills could still
+			// select the same cheap LOD that was appropriate for a flat chunk.
+			chunk.lod_errors[0] = 0.0;
+			int previous_stride = 1;
+			for (int level = 1; level < MAX_LOD; ++level) {
+				const int stride = lod_stride(level, chunk_quads);
+				if (stride == previous_stride) {
+					chunk.lod_errors[level] = chunk.lod_errors[level - 1];
+				} else {
+					const real_t error = chunk_lod_max_error(_field(), chunk.x0, chunk.z0,
+							chunk_quads, stride) * Math::abs(height_scale);
+					chunk.lod_errors[level] = MAX(error, chunk.lod_errors[level - 1]);
+				}
+				previous_stride = stride;
 			}
-			previous_stride = stride;
-		}
 		}
 	}
 	time_since_update = 1e9;
