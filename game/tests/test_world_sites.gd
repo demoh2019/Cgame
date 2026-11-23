@@ -93,14 +93,38 @@ func _city_layouts(t) -> void:
 			t.check(offset.length() <= radius, "a city lot stays in the surrounding site circle")
 		var streets: Array = CityLayout.streets(layout, radius, angle)
 		t.check(streets.size() >= 3, "%s has a local road network" % layout)
+		var safe_lots := 0
+		for lot in lots:
+			var offset: Vector2 = lot["offset"]
+			if CityLayout.street_distance(offset, streets) >= 6.82:
+				safe_lots += 1
+		t.check(safe_lots >= 14, "%s retains enough building lots clear of streets (%d)" % [layout, safe_lots])
 		for street in streets:
 			var path: PackedVector2Array = street
 			t.check(path.size() >= 3, "city streets have enough points for road painting")
 			for point in path:
 				t.check(point.length() <= radius, "city roads stay in the surrounding site circle")
+				t.check(CityLayout.contains(point, layout, radius, angle), "city streets stay within their own footprint")
+		var entrance: Vector2 = CityLayout.entrance_offset(layout, radius, angle, Vector2.RIGHT)
+		t.check(CityLayout.contains(entrance, layout, radius, angle), "the city entrance is inside the footprint")
+		var terminal_found := false
+		for street in streets:
+			var path: PackedVector2Array = street
+			if entrance.distance_to(path[0]) < 0.0001 or entrance.distance_to(path[path.size() - 1]) < 0.0001:
+				terminal_found = true
+		t.check(terminal_found, "the city entrance is a real street endpoint")
 	t.check(CityLayout.contains(Vector2(70.0, 0.0), "radial", radius), "circular cities extend radially")
 	t.check(not CityLayout.contains(Vector2(70.0, 0.0), "grid", radius), "square cities have distinct boundaries")
 	t.check(not CityLayout.contains(Vector2(0.0, 70.0), "linear", radius), "linear cities remain narrow")
+	t.check(CityLayout.contains(Vector2(0.0, -65.0), "triangular", radius), "triangle has a pointed northern district")
+	t.check(not CityLayout.contains(Vector2(60.0, -65.0), "triangular", radius), "triangle has sloping edges")
+	t.check(not CityLayout.contains(Vector2(38.64, 0.0), "crescent", radius), "crescent has an open eastern bay")
+	t.check(CityLayout.contains(Vector2(-65.0, 0.0), "crescent", radius), "crescent keeps its western districts")
+	var probe: Array = [PackedVector2Array([Vector2.ZERO, Vector2(10.0, 0.0)])]
+	t.near(CityLayout.street_distance(Vector2(5.0, 3.0), probe), 3.0, 0.0001,
+			"obstacle clearance measures the nearest road segment")
+	t.near(CityLayout.street_distance(Vector2(5.0, 0.0), probe), 0.0, 0.0001,
+			"obstacles lying on a street have zero clearance")
 
 	var world := WorldGen.new(1337)
 	var seen: Dictionary = {}
@@ -115,11 +139,16 @@ func _city_layouts(t) -> void:
 			first_city = site
 		var center := Vector2(float(site["x"]), float(site["z"]))
 		var content: Dictionary = world.poi.contents(site)
+		var paths: Array = CityLayout.streets(layout, float(site["radius"]), float(site["layout_rotation"]))
 		for group in ["structures", "crates", "props", "spawns"]:
 			for item in content[group]:
 				var offset := Vector2(float(item["x"]), float(item["z"])) - center
 				t.check(CityLayout.contains(offset, layout, float(site["radius"]), float(site["layout_rotation"])),
 						"all city content respects its shape")
+				if group != "spawns" and bool(item.get("blocks", true)):
+					var clearance: float = CityLayout.street_distance(offset, paths)
+					t.check(clearance + 0.001 >= float(item.get("radius", 0.0)) + 3.1,
+							"buildings, ruins and loot never block local city roads")
 	t.check(seen.size() >= 3, "the island generates multiple city layouts (%s)" % str(seen.keys()))
 	if not first_city.is_empty():
 		var city_roads := 0
@@ -127,6 +156,29 @@ func _city_layouts(t) -> void:
 			if road["from"] == first_city["display"] and road["to"] == first_city["display"]:
 				city_roads += 1
 		t.check(city_roads >= 3, "the generated city has internal painted streets")
+		var terminals: Array[Vector2] = []
+		for street in CityLayout.streets(str(first_city["layout"]), float(first_city["radius"]),
+				float(first_city["layout_rotation"])):
+			var path: PackedVector2Array = street
+			terminals.append(path[0])
+			terminals.append(path[path.size() - 1])
+		var city_links := 0
+		var city_center := Vector2(float(first_city["x"]), float(first_city["z"]))
+		for road in world.roads.all_roads():
+			var entry: Vector2
+			if road["from"] == first_city["display"] and road["to"] != first_city["display"]:
+				entry = road["points"][0]
+			elif road["to"] == first_city["display"] and road["from"] != first_city["display"]:
+				var points: PackedVector2Array = road["points"]
+				entry = points[points.size() - 1]
+			else:
+				continue
+			city_links += 1
+			var nearest: float = INF
+			for terminal in terminals:
+				nearest = minf(nearest, (entry - city_center).distance_to(terminal))
+			t.check(nearest < 0.001, "intercity roads connect directly to a city street endpoint")
+		t.check(city_links > 0, "at least one regional road connects to the city")
 
 
 func _contents(t) -> void:
