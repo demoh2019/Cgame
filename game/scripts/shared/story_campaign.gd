@@ -121,8 +121,7 @@ static func transmit(state: Dictionary, carried) -> Dictionary:
 	if int(state["stage"]) != 3:
 		return {"ok": false, "reason": "incomplete"}
 	var trial = Inventory.new(carried.slots.size())
-	if not trial.load_dict(carried.to_dict()):
-		return {"ok": false, "reason": "invalid_inventory"}
+	trial.load_dict(carried.to_dict())
 	for item_id in REWARD:
 		if trial.add(str(item_id), int(REWARD[item_id])) != 0:
 			return {"ok": false, "reason": "no_space"}
