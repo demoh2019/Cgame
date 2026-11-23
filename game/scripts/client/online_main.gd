@@ -21,6 +21,7 @@ const MoonVisuals = preload("res://scripts/client/moon_visuals.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Net = preload("res://scripts/shared/net.gd")
+const NetProtocol = preload("res://scripts/shared/net_protocol.gd")
 const GameClient = preload("res://scripts/client/game_client.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 const TerrainRvt = preload("res://scripts/client/terrain_rvt.gd")
@@ -125,6 +126,7 @@ const DAY_LENGTH := WorldCycle.DAY_LENGTH # Shared with server simulation and lo
 var net
 var client
 var peer: ENetMultiplayerPeer
+var _rpc_protocol_failed := false
 var streamer: WorldStreamer
 var _terrain_rvt: Node
 # Last displayed position, not input intent: online prediction uses actual
@@ -876,13 +878,19 @@ func _connect() -> void:
 		net.role = "client"
 		get_tree().root.add_child.call_deferred(net) # RPC paths must match the server: /root/Net.
 		client = GameClient.new(net)
+		if not NetProtocol.install(multiplayer as SceneMultiplayer, net,
+				Callable(self, "_on_rpc_protocol_rejected")):
+			status_label.text = "Cannot initialize network RPC protocol."
+			return
+		multiplayer.peer_authentication_failed.connect(_on_rpc_authentication_failed)
 		multiplayer.connected_to_server.connect(func() -> void:
 			NetTimeouts.apply(peer, 1) # Loading the world must not time the link out.
 			status_label.text = "Joining..."
 			client.join(name_edit.text, account.get("token", ""), account.get("refresh", "")))
 		multiplayer.connection_failed.connect(_on_connection_failed)
 		multiplayer.server_disconnected.connect(func() -> void:
-			status_label.text = "Disconnected."
+			if not _rpc_protocol_failed:
+				status_label.text = "Disconnected."
 			connect_panel.visible = true)
 		net.welcomed.connect(_on_welcomed)
 		net.join_refused.connect(func(reason: String) -> void: status_label.text = reason)
@@ -891,6 +899,7 @@ func _connect() -> void:
 
 ## The ENet connection alone, so a solo world that is still starting can be retried without signing in again.
 func _open_peer(host: String, port: int) -> void:
+	_rpc_protocol_failed = false
 	peer = ENetMultiplayerPeer.new()
 	if peer.create_client(host, port) != OK:
 		status_label.text = "Could not connect."
@@ -899,7 +908,20 @@ func _open_peer(host: String, port: int) -> void:
 	status_label.text = "Connecting..." if _solo_attempts_left == 0 else "Starting your world..."
 
 
+func _on_rpc_protocol_rejected(_peer_id: int) -> void:
+	_rpc_protocol_failed = true
+	status_label.text = "Incompatible RPC protocol. Restart/update both client and server from the same build."
+	connect_panel.visible = true
+
+
+func _on_rpc_authentication_failed(peer_id: int) -> void:
+	# Also covers old servers that do not implement the pre-RPC handshake.
+	_on_rpc_protocol_rejected(peer_id)
+
+
 func _on_connection_failed() -> void:
+	if _rpc_protocol_failed:
+		return
 	if _solo_attempts_left > 0 and local_server.is_running():
 		_solo_attempts_left -= 1
 		await get_tree().create_timer(1.5).timeout
