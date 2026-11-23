@@ -116,7 +116,7 @@ class TestVirtualGeometryAttributeContract(unittest.TestCase):
         xml = ET.parse(MODULE / "doc_classes/CgameClusterLOD.xml").getroot()
         methods = {m.get("name") for m in xml.findall("./methods/method")}
         self.assertIn("simplify_surface_arrays", methods)
-        self.assertIn("attribute-fidelity", (MODULE / "README.md").read_text())
+        self.assertIn("attribute-fidelity", (MODULE / "README.md").read_text().lower())
         notes = (ROOT / "game/docs/p1_nanite_attribute_preservation.md").read_text()
         self.assertIn("Unreal Engine Nanite", notes)
         self.assertIn("not yet", notes.lower())
