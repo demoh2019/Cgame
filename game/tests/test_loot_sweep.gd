@@ -43,6 +43,33 @@ func run(t) -> void:
 	t.eq(Sweep.candidates(server.bags, owner.position, owner, INF), [],
 		"invalid server time has no eligible bags")
 
+	t.current = "corrupt PvE bags cannot appear in the nearby auto-loot list"
+	var malformed: Dictionary = {}
+	var ordinary: Dictionary = server.bags[a].duplicate(true)
+	ordinary["id"] = 1001
+	ordinary["x"] = owner.position.x + 0.25
+	ordinary["z"] = owner.position.z
+	malformed[1001] = ordinary
+	var nonnumeric_x: Dictionary = ordinary.duplicate(true)
+	nonnumeric_x["id"] = 1002
+	nonnumeric_x["x"] = str(ordinary["x"])
+	malformed[1002] = nonnumeric_x
+	var nonnumeric_expiry: Dictionary = ordinary.duplicate(true)
+	nonnumeric_expiry["id"] = 1003
+	nonnumeric_expiry["expires"] = "999999"
+	malformed[1003] = nonnumeric_expiry
+	var invalid_id: Dictionary = ordinary.duplicate(true)
+	invalid_id["id"] = "1004"
+	malformed[1004] = invalid_id
+	var squared_overflow: Dictionary = ordinary.duplicate(true)
+	squared_overflow["id"] = 1005
+	squared_overflow["x"] = 1.0e30
+	malformed[1005] = squared_overflow
+	t.eq(Sweep.candidates(malformed, owner.position, owner, server.time), [1001],
+		"only a genuinely nearby numeric server bag enters the bounded selection")
+	t.eq(Sweep.candidates(malformed, owner.position, owner, -1.0), [],
+		"negative simulated time does not permit automatic collection")
+
 	t.current = "dense loot piles choose exact nearest five without a full sort"
 	var crowded: Dictionary = {}
 	for i in 80:

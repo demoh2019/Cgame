@@ -11,19 +11,19 @@ const RADIUS := Defs.REACH + 0.5
 
 static func candidates(bags: Dictionary, at: Vector3, player, now: float) -> Array[int]:
 	var result: Array[int] = []
-	if player == null or not at.is_finite() or not is_finite(now):
+	if player == null or not at.is_finite() or not is_finite(now) or now < 0.0:
 		return result
 	var origin := Vector2(at.x, at.z)
 	# The server only claims up to five bags. Maintain a bounded nearest list
 	# instead of sorting the entire visible loot population on every command.
 	var nearest: Array[Dictionary] = []
 	var max_distance_sq: float = RADIUS * RADIUS
-	for key in bags.keys():
+	for key in bags:
 		var value: Variant = bags[key]
 		if not (key is int) or not (value is Dictionary):
 			continue
 		var bag: Dictionary = value
-		if int(bag.get("id", -1)) != int(key) or \
+		if not (bag.get("id", null) is int) or int(bag["id"]) != int(key) or \
 				not (bag.get("allowed_tokens", null) is Array):
 			continue # Non-PvE or unowned full-loot bag.
 		if bag.has("raid_reserved_until") or bag.has("raid_round_robin") or \
@@ -34,14 +34,20 @@ static func candidates(bags: Dictionary, at: Vector3, player, now: float) -> Arr
 				not (bag.get("items", {}) is Dictionary) or \
 				(bag["items"] as Dictionary).is_empty():
 			continue
-		var expiry: float = float(bag.get("expires", -1.0))
-		var x: float = float(bag.get("x", NAN))
-		var z: float = float(bag.get("z", NAN))
+		# Do not coerce malformed bag coordinates or timestamps. An
+		# untrusted/stale record must never enter the nearest-five list.
+		if not (bag.get("expires", null) is float or bag.get("expires", null) is int) or \
+				not (bag.get("x", null) is float or bag.get("x", null) is int) or \
+				not (bag.get("z", null) is float or bag.get("z", null) is int):
+			continue
+		var expiry: float = float(bag["expires"])
+		var x: float = float(bag["x"])
+		var z: float = float(bag["z"])
 		if not is_finite(expiry) or now >= expiry or \
 				not is_finite(x) or not is_finite(z):
 			continue
 		var distance: float = origin.distance_squared_to(Vector2(x, z))
-		if distance > max_distance_sq:
+		if not is_finite(distance) or distance > max_distance_sq:
 			continue
 		var id: int = int(key)
 		var insert_at: int = nearest.size()

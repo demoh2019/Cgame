@@ -31,6 +31,18 @@ func run(t) -> void:
 	t.check(not Nav.target({"dst_x": "0", "dst_z": 1.0},
 		"dst_x", "dst_z").is_finite(), "text cannot turn into a waypoint")
 
+	t.current = "world map ignores overflow coordinates instead of showing false directions"
+	t.eq(Nav.distance_meters(Vector2.ZERO, Vector2(1.0e30, 0.0)), -1,
+		"overflowing distance cannot be converted into a fake UI meter count")
+	t.eq(Nav.compass(Vector2.ZERO, Vector2(1.0e30, 0.0)), "",
+		"extreme finite coordinates cannot become a misleading compass sector")
+	t.eq(Nav.compass(Vector2(-1.0e30, 0.0), Vector2(1.0e30, 0.0)), "",
+		"finite endpoints with overflowing separation cannot create a compass heading")
+	t.check(not Nav.valid_destination(Vector2(1.0e30, 0.0), 1.0e30),
+		"overflowing world and position squares cannot mark a point as in-bounds")
+	t.check(Nav.valid_destination(Vector2(25.0, 50.0), 100.0),
+		"ordinary in-world map destinations stay selectable")
+
 	t.current = "radar projection clips distant waypoints to map edge"
 	var size := Vector2(200, 200)
 	var near: Dictionary = Nav.project(Vector2.ZERO, Vector2(36, -36), size)

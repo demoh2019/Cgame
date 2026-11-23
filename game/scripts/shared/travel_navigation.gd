@@ -22,14 +22,21 @@ static func target(data: Variant, x_key: String, z_key: String) -> Vector2:
 static func distance_meters(origin: Vector2, destination: Vector2) -> int:
 	if not origin.is_finite() or not destination.is_finite():
 		return -1
-	return maxi(0, roundi(origin.distance_to(destination)))
+	var distance: float = origin.distance_to(destination)
+	# Guard overflow before converting float to int for the UI compass.
+	if not is_finite(distance) or distance > 2147483647.0:
+		return -1
+	return maxi(0, roundi(distance))
 
 
 static func compass(origin: Vector2, destination: Vector2) -> String:
 	if not origin.is_finite() or not destination.is_finite():
 		return ""
 	var delta: Vector2 = destination - origin
-	if delta.length_squared() <= 4.0:
+	var distance_squared: float = delta.length_squared()
+	if not delta.is_finite() or not is_finite(distance_squared):
+		return ""
+	if distance_squared <= 4.0:
 		return "ARRIVED"
 	# World coordinates use -Z as north and +X as east.
 	var angle: float = atan2(delta.x, -delta.y)
@@ -39,8 +46,12 @@ static func compass(origin: Vector2, destination: Vector2) -> String:
 ## Convert a local pointer in the full-island map into a private waypoint.
 ## Invalid/off-island clicks are rejected instead of producing a fake route.
 static func valid_destination(destination: Vector2, world_radius: float) -> bool:
-	return destination.is_finite() and is_finite(world_radius) and world_radius > 0.0 and \
-		destination.length_squared() <= world_radius * world_radius
+	if not destination.is_finite() or not is_finite(world_radius) or world_radius <= 0.0:
+		return false
+	var distance_squared: float = destination.length_squared()
+	var radius_squared: float = world_radius * world_radius
+	return is_finite(distance_squared) and is_finite(radius_squared) and \
+		distance_squared <= radius_squared
 
 
 static func world_from_map(pointer: Vector2, bounds: Rect2, span: float,
