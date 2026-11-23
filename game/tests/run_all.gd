@@ -81,6 +81,7 @@ const SUITES := [
 	"res://tests/test_terrain_shader_lod.gd",
 	"res://tests/test_terrain_screen_lod.gd",
 	"res://tests/test_terrain_mesh_streaming.gd",
+	"res://tests/test_terrain_auto_collision.gd",
 	"res://tests/test_terrain_geometric_error_lod.gd",
 	"res://tests/test_terrain_geomorph.gd",
 	"res://tests/test_terrain_seam_normals.gd",
