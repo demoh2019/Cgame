@@ -322,6 +322,7 @@ const SUITES := [
 	"res://tests/test_wading_wetness.gd",
 	"res://tests/test_wading_travel.gd",
 	"res://tests/test_wind_chill.gd",
+	"res://tests/test_hub_tangent_safe.gd",
 	"res://tests/test_hub_recall.gd",
 	"res://tests/test_storm_stealth.gd",
 	"res://tests/test_wind_hearing.gd",
