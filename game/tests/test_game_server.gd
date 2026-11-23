@@ -53,6 +53,14 @@ func run(t) -> void:
 		_teleport(server, 13, float(indexed_node["x"]), float(indexed_node["z"]))
 		t.eq(int(server._find_node(node_id).get("id", -1)), node_id,
 				"resource ID lookup resolves the actual nearby world node")
+		var node_position := Vector3(float(indexed_node["x"]), float(indexed_node["y"]),
+				float(indexed_node["z"]))
+		t.eq(int(server._find_node_near(node_id, node_position).get("id", -1)), node_id,
+				"direct lookup also preserves command-specific exact local resource resolution")
+		t.check(server._find_node_near(node_id, Vector3.ZERO).is_empty(),
+				"command lookup does not accept remote resource IDs")
+		t.check(server._find_node_near(-1, node_position).is_empty(),
+				"invalid command resource IDs are rejected before chunk access")
 		var source_cell: Vector2i = WorldGen.entity_cell(node_id)
 		t.check(server._find_node(WorldGen.entity_id(source_cell, 839)).is_empty(),
 				"an unused slot in a real chunk does not invent a resource")
