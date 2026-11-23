@@ -1047,7 +1047,7 @@ func add_structure_blockers(id: int, circles: Array) -> void:
 	var keys: Array = []
 	for k in circles.size():
 		var c: Array = circles[k]
-		if not (is_finite(float(c[0])) and is_finite(float(c[1])) and float(c[2]) > 0.0):
+		if not (is_finite(float(c[0])) and is_finite(float(c[1])) and is_finite(float(c[2])) and float(c[2]) > 0.0):
 			continue
 		var key := "%d:%d" % [id, k]
 		var entry: Dictionary = {"id": id, "x": float(c[0]), "z": float(c[1]), "radius": float(c[2]), "blocks": true, "piece_owner": str(id)}
