@@ -208,6 +208,7 @@ const SUITES := [
 	"res://tests/test_procedural_moon.gd",
 	"res://tests/test_sky_cirrus_lut.gd",
 	"res://tests/test_grass_lod.gd",
+	"res://tests/test_user_grass_assets.gd",
 	"res://tests/test_road_mask_max_filter.gd",
 	"res://tests/test_point_spacing.gd",
 	"res://tests/test_grass_crush.gd",
