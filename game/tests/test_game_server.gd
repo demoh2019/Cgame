@@ -42,6 +42,54 @@ func run(t) -> void:
 	server.remove_player(12)
 	t.check(not server.players.has(11), "a player can leave")
 
+	t.current = "single-cell authoritative entity lookup"
+	var indexed_node: Dictionary = _find_node(world, "tree", 1)
+	t.check(not indexed_node.is_empty(), "find a real seeded resource for lookup")
+	if not indexed_node.is_empty():
+		var node_id: int = int(indexed_node["id"])
+		t.check(server._find_node(node_id).is_empty(),
+				"a remote chunk is not scanned without a nearby player")
+		var guest = server.add_player(13, "Node Scout")
+		_teleport(server, 13, float(indexed_node["x"]), float(indexed_node["z"]))
+		t.eq(int(server._find_node(node_id).get("id", -1)), node_id,
+				"resource ID lookup resolves the actual nearby world node")
+		var source_cell: Vector2i = WorldGen.entity_cell(node_id)
+		t.check(server._find_node(WorldGen.entity_id(source_cell, 839)).is_empty(),
+				"an unused slot in a real chunk does not invent a resource")
+		server.remove_player(13)
+		t.check(server._find_node(node_id).is_empty(),
+				"leaving players cannot keep a remote resource eligible")
+
+	var indexed_crate: Dictionary = {}
+	var indexed_crate_zone := -1
+	for cx in range(2, 10):
+		if not indexed_crate.is_empty():
+			break
+		for cz in range(2, 10):
+			if not indexed_crate.is_empty():
+				break
+			var data: Dictionary = world.chunk(Vector2i(cx, cz))
+			if not data["crates"].is_empty():
+				indexed_crate = data["crates"][0]
+				indexed_crate_zone = int(data["zone"])
+	t.check(not indexed_crate.is_empty(), "find a real seeded loot crate for lookup")
+	if not indexed_crate.is_empty():
+		var crate_id: int = int(indexed_crate["id"])
+		t.check(server._find_crate(crate_id).is_empty(),
+				"out-of-range seeded loot cannot be resolved")
+		server.add_player(14, "Crate Scout")
+		_teleport(server, 14, float(indexed_crate["x"]), float(indexed_crate["z"]))
+		var resolved: Dictionary = server._find_crate(crate_id)
+		t.eq(int(resolved.get("id", -1)), crate_id,
+				"one owning chunk resolves the actual crate")
+		t.eq(int(resolved.get("zone", -1)), indexed_crate_zone,
+				"crate lookup preserves authoritative zone for loot rolls")
+		server.remove_player(14)
+		t.check(server._find_crate(crate_id).is_empty(),
+				"remote crates are not retained once the scout leaves")
+	t.check(server._find_node(-1).is_empty() and server._find_crate(0).is_empty(),
+			"invalid procedural IDs cannot trigger chunk scans")
+
 	t.current = "movement budget"
 	_teleport(server, 10, 20.0, 0.0)
 	var before: Vector3 = server.players[10].position
