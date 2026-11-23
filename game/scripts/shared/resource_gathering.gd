@@ -52,7 +52,10 @@ static func reach_margin(node: Dictionary) -> float:
 
 
 static func aimed_at(player_pos: Vector3, node: Dictionary, direction: Vector2, reach: float = Defs.REACH + 0.5) -> bool:
-	if not player_pos.is_finite() or not direction.is_finite() or direction.length_squared() < 0.01:
+	if not player_pos.is_finite() or not direction.is_finite():
+		return false
+	var direction_squared: float = direction.length_squared()
+	if not is_finite(direction_squared) or direction_squared < 0.01:
 		return false
 	if not is_finite(reach) or reach < 0.0:
 		return false
@@ -69,7 +72,7 @@ static func aimed_at(player_pos: Vector3, node: Dictionary, direction: Vector2, 
 	if distance_sq <= close_reach * close_reach:
 		return true
 	# Squared distance avoids repeated square roots and normalizations on hit RPCs.
-	return offset.dot(direction) >= 0.35 * sqrt(distance_sq * direction.length_squared())
+	return offset.dot(direction) >= 0.35 * sqrt(distance_sq * direction_squared)
 
 
 ## Weak spots rotate around a node after each confirmed hit. The position is
