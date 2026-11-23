@@ -6558,6 +6558,13 @@ func cmd_loot(peer_id: int, entity_id: int, requested_item: String = "") -> Dict
 		# real reachable unopened world crate can grant XP or extra materials.
 		var loot: Dictionary = Scavenging.enriched_loot(zone,
 			player.progression.scavenging_level(), Combat.crate_loot(zone, local_rng))
+		# Newly discovered cache categories come exclusively from the real
+		# world chunk, never from player-supplied loot or a claimed item type.
+		# Existing vanilla crates retain exactly their previous drop table.
+		if bool(crate.get("roadside_cache", false)):
+			loot = Scavenging.exploration_bonus(zone, loot, "roadside")
+		elif bool(crate.get("urban_cache", false)):
+			loot = Scavenging.exploration_bonus(zone, loot, "urban")
 		# The kit is consumed only after a real, reachable, unopened crate has
 		# passed server checks. The client cannot request bonus contents or zone.
 		var unlocked: bool = false

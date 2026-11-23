@@ -134,6 +134,8 @@ func run(t) -> void:
 					continue
 				var reference: float = WorldRoads.coverage_on_segments(point, segments)
 				t.near(world.roads.coverage_at(point.x, point.y), reference, 0.00011, "native road grip matches scalar")
+				t.near(world.roads.coverage_on_land(point.x, point.y), reference, 0.00011,
+						"dry-land generation skips water tests without changing road clearance")
 				sample_count += 1
 			if sample_count >= 100:
 				break
