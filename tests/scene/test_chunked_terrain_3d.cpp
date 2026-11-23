@@ -297,6 +297,107 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Editing heights and invalid input") {
 	memdelete(terrain);
 }
 
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Sparse patches rebuild only touched terrain chunks and nearby physics") {
+	ChunkedTerrain3D *terrain = make_terrain(129, 128.0, 10.0);
+	Node3D *focus = memnew(Node3D);
+	SceneTree::get_singleton()->get_root()->add_child(terrain);
+	SceneTree::get_singleton()->get_root()->add_child(focus);
+	focus->set_global_position(Vector3(-56, 30, -56));
+	terrain->set_focus(terrain->get_path_to(focus));
+	terrain->set_collision_distance(50.0);
+	terrain->force_update();
+	REQUIRE(terrain->get_chunk_grid_size() == Vector2i(4, 4));
+	REQUIRE(terrain->get_collision_chunk_count() >= 1);
+	const int far_lod = terrain->get_chunk_lod(Vector2i(3, 3));
+	const real_t untouched_height = terrain->get_height_at(Vector3(40, 0, 40));
+
+	// A single sample well inside a chunk must not invalidate 15 other
+	// surfaces, their LOD selection, or their collision shapes.
+	CHECK(terrain->apply_height_patch(Rect2i(8, 8, 1, 1), PackedFloat32Array({ 1.0f })));
+	CHECK(terrain->get_last_region_invalidated_chunks() == 1);
+	CHECK(terrain->get_height_at(Vector3(-56, 0, -56)) == doctest::Approx(10.0).epsilon(0.001));
+	CHECK(terrain->get_height_at(Vector3(40, 0, 40)) == doctest::Approx(untouched_height));
+	terrain->force_update();
+	CHECK(terrain->get_chunk_count() == 16);
+	CHECK(terrain->get_chunk_lod(Vector2i(3, 3)) == far_lod);
+	CHECK(terrain->get_collision_chunk_count() >= 1);
+
+	// Physics is recreated only for the affected near chunk, and the ray
+	// must hit the modified terrain rather than the stale heightfield.
+	PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
+	const RID space = SceneTree::get_singleton()->get_root()->get_world_3d()->get_space();
+	ps->step(0.016);
+	ps->flush_queries();
+	PhysicsDirectSpaceState3D *state = ps->space_get_direct_state(space);
+	REQUIRE(state != nullptr);
+	PhysicsServer3DTypes::RayParameters params;
+	params.from = Vector3(-56, 100, -56);
+	params.to = Vector3(-56, -100, -56);
+	PhysicsServer3DTypes::RayResult result;
+	CHECK(state->intersect_ray(params, result));
+	if (state->intersect_ray(params, result)) {
+		CHECK(result.position.y == doctest::Approx(10.0).epsilon(0.03));
+	}
+
+	// Reapplying identical values is a no-op, and seam edits must update
+	// both sides of the shared edge/corner.
+	CHECK(terrain->apply_height_patch(Rect2i(8, 8, 1, 1), PackedFloat32Array({ 1.0f })));
+	CHECK(terrain->get_last_region_invalidated_chunks() == 0);
+	CHECK(terrain->apply_height_patch(Rect2i(32, 32, 1, 1), PackedFloat32Array({ 0.8f })));
+	CHECK(terrain->get_last_region_invalidated_chunks() == 4);
+	terrain->force_update();
+
+	// Failed operations are atomic and leave both native height data and
+	// the current streaming caches intact.
+	const PackedFloat32Array before = terrain->get_height_data();
+	ERR_PRINT_OFF;
+	CHECK_FALSE(terrain->apply_height_patch(Rect2i(0, 0, 2, 2), PackedFloat32Array({ 0.7f })));
+	CHECK_FALSE(terrain->apply_height_patch(Rect2i(-1, 0, 1, 1), PackedFloat32Array({ 0.7f })));
+	CHECK_FALSE(terrain->apply_height_patch(Rect2i(0, 0, 1, 1), PackedFloat32Array({ Math::INF })));
+	ERR_PRINT_ON;
+	CHECK(terrain->get_height_data() == before);
+
+	memdelete(focus);
+	memdelete(terrain);
+}
+
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Sparse colors and custom-normal edits preserve source attributes") {
+	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
+	PackedColorArray colors;
+	colors.resize(65 * 65);
+	colors.fill(Color(0.2, 0.3, 0.4, 1.0));
+	terrain->set_color_data(colors);
+	PackedVector3Array normals;
+	normals.resize(65 * 65);
+	normals.fill(Vector3(0, 1, 0));
+	terrain->set_normal_data(normals);
+	SceneTree::get_singleton()->get_root()->add_child(terrain);
+	terrain->force_update();
+
+	CHECK(terrain->apply_color_patch(Rect2i(7, 7, 2, 1),
+			PackedColorArray({ Color(1, 0, 0), Color(0, 1, 0) })));
+	CHECK(terrain->get_last_region_invalidated_chunks() == 1);
+	CHECK(terrain->get_color_data()[7 * 65 + 7] == Color(1, 0, 0));
+	CHECK(terrain->get_color_data()[7 * 65 + 8] == Color(0, 1, 0));
+	CHECK(terrain->get_color_data()[8 * 65 + 8] == Color(0.2, 0.3, 0.4, 1.0));
+
+	// A height-only patch is refused while the material uses external
+	// normals. Supplying matching finite normals lets us edit locally.
+	const PackedFloat32Array before = terrain->get_height_data();
+	ERR_PRINT_OFF;
+	CHECK_FALSE(terrain->apply_height_patch(Rect2i(7, 7, 1, 1), PackedFloat32Array({ 0.9f })));
+	CHECK_FALSE(terrain->apply_color_patch(Rect2i(7, 7, 2, 2), PackedColorArray({ Color(1, 0, 0) })));
+	ERR_PRINT_ON;
+	CHECK(terrain->get_height_data() == before);
+	CHECK(terrain->apply_height_patch(Rect2i(7, 7, 1, 1), PackedFloat32Array({ 0.9f }),
+			PackedVector3Array({ Vector3(0, 2, 0) })));
+	CHECK(terrain->get_last_region_invalidated_chunks() == 1);
+	CHECK(terrain->get_normal_data()[7 * 65 + 7].is_equal_approx(Vector3(0, 1, 0)));
+	terrain->force_update();
+	CHECK(terrain->get_chunk_count() == 4);
+	memdelete(terrain);
+}
+
 TEST_CASE("[SceneTree][ChunkedTerrain3D] Terrains whose size is not a multiple of the chunk") {
 	// 50 samples: 49 quads, chunks of 32 -> 2 chunks per side; the last one is partial.
 	ChunkedTerrain3D *terrain = make_terrain(50, 49.0, 10.0);
