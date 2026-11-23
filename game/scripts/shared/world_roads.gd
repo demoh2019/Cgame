@@ -154,13 +154,14 @@ func _lay_road(a: Dictionary, b: Dictionary) -> void:
 	else:
 		finish -= direction * float(b["end"])
 	var length: float = start.distance_to(finish)
-	if length < STEP * 2.0:
+	# Nearby sites may have entrances less than two road steps apart: keep that connection.
+	if length < 3.0:
 		return
 	var side := Vector2(-direction.y, direction.x)
 	var seed_value: int = world.mix(int(a["x"]), int(b["z"]), int(a["z"]) + int(b["x"]), world.world_seed)
 	var phase: float = float(seed_value % 1000) / 1000.0 * TAU
 	var wiggle: float = clampf(length * 0.06, 6.0, 28.0)
-	var count: int = int(length / STEP) + 1
+	var count: int = maxi(2, int(length / STEP) + 1)
 	var points := PackedVector2Array()
 	for n in count + 1:
 		var t: float = float(n) / float(count)
