@@ -51,6 +51,11 @@ taskPayloadSharedEXT TaskPayload payload;
 shared uint visible_count;
 
 bool meshlet_visible(Meshlet m) {
+	// Empty slots start with zeroed descriptors; evicted pages are overwritten
+	// before the next draw. Never emit a mesh workgroup for an empty slot.
+	if (m.counts.z == 0u || m.counts.w == 0u) {
+		return false;
+	}
 	float scale = length(frame.model[0].xyz);
 	vec3 center = (frame.model * vec4(m.sphere.xyz, 1.0)).xyz;
 	float radius = m.sphere.w * scale;
