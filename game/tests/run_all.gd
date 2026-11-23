@@ -214,6 +214,7 @@ const SUITES := [
 	"res://tests/test_vegetation_wind.gd",
 	"res://tests/test_first_person_view.gd",
 	"res://tests/test_net_timeouts.gd",
+	"res://tests/test_net_quantization.gd",
 	"res://tests/test_net_result_rpc.gd",
 	"res://tests/test_arcane_abilities.gd",
 	"res://tests/test_swimming.gd",
