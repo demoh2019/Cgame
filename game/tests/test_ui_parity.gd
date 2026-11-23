@@ -11,6 +11,7 @@ const UiAccess = preload("res://scripts/client/ui_access.gd")
 const UiTheme = preload("res://scripts/client/ui_theme.gd")
 const PauseMenu = preload("res://scripts/client/ui_pause_menu.gd")
 const AudioMix = preload("res://scripts/client/audio_mix.gd")
+const DisplaySettings = preload("res://scripts/client/ui_display_settings.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 
 const TMP := "user://test_ui_parity.cfg"
@@ -168,6 +169,16 @@ func run(t) -> void:
 
 	t.current = "settings menu builds: graphics, audio, gameplay, keys and accessibility"
 	UiSettings.set_value("show_fps", false)
+	var prior_display_path: String = DisplaySettings.path
+	var prior_fps: int = Engine.max_fps
+	DisplaySettings.path = TMP
+	DisplaySettings.load_all()
+	t.eq(DisplaySettings.sanitize("fps_limit", 77), 0, "unsupported frame cap rejected")
+	t.eq(DisplaySettings.sanitize("fps_limit", NAN), 0, "malformed frame limit fails to default")
+	t.eq(DisplaySettings.sanitize("fps_limit", 240), 240, "legal frame cap accepted")
+	t.eq(DisplaySettings.sanitize("window_mode", 999), 1, "fullscreen mode index clamped")
+	t.eq(DisplaySettings.sanitize("window_mode", "fullscreen"), 0, "invalid window mode ignored")
+	t.eq(DisplaySettings.sanitize("vsync", 999), 1, "sync choice clamped")
 	var prior_audio_path: String = AudioMix.path
 	AudioMix.path = "user://test_albion_settings_audio.cfg"
 	DirAccess.remove_absolute(AudioMix.path)
@@ -177,6 +188,23 @@ func run(t) -> void:
 	t.eq(menu._tabs.get_tab_count(), 5, "five working Settings tabs")
 	t.eq(menu._bind_buttons.size(), UiInputRebind.ACTIONS.size(), "a button per rebindable action")
 	t.eq(menu._audio_sliders.size(), AudioMix.SLIDERS.size(), "one slider per real AudioMix bus")
+	t.eq(menu._display_pickers.size(), 3, "graphics page exposes window, vsync and FPS")
+	var fps_picker: OptionButton = menu._display_pickers["fps_limit"]
+	fps_picker.item_selected.emit(3) # Unlimited, 30, 60, 120.
+	t.eq(DisplaySettings.get_value("fps_limit"), 120, "FPS picker updates display preferences")
+	t.eq(Engine.max_fps, 120, "FPS picker changes real engine frame cap")
+	var window_picker: OptionButton = menu._display_pickers["window_mode"]
+	window_picker.item_selected.emit(1)
+	t.eq(DisplaySettings.get_value("window_mode"), 1, "fullscreen option saved")
+	var sync_picker: OptionButton = menu._display_pickers["vsync"]
+	sync_picker.item_selected.emit(0)
+	t.eq(DisplaySettings.get_value("vsync"), 0, "V-Sync off option saved")
+	var video_cfg := ConfigFile.new()
+	t.eq(video_cfg.load(TMP), OK, "display controls persist to shared graphics config")
+	t.eq(video_cfg.get_value("display", "fps_limit"), 120, "frame cap survives restart")
+	t.eq(video_cfg.get_value("display", "window_mode"), 1, "window mode survives restart")
+	t.eq(video_cfg.get_value("display", "vsync"), 0, "V-Sync survives restart")
+	t.check(video_cfg.has_section("interface"), "display writes preserve existing interface settings")
 	for bus in AudioMix.SLIDERS:
 		var slider: HSlider = menu._audio_sliders[bus]
 		t.eq(slider.min_value, 0.0, "audio controls support silence")
@@ -220,6 +248,9 @@ func run(t) -> void:
 		"graphics selection uses the full renderer / streamer path")
 	t.eq(UiLocalization.t("Graphics", "ru"), "Графика", "graphics tab translated")
 	t.eq(UiLocalization.t("Audio", "ru"), "Звук", "audio tab translated")
+	DisplaySettings.path = prior_display_path
+	DisplaySettings.load_all()
+	Engine.max_fps = prior_fps
 	AudioMix.path = prior_audio_path
 	AudioMix.reset_volumes(false)
 	AudioMix.load_all()
