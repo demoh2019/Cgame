@@ -43,7 +43,8 @@ static func reach_margin(node: Dictionary) -> float:
 	var radius: float = float(node.get("radius", 0.0))
 	if not is_finite(radius) or radius <= 0.0:
 		return 0.0
-	if node.has("solid_model"):
+	# Imported boulders use the same solid-footprint interaction as logs.
+	if node.has("solid_model") or node.has("stone_model"):
 		return minf(radius, 3.0)
 	if str(node.get("kind", "")) in ["rock", "ore", "pebble"]:
 		return minf(radius, 1.8)
