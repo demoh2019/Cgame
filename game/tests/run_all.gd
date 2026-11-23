@@ -14,6 +14,7 @@ const SUITES := [
 	"res://tests/test_static_blocker_grid.gd",
 	"res://tests/test_resource_aim_interaction.gd",
 	"res://tests/test_stream_state_replication.gd",
+	"res://tests/test_resource_chunk_query.gd",
 	"res://tests/test_noise_batch_sampling.gd",
 	"res://tests/test_gradient_batch.gd",
 	"res://tests/test_image_batch.gd",

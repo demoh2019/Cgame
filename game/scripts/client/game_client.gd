@@ -915,14 +915,25 @@ func node_by_id(node_id: int, near: Vector3) -> Dictionary:
 	return {}
 
 
+## Only visit chunks whose nodes can touch the interaction radius.
+## Large stone/log footprints still work across chunk borders.
+func _resource_cell_bounds(point: Vector3, radius: float, footprint: float) -> Rect2i:
+	var span: float = radius + footprint
+	var min_cell: Vector2i = WorldGen.cell_of(point.x - span, point.z - span)
+	var max_cell: Vector2i = WorldGen.cell_of(point.x + span, point.z + span)
+	return Rect2i(min_cell, max_cell - min_cell + Vector2i.ONE)
+
+
 ## Closest gatherable node (not depleted) within `radius` of a point.
 func nearest_node(point: Vector3, radius: float) -> Dictionary:
 	var best: Dictionary = {}
+	if world == null or not point.is_finite() or not (radius > 0.0 and radius < INF):
+		return best
 	var best_distance := radius
-	var cell := WorldGen.cell_of(point.x, point.z)
-	for dx in range(-1, 2):
-		for dz in range(-1, 2):
-			for node in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["nodes"]:
+	var bounds: Rect2i = _resource_cell_bounds(point, radius, ResourceGathering.MAX_REACH_MARGIN)
+	for cx in range(bounds.position.x, bounds.position.x + bounds.size.x):
+		for cz in range(bounds.position.y, bounds.position.y + bounds.size.y):
+			for node in world.chunk(Vector2i(cx, cz))["nodes"]:
 				if depleted.has(node["id"]):
 					continue
 				var center_distance: float = Vector2(float(node["x"]) - point.x, float(node["z"]) - point.z).length()
@@ -941,16 +952,16 @@ func nearest_node(point: Vector3, radius: float) -> Dictionary:
 func nearest_aimed_node(point: Vector3, direction: Vector2, radius: float) -> Dictionary:
 	var nearest: Dictionary = {}
 	var aimed: Dictionary = {}
-	if world == null or not point.is_finite():
+	if world == null or not point.is_finite() or not (radius > 0.0 and radius < INF):
 		return nearest
 	var default_distance: float = radius
 	var best_aim_score: float = -INF
 	var has_aim: bool = direction.is_finite() and direction.length_squared() > 0.01
 	var aim: Vector2 = direction.normalized() if has_aim else Vector2.ZERO
-	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
-	for dx in range(-1, 2):
-		for dz in range(-1, 2):
-			for node in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["nodes"]:
+	var bounds: Rect2i = _resource_cell_bounds(point, radius, ResourceGathering.MAX_REACH_MARGIN)
+	for cx in range(bounds.position.x, bounds.position.x + bounds.size.x):
+		for cz in range(bounds.position.y, bounds.position.y + bounds.size.y):
+			for node in world.chunk(Vector2i(cx, cz))["nodes"]:
 				if depleted.has(node["id"]):
 					continue
 				var offset := Vector2(float(node["x"]) - point.x,
@@ -980,11 +991,14 @@ func nearest_aimed_node(point: Vector3, direction: Vector2, radius: float) -> Di
 ## Select a mineable node in front of the player's actual swing, ignoring ground pickups.
 func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Defs.REACH + 0.5) -> Dictionary:
 	var best: Dictionary = {}
+	if world == null or not point.is_finite() or not direction.is_finite() \
+			or direction.length_squared() < 0.01 or not (radius > 0.0 and radius < INF):
+		return best
 	var best_distance: float = radius
-	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
-	for dx in range(-1, 2):
-		for dz in range(-1, 2):
-			for node in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["nodes"]:
+	var bounds: Rect2i = _resource_cell_bounds(point, radius, ResourceGathering.MAX_REACH_MARGIN)
+	for cx in range(bounds.position.x, bounds.position.x + bounds.size.x):
+		for cz in range(bounds.position.y, bounds.position.y + bounds.size.y):
+			for node in world.chunk(Vector2i(cx, cz))["nodes"]:
 				if depleted.has(node["id"]) or not ResourceGathering.is_strike(str(node["kind"])):
 					continue
 				if not ResourceGathering.aimed_at(point, node, direction, radius):
@@ -1008,10 +1022,10 @@ func nearest_pickup_node(point: Vector3, radius: float,
 	var best: Dictionary = {}
 	# Held-E runs frequently: compare squared distances to avoid a square root per node.
 	var best_distance_squared: float = radius * radius
-	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
-	for dx in range(-1, 2):
-		for dz in range(-1, 2):
-			for node in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["nodes"]:
+	var bounds: Rect2i = _resource_cell_bounds(point, radius, 0.0)
+	for cx in range(bounds.position.x, bounds.position.x + bounds.size.x):
+		for cz in range(bounds.position.y, bounds.position.y + bounds.size.y):
+			for node in world.chunk(Vector2i(cx, cz))["nodes"]:
 				var node_id: int = int(node["id"])
 				if depleted.has(node_id) or skip_ids.has(node_id) \
 						or not ResourceGathering.is_pickup(str(node["kind"])):

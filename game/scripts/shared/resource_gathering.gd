@@ -4,6 +4,8 @@ extends RefCounted
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const PROGRESS_EXPIRE_SECONDS := 45.0
+## Maximum radius extension for model-edge resource interactions.
+const MAX_REACH_MARGIN := 3.0
 
 static func is_pickup(kind: String) -> bool:
 	return kind in ["pebble", "branch", "bush", "berry"]
@@ -45,9 +47,9 @@ static func reach_margin(node: Dictionary) -> float:
 		return 0.0
 	# Imported boulders use the same solid-footprint interaction as logs.
 	if node.has("solid_model") or node.has("stone_model"):
-		return minf(radius, 3.0)
+		return clampf(radius, 0.0, MAX_REACH_MARGIN)
 	if str(node.get("kind", "")) in ["rock", "ore", "pebble"]:
-		return minf(radius, 1.8)
+		return clampf(radius, 0.0, 1.8)
 	return 0.0
 
 
