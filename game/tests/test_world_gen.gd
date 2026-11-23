@@ -165,7 +165,9 @@ func run(t) -> void:
 			if int(obstacle.get("id", -1)) == b_id:
 				regrown_blocked = true
 		t.check(regrown_blocked, "respawn restores modeled boulder collision")
-		a.sync_depleted_nodes({b_id: true})
+		var snapshot_depleted: Dictionary = {}
+		snapshot_depleted[b_id] = true
+		a.sync_depleted_nodes(snapshot_depleted)
 		t.check(a.depleted_blockers.has(b_id), "snapshot-depleted node disables local prediction blocker")
 		a.sync_depleted_nodes({})
 		t.check(not a.depleted_blockers.has(b_id), "snapshot correction restores local blocker")
