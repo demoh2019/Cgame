@@ -15,6 +15,12 @@ window and the Ctrl+F11 shortcut all call the same online_main graphics
 application pathway. Renderer settings, native render resolution,
 adaptive resolution, and streamer detail budgets update immediately.
 
+Graphics also has windowed/fullscreen mode, V-Sync Off/On and FPS cap
+(Unlimited, 30, 60, 120, 144 or 240). These controls use Window.mode,
+DisplayServer.window_set_vsync_mode and Engine.max_fps at runtime and
+persist in the existing graphics preferences file under [display].
+Headless testing skips window changes but verifies config and FPS cap.
+
 Audio: five existing AudioMix buses (Master, Music, SFX, UI, Ambience),
 0% to 100% in 5% increments, applied live. The reset button restores
 100% on all five channels. The mixer saves on slider release, focus

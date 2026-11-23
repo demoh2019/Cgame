@@ -41,6 +41,26 @@ class AlbionSettingsMenuContract(unittest.TestCase):
         self.assertIn("_apply_graphics_selection(quality_picker.get_item_id(index))", online)
         self.assertIn("_apply_graphics_selection((GraphicsQuality.level() + 1)", online)
 
+    def test_persisted_fps_vsync_fullscreen_real_display_api(self):
+        display = (CLIENT / "ui_display_settings.gd").read_text()
+        pause = (CLIENT / "ui_pause_menu.gd").read_text()
+        layer = (CLIENT / "ui_accessibility_layer.gd").read_text()
+        tests = (ROOT / "game/tests/test_ui_parity.gd").read_text()
+        for needle in ('"window_mode": 0', '"vsync": 1', '"fps_limit": 0',
+                       'Engine.max_fps = get_value("fps_limit")', 'window.mode = mode',
+                       'DisplayServer.window_set_vsync_mode(vsync)',
+                       'DisplayServer.get_name() == "headless"',
+                       'config.load(path) # Keep quality, Auto',
+                       'config.save(path)'):
+            self.assertIn(needle, display)
+        self.assertIn('DisplaySettings.load_all()', pause)
+        self.assertIn('DisplaySettings.apply(get_window() if is_inside_tree() else null)', pause)
+        self.assertIn('DisplaySettings.apply(get_window())', layer)
+        for label in ('"Window mode"', '"Vertical sync"', '"FPS limit"'):
+            self.assertIn(label, pause)
+        self.assertIn('frame cap survives restart', tests)
+        self.assertIn('V-Sync survives restart', tests)
+
     def test_audio_persistence_and_translation_have_regressions(self):
         mix = (CLIENT / "audio_mix.gd").read_text()
         locale = (CLIENT / "ui_localization.gd").read_text()

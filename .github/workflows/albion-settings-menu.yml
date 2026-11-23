@@ -5,6 +5,7 @@ on:
     branches: [develop]
     paths:
       - 'game/scripts/client/ui_pause_menu.gd'
+      - 'game/scripts/client/ui_display_settings.gd'
       - 'game/scripts/client/audio_mix.gd'
       - 'game/scripts/client/ui_localization.gd'
       - 'game/scripts/client/online_main.gd'
@@ -16,6 +17,7 @@ on:
     branches: [develop]
     paths:
       - 'game/scripts/client/ui_pause_menu.gd'
+      - 'game/scripts/client/ui_display_settings.gd'
       - 'game/scripts/client/audio_mix.gd'
       - 'game/scripts/client/ui_localization.gd'
       - 'game/scripts/client/online_main.gd'
