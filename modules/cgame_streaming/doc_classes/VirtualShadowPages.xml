@@ -134,10 +134,16 @@
 				Returns [code]true[/code] if a page is resident.
 			</description>
 		</method>
+		<method name="get_render_jobs" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>
+				Returns the page render jobs from the most recent [method end_frame] as packed records of four integers: clipmap level, global virtual page X, global virtual page Y, and physical cache slot. Each newly allocated or dirty requested page produces one record in deterministic global-page-key order. Static, unchanged pages produce no jobs. The list is cleared by [method begin_frame] or [method setup]. A renderer can use the records to schedule shadow depth rendering; this class does not issue GPU draw calls itself. The existing [code]rendered[/code] statistic counts scheduled page renders and assumes the caller actually completes them before sampling the page table.
+			</description>
+		</method>
 		<method name="page_table" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<description>
-				Returns a toroidal page table for shaders: [code]levels * pages_per_axis^2[/code] entries holding the physical slot or [code]-1[/code]. Index: [code]level*N*N + (gy mod N)*N + (gx mod N)[/code].
+				Returns a toroidal page table for shaders: [code]levels * pages_per_axis^2[/code] entries holding the physical slot or [code]-1[/code]. Index: [code]level*N*N + (gy mod N)*N + (gx mod N)[/code]. Only cached pages inside the CURRENT clipmap window may populate the table, preventing stale pages with the same modulo coordinates from overwriting visible mappings after camera movement. Cached pages outside the current window remain available for later reuse.
 			</description>
 		</method>
 	</methods>
