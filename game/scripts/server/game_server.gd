@@ -131,6 +131,7 @@ const SurveySignal = preload("res://scripts/shared/survey_signal.gd")
 const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const WallUpkeepIndex = preload("res://scripts/shared/wall_upkeep_index.gd")
+const BarricadeSnapshotIndex = preload("res://scripts/shared/barricade_snapshot_index.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
 const RaidTempo = preload("res://scripts/shared/raid_tempo.gd")
@@ -472,6 +473,13 @@ var _snapshot_interest_tick: int = -1
 var _snapshot_player_ids_by_peer: Dictionary = {}
 var _snapshot_zombie_ids_by_peer: Dictionary = {}
 var last_snapshot_interest_stats: Dictionary = {"enabled": false}
+# Broadcast-scoped scripted index also works without the optional native
+# player/zombie relevancy grids. Stale direct snapshots rebuild authoritatively.
+var _snapshot_wall_index: Dictionary = {}
+var _snapshot_wall_tick: int = -1
+var _snapshot_wall_revision: int = -1
+var _snapshot_wall_queries: int = 0
+var last_snapshot_wall_stats: Dictionary = {"enabled": false}
 var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
 var next_supply_drop_at: float = SupplyDrops.INTERVAL_SECONDS # Server-owned session clock.
@@ -10060,6 +10068,11 @@ func prepare_snapshot_interest() -> bool:
 	_snapshot_player_ids_by_peer.clear()
 	_snapshot_zombie_ids_by_peer.clear()
 	last_snapshot_interest_stats = {"enabled": false}
+	_snapshot_wall_index = BarricadeSnapshotIndex.build(
+		barricades, time, _wall_infected_attack_until)
+	_snapshot_wall_tick = tick_count
+	_snapshot_wall_revision = world_structure_revision
+	_snapshot_wall_queries = 0
 	if not ClassDB.class_exists("SpatialRelevancyGrid2D"):
 		return false
 	if _snapshot_players_grid == null:
@@ -10105,6 +10118,16 @@ func prepare_snapshot_interest() -> bool:
 
 
 func finish_snapshot_interest() -> void:
+	if not _snapshot_wall_index.is_empty():
+		last_snapshot_wall_stats = {"enabled": true,
+			"walls": (_snapshot_wall_index["entries"] as Array).size(),
+			"cells": (_snapshot_wall_index["tiles"] as Dictionary).size(),
+			"queries": _snapshot_wall_queries}
+	else:
+		last_snapshot_wall_stats = {"enabled": false}
+	_snapshot_wall_index.clear()
+	_snapshot_wall_tick = -1
+	_snapshot_wall_revision = -1
 	if _snapshot_interest_prepared:
 		last_snapshot_interest_stats = {
 			"enabled": true,
@@ -10217,28 +10240,25 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		if EmberFlask.remaining(field, time) > 0.0 and here.distance_to(
 				Vector2(float(field["x"]), float(field["z"]))) <= Defs.INTEREST_RADIUS:
 			nearby_ember_pools.append(EmberFlask.public_state(field, time))
+	# A complete per-broadcast wall index replaces the per-viewer scan of
+	# every world structure. Standalone/stale snapshots rebuild once here,
+	# preserving the original authoritative state and interest ordering.
+	var wall_cache_ready: bool = (_snapshot_wall_tick == tick_count
+		and _snapshot_wall_revision == world_structure_revision
+		and not _snapshot_wall_index.is_empty()
+		and (_snapshot_wall_index["entries"] as Array).size() == barricades.size())
+	var wall_index: Dictionary = _snapshot_wall_index if wall_cache_ready else (
+		BarricadeSnapshotIndex.build(barricades, time, _wall_infected_attack_until))
+	if wall_cache_ready:
+		_snapshot_wall_queries += 1
+	var owner_base_state: Dictionary = BarricadeSnapshotIndex.private_status(
+		wall_index, player.id, player.user_id)
 	var nearby_barricades: Array = []
-	var owner_upkeep_at_risk: int = 0
-	var owner_upkeep_under_attack: int = 0
-	var owner_upkeep_damaged: int = 0
-	var owner_upkeep_soonest: float = INF
-	for wall in barricades.values():
-		# Reuse this existing interest scan: reminders are derived from the
-		# full authoritative wall set and sent only to its owning survivor.
-		if Structures.can_manage(wall, player.id, player.user_id):
-			if float(_wall_infected_attack_until.get(int(wall["id"]), -INF)) > time:
-				owner_upkeep_under_attack += 1
-			if WallUpkeepIndex.needs_attention(wall, time):
-				owner_upkeep_at_risk += 1
-				owner_upkeep_soonest = minf(owner_upkeep_soonest,
-					maxf(0.0, float(wall["upkeep_until"]) - time))
-			if float(wall["hp"]) < Structures.max_health(Structures.tier_of(wall)) * 0.5:
-				owner_upkeep_damaged += 1
-		if Structures.within_range(here, Vector2(float(wall["x"]), float(wall["z"])), Defs.INTEREST_RADIUS):
-			var public_wall: Dictionary = Structures.public_state(wall)
-			public_wall["blast_brace_seconds"] = maxf(0.0,
-				float(siege_braces.get(int(wall["id"]), time)) - time)
-			nearby_barricades.append(public_wall)
+	for wall in BarricadeSnapshotIndex.visible(wall_index, here, Defs.INTEREST_RADIUS):
+		var public_wall: Dictionary = Structures.public_state(wall)
+		public_wall["blast_brace_seconds"] = maxf(0.0,
+			float(siege_braces.get(int(wall["id"]), time)) - time)
+		nearby_barricades.append(public_wall)
 	var nearby_plots: Array = []
 	var viewer_account: String = _market_account(player)
 	for plot_id in farm_plots:
@@ -10343,9 +10363,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"tick": tick_count, "time": time, "ack": player.last_input_seq,
 		"outposts": siege_contracts.public_state(territory.public_state(time, players, parties), time),
 		"you": {
-			"base_upkeep": {"at_risk": owner_upkeep_at_risk, "damaged": owner_upkeep_damaged,
-				"under_attack": owner_upkeep_under_attack,
-				"soonest_seconds": owner_upkeep_soonest if owner_upkeep_at_risk > 0 else 0.0},
+			"base_upkeep": owner_base_state,
 			"party": _party_state_for(peer_id),
 			"raid_aggro": raid_aggro_state,
 			"party_flank_hint": party_flank_hint,
