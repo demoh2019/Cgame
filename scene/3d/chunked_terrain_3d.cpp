@@ -1106,16 +1106,23 @@ void ChunkedTerrain3D::_invalidate_region(const Rect2i &p_region, bool p_geometr
 	if (!built || chunks.is_empty() || p_region.size.x <= 0 || p_region.size.y <= 0) {
 		return;
 	}
-	// Normals read one sample beyond a chunk, so include the neighbours of every touched chunk.
-	const Rect2i grown = p_region.grow(1);
+	// Normals read one sample beyond a changed vertex. Include shared
+	// boundary chunks, but visit only grid cells intersecting that halo:
+	// scanning every cached chunk would make small brush strokes O(world).
+	const Rect2i grown = p_region.grow(1).intersection(Rect2i(0, 0, data_width, data_depth));
+	if (grown.size.x <= 0 || grown.size.y <= 0) {
+		return;
+	}
+	const int first_x = CLAMP((grown.position.x - 1) / chunk_quads, 0, chunks_x - 1);
+	const int first_z = CLAMP((grown.position.y - 1) / chunk_quads, 0, chunks_z - 1);
+	const int last_x = CLAMP((grown.end.x - 1) / chunk_quads, 0, chunks_x - 1);
+	const int last_z = CLAMP((grown.end.y - 1) / chunk_quads, 0, chunks_z - 1);
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const Params params = _params();
-	for (Chunk &chunk : chunks) {
-		const Rect2i chunk_samples(chunk.x0, chunk.z0, chunk_quads + 1, chunk_quads + 1);
-		if (!chunk_samples.intersects(grown)) {
-			continue;
-		}
-		last_region_invalidated_chunks++;
+	for (int cz = first_z; cz <= last_z; cz++) {
+		for (int cx = first_x; cx <= last_x; cx++) {
+			Chunk &chunk = chunks[cz * chunks_x + cx];
+			last_region_invalidated_chunks++;
 		for (int i = 0; i < MAX_LOD; i++) {
 			if (chunk.meshes[i].is_valid() && rs) {
 				if (chunk.lod == i && chunk.instance.is_valid()) {
@@ -1163,6 +1170,7 @@ void ChunkedTerrain3D::_invalidate_region(const Rect2i &p_region, bool p_geometr
 				chunk.lod_errors[level] = MAX(error, chunk.lod_errors[level - 1]);
 			}
 			previous_stride = stride;
+		}
 		}
 	}
 	time_since_update = 1e9;
