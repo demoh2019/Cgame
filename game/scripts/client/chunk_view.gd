@@ -934,13 +934,21 @@ func _refresh_terrain_horizon() -> void:
 
 func _build_terrain(origin: Vector2) -> void:
 	var heights := PackedFloat32Array()
-	heights.resize(SAMPLES * SAMPLES)
+	var sample_count: int = SAMPLES * SAMPLES
+	heights.resize(sample_count)
+	# Preserve a fixed-size raw buffer for grass, normals and horizon AO.
+	# Indexed writes avoid thousands of repeated PackedArray appends per chunk.
+	_raw_heights.resize(sample_count)
+	_base_curvature_colors.clear()
+	_horizon_cached.clear()
+	_horizon_state = -1
 	var step := Defs.CHUNK_SIZE / float(SAMPLES - 1)
 	for j in SAMPLES:
 		for i in SAMPLES:
 			var h: float = _world.ground_at(origin.x + i * step, origin.y + j * step)
-			heights[j * SAMPLES + i] = clampf((h - HEIGHT_MIN) / HEIGHT_RANGE, 0.0, 1.0)
-			_raw_heights.append(h)
+			var index: int = j * SAMPLES + i
+			heights[index] = clampf((h - HEIGHT_MIN) / HEIGHT_RANGE, 0.0, 1.0)
+			_raw_heights[index] = h
 	_terrain = ChunkedTerrain3D.new()
 	_terrain.centered = false
 	_terrain.size = Vector2(Defs.CHUNK_SIZE, Defs.CHUNK_SIZE)

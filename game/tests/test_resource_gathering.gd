@@ -61,6 +61,30 @@ func run(t) -> void:
 	t.eq(ResourceGathering.reach_margin(malformed_rock), 0.0,
 		"negative model radius is ignored")
 
+	t.current = "mining large modeled stones uses their actual solid footprint"
+	var edge_x: float = Defs.REACH + 0.5 + 2.4
+	var large_stone: Dictionary = {
+		"kind": "rock", "x": edge_x, "z": 0.0,
+		"radius": 3.0, "stone_model": 1,
+	}
+	t.near(ResourceGathering.reach_margin(large_stone), 3.0, 0.0001,
+		"modeled boulders use their reachable collision footprint")
+	t.check(ResourceGathering.aimed_at(Vector3.ZERO, large_stone, Vector2.RIGHT),
+		"a player near the side of a large modeled boulder can mine it")
+	t.check(not ResourceGathering.aimed_at(Vector3.ZERO, large_stone, Vector2.LEFT),
+		"extended boulder reach still requires facing the resource")
+	large_stone.erase("stone_model")
+	t.check(not ResourceGathering.aimed_at(Vector3.ZERO, large_stone, Vector2.RIGHT),
+		"ordinary rock nodes retain their existing conservative reach")
+	large_stone["radius"] = NAN
+	t.eq(ResourceGathering.reach_margin(large_stone), 0.0,
+		"non-finite resource geometry cannot poison interaction reach")
+	large_stone["radius"] = -3.0
+	t.eq(ResourceGathering.reach_margin(large_stone), 0.0,
+		"invalid negative radii do not make a resource impossible to hit")
+	t.check(not ResourceGathering.aimed_at(Vector3.ZERO, large_stone, Vector2.RIGHT),
+		"invalid geometry never grants unlimited remote gathering reach")
+
 	t.current = "server-validated mining with incremental grants and shared depletion"
 	var world := WorldGen.new(42)
 	var tree: Dictionary = _find(world, "tree")

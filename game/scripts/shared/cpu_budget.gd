@@ -17,9 +17,14 @@ var _allocation: Dictionary = {}
 
 
 func register_system(system_name: String, priority: float, min_ms: float, desired_ms: float) -> void:
-	var mn := maxf(min_ms, 0.0)
-	_systems[system_name] = {"priority": maxf(priority, 0.0001), "min_ms": mn,
-		"desired_ms": maxf(desired_ms, mn), "ema": -1.0, "last": 0.0}
+	if system_name.is_empty():
+		return
+	var mn: float = maxf(min_ms, 0.0) if is_finite(min_ms) else 0.0
+	var want: float = maxf(desired_ms, mn) if is_finite(desired_ms) else mn
+	var weight: float = maxf(priority, 0.0001) if is_finite(priority) else 0.0001
+	_systems[system_name] = {"priority": weight, "min_ms": mn,
+		"desired_ms": want, "ema": -1.0, "last": 0.0}
+	_allocation.erase(system_name)
 
 
 func unregister_system(system_name: String) -> void:
@@ -41,23 +46,26 @@ func demand_ms(system_name: String) -> float:
 	var want: float = s["desired_ms"]
 	if ema < 0.0:
 		return want
-	return clampf(ema * headroom, mn, want)
+	var safe_headroom: float = maxf(headroom, 0.0) if is_finite(headroom) else 1.0
+	return clampf(ema * safe_headroom, mn, want)
 
 
 func allocate(frame_budget_ms: float) -> Dictionary:
+	# A dropped/invalid frame must never produce a negative or NaN CPU grant.
+	var budget: float = maxf(frame_budget_ms, 0.0) if is_finite(frame_budget_ms) else 0.0
 	var out: Dictionary = {}
 	var min_sum := 0.0
 	for n in _systems:
 		var s: Dictionary = _systems[n]
 		min_sum += float(s["min_ms"])
-	if min_sum >= frame_budget_ms:
-		var scale := frame_budget_ms / min_sum if min_sum > 0.0 else 0.0
+	if min_sum >= budget:
+		var scale: float = budget / min_sum if min_sum > 0.0 else 0.0
 		for n in _systems:
 			var s: Dictionary = _systems[n]
 			out[n] = float(s["min_ms"]) * scale
 		_allocation = out
 		return out
-	var remaining := frame_budget_ms
+	var remaining: float = budget
 	var open: Array = []
 	for n in _systems:
 		var s: Dictionary = _systems[n]
@@ -98,11 +106,12 @@ func allocation_ms(system_name: String) -> float:
 
 
 func report_usage(system_name: String, ms: float) -> void:
-	if not _systems.has(system_name):
+	if not _systems.has(system_name) or not is_finite(ms) or ms < 0.0:
 		return
 	var s: Dictionary = _systems[system_name]
 	var ema: float = s["ema"]
-	s["ema"] = ms if ema < 0.0 else lerpf(ema, ms, smoothing)
+	var blend: float = clampf(smoothing, 0.0, 1.0) if is_finite(smoothing) else 0.2
+	s["ema"] = ms if ema < 0.0 else lerpf(ema, ms, blend)
 	s["last"] = ms
 
 
