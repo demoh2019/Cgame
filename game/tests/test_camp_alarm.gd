@@ -118,6 +118,25 @@ func run(t) -> void:
 	t.eq(CampAlarm.seconds_left(fire, 120.0), 0.0,
 		"fuse expires when fire does")
 
+	t.current = "malformed alarm clocks cannot produce false infected warnings"
+	var bad_scan: Dictionary = fire.duplicate(true)
+	bad_scan["alarm_next_scan"] = NAN
+	var test_enemy := Zombie.new(955, "walker", Vector3(19, 5, 10))
+	t.eq(CampAlarm.scan(bad_scan, {955: test_enemy}, 2.0), 0,
+		"invalid scan deadline cannot cause an alarm notification")
+	bad_scan["alarm_next_scan"] = 2.0
+	bad_scan["alarm_next_alert"] = NAN
+	t.eq(CampAlarm.scan(bad_scan, {955: test_enemy}, 2.0), 0,
+		"invalid alert cooldown cannot bypass notification rate limits")
+	bad_scan["alarm_next_alert"] = INF
+	t.eq(CampAlarm.scan(bad_scan, {955: test_enemy}, 2.0), 0,
+		"infinite alert deadline cannot be converted into a warning")
+	bad_scan["alarm_next_alert"] = 0.0
+	t.eq(CampAlarm.scan(bad_scan, {955: test_enemy}, NAN), 0,
+		"invalid simulation timestamp cannot leak an alarm")
+	t.eq(CampAlarm.scan(bad_scan, {955: test_enemy}, 2.0), 1,
+		"normal finite clock values continue to allow real detections")
+
 	t.current = "bounded two-second scans and 24-second repeated warning cap"
 	var enemies: Dictionary = {}
 	var walker := Zombie.new(401, "walker", Vector3(19, 5, 10))

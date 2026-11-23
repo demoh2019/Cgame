@@ -66,6 +66,39 @@ func run(t) -> void:
 	scout.noise_timer = 1.0
 	t.eq(sim._visual_signature_for(scout), 1.0,
 		"server cannot treat gunfire or sprint as silent")
+	t.current = "smoke cover respects floors and malformed world state"
+	var cloud_data: Dictionary = sim.smoke_clouds.values()[0]
+	var upstairs: Vector3 = scout.position + Vector3(0.0, Smoke.HEIGHT_LIMIT + 1.0, 0.0)
+	t.check(not Smoke.inside(sim.smoke_clouds, upstairs, sim.time),
+		"ground-floor smoke cannot cloak players on another floor")
+	t.eq(Smoke.signature(1.0, sim.smoke_clouds, upstairs, sim.time, 0.0, true),
+		1.0, "infected still see an upstairs player through ground-level smoke")
+	t.eq(Smoke.visible(sim.smoke_clouds, upstairs, sim.time, 50.0), [],
+		"far-above observer does not receive ground-level cosmetic smoke")
+	t.check(Smoke.inside(sim.smoke_clouds, scout.position, sim.time),
+		"the actual throwing survivor retains the normal cover bonus")
+	var dirty: Dictionary = {
+		1: {"x": site.x, "z": site.y, "y": scout.position.y,
+			"expires": INF, "id": 1},
+		2: {"x": NAN, "z": site.y, "y": scout.position.y,
+			"expires": sim.time + 10.0, "id": 2},
+		3: {"x": site.x, "z": site.y, "y": NAN,
+			"expires": sim.time + 10.0, "id": 3},
+		4: {"x": site.x, "z": site.y, "y": scout.position.y,
+			"expires": NAN, "id": 4},
+		5: {"x": site.x, "z": site.y, "y": scout.position.y,
+			"expires": sim.time, "id": 5},
+		6: "corrupt-cloud"
+	}
+	t.check(not Smoke.inside(dirty, scout.position, sim.time),
+		"invalid or expired smoke never grants free concealment")
+	t.eq(Smoke.visible(dirty, scout.position, sim.time, 50.0), [],
+		"invalid cloud data is never serialized into the visible world")
+	t.eq(Smoke.signature(1.0, sim.smoke_clouds, scout.position, sim.time, -0.1, true),
+		1.0, "invalid negative noise time cannot mint stealth")
+	t.eq(Smoke.visible({7: cloud_data}, scout.position, sim.time, 50.0).size(), 1,
+		"live smoke remains visible at ordinary height")
+
 	t.current = "replication, expiry and storage safety"
 	var snap: Dictionary = sim.snapshot_for(89)
 	t.eq(snap["smoke_clouds"].size(), 1, "owner sees the deployed cloud")

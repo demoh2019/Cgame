@@ -60,9 +60,11 @@ static func install(fire: Dictionary, owner_id: int, group_id: int, now: float) 
 ## No enemies are spawned, damaged, or exposed with exact coordinates.
 static func scan(fire: Dictionary, zombies: Dictionary, now: float,
 		precomputed_count: int = -1) -> int:
-	if seconds_left(fire, now) <= 0.0:
+	if not is_finite(now) or now < 0.0 or seconds_left(fire, now) <= 0.0:
 		return 0
-	if now < float(fire.get("alarm_next_scan", INF)):
+	var next_scan: float = float(fire.get("alarm_next_scan", INF))
+	var next_alert: float = float(fire.get("alarm_next_alert", INF))
+	if not is_finite(next_scan) or not is_finite(next_alert) or now < next_scan:
 		return 0
 	fire["alarm_next_scan"] = now + SCAN_INTERVAL
 	var fx: float = float(fire.get("x", NAN))
@@ -87,7 +89,7 @@ static func scan(fire: Dictionary, zombies: Dictionary, now: float,
 			detected += 1
 			if detected >= MAX_DETECTED:
 				break
-	if detected == 0 or now < float(fire.get("alarm_next_alert", INF)):
+	if detected == 0 or now < next_alert:
 		return 0
 	fire["alarm_next_alert"] = now + ALERT_COOLDOWN
 	return detected
