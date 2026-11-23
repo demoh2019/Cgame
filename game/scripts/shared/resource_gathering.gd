@@ -41,6 +41,8 @@ static func strike_yield(kind: String, strike: int) -> int:
 ## Normal upright trees keep their short centre-based reach.
 static func reach_margin(node: Dictionary) -> float:
 	var radius: float = float(node.get("radius", 0.0))
+	if not is_finite(radius) or radius <= 0.0:
+		return 0.0
 	if node.has("solid_model"):
 		return minf(radius, 3.0)
 	if str(node.get("kind", "")) in ["rock", "ore", "pebble"]:
@@ -51,14 +53,22 @@ static func reach_margin(node: Dictionary) -> float:
 static func aimed_at(player_pos: Vector3, node: Dictionary, direction: Vector2, reach: float = Defs.REACH + 0.5) -> bool:
 	if not player_pos.is_finite() or not direction.is_finite() or direction.length_squared() < 0.01:
 		return false
+	if not is_finite(reach) or reach < 0.0:
+		return false
 	var offset := Vector2(float(node.get("x", INF)) - player_pos.x,
 		float(node.get("z", INF)) - player_pos.z)
 	if not offset.is_finite():
 		return false
+	var distance_sq: float = offset.length_squared()
 	var margin: float = reach_margin(node)
-	if offset.length() > reach + margin:
+	var max_reach: float = reach + margin
+	if distance_sq > max_reach * max_reach:
 		return false
-	return offset.length() <= 0.8 + margin or offset.normalized().dot(direction.normalized()) >= 0.35
+	var close_reach: float = 0.8 + margin
+	if distance_sq <= close_reach * close_reach:
+		return true
+	# Squared distance avoids repeated square roots and normalizations on hit RPCs.
+	return offset.dot(direction) >= 0.35 * sqrt(distance_sq * direction.length_squared())
 
 
 ## Weak spots rotate around a node after each confirmed hit. The position is

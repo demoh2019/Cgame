@@ -41,7 +41,7 @@ static func bend_strength(speed: float) -> float:
 
 ## Shake amplitude (metres of sway) of age `age` seconds after the hit: damped oscillation envelope.
 static func shake_envelope(age: float, amp: float) -> float:
-	if age < 0.0 or age >= SHAKE_SECONDS or amp <= 0.0:
+	if not is_finite(age) or not is_finite(amp) or age < 0.0 or age >= SHAKE_SECONDS or amp <= 0.0:
 		return 0.0
 	var t := age / SHAKE_SECONDS
 	return amp * (1.0 - t) * exp(-2.0 * t)
@@ -60,7 +60,7 @@ static func shake_amplitude_for(event_type: String) -> float:
 
 
 func shake(at: Vector3, amp: float) -> void:
-	if amp <= 0.0 or not at.is_finite():
+	if not is_finite(amp) or amp <= 0.0 or not at.is_finite():
 		return
 	_shake_at = Vector2(at.x, at.z)
 	_shake_amp = amp
@@ -68,13 +68,16 @@ func shake(at: Vector3, amp: float) -> void:
 
 
 func update(delta: float, player: Vector3, level: int) -> Vector2:
-	var radius := bend_radius(level)
-	if delta > 0.0 and _last.is_finite() and player.is_finite():
-		var speed := Vector2(player.x - _last.x, player.z - _last.z).length() / delta
-		_smoothed_speed = lerpf(_smoothed_speed, minf(speed, 8.0), 1.0 - exp(-8.0 * delta))
-	_last = player
-	_shake_age += maxf(delta, 0.0)
-	var bend := Vector4(player.x, player.z, radius, bend_strength(_smoothed_speed) if radius > 0.0 else 0.0)
+	# A broken position or delta must never reach global shader uniforms.
+	var safe_delta: float = delta if is_finite(delta) and delta > 0.0 else 0.0
+	var at: Vector3 = player if player.is_finite() else (_last if _last.is_finite() else Vector3.ZERO)
+	var radius: float = bend_radius(level)
+	if safe_delta > 0.0 and _last.is_finite():
+		var speed: float = Vector2(at.x - _last.x, at.z - _last.z).length() / safe_delta
+		_smoothed_speed = lerpf(_smoothed_speed, minf(speed, 8.0), 1.0 - exp(-8.0 * safe_delta))
+	_last = at
+	_shake_age += safe_delta
+	var bend := Vector4(at.x, at.z, radius, bend_strength(_smoothed_speed) if radius > 0.0 else 0.0)
 	var shake_strength := shake_envelope(_shake_age, _shake_amp) if shake_radius(level) > 0.0 else 0.0
 	var shake_v := Vector4(_shake_at.x, _shake_at.y, shake_radius(level), shake_strength)
 	RenderingServer.global_shader_parameter_set(&"aa_plant_bend", bend)
@@ -85,8 +88,15 @@ func update(delta: float, player: Vector3, level: int) -> Vector2:
 ## Nearest object footprints to `center` as Vector4(x, z, radius, strength), at most MAX_CRUSHERS.
 ## `sources` is an Array of [kind, Dictionary-with-x-and-z].
 static func pick_crushers(center: Vector2, sources: Array) -> Array:
-	var found: Array = []
+	if not center.is_finite():
+		return []
+	# Shader has only eight slots. Keep an ordered, bounded top-K while walking
+	# sources instead of allocating and sorting every nearby actor each frame.
+	var nearest: Array = []
+	var max_distance_sq: float = CRUSH_RANGE * CRUSH_RANGE
 	for source in sources:
+		if not (source is Array) or source.size() < 2 or not (source[1] is Dictionary):
+			continue
 		var kind: String = str(source[0])
 		var entity: Dictionary = source[1]
 		if not FOOTPRINTS.has(kind) or not entity.has("x") or not entity.has("z"):
@@ -94,14 +104,22 @@ static func pick_crushers(center: Vector2, sources: Array) -> Array:
 		var at := Vector2(float(entity["x"]), float(entity["z"]))
 		if not at.is_finite():
 			continue
-		var distance := center.distance_to(at)
-		if distance > CRUSH_RANGE:
+		var distance_sq: float = center.distance_squared_to(at)
+		if distance_sq > max_distance_sq:
+			continue
+		var insert_at: int = nearest.size()
+		# Strict comparison preserves source order for equally distant actors.
+		while insert_at > 0 and distance_sq < float(nearest[insert_at - 1]["d"]):
+			insert_at -= 1
+		if insert_at >= MAX_CRUSHERS:
 			continue
 		var footprint: Vector2 = FOOTPRINTS[kind]
-		found.append({"d": distance, "v": Vector4(at.x, at.y, footprint.x, footprint.y)})
-	found.sort_custom(func(a, b): return float(a["d"]) < float(b["d"]))
+		nearest.insert(insert_at, {"d": distance_sq,
+			"v": Vector4(at.x, at.y, footprint.x, footprint.y)})
+		if nearest.size() > MAX_CRUSHERS:
+			nearest.pop_back()
 	var result: Array = []
-	for entry in found.slice(0, MAX_CRUSHERS):
+	for entry in nearest:
 		result.append(entry["v"])
 	return result
 
