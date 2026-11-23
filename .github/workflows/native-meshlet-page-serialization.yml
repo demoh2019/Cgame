@@ -50,7 +50,7 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 240s "$BIN" --headless --test --test-case="*CgameMeshletPages*" --no-colors 2>&1 | tee meshlet-page-native.log
-          grep -Eq '[0-9]+ test cases|[0-9]+ assertions' meshlet-page-native.log
+          grep -Eq 'test cases:|assertions:' meshlet-page-native.log
       - name: Import Albion and reject script parse failures
         shell: bash
         run: |
