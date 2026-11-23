@@ -120,10 +120,30 @@ func run(t) -> void:
 		t.check(bool(mine_result.get("ok", false)) and float(mine_result.get("seconds", 0.0)) > 0.0,
 			"mining a modeled boulder starts the regular gathering action")
 		if bool(mine_result.get("ok", false)):
+			var rock_id: int = int(modeled_rock["id"])
+			var rock_x: float = float(modeled_rock["x"])
+			var rock_z: float = float(modeled_rock["z"])
+			var solid_before := false
+			for obstacle in world.blockers_near(rock_x, rock_z, 0.5):
+				if int(obstacle.get("id", -1)) == rock_id:
+					solid_before = true
+			t.check(solid_before, "visible boulder is solid before mining")
 			_run_ticks(server, 10.0)
 			t.check(server.players[10].inventory.count("stone_1") >= stone_before_mining + 4,
 				"mined modeled rock yields full stone resources")
 			t.check(server.depleted.has(modeled_rock["id"]), "mined rock disappears")
+			var ghost_blocker := false
+			for obstacle in world.blockers_near(rock_x, rock_z, 0.5):
+				if int(obstacle.get("id", -1)) == rock_id:
+					ghost_blocker = true
+			t.check(not ghost_blocker, "server removes collision with the mined boulder")
+			server.time += 1000.0
+			server.tick(0.05)
+			var solid_after := false
+			for obstacle in world.blockers_near(rock_x, rock_z, 0.5):
+				if int(obstacle.get("id", -1)) == rock_id:
+					solid_after = true
+			t.check(solid_after, "respawning boulder becomes solid again")
 
 	t.current = "tools gate higher tiers"
 	var tier2 := _find_node(world, "tree", 2, Vector2i(6, 6))

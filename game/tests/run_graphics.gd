@@ -7,6 +7,7 @@ const TestCase = preload("res://tests/test_case.gd")
 const SUITES := [
 	"res://tests/test_graphics_lightning_flash.gd",
 	"res://tests/test_render_benchmark.gd",
+	"res://tests/test_perf_overlay.gd",
 	"res://tests/test_combat_camera_feedback.gd",
 	"res://tests/test_sky_lighting_budget.gd",
 	"res://tests/test_dungeon_torch_cookie.gd",
@@ -27,6 +28,7 @@ const SUITES := [
 	"res://tests/test_user_grass_assets.gd",
 	"res://tests/test_world_map_focus.gd",
 	"res://tests/test_terrain_mesh_streaming.gd",
+	"res://tests/test_terrain_mesh_residency.gd",
 	"res://tests/test_staged_scenery_streaming.gd",
 	"res://tests/test_graphics_stone_microdetail.gd",
 	"res://tests/test_native_detail_normal_blend.gd",
@@ -73,6 +75,7 @@ const SUITES := [
 	"res://tests/test_cinematic_bloom.gd",
 	"res://tests/test_foliage_spectral_optics.gd",
 	"res://tests/test_scenery_pigment_instancing.gd",
+	"res://tests/test_object_batch_grid.gd",
 	"res://tests/test_native_scenery_geometry.gd",
 	"res://tests/test_native_multimesh_shuffle.gd",
 	"res://tests/test_graphics_auto_quality.gd",

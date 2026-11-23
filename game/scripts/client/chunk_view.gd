@@ -4,8 +4,10 @@ extends Node3D
 ## "opened" flags from the server change what is shown.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const ResourceGathering = preload("res://scripts/shared/resource_gathering.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const StoneResources = preload("res://scripts/shared/stone_resources.gd")
+const SolidScenery = preload("res://scripts/shared/solid_scenery.gd")
 const GroundPlants = preload("res://scripts/client/ground_plants.gd")
 const TerrainRvt = preload("res://scripts/client/terrain_rvt.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
@@ -225,6 +227,7 @@ void fragment() {
 static var _ground_material: ShaderMaterial
 static var _textured_material: ShaderMaterial
 static var _textured_checked := false
+static var _solid_wood_fallbacks: Dictionary = {}
 static var terrain_filter_quality := 1
 static var terrain_geomorph_enabled := false
 static var terrain_horizon_enabled := false
@@ -232,6 +235,9 @@ static var terrain_screen_lod_quality := 1
 static var terrain_lod_pixel_error := 3.5
 static var terrain_mesh_build_budget_usec := 1500
 static var terrain_mesh_streaming_priority := 2
+# Keep only the most recently used mesh LODs on the GPU for each terrain tile.
+# Zero in the native engine remains unlimited for older scenes/tools.
+static var terrain_max_cached_lods := 2
 static var terrain_error_lod_quality := 1
 const TERRAIN_LOD_GROUP := "aa_chunked_terrain_lod"
 const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete", "brick", "plank"]
@@ -353,6 +359,17 @@ static func configure_terrain_streaming_priority(mode: int) -> void:
 static func apply_terrain_streaming_priority(node: Node) -> void:
 	if node is ChunkedTerrain3D and node.is_in_group(TERRAIN_LOD_GROUP):
 		node.mesh_streaming_priority = terrain_mesh_streaming_priority
+
+
+## Resident geometry, not just per-frame CPU building, needs a GPU budget.
+## All LODs are still generated on demand by the native streaming scheduler.
+static func configure_terrain_mesh_residency(quality: int) -> void:
+	terrain_max_cached_lods = [1, 2, 2, 3][clampi(quality, 0, 3)]
+
+
+static func apply_terrain_mesh_residency(node: Node) -> void:
+	if node is ChunkedTerrain3D and node.is_in_group(TERRAIN_LOD_GROUP):
+		node.max_cached_lods = terrain_max_cached_lods
 
 
 static func configure_terrain_geomorph(quality: int) -> void:
@@ -929,6 +946,7 @@ func _build_terrain(origin: Vector2) -> void:
 	# Must be set before add_child() triggers native initial mesh streaming.
 	_terrain.mesh_build_budget_usec = terrain_mesh_build_budget_usec
 	_terrain.mesh_streaming_priority = terrain_mesh_streaming_priority
+	_terrain.max_cached_lods = terrain_max_cached_lods
 	apply_terrain_error_lod(_terrain)
 	_terrain.lod_geomorph_enabled = terrain_geomorph_enabled
 	_terrain.skirt_depth = 3.0
@@ -968,18 +986,74 @@ const TREES_BY_BIOME := {
 }
 
 
+## Filter each biome once when the optional painted tree pack is absent.
+## Retain duplicate model entries: they are intentional spawn probabilities.
+## Unknown biomes use the same forest fallback as before, without unbounded keys.
+static var _trees_without_painted: Dictionary = {}
+
+
+static func _tree_options_for_biome(biome: String, painted_available: bool) -> Array:
+	var key: String = biome if TREES_BY_BIOME.has(biome) else "forest"
+	if painted_available:
+		return TREES_BY_BIOME[key]
+	if not _trees_without_painted.has(key):
+		var filtered: Array = []
+		var source: Array = TREES_BY_BIOME[key]
+		for option in source:
+			if not str(option).begins_with("painted"):
+				filtered.append(option)
+		_trees_without_painted[key] = filtered
+	return _trees_without_painted[key]
+
+
 ## Which tree stands at a node: by biome, stable for the node id.
-func _tree_key(node: Dictionary) -> String:
+func _tree_key(node: Dictionary, painted_available: bool) -> String:
 	var biome: String = _world.biome_at(float(node["x"]), float(node["z"]))
-	var options: Array = TREES_BY_BIOME.get(biome, TREES_BY_BIOME["forest"])
-	if not ModelCatalog.has_painted_trees():
-		options = options.filter(func(name: String) -> bool: return not name.begins_with("painted"))
+	var options: Array = _tree_options_for_biome(biome, painted_available)
 	return "tree:" + str(options[WorldGen.mix(int(node["id"]), 3, 5) % options.size()])
+
+
+## A missing optional nature pack must not turn a hand-sized pickup
+## into a visually huge generic boulder. Shared across chunks (one mesh/material).
+static var _pebble_fallback_cache: Mesh
+
+
+static func pebble_fallback_mesh() -> Mesh:
+	if _pebble_fallback_cache == null:
+		var pebble := SphereMesh.new()
+		pebble.radius = 0.18
+		pebble.height = 0.26
+		pebble.radial_segments = 8
+		pebble.rings = 4
+		var stone_material := StandardMaterial3D.new()
+		stone_material.albedo_color = Color(0.45, 0.44, 0.43)
+		stone_material.roughness = 0.96
+		pebble.material = stone_material
+		_pebble_fallback_cache = pebble
+	return _pebble_fallback_cache
 
 
 ## Mesh of a group. Kinds with a number ("tree:3", "building:5") are variants; the catalog picks the model installed for it,
 ## and each branch falls back to the Kenney or procedural models when its packs are missing.
 func _mesh_for(kind: String) -> Mesh:
+	if kind.begins_with("solid_wood:"):
+		var variant: int = int(kind.get_slice(":", 1))
+		if variant >= 0 and variant < SolidScenery.MODELS.size():
+			var entry: Dictionary = SolidScenery.MODELS[variant]
+			if ModelCatalog.exists(str(entry["path"])):
+				var wood_mesh: Mesh = ModelCatalog.entry_mesh(entry)
+				if wood_mesh != null:
+					return wood_mesh
+			# No downloaded pack: the same physical node is still visible.
+			if not _solid_wood_fallbacks.has(variant):
+				var fallback := BoxMesh.new()
+				fallback.size = Vector3(float(entry["size"]), 0.55, 0.65)
+				var material := StandardMaterial3D.new()
+				material.albedo_color = Color(0.34, 0.23, 0.14)
+				fallback.material = material
+				_solid_wood_fallbacks[variant] = fallback
+			return _solid_wood_fallbacks[variant]
+		return Meshes.get_mesh("tree")
 	if kind.begins_with("stone:"):
 		var model_index: int = int(kind.get_slice(":", 1))
 		if model_index >= 0 and model_index < StoneResources.MODELS.size():
@@ -988,6 +1062,8 @@ func _mesh_for(kind: String) -> Mesh:
 			if entry.has("nature"):
 				if _use_nature:
 					model = Assets.nature_mesh(str(entry["nature"]))
+				if model == null:
+					model = pebble_fallback_mesh()
 			else:
 				model = ModelCatalog.entry_mesh(entry)
 			if model != null:
@@ -1088,6 +1164,8 @@ func _mesh_for(kind: String) -> Mesh:
 ## Size multiplier of one instance. Catalog meshes are baked to meters already, so this is only the variation between
 ## instances and the difference between a structure's own scale and the nominal one the mesh was baked for.
 func _size_for(kind: String, node: Dictionary, rng: RandomNumberGenerator) -> float:
+	if kind.begins_with("solid_wood:"):
+		return float(node.get("scale", 1.0))
 	if str(node.get("kind", "")) == "pebble" and not node.has("stone_model"):
 		return 0.22
 	if str(node.get("kind", "")) == "branch":
@@ -1167,8 +1245,9 @@ func _build_objects(data: Dictionary) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = WorldGen.mix(cell.x, cell.y, 99)
 	var tree_variants: int = Assets.tree_meshes().size() + ModelCatalog.BUILTIN_TREES.size()
+	var painted_available: bool = ModelCatalog.has_painted_trees() if _use_nature else false
 	if _use_nature:
-		tree_variants = Assets.TREE_FILES.size() + (ModelCatalog.PAINTED_TREES.size() if ModelCatalog.has_painted_trees() else 0)
+		tree_variants = Assets.TREE_FILES.size() + (ModelCatalog.PAINTED_TREES.size() if painted_available else 0)
 	var rock_variants: int = Assets.ROCK_FILES.size() + (ModelCatalog.STONES.size() if ModelCatalog.has_stones() else 0)
 	if ModelCatalog.has_scanned_rocks():
 		rock_variants = ModelCatalog.SCANNED_ROCKS.size()
@@ -1178,10 +1257,12 @@ func _build_objects(data: Dictionary) -> void:
 	for node in data["nodes"]:
 		var kind: String = node["kind"]
 		var variant: int = WorldGen.mix(int(node["id"]), 3, 5)
-		if node.has("stone_model"):
+		if node.has("solid_model"):
+			kind = "solid_wood:%d" % int(node["solid_model"])
+		elif node.has("stone_model"):
 			kind = "stone:%d" % int(node["stone_model"])
 		elif kind == "tree":
-			kind = _tree_key(node) if _use_nature else "tree:%d" % (variant % tree_variants)
+			kind = _tree_key(node, painted_available) if _use_nature else "tree:%d" % (variant % tree_variants)
 		elif kind == "pebble":
 			kind = "rock:%d" % (variant % rock_variants)
 		elif kind == "rock" and (_use_nature or rock_variants > Assets.ROCK_FILES.size() or ModelCatalog.has_scanned_rocks()):
@@ -1219,7 +1300,11 @@ func _build_objects(data: Dictionary) -> void:
 		multimesh.instance_count = list.size()
 		var index: Dictionary = {}
 		var transforms: Array = []
+		transforms.resize(list.size())
 		var tints := PackedColorArray()
+		tints.resize(list.size())
+		var is_tree: bool = kind.begins_with("tree:")
+		var is_mineral: bool = kind.begins_with("rock") or kind.begins_with("ore") or kind.begins_with("stone:")
 		var is_building: bool = kind.begins_with("wall") or kind.begins_with("building:") or kind.begins_with("tower") or kind == "workbench" or kind.begins_with("ruin:") or kind.begins_with("monument:")
 		for i in list.size():
 			var node: Dictionary = list[i]
@@ -1231,13 +1316,13 @@ func _build_objects(data: Dictionary) -> void:
 			# Keep the original tier tint exactly as before; submit the
 			# complete group only after every resource slot is prepared.
 			var tier: int = node.get("tier", 1)
-			if kind.begins_with("rock") or kind.begins_with("ore") or kind.begins_with("stone:"):
-				tints.append(Color.WHITE.lerp(Color(0.8, 0.85, 1.0), (tier - 1) * 0.2))
+			if is_mineral:
+				tints[i] = Color.WHITE.lerp(Color(0.8, 0.85, 1.0), (tier - 1) * 0.2)
 			else:
-				tints.append(Color.WHITE.darkened((tier - 1) * 0.07) if kind.begins_with("tree:") else Color.WHITE)
+				tints[i] = Color.WHITE.darkened((tier - 1) * 0.07) if is_tree else Color.WHITE
 			if node.has("id"):
 				index[node["id"]] = i
-			transforms.append(transform)
+			transforms[i] = transform
 		# Dense groups upload one complete GPU-ready buffer; tiny batches
 		# retain the original per-instance calls. Both preserve tier tints.
 		if not ResourceInstanceInitializer.initialize(multimesh, transforms, tints):
@@ -1245,7 +1330,7 @@ func _build_objects(data: Dictionary) -> void:
 			continue
 		var instance := MultiMeshInstance3D.new()
 		instance.multimesh = multimesh
-		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if (kind.begins_with("tree:") or kind.begins_with("building:") or kind.begins_with("wall") or kind.begins_with("tower") or kind.begins_with("ruin:") or kind.begins_with("monument:")) else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if (kind.begins_with("tree:") or kind.begins_with("building:") or kind.begins_with("wall") or kind.begins_with("tower") or kind.begins_with("ruin:") or kind.begins_with("monument:") or kind.begins_with("solid_wood:")) else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if _use_nature and kind.begins_with("ore:") and crystal_count == 0:
 			instance.material_override = _ore_material(multimesh.mesh)
 		register_scenery(instance, kind)
@@ -1255,6 +1340,13 @@ func _build_objects(data: Dictionary) -> void:
 			_shadow_casters.append({"node": instance, "role": "tree" if kind.begins_with("tree:") else "structure",
 				"bounds": SceneryBatches.bounds_for(multimesh.mesh, transforms)})
 		_groups[batch_id] = {"multimesh": multimesh, "index": index, "transforms": transforms, "tree": kind.begins_with("tree:")}
+		for i in list.size():
+			var harvest_node: Dictionary = list[i]
+			var strikes: int = ResourceGathering.strikes_needed(str(harvest_node.get("kind", "")))
+			if strikes > 0 and harvest_node.has("id"):
+				_resource_damage_slots[int(harvest_node["id"])] = {
+					"mesh": multimesh, "slot": i, "tint": tints[i], "total": strikes,
+				}
 	_build_decor(origin, rng, data)
 	_build_windmills(windmills, origin)
 	_build_signposts(origin)
@@ -1940,6 +2032,8 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary)
 				continue # Replaced by server-authoritative pickup stone instances.
 			_decor_tasks.append({"type": "nature", "entry": entry})
 	for entry in ModelCatalog.available("decor", ModelCatalog.DECOR_EXTRA):
+		if SolidScenery.is_promoted_path(str(entry["path"])):
+			continue # Fallen wood now has shared collision, harvest IDs and save state.
 		if StoneResources.is_loose_stone_entry(entry):
 			continue # No inert stone meshes; all loose stones are resource nodes.
 		_decor_tasks.append({"type": "extra", "entry": entry})
@@ -2131,6 +2225,32 @@ func _refresh_ground_contact() -> void:
 
 
 ## Hides depleted nodes and opened crates. `hidden_ids` is the set of ids the server says are gone.
+## Damage tint only changes for currently struck, streamed instances.
+## No duplicate meshes and no whole-chunk GPU buffer upload on every frame.
+func apply_resource_damage(hits: Dictionary) -> void:
+	for node_id in _resource_colored_hits.keys():
+		if hits.has(node_id):
+			continue
+		var previous: Dictionary = _resource_damage_slots.get(node_id, {})
+		if not previous.is_empty():
+			var mesh: MultiMesh = previous["mesh"]
+			mesh.set_instance_color(int(previous["slot"]), previous["tint"])
+		_resource_colored_hits.erase(node_id)
+	for node_id in hits:
+		if not _resource_damage_slots.has(node_id):
+			continue
+		var applied: int = int(hits[node_id])
+		if int(_resource_colored_hits.get(node_id, -1)) == applied:
+			continue
+		var source: Dictionary = _resource_damage_slots[node_id]
+		var amount: float = clampf(float(applied) / float(maxi(1, int(source["total"]))), 0.0, 1.0)
+		var original: Color = source["tint"]
+		var cracked: Color = original.lerp(Color(0.30, 0.27, 0.23), amount * 0.65)
+		var multimesh: MultiMesh = source["mesh"]
+		multimesh.set_instance_color(int(source["slot"]), cracked)
+		_resource_colored_hits[node_id] = applied
+
+
 func apply_state(hidden_ids: Dictionary) -> void:
 	var changed := false
 	_state_seen_pending = true
@@ -2309,6 +2429,8 @@ func _build_bridge(bridge: Dictionary, origin: Vector2) -> void:
 var _state_seen := false
 var _state_seen_pending := false
 var _shaking: Dictionary = {} # node id -> {"group", "slot", "t"}
+var _resource_damage_slots: Dictionary = {} # Node id -> GPU instance, base tint and hit total.
+var _resource_colored_hits: Dictionary = {} # Only modified slots, not all world nodes.
 var _falling: Array = [] # [{"node": MeshInstance3D, "base": Transform3D, "axis": Vector3, "t": float}]
 const SHAKE_SECONDS := 0.45
 const FALL_SECONDS := 1.9

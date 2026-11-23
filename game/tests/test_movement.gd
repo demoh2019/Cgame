@@ -112,6 +112,17 @@ func run(t) -> void:
 		Vector2.RIGHT, 30.0, 0.1)
 	t.check(corner_hit.x < -3.9,
 		"swept movement stops before a house corner")
+
+	t.current = "raid and supply point-collision compatibility"
+	flat.blocker = {"kind": "crate", "x": 0.0, "z": 0.0, "radius": 0.15}
+	t.check(not Movement._is_free(flat, Vector2.ZERO),
+		"two-argument spawn check detects a solid obstacle")
+	t.check(Movement._is_free(flat, Vector2(5.0, 0.0)),
+		"two-argument spawn check accepts open ground")
+	t.check(not Movement._is_free(flat, Vector2.ZERO, false, [flat.blocker]),
+		"locomotion can pass a precomputed blocker array")
+	t.check(Movement._is_free(flat, Vector2.ZERO, false, []),
+		"an intentionally empty cached blocker array does not trigger a second world query")
 	flat.free()
 
 	t.current = "water"

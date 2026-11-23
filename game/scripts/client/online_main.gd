@@ -21,6 +21,7 @@ const MoonVisuals = preload("res://scripts/client/moon_visuals.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Net = preload("res://scripts/shared/net.gd")
+const NetProtocol = preload("res://scripts/shared/net_protocol.gd")
 const GameClient = preload("res://scripts/client/game_client.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 const TerrainRvt = preload("res://scripts/client/terrain_rvt.gd")
@@ -126,6 +127,7 @@ const DAY_LENGTH := WorldCycle.DAY_LENGTH # Shared with server simulation and lo
 var net
 var client
 var peer: ENetMultiplayerPeer
+var _rpc_protocol_failed := false
 var streamer: WorldStreamer
 var _terrain_rvt: Node
 # Last displayed position, not input intent: online prediction uses actual
@@ -250,6 +252,9 @@ var _underwater_tint: ColorRect # Blue murk while the camera is below the surfac
 var _breath_label: Label # Air left while diving.
 var _dof_elapsed := 0.35 # Coalesce cinematic focus updates to ~3 Hz.
 var _attack_cooldown := 0.0
+var _resource_weakspot: MeshInstance3D # One reusable marker, never one object per resource.
+var _resource_marker_rescan_at: int = 0
+var _resource_marker_target: Dictionary = {}
 var _charge_msec := -1 # Melee attack held since (ms); release = light swing or power blow.
 const CHARGE_START_MS := 220 # A shorter press is a quick swing.
 const CHARGE_FULL_MS := 850
@@ -874,13 +879,19 @@ func _connect() -> void:
 		net.role = "client"
 		get_tree().root.add_child.call_deferred(net) # RPC paths must match the server: /root/Net.
 		client = GameClient.new(net)
+		if not NetProtocol.install(multiplayer as SceneMultiplayer, net,
+				Callable(self, "_on_rpc_protocol_rejected")):
+			status_label.text = "Cannot initialize network RPC protocol."
+			return
+		multiplayer.peer_authentication_failed.connect(_on_rpc_authentication_failed)
 		multiplayer.connected_to_server.connect(func() -> void:
 			NetTimeouts.apply(peer, 1) # Loading the world must not time the link out.
 			status_label.text = "Joining..."
 			client.join(name_edit.text, account.get("token", ""), account.get("refresh", "")))
 		multiplayer.connection_failed.connect(_on_connection_failed)
 		multiplayer.server_disconnected.connect(func() -> void:
-			status_label.text = "Disconnected."
+			if not _rpc_protocol_failed:
+				status_label.text = "Disconnected."
 			connect_panel.visible = true)
 		net.welcomed.connect(_on_welcomed)
 		net.join_refused.connect(func(reason: String) -> void: status_label.text = reason)
@@ -889,6 +900,7 @@ func _connect() -> void:
 
 ## The ENet connection alone, so a solo world that is still starting can be retried without signing in again.
 func _open_peer(host: String, port: int) -> void:
+	_rpc_protocol_failed = false
 	peer = ENetMultiplayerPeer.new()
 	if peer.create_client(host, port) != OK:
 		status_label.text = "Could not connect."
@@ -897,7 +909,20 @@ func _open_peer(host: String, port: int) -> void:
 	status_label.text = "Connecting..." if _solo_attempts_left == 0 else "Starting your world..."
 
 
+func _on_rpc_protocol_rejected(_peer_id: int) -> void:
+	_rpc_protocol_failed = true
+	status_label.text = "Incompatible RPC protocol. Restart/update both client and server from the same build."
+	connect_panel.visible = true
+
+
+func _on_rpc_authentication_failed(peer_id: int) -> void:
+	# Also covers old servers that do not implement the pre-RPC handshake.
+	_on_rpc_protocol_rejected(peer_id)
+
+
 func _on_connection_failed() -> void:
+	if _rpc_protocol_failed:
+		return
 	if _solo_attempts_left > 0 and local_server.is_running():
 		_solo_attempts_left -= 1
 		await get_tree().create_timer(1.5).timeout
@@ -1304,6 +1329,13 @@ func _spawn_effects(event: Dictionary) -> void:
 			elif item.begins_with("stone") or item.begins_with("ore"):
 				chips = Color(0.6, 0.6, 0.62)
 			effects.gathered(at, chips)
+			if bool(event.get("precise", false)):
+				var node_for_impact: Dictionary = client.node_by_id(
+					int(event.get("node", -1)), at)
+				if not node_for_impact.is_empty():
+					var impact: Vector3 = ResourceGathering.weakspot_position(
+						node_for_impact, maxi(0, int(event.get("hit", 1)) - 1))
+					effects.ring(impact, Color(1.0, 0.77, 0.25), 0.65, 0.32)
 		"crate":
 			effects.loot(here)
 		"skill_up":
@@ -1315,8 +1347,9 @@ func _on_skill_event(event: Dictionary) -> void:
 	if event["type"] == "gathered":
 		var gatherer: int = int(event.get("peer", -1))
 		if gatherer == client.peer_id and int(event.get("amount", 0)) > 0:
-			hud.say("+%d %s" % [int(event["amount"]),
-				str(Defs.item(str(event.get("item", ""))).get("name", event.get("item", "")))])
+			var reward: String = "+%d %s" % [int(event["amount"]),
+				str(Defs.item(str(event.get("item", ""))).get("name", event.get("item", "")))]
+			hud.say(("WEAK SPOT! " if bool(event.get("precise", false)) else "") + reward)
 		if bool(event.get("strike", false)):
 			var source: Dictionary = client.node_by_id(int(event.get("node", -1)),
 				Vector3(float(event.get("x", client.predicted.x)), 0.0,
@@ -1819,7 +1852,7 @@ func _physics_process(delta: float) -> void:
 		# Mining/chopping takes priority over combat only when aimed at a nearby node.
 		_charge_msec = -1
 		if _attack_cooldown <= 0.0:
-			client.resource_hit(int(hit_node["id"]), aim)
+			client.resource_hit(int(hit_node["id"]), _resource_swing_aim(hit_node, aim))
 			var tool: String = Defs.tool_tier_for_node(str(hit_node["kind"]))
 			var equipped: String = client.inventory.best_tool(tool)
 			var tier: int = Defs.tier_of(equipped) if not equipped.is_empty() else 0
@@ -2075,6 +2108,8 @@ func _apply_world_state() -> void:
 			hidden.merge(client.depleted)
 			hidden.merge(client.crates_used)
 		chunk.apply_state(hidden)
+		if chunk.has_method("apply_resource_damage"):
+			chunk.apply_resource_damage(client.resource_hits)
 		chunk.set_meta("aa_state_revision", revision)
 
 
@@ -2314,11 +2349,73 @@ func _typing() -> bool:
 	return focus is LineEdit or (_access != null and _access.is_open()) # The settings menu swallows game hotkeys too.
 
 
+## A single bright, pulsing impact marker. It is positioned using the same
+## deterministic server rules and replicated strike count, not client guesses.
+## Map a click on the glowing 3D marker to its horizontal world bearing.
+## Without this, isometric aiming projects to the ground below the elevated
+## marker and exact mouse clicks would frequently miss the precision check.
+func _resource_swing_aim(node: Dictionary, fallback: Vector2) -> Vector2:
+	if node.is_empty() or camera == null or client == null:
+		return fallback
+	var hit_count: int = int(client.resource_hits.get(int(node["id"]), 0))
+	var spot: Vector3 = ResourceGathering.weakspot_position(node, hit_count)
+	if camera.is_position_behind(spot):
+		return fallback
+	var screen: Vector2 = camera.unproject_position(spot)
+	var cursor: Vector2 = get_viewport().get_visible_rect().size * 0.5 if _first_person \
+		else get_viewport().get_mouse_position()
+	if not screen.is_finite() or cursor.distance_to(screen) > 36.0:
+		return fallback
+	var offset := Vector2(spot.x - client.predicted.x, spot.z - client.predicted.z)
+	return offset.normalized() if offset.length_squared() > 0.01 else fallback
+
+
+func _update_resource_weakspot(node: Dictionary) -> void:
+	var can_show: bool = not node.is_empty() and ResourceGathering.is_strike(
+		str(node.get("kind", ""))) and bool(client.you.get("alive", false)) \
+		and not bool(client.you.get("mounted", false)) and not hud.is_menu_open()
+	if not can_show:
+		if _resource_weakspot != null:
+			_resource_weakspot.visible = false
+		return
+	if _resource_weakspot == null:
+		_resource_weakspot = MeshInstance3D.new()
+		_resource_weakspot.name = "MiningWeakspotMarker"
+		var ball := SphereMesh.new()
+		ball.radius = 0.12
+		ball.height = 0.24
+		ball.radial_segments = 10
+		ball.rings = 5
+		var glow := StandardMaterial3D.new()
+		glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		glow.albedo_color = Color(1.0, 0.72, 0.18, 0.92)
+		glow.emission_enabled = true
+		glow.emission = Color(1.0, 0.48, 0.08)
+		glow.emission_energy_multiplier = 2.0
+		ball.material = glow
+		_resource_weakspot.mesh = ball
+		_resource_weakspot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(_resource_weakspot)
+	var node_id: int = int(node["id"])
+	var completed: int = int(client.resource_hits.get(node_id, 0))
+	_resource_weakspot.position = ResourceGathering.weakspot_position(node, completed)
+	var pulse: float = 1.0 + 0.17 * sin(float(Time.get_ticks_msec()) * 0.008)
+	_resource_weakspot.scale = Vector3.ONE * pulse
+	_resource_weakspot.visible = not client.depleted.has(node_id)
+
+
 func _update_prompt() -> void:
 	var text := ""
 	var p: Vector3 = client.predicted
 	var loot: Dictionary = client.nearest_loot(p, Defs.REACH)
 	var node: Dictionary = client.nearest_node(p, Defs.REACH)
+	# A pickup closer than the tree must not hide the tree's weak spot.
+	# Scan a forward-facing candidate 8x/s instead of scanning every frame.
+	var now_ms: int = Time.get_ticks_msec()
+	if now_ms >= _resource_marker_rescan_at:
+		_resource_marker_rescan_at = now_ms + 125
+		_resource_marker_target = client.nearest_strike_node(p, _aim_direction())
+	_update_resource_weakspot(_resource_marker_target)
 	var below: bool = Dungeon.is_underground(p.x)
 	if below and Dungeon.at_stairs(p.x, p.z):
 		text = "[E] Climb the stairs back to the surface"
@@ -2338,7 +2435,11 @@ func _update_prompt() -> void:
 			}.get(resource_kind, "Collect resources"))
 			text = "[E] %s" % pickup_label
 		elif ResourceGathering.is_strike(resource_kind):
-			text = "[LMB] %s %s (tier %d)" % ["Chop" if resource_kind == "tree" else "Mine", resource_kind, int(node["tier"])]
+			var hits_done: int = int(client.resource_hits.get(int(node["id"]), 0))
+			var total_hits: int = ResourceGathering.strikes_needed(resource_kind)
+			text = "[LMB] %s %s (T%d) | %d/%d hits | Aim at golden spot for +1" % [
+				"Chop" if resource_kind == "tree" else "Mine", resource_kind,
+				int(node["tier"]), hits_done, total_hits]
 		else:
 			text = "[E] Gather %s (tier %d)" % [resource_kind, int(node["tier"])]
 		var needed := Defs.tool_tier_for_node(node["kind"])
@@ -3124,7 +3225,7 @@ func _interact() -> void:
 			var facing: Vector2 = _aim_direction()
 			if facing == Vector2.ZERO:
 				facing = _look_direction()
-			client.resource_hit(int(node["id"]), facing)
+			client.resource_hit(int(node["id"]), _resource_swing_aim(node, facing))
 		else:
 			client.gather(int(node["id"]))
 

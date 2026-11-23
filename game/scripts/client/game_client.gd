@@ -47,6 +47,7 @@ var ember_pools: Dictionary = {} # Replicated server-owned burning ground.
 var outposts: Array = [] # Public server-controlled PvP objectives.
 var bags: Dictionary = {}
 var depleted: Dictionary = {}
+var resource_hits: Dictionary = {} # Server-verified nearby node id -> completed strikes.
 var crates_used: Dictionary = {}
 var world_state_revision: int = Time.get_ticks_usec() # Bumped only when depleted/crates_used really change, so views skip per-frame rescans.
 var server_time: float = 0.0
@@ -91,6 +92,12 @@ func active_supply_beacon() -> Dictionary:
 
 func on_events(list: Array) -> void:
 	for event in list:
+		if str(event.get("type", "")) == "gathered" and bool(event.get("strike", false)):
+			var node_id: int = int(event.get("node", -1))
+			if bool(event.get("final", false)):
+				resource_hits.erase(node_id)
+			else:
+				resource_hits[node_id] = int(event.get("hit", 0))
 		if str(event.get("type", "")) == "party_supply_request":
 			var seen: Dictionary = PartySupplyBeacon.read(
 				event, peer_id, you.get("party", {}), server_time)
@@ -174,6 +181,12 @@ func on_snapshot(snapshot: Dictionary) -> void:
 				world.add_structure_blockers(id, HousePieces.blockers_of(entity))
 			else:
 				world.add_dynamic_blocker(id, float(entity["x"]), float(entity["z"]), 0.85)
+	var next_resource_hits: Dictionary = {}
+	for entry in snapshot.get("resource_hits", []):
+		next_resource_hits[int(entry["id"])] = int(entry["hits"])
+	if resource_hits != next_resource_hits:
+		world_state_revision += 1
+	resource_hits = next_resource_hits
 	var next_depleted: Dictionary = {}
 	for id in snapshot["depleted"]:
 		next_depleted[id] = true
@@ -182,6 +195,10 @@ func on_snapshot(snapshot: Dictionary) -> void:
 		next_crates[id] = true
 	if next_depleted != depleted or next_crates != crates_used:
 		world_state_revision += 1
+		# Prediction must see the same gaps as the server's depleted geometry
+		# before replaying input; otherwise mining creates invisible walls.
+		if next_depleted != depleted:
+			world.sync_depleted_nodes(next_depleted)
 	depleted = next_depleted
 	crates_used = next_crates
 	_reconcile(snapshot)
@@ -848,10 +865,8 @@ func nearest_node(point: Vector3, radius: float) -> Dictionary:
 				if depleted.has(node["id"]):
 					continue
 				var center_distance: float = Vector2(float(node["x"]) - point.x, float(node["z"]) - point.z).length()
-				# A modeled rock is interactable from its visible edge. Trees and
-				# foliage keep their original centre-based distance checks.
-				var margin: float = minf(float(node.get("radius", 0.0)), 1.8) if \
-					str(node["kind"]) in ["rock", "ore", "pebble"] else 0.0
+				# Logs and stones are interactable from their solid footprint edge.
+				var margin: float = ResourceGathering.reach_margin(node)
 				var distance: float = maxf(0.0, center_distance - margin)
 				if distance < best_distance:
 					best = node
@@ -860,7 +875,7 @@ func nearest_node(point: Vector3, radius: float) -> Dictionary:
 
 
 ## Select a mineable node in front of the player's actual swing, ignoring ground pickups.
-func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Defs.REACH) -> Dictionary:
+func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Defs.REACH + 0.5) -> Dictionary:
 	var best: Dictionary = {}
 	var best_distance: float = radius
 	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
@@ -873,7 +888,7 @@ func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Def
 					continue
 				var center_distance: float = Vector2(float(node["x"]) - point.x,
 					float(node["z"]) - point.z).length()
-				var margin: float = minf(float(node.get("radius", 0.0)), 1.8) if str(node["kind"]) in ["rock", "ore"] else 0.0
+				var margin: float = ResourceGathering.reach_margin(node)
 				var distance: float = maxf(0.0, center_distance - margin)
 				if distance < best_distance:
 					best_distance = distance

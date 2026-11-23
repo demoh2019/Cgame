@@ -53,6 +53,10 @@ private:
 		AABB bounds;
 		RID instance;
 		RID meshes[MAX_LOD];
+		// Last-used stamps are local to each chunk. Never evict the RID that is
+		// currently attached to the RenderingServer instance.
+		uint64_t lod_use_clock = 0;
+		uint64_t lod_last_used[MAX_LOD] = {};
 		int lod = -1;
 		real_t lod_errors[MAX_LOD] = {}; // Cached height deviation per LOD.
 		float morph = -1.0f; // Cache the last instance uniform; avoid redundant RD writes.
@@ -87,6 +91,9 @@ private:
 	// 0 = original row-major order, 1 = nearest first,
 	// 2 = nearest with a bounded camera-facing priority bonus.
 	int mesh_streaming_priority = 0;
+	// 0 preserves legacy unlimited GPU geometry caching; 1..8 limits each
+	// chunk to its active LOD and the most recently used neighbours.
+	int max_cached_lods = 0;
 	int pending_mesh_build_count = 0;
 	static uint64_t shared_mesh_budget_frame;
 	static uint64_t shared_mesh_budget_start_usec;
@@ -128,6 +135,7 @@ private:
 	void _free_chunk_mesh_and_collision(Chunk &r_chunk);
 	void _free_collision(Chunk &r_chunk);
 	void _ensure_mesh(Chunk &r_chunk, int p_lod);
+	void _trim_cached_lods(Chunk &r_chunk);
 	void _ensure_collision(Chunk &r_chunk);
 	void _invalidate_region(const Rect2i &p_region, bool p_geometry_changed);
 	void _update_transforms();
@@ -176,6 +184,10 @@ public:
 	void set_mesh_build_budget_usec(int p_usec);
 	void set_mesh_streaming_priority(int p_mode);
 	int get_mesh_streaming_priority() const { return mesh_streaming_priority; }
+	void set_max_cached_lods(int p_limit);
+	int get_max_cached_lods() const { return max_cached_lods; }
+	int get_cached_mesh_count() const;
+	int get_chunk_cached_lod_count(const Vector2i &p_chunk) const;
 	int get_mesh_build_budget_usec() const { return int(mesh_build_budget_usec); }
 	int get_pending_mesh_build_count() const { return pending_mesh_build_count; }
 	real_t get_lod_pixel_error() const { return lod_pixel_error; }

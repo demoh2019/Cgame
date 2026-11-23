@@ -5,6 +5,7 @@ extends RefCounted
 
 const MeshletRenderer = preload("res://scripts/client/meshlet_renderer.gd")
 const Meshlets = preload("res://scripts/shared/meshlets.gd")
+const ClusterLOD = preload("res://scripts/shared/cluster_lod.gd")
 
 
 ## Flat grid in the XZ plane, `n` x `n` quads, two triangles each.
@@ -219,3 +220,68 @@ func run(t) -> void:
 	var culled_idx: PackedInt32Array = culled_inst.mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
 	t.check(culled_idx.size() > 0 and culled_idx.size() < indices.size(), "fallback instance drops culled meshlets")
 	culled_inst.free()
+
+	t.current = "material-preserving cluster cut for the actual game mesh fallback"
+	var source_arrays: Array = []
+	source_arrays.resize(Mesh.ARRAY_MAX)
+	source_arrays[Mesh.ARRAY_VERTEX] = verts
+	source_arrays[Mesh.ARRAY_INDEX] = indices
+	var colors := PackedColorArray()
+	var uv := PackedVector2Array()
+	var normals := PackedVector3Array()
+	for i in verts.size():
+		colors.append(Color(float(i % 3) / 3.0, 0.5, 0.8))
+		uv.append(Vector2(float(i % 17) / 17.0, float(i % 11) / 11.0))
+		normals.append(Vector3.UP)
+	source_arrays[Mesh.ARRAY_COLOR] = colors
+	source_arrays[Mesh.ARRAY_TEX_UV] = uv
+	source_arrays[Mesh.ARRAY_NORMAL] = normals
+	var custom0 := PackedByteArray()
+	custom0.resize(verts.size() * 12) # one RGB float custom channel per vertex
+	for i in verts.size():
+		custom0.encode_float(i * 12, float(i) * 0.015)
+		custom0.encode_float(i * 12 + 4, 0.5)
+		custom0.encode_float(i * 12 + 8, 1.0)
+	source_arrays[Mesh.ARRAY_CUSTOM0] = custom0
+	var custom_flags: int = Mesh.ARRAY_CUSTOM_RGB_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT
+	var authored := ArrayMesh.new()
+	authored.resource_name = "AlbionTerrainFixture"
+	authored.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, source_arrays, [], {}, custom_flags)
+	var authored_material := StandardMaterial3D.new()
+	authored.surface_set_material(0, authored_material)
+	# Compare to Godot's uploaded surface arrays rather than the authoring
+	# floats: vertex colors and UVs may be quantized during mesh creation.
+	var canonical: Array = authored.surface_get_arrays(0)
+	var hierarchy: Dictionary = ClusterLOD.build_hierarchy(
+		canonical[Mesh.ARRAY_VERTEX], canonical[Mesh.ARRAY_INDEX], 4)
+	var cut_ids: PackedInt32Array = ClusterLOD.select_cut(
+		hierarchy, Vector3(0, 50, 150), 1.0471976, 1080.0, 1.0)
+	var output: ArrayMesh = MeshletRenderer.build_material_preserving_cut(
+		authored, hierarchy, cut_ids)
+	t.check(output != null, "real CPU mesh fallback rebuilds a selected LOD cut")
+	if output != null:
+		var output_arrays: Array = output.surface_get_arrays(0)
+		t.eq(output_arrays[Mesh.ARRAY_VERTEX], canonical[Mesh.ARRAY_VERTEX],
+			"the selected cut does not discard source vertex IDs")
+		t.eq(output_arrays[Mesh.ARRAY_TEX_UV], canonical[Mesh.ARRAY_TEX_UV],
+			"UV seams and texture mappings remain unchanged")
+		t.eq(output_arrays[Mesh.ARRAY_COLOR], canonical[Mesh.ARRAY_COLOR],
+			"scanned terrain vertex colors survive LOD construction")
+		t.eq(output_arrays[Mesh.ARRAY_NORMAL], canonical[Mesh.ARRAY_NORMAL],
+			"PBR lighting normals survive the cut")
+		t.eq(output_arrays[Mesh.ARRAY_CUSTOM0], canonical[Mesh.ARRAY_CUSTOM0],
+			"custom packed attributes retain their original byte layout")
+		t.eq(output.surface_get_format(0) & Mesh.ARRAY_FORMAT_CUSTOM_MASK,
+			authored.surface_get_format(0) & Mesh.ARRAY_FORMAT_CUSTOM_MASK,
+			"per-vertex custom attribute format bits survive LOD construction")
+		t.check((output_arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() > 0,
+			"chosen clusters are built as indexed triangles")
+		t.check((output_arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() <= indices.size(),
+			"the selected cluster LOD does not add geometry")
+		t.check(output.surface_get_material(0) == authored_material,
+			"authored terrain material is preserved")
+	t.eq(authored.surface_get_arrays(0)[Mesh.ARRAY_INDEX], indices,
+		"building the cluster cut never mutates the input mesh")
+	t.eq(MeshletRenderer.build_material_preserving_cut(authored, {}, cut_ids), null,
+		"invalid hierarchy returns no broken visual geometry")
+

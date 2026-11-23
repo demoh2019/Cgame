@@ -3820,8 +3820,15 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nSTORM MUD: ground travel -%.0f%% | roads reduce the penalty." % [
 			(1.0 - mud_traction) * 100.0]
 	if int(client.you.get("rested_xp_credit", 0)) > 0:
-		_info_label.text += "\nRESTED TRAINING: %d bonus XP left (+50-75%% by skill level; paid rest)" % int(
+		_info_label.text += "\nRESTED TRAINING: %d bonus XP left (+50-100%% by skill and practice)" % int(
 			client.you["rested_xp_credit"])
+	var practice_branches: int = int(client.you.get("practice_branches", 0))
+	if practice_branches > 0:
+		_info_label.text += "\nCROSS-TRAINING: %d/3 branches in 3 min (+20%% rested XP rate when active)" % mini(
+			practice_branches, 3)
+	var deep_branches: int = int(client.you.get("deep_practice_branches", 0))
+	if deep_branches > 0:
+		_info_label.text += "\nDEEP PRACTICE: %d disciplines (+10%% rested XP in trained disciplines)" % deep_branches
 	for bag in client.bags.values():
 		if not bool(bag.get("corpse_scent", false)):
 			continue

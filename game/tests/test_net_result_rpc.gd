@@ -3,6 +3,7 @@ extends RefCounted
 ## handling of malformed replies without guessing command outcomes.
 
 const Net = preload("res://scripts/shared/net.gd")
+const NetProtocol = preload("res://scripts/shared/net_protocol.gd")
 
 
 func run(t) -> void:
@@ -35,4 +36,16 @@ func run(t) -> void:
 	net.callv("s_result", [{"ok": true}])
 	t.eq(delivered.size(), 2, "invalid replies never reach gameplay")
 	t.check(bool(net.get("_bad_result_packet_warned")), "incompatible reply is diagnosed once")
+	t.current = "network protocol preflight guards all RPCs"
+	var other: Node = Net.new()
+	var digest: String = NetProtocol.fingerprint(net)
+	t.eq(digest.length(), 64, "contract has a SHA-256 fingerprint")
+	t.eq(digest, NetProtocol.fingerprint(other), "both endpoint roles share the RPC contract")
+	var handshake: PackedByteArray = NetProtocol.auth_payload(net)
+	t.check(NetProtocol.accepts(other, handshake), "matching RPC contract is admitted")
+	t.check(not NetProtocol.accepts(other, PackedByteArray()), "missing handshake is rejected")
+	var changed: PackedByteArray = handshake.duplicate()
+	changed[changed.size() - 1] = (changed[changed.size() - 1] + 1) % 256
+	t.check(not NetProtocol.accepts(other, changed), "different RPC fingerprint is rejected")
+	other.free()
 	net.free()

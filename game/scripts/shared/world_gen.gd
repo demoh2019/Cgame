@@ -9,6 +9,7 @@ const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 const StoneResources = preload("res://scripts/shared/stone_resources.gd")
+const SolidScenery = preload("res://scripts/shared/solid_scenery.gd")
 
 var world_seed: int
 var _continent: FastNoiseLite
@@ -18,6 +19,11 @@ var _temperature: FastNoiseLite
 var _moisture: FastNoiseLite
 var _cache: Dictionary = {}
 var dynamic_blockers: Dictionary = {} # Session structures shared with movement and prediction.
+# Generated resource geometry remains immutable for deterministic world seeding.
+# Only its collision eligibility is mutable, matching server depletion and
+# client snapshot state (the renderer hides the same node IDs).
+var depleted_blockers: Dictionary = {}
+
 var _hub_structures: Array = []
 var _level_rx: int = 1 << 30
 var _level_rz: int = 1 << 30
@@ -822,10 +828,73 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 	_add_outposts(cell, origin, zone, ruin, structures, crates, props, sites)
 	_add_ground_pickups(cell, origin, nodes, sites)
 	_add_loose_stones(cell, origin, tier, nodes, sites)
+	_add_fallen_wood(cell, origin, tier, nodes, structures, crates, props, sites)
 	var generated := {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
 	if spawn_extender != null:
 		spawn_extender.extend(cell, generated)
 	return generated
+
+
+## Large fallen trunks use the same world IDs on the server and every client.
+## Slots 810..819 do not overlap loose stones (550..789), pickups (790..809),
+## outposts (850+), hostiles (900+) or grove trees (960+).
+const FALLEN_WOOD_ID_BASE := 810
+const FALLEN_WOOD_MAX := 1
+
+
+func _add_fallen_wood(cell: Vector2i, origin: Vector2, tier: int, nodes: Array,
+		structures: Array, crates: Array, props: Array, sites: Array) -> void:
+	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
+	if center.length() < Defs.HUB_SAFE_RADIUS + 40.0 or Dungeon.is_underground(origin.x + Defs.CHUNK_SIZE):
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = mix(cell.x, cell.y, world_seed, 149)
+	if rng.randf() > 0.55:
+		return
+	var placed := 0
+	for _attempt in 16:
+		if placed >= FALLEN_WOOD_MAX:
+			break
+		# Keep every 5m log away from borders so adjacent chunks cannot
+		# create overlapping collision on either side of a streaming seam.
+		var point := origin + Vector2(rng.randf_range(6.0, Defs.CHUNK_SIZE - 6.0),
+			rng.randf_range(6.0, Defs.CHUNK_SIZE - 6.0))
+		if is_water(point.x, point.y) or is_safe(point.x, point.y):
+			continue
+		if roads != null and roads.coverage_at(point.x, point.y) > 0.0:
+			continue
+		var variants: Array[int] = SolidScenery.available_variants(biome_at(point.x, point.y))
+		if variants.is_empty():
+			continue
+		var variant: int = variants[rng.randi_range(0, variants.size() - 1)]
+		var scale: float = rng.randf_range(0.85, 1.15)
+		var radius: float = SolidScenery.radius(variant, scale)
+		var blocked := false
+		for site in sites:
+			if point.distance_to(Vector2(float(site["x"]), float(site["z"]))) < float(site["radius"]) + radius + 2.0:
+				blocked = true
+				break
+		if blocked:
+			continue
+		for group in [nodes, structures, crates, props]:
+			for obj in group:
+				var clearance: float = radius + float(obj.get("radius", 0.5)) + 0.7
+				if point.distance_squared_to(Vector2(float(obj["x"]), float(obj["z"]))) < clearance * clearance:
+					blocked = true
+					break
+			if blocked:
+				break
+		if blocked:
+			continue
+		var descriptor: Dictionary = SolidScenery.MODELS[variant]
+		nodes.append({
+			"id": entity_id(cell, FALLEN_WOOD_ID_BASE + placed),
+			"kind": str(descriptor["resource"]), "solid_model": variant,
+			"x": point.x, "z": point.y, "y": height_at(point.x, point.y),
+			"yaw": rng.randf() * TAU, "scale": scale, "radius": radius,
+			"tier": tier, "blocks": true,
+		})
+		placed += 1
 
 
 ## Trees and rocks keep out of the inner part of a settlement, camp or city.
@@ -894,6 +963,21 @@ static func _pick_zombie(zone: int, rng: RandomNumberGenerator) -> String:
 	return "walker"
 
 
+## A depleted resource has no visible mesh and must not block locomotion.
+## This is updated only on a server gather/respawn or a changed client snapshot.
+func set_node_depleted(node_id: int, depleted: bool) -> void:
+	if depleted:
+		depleted_blockers[node_id] = true
+	else:
+		depleted_blockers.erase(node_id)
+
+
+## Snapshots replace the complete live depletion set, including corrections
+## after reconnect. Copy it rather than alias mutable client state.
+func sync_depleted_nodes(nodes: Dictionary) -> void:
+	depleted_blockers = nodes.duplicate()
+
+
 ## Static things that block movement near a point, for both the server and client prediction.
 func add_dynamic_blocker(id: int, x: float, z: float, radius: float) -> void:
 	if is_finite(x) and is_finite(z) and is_finite(radius) and radius > 0.0:
@@ -944,6 +1028,11 @@ func blockers_near(x: float, z: float, radius: float) -> Array:
 			var data := chunk(Vector2i(cx, cz))
 			for group in ["nodes", "crates", "structures", "props"]:
 				for n in data[group]:
+					# Depletion affects actual collisions, not just MultiMesh
+					# visibility. A server-mined boulder cannot become an
+					# invisible barrier until it respawns.
+					if group == "nodes" and depleted_blockers.has(n["id"]):
+						continue
 					if n["blocks"] and absf(n["x"] - x) < radius + n["radius"] and absf(n["z"] - z) < radius + n["radius"]:
 						result.append(n)
 	# Include built obstacles without erasing the procedural hub/terrain blockers.

@@ -54,6 +54,29 @@ func run(t) -> void:
 	t.check(StoneResources.MODELS[0].has("nature") and StoneResources.MODELS[1].has("nature"),
 		"both previously cosmetic pebble meshes now have pickup entries")
 
+	t.current = "stone model size matches pickup or mining"
+	var generator := RandomNumberGenerator.new()
+	generator.seed = 20261123
+	for biome in ["forest", "plains", "swamp", "mountain", "beach"]:
+		for i in 16:
+			var tiny: int = StoneResources.pick_model(biome, true, generator)
+			var mineable: int = StoneResources.pick_model(biome, false, generator)
+			t.check(tiny >= 0 and mineable >= 0,
+				"both pickup and mineable stone variants available in " + biome)
+			if tiny >= 0:
+				t.check(StoneResources.MODELS[tiny].has("nature"),
+					"hand-pickup never selects a 1-metre imported rock")
+			if mineable >= 0:
+				t.check(StoneResources.MODELS[mineable].has("path"),
+					"mining selects collidable imported rock models")
+	var pebble_mesh: Mesh = ChunkView.pebble_fallback_mesh()
+	t.check(pebble_mesh != null, "pickup has geometry without optional nature pack")
+	if pebble_mesh != null:
+		t.check(pebble_mesh.get_aabb().size.x < 0.5,
+			"fallback pickup is actually hand-sized, not a boulder")
+		t.check(pebble_mesh == ChunkView.pebble_fallback_mesh(),
+			"pickup fallback is shared rather than allocated per streamed chunk")
+
 	t.current = "ground shader layers"
 	t.eq(ChunkView.TERRAIN_LAYERS.size(), 13, "thirteen ground materials")
 	t.eq(ChunkView.TERRAIN_LAYERS.size(), ChunkView.TERRAIN_TARGETS.size(), "every material has a matching colour target")
