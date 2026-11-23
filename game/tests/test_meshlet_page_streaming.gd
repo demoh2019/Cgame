@@ -4,7 +4,8 @@ extends RefCounted
 
 const PagePolicy = preload("res://scripts/shared/meshlet_page_streaming.gd")
 const MeshletRenderer = preload("res://scripts/client/meshlet_renderer.gd")
-const Meshlets = preload("res://scripts/shared/meshlets.gd")
+const Meshes = preload("res://scripts/client/meshes.gd")
+const VirtualGeometryProbe = preload("res://scripts/client/virtual_geometry_probe.gd")
 
 
 static func make_meshlets(count: int) -> Array:
@@ -13,7 +14,7 @@ static func make_meshlets(count: int) -> Array:
 		out.append({
 			"vertex_ids": PackedInt32Array([0, 1, 2]),
 			"indices": PackedInt32Array([0, 1, 2]),
-			"bounds_center": Vector3(float(id) / 32.0 * 20.0 if id % 32 == 0 else float(id - id % 32) / 32.0 * 20.0, 0.0, 0.0),
+			"bounds_center": Vector3(floorf(float(id) / 32.0) * 20.0, 0.0, 0.0),
 			"bounds_radius": 2.0,
 			"cone_axis": Vector3.UP,
 			"cone_cutoff": 1.0,
@@ -41,6 +42,11 @@ func run(t) -> void:
 	t.eq(transformed, PackedInt32Array([1]), "residency priorities use the mesh world transform")
 	t.eq(PagePolicy.wanted_pages(pages, Vector3.ZERO, Transform3D.IDENTITY).size(),
 		3, "zero policy budget means all pages")
+	var visible_plane: Array[Plane] = [Plane(Vector3(1, 0, 0), 25.0)]
+	var facing: PackedInt32Array = PagePolicy.wanted_pages(
+		pages, Vector3(50, 0, 0), Transform3D.IDENTITY, 2, visible_plane)
+	t.eq(facing, PackedInt32Array([1, 0]),
+		"on-screen pages get precedence over an offscreen page closer to the camera")
 
 	t.current = "GPU page allocation and stable LRU-free eviction"
 	var empty := PackedInt32Array([-1, -1])
@@ -61,7 +67,7 @@ func run(t) -> void:
 	t.eq(paused["slots"], shifted["slots"], "zero upload budget does not mutate resident buffers")
 
 	t.current = "fixed-slot GPU data layout with no whole-mesh upload"
-	var verts := PackedVector3Array([Vector3(1, 2, 3), Vector3(4, 5, 6), Vector3(7, 8, 9)])
+	var verts := PackedVector3Array([Vector3(1, 2, 3), Vector3(4, 2, 3), Vector3(1, 5, 3)])
 	var page: Dictionary = MeshletRenderer.pack_resident_page(verts, meshlets, 1, 2)
 	t.eq(String(page.get("error", "error")), "", "one page packs without a device")
 	var positions: PackedByteArray = page["positions"]
@@ -102,6 +108,28 @@ func run(t) -> void:
 	var fallback: ArrayMesh = renderer.build_array_mesh()
 	t.eq(fallback.surface_get_arrays(0)[Mesh.ARRAY_INDEX].size(), 70 * 3,
 		"fallback retains every triangle despite GPU page limits")
+
+	t.current = "canonical game model uses optional GPU page streaming"
+	var actual_rock: Mesh = Meshes.get_mesh("rock")
+	var game_renderer: RefCounted = VirtualGeometryProbe.prepare(actual_rock, 2, 1)
+	t.check(game_renderer != null, "the live Albion rock model can produce GPU meshlets")
+	if game_renderer != null:
+		t.check(int(game_renderer.call("page_count")) >= 1,
+			"real game model generates one or more streamable pages")
+		t.eq(int(game_renderer.get("max_resident_pages")), 2,
+			"live debug feature applies a bounded resident page budget")
+		t.eq(int(game_renderer.get("max_page_uploads_per_frame")), 1,
+			"live debug feature applies a transfer-per-frame limit")
+	t.check(VirtualGeometryProbe.prepare(null) == null, "null game mesh is safely ignored")
+	t.check(VirtualGeometryProbe.prepare(ArrayMesh.new()) == null,
+		"missing geometry does not register a GPU draw")
+	t.check(VirtualGeometryProbe.attach_for_debug(actual_rock, null) == null,
+		"no camera never creates a compositor effect")
+	var client_source: String = FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
+	t.check(client_source.contains('VirtualGeometryProbe.attach_for_debug(Meshes.get_mesh("rock"), camera)'),
+		"online game calls GPU probe on the canonical rock, not a duplicate game project")
+	t.check(client_source.contains('VirtualGeometryProbe.detach_for_debug(_meshlet_page_probe, camera)'),
+		"online game releases the page pool on shutdown")
 
 	t.current = "GPU task shaders exclude unresident descriptor slots"
 	var task_source: String = MeshletRenderer._read_text(MeshletRenderer.TASK_SHADER_PATH)
