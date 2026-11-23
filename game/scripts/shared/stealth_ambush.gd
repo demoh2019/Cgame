@@ -5,6 +5,7 @@ const Zombie = preload("res://scripts/shared/zombie.gd")
 
 const DAMAGE_MULTIPLIER := 1.45
 const MAX_DISTANCE := 2.4
+const MAX_HEIGHT_DIFFERENCE := 2.0 # A survivor on another floor cannot backstab through it.
 const MAX_REAR_DOT := -0.55
 
 
@@ -31,6 +32,8 @@ static func multiplier(attacker, infected, weapon_id: String) -> float:
 	if infected.target_id != -1 or infected.forced_target_id != -1 or not infected.threat.is_empty():
 		return 1.0
 	if not infected.position.is_finite() or not is_finite(infected.yaw):
+		return 1.0
+	if absf(attacker.position.y - infected.position.y) > MAX_HEIGHT_DIFFERENCE:
 		return 1.0
 	var behind := Vector2(attacker.position.x - infected.position.x,
 			attacker.position.z - infected.position.z)

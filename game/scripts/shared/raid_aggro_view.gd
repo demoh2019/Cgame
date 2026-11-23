@@ -65,17 +65,22 @@ static func for_viewer(boss, viewer, players: Dictionary, parties, world) -> Dic
 		target_value = 0.0
 	var pull_pct: int = -1
 	if target_id > 0 and target_id != viewer.id and target_value > 0.0:
-		pull_pct = clampi(roundi(100.0 * viewer_value / \
-			(target_value * Threat.SWITCH_MARGIN)), 0, 999)
-	var forced: bool = target_id > 0 and \
-		boss.forced_target_id == target_id and boss.forced_target_seconds > 0.0
+		# Divide before scaling to percent: 100 * huge finite threat can
+		# overflow, and rounding INF can corrupt a networked HUD integer.
+		var pull_ratio: float = (viewer_value / target_value) / Threat.SWITCH_MARGIN
+		pull_pct = 999 if not is_finite(pull_ratio) else clampi(
+			roundi(minf(pull_ratio, 9.99) * 100.0), 0, 999)
+	var forced_seconds: float = float(boss.forced_target_seconds)
+	var forced: bool = target_id > 0 and boss.forced_target_id == target_id and \
+		is_finite(forced_seconds) and forced_seconds > 0.0
+	var share: float = viewer_value / maxf(top_value, 1.0)
 	return {
 		"boss": boss.id,
 		"target": target_id,
 		"top": top_id,
-		"your_pct": clampi(roundi(100.0 * viewer_value / maxf(top_value, 1.0)), 0, 100),
+		"your_pct": clampi(roundi(minf(share, 1.0) * 100.0), 0, 100),
 		"pull_pct": pull_pct,
 		"targeted": target_id == viewer.id,
 		"taunted": forced,
-		"taunt_seconds": minf(10.0, maxf(0.0, boss.forced_target_seconds)) if forced else 0.0
+		"taunt_seconds": minf(10.0, forced_seconds) if forced else 0.0
 	}
