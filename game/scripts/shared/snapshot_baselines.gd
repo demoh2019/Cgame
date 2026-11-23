@@ -25,7 +25,10 @@ func record_sent(client_id: int, sequence: int, state: Dictionary) -> void:
 	if sequence <= int(slot["acked_seq"]) or pending.has(sequence):
 		return
 	var order: Array[int] = slot["order"]
-	order.append(sequence)
+	# Network retries may arrive out of order. Keep the window sorted by the
+	# authoritative sequence, never by local arrival time, so delayed old
+	# snapshots cannot evict newer still-acknowledgeable states.
+	order.insert(order.bsearch(sequence), sequence)
 	pending[sequence] = state.duplicate(true)
 	while order.size() > MAX_UNACKED:
 		var oldest: int = order.pop_front()

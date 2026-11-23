@@ -150,6 +150,28 @@ func run(t) -> void:
 	var pend: Dictionary = (bl3._clients[7] as Dictionary)["pending"]
 	t.check(pend.size() <= 32, "history bounded to 32")
 
+	t.current = "out-of-order send history keeps newer snapshot ACKs"
+	var reordered := SnapshotBaselines.new()
+	reordered.record_sent(55, 100, {1: {"hp": 100}})
+	for sequence in range(1, 70):
+		reordered.record_sent(55, sequence, {1: {"hp": sequence}})
+	var out_of_order_pending: Dictionary = (reordered._clients[55] as Dictionary)["pending"]
+	t.eq(out_of_order_pending.size(), SnapshotBaselines.MAX_UNACKED,
+		"out-of-order sends keep a strict 32-snapshot memory window")
+	t.check(out_of_order_pending.has(100),
+		"late older transmissions cannot evict the newest snapshot")
+	t.check(not out_of_order_pending.has(1),
+		"old sequence IDs are evicted regardless of arrival order")
+	reordered.acknowledge(55, 50)
+	t.eq((reordered.baseline_for(55)[1] as Dictionary)["hp"], 50,
+		"late valid ACK can select a retained older state")
+	reordered.acknowledge(55, 100)
+	t.eq((reordered.baseline_for(55)[1] as Dictionary)["hp"], 100,
+		"later ACK advances to newest state without rollback")
+	reordered.record_sent(55, 70, {1: {"hp": -70}})
+	t.eq(reordered.baseline_for(55)[1]["hp"], 100,
+		"replayed older sequence cannot replace acknowledged state")
+
 	t.current = "compression size"
 	var big: Dictionary = _world(200)
 	var nxt: Dictionary = big.duplicate(true)
