@@ -83,6 +83,55 @@ func run(t) -> void:
 		t.eq(server.cmd_resource_pickup(801, int(pickup["id"])).get("reason", ""),
 			"depleted", "pickup cannot be collected twice")
 
+	t.current = "real modeled rock strikes preserve shared collisions"
+	var modeled: Dictionary = {}
+	for cx in range(2, 10):
+		if not modeled.is_empty():
+			break
+		for cz in range(2, 10):
+			if not modeled.is_empty():
+				break
+			for candidate in world.chunk(Vector2i(cx, cz))["nodes"]:
+				if str(candidate["kind"]) == "rock" and candidate.has("stone_model") and int(candidate["tier"]) == 1:
+					modeled = candidate
+					break
+	t.check(not modeled.is_empty(), "tier-one model boulder exists for Rust-style mining")
+	if not modeled.is_empty():
+		var rock_x: float = float(modeled["x"])
+		var rock_z: float = float(modeled["z"])
+		var rock_id: int = int(modeled["id"])
+		player.position = Vector3(rock_x + 1.5,
+			world.height_at(rock_x + 1.5, rock_z), rock_z)
+		var blocked := false
+		for obstacle in world.blockers_near(rock_x, rock_z, 0.5):
+			if int(obstacle.get("id", -1)) == rock_id:
+				blocked = true
+		t.check(blocked, "solid stone model blocks movement before mining")
+		var stone_before: int = player.inventory.count("stone_1")
+		var total_hits: int = ResourceGathering.strikes_needed("rock")
+		for strike in range(1, total_hits + 1):
+			var result: Dictionary = server.cmd_resource_hit(801, rock_id, -1.0, 0.0)
+			t.check(bool(result.get("ok", false)), "real modeled rock accepts hit %d" % strike)
+			t.eq(int(result.get("hit", -1)), strike, "model rock shares authoritative strike progress")
+			if strike < total_hits:
+				t.check(not server.depleted.has(rock_id), "partially mined rock is still present")
+			server.time += ResourceGathering.swing_cooldown(0) + 0.01
+		t.check(player.inventory.count("stone_1") >= stone_before + 4,
+			"strikes give real stone resources")
+		t.check(server.depleted.has(rock_id), "last strike depletes modeled boulder")
+		var ghost := false
+		for obstacle in world.blockers_near(rock_x, rock_z, 0.5):
+			if int(obstacle.get("id", -1)) == rock_id:
+				ghost = true
+		t.check(not ghost, "depleted model has no invisible collision")
+		server.time += float(Defs.node_info("rock")["respawn"]) + 1.0
+		server.tick(0.05)
+		var restored := false
+		for obstacle in world.blockers_near(rock_x, rock_z, 0.5):
+			if int(obstacle.get("id", -1)) == rock_id:
+				restored = true
+		t.check(restored, "model boulder collision returns with its respawn")
+
 
 	t.current = "rotating weak point is deterministic, visible and has a strict aim check"
 	var initial_spot: Vector3 = ResourceGathering.weakspot_position(tree, 0)
