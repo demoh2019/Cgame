@@ -53,6 +53,7 @@ const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const StoryCampaign = preload("res://scripts/shared/story_campaign.gd")
 const StoryChapterTwo = preload("res://scripts/shared/story_chapter_two.gd")
+const StoryChapterThree = preload("res://scripts/shared/story_chapter_three.gd")
 const CaravanRoutes = preload("res://scripts/shared/caravan_routes.gd")
 const CaravanAmbush = preload("res://scripts/shared/caravan_ambush.gd")
 const RuinAmbush = preload("res://scripts/shared/ruin_ambush.gd")
@@ -254,6 +255,7 @@ class Player:
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
 	var story_state: Dictionary = {} # Character-bound narrative chapter checkpoint.
 	var story2_state: Dictionary = {} # Independent, persistent Chapter II and ending choice.
+	var story3_state: Dictionary = {} # Chapter III checkpoint and inherited branch.
 	var caravan_state: Dictionary = {} # Saved canonical source/destination IDs only.
 	var caravan_view: Dictionary = {} # Verified route details for this private client.
 	var caravan_ambushed: bool = false # One PvE ambush per active route, persisted.
@@ -596,6 +598,7 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.contract_state = Contracts.empty_state()
 	player.story_state = StoryCampaign.empty_state()
 	player.story2_state = StoryChapterTwo.empty_state()
+	player.story3_state = StoryChapterThree.empty_state()
 	player.equipment_presets = EquipmentPresets.empty_slots()
 	player.caravan_state = {}
 	player.caravan_view = {}
@@ -652,6 +655,7 @@ func character_data(player: Player) -> Dictionary:
 		"contracts": player.contract_state.duplicate(true),
 		"story": player.story_state.duplicate(true),
 		"story2": player.story2_state.duplicate(true),
+		"story3": player.story3_state.duplicate(true),
 		"caravan": player.caravan_state.duplicate(true),
 		"caravan_ambushed": player.caravan_ambushed,
 		"caravan_defended": player.caravan_defended,
@@ -857,6 +861,15 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if int((loaded_story2 as Dictionary)["stage"]) > 0 and \
 			int((loaded_story as Dictionary)["stage"]) != StoryCampaign.LAST_STAGE:
 		return false
+	# The third journal must match the actual permanent Chapter II choice;
+	# legacy saves without Chapter III remain valid and begin at its first step.
+	var loaded_story3: Variant = data.get("story3", StoryChapterThree.empty_state())
+	if not StoryChapterThree.valid_state(loaded_story3):
+		return false
+	if int((loaded_story3 as Dictionary)["stage"]) > 0 and (
+			int((loaded_story2 as Dictionary)["stage"]) != StoryChapterTwo.LAST_STAGE or
+			str((loaded_story3 as Dictionary)["source"]) != str((loaded_story2 as Dictionary)["ending"])):
+		return false
 	var loaded_presets: Variant = data.get("equipment_presets", EquipmentPresets.empty_slots())
 	if not EquipmentPresets.valid_state(loaded_presets):
 		return false
@@ -906,6 +919,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
 	player.story_state = (loaded_story as Dictionary).duplicate(true)
 	player.story2_state = (loaded_story2 as Dictionary).duplicate(true)
+	player.story3_state = (loaded_story3 as Dictionary).duplicate(true)
 	player.equipment_presets = (loaded_presets as Array).duplicate(true)
 	player.caravan_state = (loaded_caravan as Dictionary).duplicate(true)
 	player.caravan_view = caravan_view.duplicate(true)
@@ -3625,12 +3639,24 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 			"silver": payout})
 	_award(player, "explorer", 20.0)
 	_earn_renown(player, 4, "caravan")
+	# Only a successful, fully settled NPC-to-NPC delivery recovers
+	# Chapter III's convoy waypoint. Escort payouts alone never count.
+	if StoryChapterThree.record_delivery(player.story3_state):
+		player.dirty_character = true
+		_story3_event(player)
 	outcome["action"] = "deliver"
 	return outcome
 
 
 ## Only owner-visible server-authored narrative events; no targets, location,
 ## chapter checkpoint or rewards are accepted from remote client RPC data.
+func _story3_event(player: Player) -> void:
+	events.append({"type": "story3", "peer": player.id,
+		"stage": int(player.story3_state["stage"]),
+		"line": StoryChapterThree.current_line(player.story3_state),
+		"objective": StoryChapterThree.objective(player.story3_state)})
+
+
 func _story2_event(player: Player) -> void:
 	events.append({"type": "story2", "peer": player.id,
 		"stage": int(player.story2_state["stage"]),
@@ -3638,18 +3664,31 @@ func _story2_event(player: Player) -> void:
 		"objective": StoryChapterTwo.objective(player.story2_state)})
 
 
-## Chapter I and Chapter II radio commands are server-side, always requiring
-## a live actor physically at a workbench and a completed previous chapter.
+## All chapter radio commands require a living authenticated survivor at
+## a real workbench; Chapter III requires the saved Chapter II finale.
 func cmd_story(peer_id: int, action: String) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	if action != "listen" and action != "transmit" and action != "decode" \
-			and action != "seal" and action != "broadcast":
+			and action != "seal" and action != "broadcast" and action != "trace" \
+			and action != "guide" and action != "mask":
 		return {"ok": false, "reason": "unknown_action"}
 	var position := Vector2(player.position.x, player.position.z)
 	if not _at_workbench(position):
 		return {"ok": false, "reason": "no_station"}
+	if action == "trace" or action == "guide" or action == "mask":
+		if int(player.story2_state.get("stage", 0)) != StoryChapterTwo.LAST_STAGE:
+			return {"ok": false, "reason": "chapter_two_incomplete"}
+		var continuation: Dictionary = StoryChapterThree.begin(player.story3_state,
+			str(player.story2_state["ending"])) if action == "trace" else \
+			StoryChapterThree.resolve(player.story3_state, player.inventory, action)
+		if bool(continuation.get("ok", false)):
+			player.dirty_character = true
+			if action == "guide" or action == "mask":
+				player.dirty_inventory = true
+			_story3_event(player)
+		return continuation
 	if action == "decode" or action == "seal" or action == "broadcast":
 		if int(player.story_state.get("stage", 0)) != StoryCampaign.LAST_STAGE:
 			return {"ok": false, "reason": "chapter_one_incomplete"}
@@ -6458,6 +6497,12 @@ func cmd_loot(peer_id: int, entity_id: int, requested_item: String = "") -> Dict
 				and StoryChapterTwo.record_underground_cache(player.story2_state, entity_id):
 			player.dirty_character = true
 			_story2_event(player)
+		# Evidence is a real unopened surface cache in a dangerous region,
+		# never a dungeon chest, a fake RPC ID, or a safe-zone supply box.
+		if not bool(crate.get("dungeon", false)) and not Dungeon.is_underground(player.position.x) \
+				and StoryChapterThree.record_manifest(player.story3_state, entity_id, zone):
+			player.dirty_character = true
+			_story3_event(player)
 		if DailyBounties.record_crate(player.daily_bounty, _refresh_daily(player), entity_id):
 			player.dirty_character = true
 		events.append({"type": "crate", "peer": peer_id, "id": entity_id})
@@ -10206,6 +10251,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"story": StoryCampaign.public_state(player.story_state),
 			"story2": StoryChapterTwo.public_state(player.story2_state) \
 				if int(player.story_state.get("stage", 0)) == StoryCampaign.LAST_STAGE else {},
+			"story3": StoryChapterThree.public_state(player.story3_state) \
+				if int(player.story2_state.get("stage", 0)) == StoryChapterTwo.LAST_STAGE else {},
 			"discovered_site_ids": WorldDiscovery.ids(player.discovered_sites),
 			"discovered_count": player.discovered_sites.size(),
 			"daily_bounty": player.daily_bounty.duplicate(true),
