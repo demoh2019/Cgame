@@ -193,7 +193,7 @@ func load_dict(data: Dictionary) -> void:
 	var source_slots: Array = []
 	var loaded_slots: Variant = data.get("slots", [])
 	if loaded_slots is Array:
-		source_slots = loaded_slots.duplicate(true)
+		source_slots = (loaded_slots as Array).duplicate(true)
 	for i in slots.size():
 		slots[i] = {}
 		if i >= source_slots.size() or not (source_slots[i] is Dictionary):
@@ -208,15 +208,15 @@ func load_dict(data: Dictionary) -> void:
 		var count_value: float = float(raw_count)
 		if not is_finite(count_value) or count_value <= 0.0 or count_value != floor(count_value):
 			continue
-		var item_id: String = raw_id
+		var item_id: String = str(raw_id)
 		var limit: int = Defs.stack_size(item_id)
 		# Clamp before conversion: huge JSON counts cannot overflow int64.
 		slots[i] = {"id": item_id, "count": int(minf(count_value, float(limit)))}
 
 	var saved_weapon: Variant = data.get("weapon", "")
 	var saved_armor: Variant = data.get("armor", "")
-	weapon = saved_weapon if saved_weapon is String else ""
-	armor = saved_armor if saved_armor is String else ""
+	weapon = str(saved_weapon) if saved_weapon is String else ""
+	armor = str(saved_armor) if saved_armor is String else ""
 	if count(weapon) < 1 or str(Defs.item(weapon).get("kind", "")) != "weapon":
 		weapon = ""
 	if count(armor) < 1 or str(Defs.item(armor).get("kind", "")) != "armor":
@@ -226,19 +226,25 @@ func load_dict(data: Dictionary) -> void:
 	if saved_gear is Dictionary:
 		for slot in GEAR_SLOTS:
 			var gear_id: Variant = saved_gear.get(slot, "")
-			if gear_id is String and count(gear_id) > 0 and str(Defs.item(gear_id).get("kind", "")) == slot:
-				gear[slot] = gear_id
+			if not (gear_id is String):
+				continue
+			var gear_name: String = str(gear_id)
+			if count(gear_name) > 0 and str(Defs.item(gear_name).get("kind", "")) == slot:
+				gear[slot] = gear_name
 	wear = {}
 	var saved_wear: Variant = data.get("wear", {})
 	if saved_wear is Dictionary:
 		for id in saved_wear:
 			var raw_durability: Variant = saved_wear[id]
-			if not (id is String) or count(id) < 1 or not (raw_durability is int or raw_durability is float):
+			if not (id is String) or not (raw_durability is int or raw_durability is float):
+				continue
+			var owned_id: String = str(id)
+			if count(owned_id) < 1:
 				continue
 			var durability_value: float = GearDurability.clamp_durability(
 				float(raw_durability))
 			if durability_value < GearDurability.MAX:
-				wear[id] = durability_value
+				wear[owned_id] = durability_value
 
 
 ## Durability of an item (100 when never damaged).
