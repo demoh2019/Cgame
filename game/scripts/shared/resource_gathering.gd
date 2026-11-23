@@ -42,6 +42,9 @@ static func aimed_at(player_pos: Vector3, node: Dictionary, direction: Vector2, 
 		return false
 	var offset := Vector2(float(node.get("x", INF)) - player_pos.x,
 		float(node.get("z", INF)) - player_pos.z)
-	if not offset.is_finite() or offset.length() > reach:
+	if not offset.is_finite():
 		return false
-	return offset.length() <= 0.8 or offset.normalized().dot(direction.normalized()) >= 0.35
+	var margin: float = minf(float(node.get("radius", 0.0)), 1.8) if str(node.get("kind", "")) in ["rock", "ore"] else 0.0
+	if offset.length() > reach + margin:
+		return false
+	return offset.length() <= 0.8 + margin or offset.normalized().dot(direction.normalized()) >= 0.35
