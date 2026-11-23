@@ -66,6 +66,12 @@ func run(t) -> void:
 		"nonfinite coverage grants no boost")
 	terrain.coverage_value = 400.0
 	t.eq(RoadTravel.coverage(terrain, start), 1.0, "oversized cover is clamped")
+	t.near(RoadTravel.bike_surface(0.42, NAN), 0.42, 0.00001,
+		"invalid road input preserves actual off-road grip")
+	t.near(RoadTravel.bike_surface(0.42, INF), 0.42, 0.00001,
+		"infinite road influence cannot give free speed")
+	t.eq(RoadTravel.bike_surface(NAN, 0.7), 1.0,
+		"unknown base surface retains safe legacy fallback")
 
 	t.current = "real world links rendered roads and server controls"
 	var world := WorldGen.new(1337)

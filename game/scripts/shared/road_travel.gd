@@ -13,9 +13,12 @@ static func foot_factor(world, pos: Vector3, crouched: bool) -> float:
 	return 1.0 if crouched else 1.0 + FOOT_BONUS * coverage(world, pos)
 
 static func bike_surface(base: float, road: float) -> float:
-	if not is_finite(base) or not is_finite(road):
+	if not is_finite(base):
 		return 1.0
-	var actual := clampf(base, 0.0, 1.0)
+	var actual: float = clampf(base, 0.0, 1.0)
+	# A missing/corrupt road sample must never grant free asphalt-level grip.
+	if not is_finite(road):
+		return actual
 	return lerpf(actual, maxf(actual, ROAD_BIKE_GRIP), clampf(road, 0.0, 1.0))
 
 static func on_road(world, pos: Vector3) -> bool:

@@ -101,12 +101,24 @@ func next_batch(budget: int) -> Array[Vector2i]:
 		allowed = mini(allowed, max_in_flight - in_flight_count())
 	if allowed <= 0:
 		return out
+	# Keep only the best `allowed` requests in memory for this tick.
+	# Dense world partitions commonly have far more queued cells than the
+	# per-frame generation budget; sorting the whole queue is unnecessary.
 	var queued: Array[Req] = []
 	for r: Req in _reqs.values():
-		if r.state == State.QUEUED:
-			queued.append(r)
-	queued.sort_custom(_before)
-	for i in mini(allowed, queued.size()):
+		if r.state != State.QUEUED:
+			continue
+		var insert_at: int = queued.size()
+		for i in queued.size():
+			if _before(r, queued[i]):
+				insert_at = i
+				break
+		if insert_at >= allowed:
+			continue
+		queued.insert(insert_at, r)
+		if queued.size() > allowed:
+			queued.pop_back()
+	for i in queued.size():
 		queued[i].state = State.IN_FLIGHT
 		out.append(queued[i].cell)
 	return out

@@ -38,14 +38,22 @@ static func candidates(bags: Dictionary, at: Vector3, player, now: float) -> Arr
 				not is_finite(x) or not is_finite(z):
 			continue
 		var distance: float = origin.distance_squared_to(Vector2(x, z))
-		if distance <= RADIUS * RADIUS:
-			ordered.append({"id": int(key), "distance": distance})
-	ordered.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		if is_equal_approx(float(a["distance"]), float(b["distance"])):
-			return int(a["id"]) < int(b["id"])
-		return float(a["distance"]) < float(b["distance"]))
+		if distance > RADIUS * RADIUS:
+			continue
+		# Keep only the closest five bags, rather than sorting every world bag.
+		# Exact distance and stable ID ties form a transitive ordering.
+		var insert_at: int = ordered.size()
+		for i in ordered.size():
+			var existing: Dictionary = ordered[i]
+			var existing_distance: float = float(existing["distance"])
+			if distance < existing_distance or (distance == existing_distance and int(key) < int(existing["id"])):
+				insert_at = i
+				break
+		if insert_at >= MAX_BAGS:
+			continue
+		ordered.insert(insert_at, {"id": int(key), "distance": distance})
+		if ordered.size() > MAX_BAGS:
+			ordered.pop_back()
 	for entry in ordered:
-		if result.size() == MAX_BAGS:
-			break
 		result.append(int(entry["id"]))
 	return result

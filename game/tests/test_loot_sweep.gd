@@ -43,6 +43,26 @@ func run(t) -> void:
 	t.eq(Sweep.candidates(server.bags, owner.position, owner, INF), [],
 		"invalid server time has no eligible bags")
 
+	t.current = "dense loot piles choose exact nearest five without a full sort"
+	var crowded: Dictionary = {}
+	for i in 80:
+		var bag_copy: Dictionary = server.bags[a].duplicate(true)
+		var bag_id: int = 2000 + i
+		bag_copy["id"] = bag_id
+		bag_copy["x"] = owner.position.x + float(80 - i) * 0.01
+		bag_copy["z"] = owner.position.z
+		crowded[bag_id] = bag_copy
+	var equal_nearest: Dictionary = crowded[2079].duplicate(true)
+	equal_nearest["id"] = 1
+	crowded[1] = equal_nearest
+	var slightly_farther: Dictionary = equal_nearest.duplicate(true)
+	slightly_farther["id"] = 0
+	slightly_farther["x"] = owner.position.x + 0.010001
+	crowded[0] = slightly_farther
+	t.eq(Sweep.candidates(crowded, owner.position, owner, server.time),
+		[1, 2079, 0, 2078, 2077],
+		"equal distances use ID, but a slightly nearer drop beats lower IDs")
+
 	t.current = "one command uses actual item transfers and preserves exclusions"
 	var got: Dictionary = server.cmd_loot_sweep(owner.id)
 	t.check(got.get("ok", false), "owner can collect eligible drops")

@@ -10,6 +10,7 @@ const SUITES := [
 	"res://tests/test_radial_blast_shielding.gd",
 	"res://tests/test_world_gen.gd",
 	"res://tests/test_city_street_entrance.gd",
+	"res://tests/test_stream_requests.gd",
 	"res://tests/test_static_blocker_grid.gd",
 	"res://tests/test_resource_aim_interaction.gd",
 	"res://tests/test_stream_state_replication.gd",
