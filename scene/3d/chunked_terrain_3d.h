@@ -117,6 +117,7 @@ private:
 	double time_since_update = 1e9;
 	bool built = false;
 	bool rebuild_queued = false;
+	int last_region_invalidated_chunks = 0; // Number of render chunks affected by the last edit.
 
 	HeightmapTerrainGeometry::Params _params() const;
 	HeightmapTerrainGeometry::HeightField _field() const;
@@ -128,6 +129,7 @@ private:
 	void _free_collision(Chunk &r_chunk);
 	void _ensure_mesh(Chunk &r_chunk, int p_lod);
 	void _ensure_collision(Chunk &r_chunk);
+	void _invalidate_region(const Rect2i &p_region, bool p_geometry_changed);
 	void _update_transforms();
 	void _update_chunks(bool p_ignore_mesh_budget = false);
 	bool _get_viewer_position(Vector3 &r_position) const;
@@ -152,6 +154,8 @@ public:
 			const Vector2i &p_dimensions, real_t p_spacing, int p_radius_steps = 6);
 	void set_color_data(const PackedColorArray &p_colors);
 	PackedColorArray get_color_data() const { return color_data; }
+	// Changes existing vertex colors without touching collision or heightfield LOD error.
+	bool apply_color_patch(const Rect2i &p_region, const PackedColorArray &p_colors);
 	Vector2i get_height_dimensions() const { return Vector2i(data_width, data_depth); }
 	void clear_height_data();
 
@@ -216,6 +220,7 @@ public:
 	bool is_over_terrain(const Vector3 &p_world_position) const;
 	// Recomputes meshes and collision after the samples inside `p_region` (sample coordinates) changed.
 	void update_region(const Rect2i &p_region);
+	int get_last_region_invalidated_chunks() const { return last_region_invalidated_chunks; }
 	// Atomically replace at most 4096 height samples in a rectangular source
 	// region; only touched render/collision chunks are invalidated. Use
 	// force_update() to synchronously rebuild immediately if required.
