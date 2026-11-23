@@ -7,6 +7,7 @@ const LagCompensation = preload("res://scripts/native/lag_compensation.gd") # Na
 const HTNPlanner = preload("res://scripts/native/htn_planner.gd") # Native CgameHTNPlanner when built in.
 const InfectedRaidDomain = preload("res://scripts/shared/infected_raid_domain.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
+const ResourceGathering = preload("res://scripts/shared/resource_gathering.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
@@ -175,6 +176,8 @@ const Progression = preload("res://scripts/shared/progression.gd")
 const WorldDiscovery = preload("res://scripts/shared/world_discovery.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const RestedTraining = preload("res://scripts/shared/rested_training.gd")
+const CrossTraining = preload("res://scripts/shared/cross_training.gd")
+const DeepPractice = preload("res://scripts/shared/deep_practice.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const StormproofBriquette = preload("res://scripts/shared/stormproof_briquette.gd")
@@ -268,6 +271,8 @@ class Player:
 	var prospect_mark: Dictionary = {} # One paid, session-only resource waypoint.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var rested_xp_credit: int = 0 # Paid rest creates a capped, persistent training XP reserve.
+	var practice_state: Dictionary = {} # Recent verified skill branches, session-only.
+	var deep_practice_state: Dictionary = {} # Distinct skills practised in each discipline, session-only.
 	var party_aid_timer: float = 0.0 # Shared medical/provisions support cooldown.
 	var medic_cover_cooldown: float = 0.0 # Server-only healer aggro rescue cooldown.
 	var supply_request_last_at: float = -INF # Session-only anti-spam for supply distress signals.
@@ -354,6 +359,7 @@ class Player:
 	var flash_cooldown: float = 0.0 # Persistent item-paid tactical cooldown.
 	var ruin_survey: Dictionary = {} # One owner-only temporary expedition waypoint.
 	var action: Dictionary = {} # Current gathering or fishing: {"remaining": s, "total": s, ...}
+	var resource_next_hit_at: float = 0.0 # Server-owned strike rate limit; never client supplied.
 	var fish_next_at: float = 0.0
 	var respawn_timer: float = 0.0
 	var keep_inventory_on_respawn: bool = false
@@ -533,6 +539,7 @@ var pair_commits: Array = [] # [{a: peer, b: peer, tx: String}], drained by Net.
 var pair_locks: Dictionary = {} # peer -> transaction ID awaiting confirmation.
 var market_buy_requests: Dictionary = {} # Peer -> last request ID, arguments and result.
 var loot_sweep_next: Dictionary = {} # Session-only authenticated pickup throttle.
+var resource_hit_progress: Dictionary = {} # World node id -> {hits, expires}; multiplayer-shared and bounded.
 var trade_by_player: Dictionary = {} # peer -> active trade
 var parties = Party.new() # Server-only session groups and short-lived invitations.
 var territory # Session outposts generated from this world seed.
@@ -1087,6 +1094,7 @@ func _spawn_player(player: Player) -> void:
 		for id in STARTER_KIT:
 			player.inventory.add(id, STARTER_KIT[id])
 	player.action = {}
+	player.resource_next_hit_at = 0.0
 	player.recall = {}
 	player.threat_scan = {} # Death cannot preserve a scouting advantage.
 	player.sharpened_weapon = ""
@@ -1306,7 +1314,7 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 					player.action = {}
 			else:
 				var node := _find_node(int(player.action["node"]))
-				if node.is_empty() or _distance_xz(player.position, node) > Defs.REACH + 0.8:
+				if node.is_empty() or _distance_xz(player.position, node) > Defs.REACH + 0.8 + _stone_reach_margin(node):
 					player.action = {}
 
 
@@ -1516,7 +1524,7 @@ func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
 		return {"ok": false, "reason": "no_such_node"}
 	if depleted.has(node_id):
 		return {"ok": false, "reason": "depleted"}
-	if _distance_xz(player.position, node) > Defs.REACH + 0.5:
+	if _distance_xz(player.position, node) > Defs.REACH + 0.5 + _stone_reach_margin(node):
 		return {"ok": false, "reason": "too_far"}
 	var info := Defs.node_info(node["kind"])
 	var required_tool := Defs.tool_tier_for_node(node["kind"])
@@ -1535,9 +1543,100 @@ func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
 	var gather_skill := Skills.skill_for_node(String(node["kind"]))
 	if gather_skill != "":
 		speed *= 1.0 + player.skills.bonus("gather_speed." + gather_skill)
+	# Loose pebbles are picked up immediately and do not start mining.
+	# Still use the authoritative inventory/depletion/event pipeline.
+	if str(node["kind"]) == "pebble":
+		if player.inventory.free_space_for("stone_1") < 1:
+			return {"ok": false, "reason": "inventory_full"}
+		player.action = {"node": node_id, "remaining": 0.0, "total": 0.0}
+		_finish_gather(player, node)
+		return {"ok": true, "pickup": true}
 	var total := float(info["seconds"]) / speed
 	player.action = {"node": node_id, "remaining": total, "total": total}
 	return {"ok": true, "seconds": total}
+
+
+## E: immediate, server-authoritative pickup of a loose ground stone or fallen branch.
+func cmd_resource_pickup(peer_id: int, node_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted or not player.recall.is_empty() or not player.action.is_empty():
+		return {"ok": false, "reason": "busy"}
+	var node: Dictionary = _find_node(node_id)
+	if node.is_empty() or not ResourceGathering.is_pickup(str(node.get("kind", ""))):
+		return {"ok": false, "reason": "not_pickup"}
+	if depleted.has(node_id):
+		return {"ok": false, "reason": "depleted"}
+	if _distance_xz(player.position, node) > Defs.REACH + 0.5:
+		return {"ok": false, "reason": "too_far"}
+	if not player.progression.can_gather(str(node["kind"]), int(node["tier"])):
+		return {"ok": false, "reason": "need_skill",
+			"skill": Progression.resource_skill(str(node["kind"])), "tier": node["tier"]}
+	var info: Dictionary = Defs.node_info(str(node["kind"]))
+	var item_id: String = str(info["yield"])
+	if item_id in ["wood", "stone", "ore", "fiber"]:
+		item_id = "%s_%d" % [item_id, int(node["tier"])]
+	if player.inventory.free_space_for(item_id) < int(info["amount"]):
+		return {"ok": false, "reason": "inventory_full"}
+	_finish_gather(player, node)
+	return {"ok": true, "item": item_id}
+
+
+## LMB: one validated swing against a real generated world node (not cosmetic props).
+## Shared per-node progress avoids two players each claiming the full harvest.
+func cmd_resource_hit(peer_id: int, node_id: int, dir_x: float, dir_z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted or not player.recall.is_empty() or not player.action.is_empty():
+		return {"ok": false, "reason": "busy"}
+	var node: Dictionary = _find_node(node_id)
+	if node.is_empty() or not ResourceGathering.is_strike(str(node.get("kind", ""))):
+		return {"ok": false, "reason": "not_mineable"}
+	if depleted.has(node_id):
+		return {"ok": false, "reason": "depleted"}
+	if not ResourceGathering.aimed_at(player.position, node, Vector2(dir_x, dir_z)):
+		return {"ok": false, "reason": "too_far_or_not_aimed"}
+	var kind: String = str(node["kind"])
+	var tier: int = int(node["tier"])
+	var tool: String = Defs.tool_tier_for_node(kind)
+	var tool_id: String = player.inventory.best_tool(tool)
+	var tool_tier: int = Defs.tier_of(tool_id) if not tool_id.is_empty() else 0
+	if tool_tier < tier and not (tool_tier == 0 and tier == 1):
+		return {"ok": false, "reason": "need_tool", "tier": tier, "tool": tool}
+	if not player.progression.can_gather(kind, tier):
+		return {"ok": false, "reason": "need_skill", "skill": Progression.resource_skill(kind), "tier": tier}
+	if time < player.resource_next_hit_at:
+		return {"ok": false, "reason": "swing_cooldown"}
+	var hits_needed: int = ResourceGathering.strikes_needed(kind)
+	var progress: Dictionary = resource_hit_progress.get(node_id, {})
+	# An abandoned half-mined node must not reset and yield its first hits forever.
+	if not progress.is_empty() and time >= float(progress.get("expires", 0.0)):
+		resource_hit_progress.erase(node_id)
+		depleted[node_id] = time + float(Defs.node_info(kind)["respawn"])
+		world.set_node_depleted(node_id, true)
+		return {"ok": false, "reason": "depleted"}
+	var current_hits: int = int(progress.get("hits", 0))
+	var hit: int = mini(current_hits + 1, hits_needed)
+	var accurate: bool = ResourceGathering.precise_strike(
+		player.position, node, Vector2(dir_x, dir_z), current_hits)
+	# A perfect weak-spot strike adds one resource immediately. Neither the
+	# client nor a repeated RPC can invent or replay this bonus.
+	var amount: int = ResourceGathering.strike_yield(kind, hit) + (1 if accurate else 0)
+	var item_id: String = "%s_%d" % [str(Defs.node_info(kind)["yield"]), tier]
+	if amount > 0 and player.inventory.free_space_for(item_id) < amount:
+		return {"ok": false, "reason": "inventory_full"}
+	player.resource_next_hit_at = time + ResourceGathering.swing_cooldown(tool_tier)
+	var finished: bool = hit >= hits_needed
+	if not finished:
+		resource_hit_progress[node_id] = {"hits": hit,
+			"expires": time + ResourceGathering.PROGRESS_EXPIRE_SECONDS,
+			"respawn": float(Defs.node_info(kind)["respawn"]),
+			"x": float(node["x"]), "z": float(node["z"])}
+	_finish_gather(player, node, amount, finished, true, hit, accurate)
+	return {"ok": true, "hit": hit, "total_hits": hits_needed,
+		"finished": finished, "item": item_id, "precise": accurate}
 
 
 func cmd_craft(peer_id: int, recipe_id: String, times: int = 1,
@@ -6602,13 +6701,25 @@ func _apply_skill_bonuses(player: Player) -> void:
 
 ## The one place XP is granted. Callers pass what the action was worth; refused actions never call it.
 func _award(player: Player, skill: String, amount: float) -> void:
-	# The only place that consumes rested credit. Refused actions never call
-	# this method; no extra reward is spent when the skill is already maxed.
-	var extra: int = RestedTraining.bonus_for(amount, player.rested_xp_credit)
-	var result: Dictionary = player.skills.add_xp(skill, amount + float(extra))
-	if int(result["gained"]) <= 0:
+	# Only confirmed server skill awards qualify for cross-training. Credits
+	# buy XP that actually fits below the skill cap, not the discarded excess.
+	if not Skills.SKILLS.has(skill) or not is_finite(amount) or amount <= 0.0:
 		return
-	player.rested_xp_credit = maxi(0, player.rested_xp_credit - extra)
+	var old_xp: int = int(player.skills.xp[skill])
+	var base_scaled: int = clampi(roundi(amount * (1.0 + player.skills.bonus("xp_gain"))), 1, 100000)
+	var base_gained: int = maxi(0, mini(Skills.MAX_XP - old_xp, base_scaled))
+	var cross_active: bool = CrossTraining.active_for(player.practice_state, skill, amount, time)
+	var depth_active: bool = DeepPractice.active_for(player.deep_practice_state, skill, amount, time)
+	var extra: int = RestedTraining.bonus_for(amount, player.rested_xp_credit,
+		player.skills.level(skill), cross_active, depth_active)
+	var result: Dictionary = player.skills.add_xp(skill, amount + float(extra))
+	var gained: int = int(result["gained"])
+	if gained <= 0:
+		return
+	var bonus_gained: int = maxi(0, gained - base_gained)
+	player.rested_xp_credit = maxi(0, player.rested_xp_credit - mini(extra, bonus_gained))
+	player.practice_state = CrossTraining.record(player.practice_state, skill, amount, time)
+	player.deep_practice_state = DeepPractice.record(player.deep_practice_state, skill, amount, time)
 	player.pending_xp[skill] = int(player.pending_xp.get(skill, 0)) + int(result["gained"])
 	player.dirty_skills = true
 	player.dirty_character = true
@@ -6712,6 +6823,11 @@ func cmd_perk(peer_id: int, perk_id: String) -> Dictionary:
 
 
 # --- Helpers ----------------------------------------------------------------------------------------------
+
+## Legacy helper shared by mining and tree chopping, including fallen logs.
+func _stone_reach_margin(node: Dictionary) -> float:
+	return ResourceGathering.reach_margin(node)
+
 
 func _distance_xz(position: Vector3, thing: Dictionary) -> float:
 	return Vector2(position.x - float(thing["x"]), position.z - float(thing["z"])).length()
@@ -7856,23 +7972,28 @@ func _finish_fishing(player: Player) -> void:
 		"storm_cast": storm_cast, "storm_bonus": storm_bonus, "hooked": hooked})
 
 
-func _finish_gather(player: Player, node: Dictionary) -> void:
+func _finish_gather(player: Player, node: Dictionary, base_amount: int = -1,
+		finish_node: bool = true, from_strike: bool = false,
+		hit_number: int = 0, precise: bool = false) -> void:
 	var info := Defs.node_info(node["kind"])
 	var item_id: String = info["yield"]
 	if item_id in ["wood", "stone", "ore", "fiber"]:
 		item_id = "%s_%d" % [item_id, int(node["tier"])]
-	var amount: int = int(info["amount"]) + (1 if rng.randf() < 0.3 else 0)
+	var amount: int = int(info["amount"]) if base_amount < 0 else base_amount
+	if finish_node and str(node["kind"]) != "pebble" and rng.randf() < 0.3:
+		amount += 1
 	var gather_skill := Skills.skill_for_node(String(node["kind"]))
-	if gather_skill != "" and rng.randf() < player.skills.bonus("gather_yield." + gather_skill):
+	if finish_node and gather_skill != "" and rng.randf() < player.skills.bonus("gather_yield." + gather_skill):
 		amount += 1 # Skill: a lucky harvest.
 	var outpost_bonus: int = territory.harvest_bonus(player.id, node, players,
-		parties, time, world)
+		parties, time, world) if finish_node else 0
 	var ordinary_amount: int = amount
 	amount += outpost_bonus
 	# Only the actual server-started, in-range and skill/tool-qualified mine
 	# may spend a paid wedge charge. A full bag keeps all remaining charges.
-	var wedge_authenticated: bool = int(player.action.get("node", -1)) == int(node["id"]) and (
-		player.position.is_finite() and _distance_xz(player.position, node) <= Defs.REACH + 0.5 and
+	var wedge_authenticated: bool = finish_node and (from_strike or
+		int(player.action.get("node", -1)) == int(node["id"])) and (
+		player.position.is_finite() and _distance_xz(player.position, node) <= Defs.REACH + 0.5 + _stone_reach_margin(node) and
 		player.progression.can_gather(String(node["kind"]), int(node["tier"])) and
 		Defs.tier_of(player.inventory.best_tool("pickaxe")) >= int(node["tier"]))
 	var wedge_bonus: int = MiningWedges.bonus(String(node["kind"]), int(node["tier"]),
@@ -7887,7 +8008,7 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	# The server reads biome and risk from the generated world itself. A full
 	# bag, an invalid habitat, and exhausted nodes cannot mint extra supplies.
 	var herbs_added: int = 0
-	if amount - left > 0:
+	if finish_node and amount - left > 0:
 		var found_herb: String = HerbalForaging.roll(String(node["kind"]),
 			world.biome_at(float(node.get("x", player.position.x)), float(node.get("z", player.position.z))),
 			world.zone_at(float(node.get("x", player.position.x)), float(node.get("z", player.position.z))), rng)
@@ -7899,8 +8020,8 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 		_award(player, gather_skill, (3.0 + 2.0 * float(amount - left)) * float(int(node["tier"])))
 	# No XP for items that did not fit, nor for repeat attempts on depleted nodes.
 	player.progression.award_gather(String(node["kind"]), int(node["tier"]), amount - left)
-	# Finishing a genuine resource harvest generates sound exactly once. This
-	# uses the same short-lived channel as footsteps and gunfire; existing
+	# Each server-confirmed strike or forage gives away the player's position.
+	# Uses the same short-lived channel as footsteps and gunfire; existing
 	# infected hearing, chase leashes, safe zones and camouflage rules apply.
 	var harvest_noise: float = GatheringNoise.radius(String(node["kind"]),
 		player.crouching, amount - left)
@@ -7911,11 +8032,16 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 		player.noise_timer = maxf(player.noise_timer, GatheringNoise.SOUND_SECONDS)
 	player.dirty_inventory = true
 	player.dirty_character = true
-	player.action = {}
-	depleted[int(node["id"])] = time + float(info["respawn"])
-	SurveySignal.clear_depleted(parties, int(node["id"]))
+	if finish_node:
+		player.action = {}
+		resource_hit_progress.erase(int(node["id"]))
+		depleted[int(node["id"])] = time + float(info["respawn"])
+		world.set_node_depleted(int(node["id"]), true)
+		SurveySignal.clear_depleted(parties, int(node["id"]))
 	events.append({"type": "gathered", "peer": player.id, "item": item_id,
-		"amount": amount - left, "node": node["id"],
+		"amount": amount - left, "node": node["id"], "final": finish_node, "strike": from_strike,
+		"hit": hit_number, "precise": precise,
+		"x": float(node["x"]), "z": float(node["z"]),
 		"herbs": herbs_added, "harvest_noise": harvest_noise,
 		"outpost_bonus": paid_outpost_bonus,
 		"wedge_bonus": wedge_bonus if wedge_spent else 0})
@@ -9798,6 +9924,12 @@ func _tick_world(delta: float) -> void:
 	for id in depleted.keys():
 		if time >= float(depleted[id]):
 			depleted.erase(id)
+			world.set_node_depleted(int(id), false)
+	for id in resource_hit_progress.keys():
+		if time >= float(resource_hit_progress[id]["expires"]):
+			depleted[id] = time + float(resource_hit_progress[id]["respawn"])
+			world.set_node_depleted(int(id), true)
+			resource_hit_progress.erase(id)
 	for id in opened_crates.keys():
 		if time >= float(opened_crates[id]):
 			opened_crates.erase(id)
@@ -10084,6 +10216,16 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var gone_nodes: Array = []
 	for id in depleted:
 		gone_nodes.append(id)
+	# Share only live strike progress near this viewer. New joiners see the
+	# correct rotating marker without scanning full world chunks every tick.
+	var nearby_resource_hits: Array = []
+	for node_id in resource_hit_progress:
+		var progress: Dictionary = resource_hit_progress[node_id]
+		if time >= float(progress.get("expires", 0.0)):
+			continue
+		var point := Vector2(float(progress["x"]), float(progress["z"]))
+		if here.distance_squared_to(point) <= 144.0:
+			nearby_resource_hits.append({"id": node_id, "hits": int(progress["hits"])})
 	var used_crates: Array = []
 	for id in opened_crates:
 		used_crates.append(id)
@@ -10228,6 +10370,9 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"arcane_cooldown": player.arcane_cooldown, "ultimate_cooldown": player.ultimate_cooldown,
 			"rest_cooldown": player.rest_cooldown,
 			"rested_xp_credit": player.rested_xp_credit,
+			"practice_branches": CrossTraining.branches_count(player.practice_state, time),
+			"deep_practice_branches": DeepPractice.trained_branches(player.deep_practice_state, time),
+			"cross_training_active": CrossTraining.branches_count(player.practice_state, time) >= CrossTraining.REQUIRED_BRANCHES,
 			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,
 			"medic_cover_cooldown": player.medic_cover_cooldown,
 			"stim_cooldown": player.stim_cooldown, "flare_seconds": player.flare_seconds,
@@ -10291,6 +10436,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"fish_traps": nearby_fish_traps,
 		"infected_snares": nearby_snares,
 		"depleted": gone_nodes, "crates_used": used_crates,
+		"resource_hits": nearby_resource_hits,
 	}
 	# A lightning warning is public only to nearby survivors, not to global
 	# clients watching a different part of the island.

@@ -105,7 +105,9 @@ func _apply_level(level: int) -> void:
 	if tier.is_empty():
 		return
 	_make_component("roadside", PcgGraphs.roadside_dressing(), _roadside_meshes(), tier, {"spacing": tier["roadside_spacing"]}, true)
-	_make_component("clutter", PcgGraphs.biome_clutter(), _clutter_meshes(), tier, {"spacing": tier["clutter_spacing"]}, false)
+	# Every decorative stone must be collectible or mineable. WorldGen now
+	# supplies real, shared stone/rock nodes instead of inert PCG-only rocks.
+	# Keep the biome-clutter PCG graph as an engine test, not as unmineable scenery.
 	if bool(tier["debris"]) and not _user_data["ruins"].is_empty():
 		_make_component("debris", PcgGraphs.ruin_debris(), _debris_meshes(), tier, {"spacing": tier["debris_spacing"]}, true)
 	_last_anchor = Vector3(1.0e9, 0.0, 1.0e9)

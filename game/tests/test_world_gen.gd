@@ -2,6 +2,26 @@ extends RefCounted
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const StoneResources = preload("res://scripts/shared/stone_resources.gd")
+
+
+## Exhaustive reference for outdoor procedural collisions. The cached
+## broadphase must return the same IDs and ordering as the old group scan.
+static func _reference_procedural_blockers(world, x: float, z: float, radius: float) -> Array[int]:
+	var ids: Array[int] = []
+	var cell_a: Vector2i = WorldGen.cell_of(x - radius, z - radius)
+	var cell_b: Vector2i = WorldGen.cell_of(x + radius, z + radius)
+	for cx in range(cell_a.x, cell_b.x + 1):
+		for cz in range(cell_a.y, cell_b.y + 1):
+			var data: Dictionary = world.chunk(Vector2i(cx, cz))
+			for group in ["nodes", "crates", "structures", "props"]:
+				for item in data[group]:
+					if group == "nodes" and world.depleted_blockers.has(item["id"]):
+						continue
+					if bool(item["blocks"]) and absf(float(item["x"]) - x) < radius + float(item["radius"]) \
+							and absf(float(item["z"]) - z) < radius + float(item["radius"]):
+						ids.append(int(item["id"]))
+	return ids
 
 
 func run(t) -> void:
@@ -59,6 +79,8 @@ func run(t) -> void:
 	var ruins := 0
 	var zombies := 0
 	var min_spacing := 1000.0
+	var loose_pickups := 0
+	var modeled_boulders := 0
 	for cx in range(-10, 11):
 		for cz in range(-10, 11):
 			var data := a.chunk(Vector2i(cx, cz))
@@ -66,6 +88,17 @@ func run(t) -> void:
 			ruins += 1 if data["ruin"] else 0
 			zombies += data["spawns"].size()
 			for node in data["nodes"]:
+				if node.has("stone_model"):
+					var model_index: int = int(node["stone_model"])
+					t.check(model_index >= 0 and model_index < StoneResources.MODELS.size(),
+						"stone node selects a valid renderable model")
+					if str(node["kind"]) == "pebble":
+						loose_pickups += 1
+						t.eq(int(node["tier"]), 1, "hand-pickable stones are always tier 1")
+						t.check(not bool(node["blocks"]), "small stones cannot block movement")
+					elif str(node["kind"]) == "rock":
+						modeled_boulders += 1
+						t.check(bool(node["blocks"]), "minable boulders have collision")
 				tiers_seen[node["tier"]] = true
 				kinds_seen[node["kind"]] = true
 				t.check(node["tier"] >= 1 and node["tier"] <= Defs.MAX_TIER, "node tier in range")
@@ -74,6 +107,8 @@ func run(t) -> void:
 				# A node belongs to its own chunk.
 				t.eq(WorldGen.cell_of(node["x"], node["z"]), Vector2i(cx, cz), "node lies in its chunk")
 	t.check(total_nodes > 3000, "the world has plenty to gather (%d)" % total_nodes)
+	t.check(loose_pickups > 100, "seeded world includes pickable modeled stones (%d)" % loose_pickups)
+	t.check(modeled_boulders > 20, "seeded world includes mineable modeled rocks (%d)" % modeled_boulders)
 	t.check(tiers_seen.size() >= 3, "several tiers exist near the hub (%d)" % tiers_seen.size())
 	t.check(kinds_seen.has("tree") and kinds_seen.has("rock") and kinds_seen.has("bush"), "trees, rocks and bushes exist")
 	t.check(ruins > 8, "ruins exist (%d)" % ruins)
@@ -110,6 +145,52 @@ func run(t) -> void:
 			t.check(contains, "a blocking node is found near itself")
 			break
 
+	t.current = "depleted stone collision matches visible model"
+	var blocked_stone: Dictionary = {}
+	for candidate in a.chunk(Vector2i(8, 8))["nodes"]:
+		if str(candidate["kind"]) == "rock" and candidate.has("stone_model"):
+			blocked_stone = candidate
+			break
+	if blocked_stone.is_empty():
+		for cx in range(6, 10):
+			if not blocked_stone.is_empty():
+				break
+			for cz in range(6, 10):
+				if not blocked_stone.is_empty():
+					break
+				for candidate in a.chunk(Vector2i(cx, cz))["nodes"]:
+					if str(candidate["kind"]) == "rock" and candidate.has("stone_model"):
+						blocked_stone = candidate
+						break
+	t.check(not blocked_stone.is_empty(), "found an authoritative collidable model boulder")
+	if not blocked_stone.is_empty():
+		var bx: float = float(blocked_stone["x"])
+		var bz: float = float(blocked_stone["z"])
+		var b_id: int = int(blocked_stone["id"])
+		var initially_blocked := false
+		for obstacle in a.blockers_near(bx, bz, 0.5):
+			if int(obstacle.get("id", -1)) == b_id:
+				initially_blocked = true
+		t.check(initially_blocked, "visible modeled boulder blocks movement")
+		a.set_node_depleted(b_id, true)
+		var mined_blocked := false
+		for obstacle in a.blockers_near(bx, bz, 0.5):
+			if int(obstacle.get("id", -1)) == b_id:
+				mined_blocked = true
+		t.check(not mined_blocked, "mined modeled boulder has no invisible collision")
+		a.set_node_depleted(b_id, false)
+		var regrown_blocked := false
+		for obstacle in a.blockers_near(bx, bz, 0.5):
+			if int(obstacle.get("id", -1)) == b_id:
+				regrown_blocked = true
+		t.check(regrown_blocked, "respawn restores modeled boulder collision")
+		var snapshot_depleted: Dictionary = {}
+		snapshot_depleted[b_id] = true
+		a.sync_depleted_nodes(snapshot_depleted)
+		t.check(a.depleted_blockers.has(b_id), "snapshot-depleted node disables local prediction blocker")
+		a.sync_depleted_nodes({})
+		t.check(not a.depleted_blockers.has(b_id), "snapshot correction restores local blocker")
+
 	t.current = "structures"
 	var hub: Array = a.hub_structures()
 	t.check(hub.size() >= 10, "the hub has a fountain, a workbench and houses (%d)" % hub.size())
@@ -142,3 +223,79 @@ func run(t) -> void:
 				t.eq(WorldGen.cell_of(s["x"], s["z"]), Vector2i(cx, cz), "a structure lies in its chunk")
 				t.check(not a.is_water(s["x"], s["z"]), "structures are not in water")
 	t.check(ruin_structures > 20 and ruin_walls > 3, "ruins hold buildings and walls (%d, %d walls)" % [ruin_structures, ruin_walls])
+
+	t.current = "bounded LRU cache prevents mass chunk regeneration"
+	var first_stats: Dictionary = a.chunk_cache_stats()
+	t.check(int(first_stats["size"]) <= WorldGen.CACHE_LIMIT,
+		"world never keeps more than its chunk cache capacity")
+	t.eq(int(first_stats["collision_chunks"]), int(first_stats["size"]),
+		"collision broadphase has one matching entry for each cached chunk")
+	var cold_cell := Vector2i(-220, -220)
+	var hot_cell := Vector2i(-221, -220)
+	var cold: Dictionary = a.chunk(cold_cell)
+	var hot: Dictionary = a.chunk(hot_cell)
+	cold["_cache_test_marker"] = "should_evicted"
+	hot["_cache_test_marker"] = "recently_used"
+	var evictions_before: int = int(a.chunk_cache_stats()["evictions"])
+	for index in range(WorldGen.CACHE_LIMIT + 8):
+		a.chunk(Vector2i(-300 - index, -350))
+		if index % 4 == 0:
+			a.chunk(hot_cell)
+	var cache_report: Dictionary = a.chunk_cache_stats()
+	t.eq(a.chunk_cache_size(), WorldGen.CACHE_LIMIT,
+		"cache retains at most 256 recent cells even after a long journey")
+	t.eq(int(cache_report["collision_chunks"]), a.chunk_cache_size(),
+		"solid-only collision entries evict with their source chunks")
+	t.check(int(cache_report["evictions"]) > evictions_before,
+		"pressure evicts individual old chunks rather than clearing all")
+	t.eq(str(a.chunk(hot_cell).get("_cache_test_marker", "")), "recently_used",
+		"frequently visited chunks stay hot throughout cache pressure")
+	t.check(not a.chunk(cold_cell).has("_cache_test_marker"),
+		"long-unvisited chunks regenerate deterministically when revisited")
+	var miss_before: int = int(a.chunk_cache_stats()["misses"])
+	var hit_before: int = int(a.chunk_cache_stats()["hits"])
+	var visited_again: Dictionary = a.chunk(hot_cell)
+	t.eq(visited_again.get("_cache_test_marker"), "recently_used",
+		"cache hits return the existing generated chunk object")
+	t.eq(int(a.chunk_cache_stats()["misses"]), miss_before,
+		"cache hit avoids extra world generation")
+	t.check(int(a.chunk_cache_stats()["hits"]) > hit_before,
+		"cache diagnostics count reuse without iterating chunk contents")
+	t.check(a.chunk_cache_hit_percent() > 0.0 and a.chunk_cache_hit_percent() <= 100.0,
+		"profiler hit percentage stays within meaningful bounds")
+
+	t.current = "collision broadphase stays live across eviction and build changes"
+	var dynamic_id: int = 735199
+	var wall_x: float = -15000.0
+	var wall_z: float = -15000.0
+	a.add_dynamic_blocker(dynamic_id, wall_x, wall_z, 1.1)
+	var dynamic_found: bool = false
+	for obstacle in a.blockers_near(wall_x, wall_z, 0.5):
+		if int(obstacle.get("id", -1)) == dynamic_id:
+			dynamic_found = true
+	t.check(dynamic_found, "new build is collidable after static cache churn")
+	a.remove_dynamic_blocker(dynamic_id)
+	var dynamic_removed: bool = true
+	for obstacle in a.blockers_near(wall_x, wall_z, 0.5):
+		if int(obstacle.get("id", -1)) == dynamic_id:
+			dynamic_removed = false
+	t.check(dynamic_removed, "removing a build immediately removes its collision")
+	if not blocked_stone.is_empty():
+		var stone_center: Vector2 = Vector2(float(blocked_stone["x"]), float(blocked_stone["z"]))
+		var stone_found: bool = false
+		for obstacle in a.blockers_near(stone_center.x, stone_center.y, 0.5):
+			if int(obstacle.get("id", -1)) == int(blocked_stone["id"]):
+				stone_found = true
+		t.check(stone_found, "procedural rock collision returns after LRU regeneration")
+		var actual_ids: Array[int] = []
+		for obstacle in a.blockers_near(stone_center.x, stone_center.y, 0.5):
+			actual_ids.append(int(obstacle["id"]))
+		t.eq(actual_ids, _reference_procedural_blockers(a, stone_center.x, stone_center.y, 0.5),
+			"solid-only index preserves exhaustive collision results and iteration order")
+		a.set_node_depleted(int(blocked_stone["id"]), true)
+		actual_ids.clear()
+		for obstacle in a.blockers_near(stone_center.x, stone_center.y, 0.5):
+			actual_ids.append(int(obstacle["id"]))
+		t.eq(actual_ids, _reference_procedural_blockers(a, stone_center.x, stone_center.y, 0.5),
+			"solid index matches full scans after resource depletion")
+		a.set_node_depleted(int(blocked_stone["id"]), false)

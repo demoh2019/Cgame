@@ -6,6 +6,7 @@ extends RefCounted
 ## The client asks per chunk: the road pieces crossing it (to paint the ground) and the signposts standing in it.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const CityLayout = preload("res://scripts/shared/city_layout.gd")
 
 const HALF_WIDTH := 2.1
 const STEP := 14.0 # Spacing of the points along a road.
@@ -106,28 +107,63 @@ func _build() -> void:
 		for rz in range(-REGION_REACH, REGION_REACH):
 			for site in world.poi.sites_in_region(rx, rz):
 				if LINKED_KINDS.has(str(site["kind"])):
-					places.append({"name": str(site["display"]), "x": float(site["x"]), "z": float(site["z"]), "radius": float(site["radius"]),
-						"end": minf(float(site["radius"]) * 0.35, 20.0), "id": int(site["id"])})
+					var place: Dictionary = {"name": str(site["display"]), "x": float(site["x"]), "z": float(site["z"]),
+						"radius": float(site["radius"]), "end": minf(float(site["radius"]) * 0.35, 20.0), "id": int(site["id"])}
+					if str(site["kind"]) == "city":
+						var plan: Dictionary = world.poi.city_plan(site)
+						place["city_paths"] = plan["paths"]
+						_lay_city_streets(site)
+					places.append(place)
 	# Build the graph in one native nearest-neighbor pass when Cgame supports it.
 	# The identical scalar fallback works on stock Godot.
 	for key in compute_links(places):
 		_lay_road(places[key.x], places[key.y])
 
 
+## Index the local streets with the same terrain mask and authoritative road grip as intercity roads.
+func _lay_city_streets(site: Dictionary) -> void:
+	var center := Vector2(float(site["x"]), float(site["z"]))
+	var plan: Dictionary = world.poi.city_plan(site)
+	var paths: Array = plan["paths"]
+	for offsets in paths:
+		var points := PackedVector2Array()
+		for offset in offsets:
+			points.append(center + Vector2(offset))
+		if points.size() < 3:
+			continue
+		roads.append({"from": str(site["display"]), "to": str(site["display"]), "points": points})
+		for i in points.size() - 1:
+			var a: Vector2 = points[i]
+			var b: Vector2 = points[i + 1]
+			if world.is_water(a.x, a.y) and world.is_water(b.x, b.y):
+				continue
+			_add_piece(a, b)
+
+
 func _lay_road(a: Dictionary, b: Dictionary) -> void:
 	var start := Vector2(a["x"], a["z"])
 	var finish := Vector2(b["x"], b["z"])
 	var direction := (finish - start).normalized()
-	start += direction * float(a["end"])
-	finish -= direction * float(b["end"])
+	if a.has("city_paths"):
+		var from_paths: Array = a["city_paths"]
+		start += CityLayout.entrance_on_paths(from_paths, direction)
+	else:
+		start += direction * float(a["end"])
+	if b.has("city_paths"):
+		var to_paths: Array = b["city_paths"]
+		finish += CityLayout.entrance_on_paths(to_paths, -direction)
+	else:
+		finish -= direction * float(b["end"])
 	var length: float = start.distance_to(finish)
-	if length < STEP * 2.0:
+	# Preserve old non-city link spacing; a nearby city entrance still needs a short connection.
+	var minimum_length: float = 3.0 if a.has("city_paths") or b.has("city_paths") else STEP * 2.0
+	if length < minimum_length:
 		return
 	var side := Vector2(-direction.y, direction.x)
 	var seed_value: int = world.mix(int(a["x"]), int(b["z"]), int(a["z"]) + int(b["x"]), world.world_seed)
 	var phase: float = float(seed_value % 1000) / 1000.0 * TAU
 	var wiggle: float = clampf(length * 0.06, 6.0, 28.0)
-	var count: int = int(length / STEP) + 1
+	var count: int = maxi(2, int(length / STEP) + 1)
 	var points := PackedVector2Array()
 	for n in count + 1:
 		var t: float = float(n) / float(count)

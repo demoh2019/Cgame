@@ -65,11 +65,14 @@ class VirtualShadowPages : public RefCounted {
 	HashMap<int64_t, Entry> cache;
 	LocalVector<int> free_slots;
 	HashSet<int64_t> requested;
+	PackedInt32Array render_jobs; // (clipmap level, global page X, page Y, physical slot)
 	int64_t frame = 0;
 	int evicted = 0;
 	int dropped = 0;
 
 	static int64_t _key(int p_level, int p_gx, int p_gy);
+	bool _in_current_window(int p_level, int p_gx, int p_gy) const;
+	void _append_render_job(const Entry &p_entry);
 	int _take_slot();
 
 protected:
@@ -96,4 +99,5 @@ public:
 	int resident_count() const;
 	bool is_resident(int p_level, int p_gx, int p_gy) const;
 	PackedInt32Array page_table() const;
+	PackedInt32Array get_render_jobs() const { return render_jobs; }
 };

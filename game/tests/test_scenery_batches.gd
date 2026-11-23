@@ -143,6 +143,9 @@ func run(t) -> void:
 	invalid_points.append(Vector3(0, NAN, 0))
 	t.eq(SceneryBatches.partition_indices_3d(invalid_points, 32.0, 48, 256, false).size(),
 		0, "late NaN invalidates the entire plan")
+	t.eq(SceneryBatches.partition_indices_adaptive_3d(
+		invalid_points, 32.0, 48, 256, 8, false).size(),
+		0, "adaptive retries also reject a late invalid point")
 
 	if ClassDB.class_exists("PCGInstanceCluster3D"):
 		var native: Object = ClassDB.instantiate("PCGInstanceCluster3D")
@@ -167,6 +170,24 @@ func run(t) -> void:
 	else:
 		t.eq(SceneryBatches.partition_indices_3d(positions), expected,
 			"stock Godot uses exactly the same index plan")
+
+	t.current = "dense scenery fallback preserves packed source indices"
+	var dense_points := PackedVector3Array()
+	var expected_indices := PackedInt32Array()
+	dense_points.resize(4096)
+	expected_indices.resize(4096)
+	for i in dense_points.size():
+		dense_points[i] = Vector3(float(i % 32) * 0.25, 2.0,
+			float(i % 16) * 0.25)
+		expected_indices[i] = i
+	var packed_groups: Array = SceneryBatches.partition_indices_3d(
+		dense_points, 32.0, 48, 256, false)
+	t.eq(packed_groups.size(), 1, "dense cell retains one MultiMesh batch")
+	if packed_groups.size() == 1:
+		t.check(packed_groups[0] is PackedInt32Array,
+			"bucket building still produces packed indices")
+		t.eq(packed_groups[0], expected_indices,
+			"large dense cell preserves exact source ordering")
 
 	t.current = "HISM-style adaptive cluster coarsening after draw-call overflow"
 	var spaced_3d := PackedVector3Array()

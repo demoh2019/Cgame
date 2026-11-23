@@ -96,6 +96,7 @@ ignore-words-list = [
 	"nd",
 	"numer",
 	"optin",
+	"ore", # Albion After resource item name: iron ore, not a misspelling.
 	"ot",
 	"outin",
 	"parm",
@@ -105,5 +106,6 @@ ignore-words-list = [
 	"te",
 	"textin",
 	"thirdparty",
+	"ue", # Unreal Engine abbreviation in debug and profiling UI.
 	"vai",
 ]

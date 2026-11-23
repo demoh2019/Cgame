@@ -1,5 +1,9 @@
 # Albion After — main game
 
+**P1 terrain update:** The native large-world terrain now supports sparse height edits; this increment adds color-only patches without collision resets, non-destructive editor layer binding and viewport sculpt. See [Native Terrain Patch Streaming](docs/NATIVE_TERRAIN_PATCH_STREAMING.md).
+
+**P1 GPU-resident meshlet pages (experimental):** bounded GPU geometry slots with frustum-prioritized page uploads, GPU task/mesh shader culling and a debug-only production-rock probe. See [GPU Meshlet Residency](docs/P1_GPU_MESHLET_RESIDENCY.md).
+
 **This is the canonical game project at `game/`.** All new gameplay
 features belong here. It is the only game in the repository; `demo/` and `misc/` hold engine labs, not games.
 

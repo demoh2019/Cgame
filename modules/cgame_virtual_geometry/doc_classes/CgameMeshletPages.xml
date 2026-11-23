@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameMeshletPages" inherits="RefCounted" api_type="core" keywords="nanite,virtual geometry,meshlet,page,cluster,streaming" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Builds deterministic bounded binary pages of meshlet descriptors and original vertex references.
+	</brief_description>
+	<description>
+		[CgameMeshletPages] converts a valid indexed triangle mesh into independently stored packed meshlet pages. Every meshlet carries 64 or fewer unique source vertex IDs, 124 or fewer triangles, a bounding sphere and a normal cone. The binary format stores only local triangle indices and references to the [b]original[/b] source vertex IDs; normals, UVs, tangents, colors, skin weights, custom channels and material data remain in the original mesh. The original render mesh is never modified.
+		The v1 layout is fixed, little-endian and independent of host CPU endianness: a 32-byte header containing the [code]CGMP[/code] magic, version, first-meshlet ordinal, meshlet count, descriptor offset, vertex-reference offset, triangle offset and total page size; a packed 48-byte descriptor per meshlet (two absolute byte offsets, vertex count, triangle count, four float32 bounds, four float32 cone parameters); then global uint32 vertex references followed by compact uint8 local triangle indices. Each meshlet is contained in one page. Pages cannot exceed the caller's byte limit or 65536 bytes.
+		[b]Limitations:[/b] These are GPU-upload-ready asset [i]payloads[/i], not GPU resident pages. This class does not allocate GPU buffers, submit compute culling, stream pages to RenderingDevice, issue mesh draws or report frame-rate gains. Renderer-side page scheduling and a vertex attribute decoding path are separate future work. On-demand inspection in Albion After's debug client uses this class on actual streamed [MultiMeshInstance3D] source geometry.
+	</description>
+	<methods>
+		<method name="build_pages" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="vertices" type="PackedVector3Array" />
+			<param index="1" name="indices" type="PackedInt32Array" />
+			<param index="2" name="page_bytes" type="int" default="16384" />
+			<description>
+				Returns an array of [PackedByteArray] values. Validates finite source positions, all triangle indices, an exact multiple of three, 3 to 1000000 vertices, at most 3000000 indices and [param page_bytes] from 1024 through 65536. Produces empty output if invalid. Uses native meshoptimizer to construct 64-vertex/124-triangle meshlets with bounds; packs consecutive complete meshlets into byte-bounded pages. No attribute interpolation, vertex welding or mesh simplification is performed. Repeating the call with unchanged inputs produces identical page bytes.
+			</description>
+		</method>
+		<method name="inspect_page" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="page" type="PackedByteArray" />
+			<description>
+				Strictly decodes a binary v1 page. Checks magic, version, total length, canonical contiguous offsets, 128-meshlet limit, finite bounds/cones, exact vertex and triangle stream lengths, and in-range local triangle indices. Returns an empty dictionary on corruption; otherwise provides [code]first_meshlet[/code], [code]meshlet_count[/code], [code]triangle_count[/code], [code]bytes[/code] and [code]meshlets[/code], each with [code]vertex_ids[/code], [code]local_indices[/code], [code]bounds_center[/code], [code]bounds_radius[/code], [code]cone_axis[/code] and [code]cone_cutoff[/code]. The original source mesh's total vertex count is not embedded in each page, so validate external vertex-buffer compatibility before rendering.
+			</description>
+		</method>
+	</methods>
+</class>

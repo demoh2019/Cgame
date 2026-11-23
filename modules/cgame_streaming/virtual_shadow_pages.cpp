@@ -60,6 +60,27 @@ int64_t VirtualShadowPages::_key(int p_level, int p_gx, int p_gy) {
 	return ((int64_t)(p_level & 0xFF) << 48) | ((int64_t)((p_gx + 0x800000) & 0xFFFFFF) << 24) | (int64_t)((p_gy + 0x800000) & 0xFFFFFF);
 }
 
+bool VirtualShadowPages::_in_current_window(int p_level, int p_gx, int p_gy) const {
+	if (p_level < 0 || p_level >= int(center.size()) || pages_per_axis < 1) {
+		return false;
+	}
+	// An N-by-N clipmap has exactly N slots along each axis, even for
+	// odd N (or N == 1). Use signed 64-bit deltas to avoid overflow near
+	// large world coordinates. The half-open range is [-N/2, N-N/2).
+	const int64_t dx = int64_t(p_gx) - center[p_level].x;
+	const int64_t dy = int64_t(p_gy) - center[p_level].y;
+	const int half = pages_per_axis / 2;
+	return dx >= -half && dx < pages_per_axis - half &&
+			dy >= -half && dy < pages_per_axis - half;
+}
+
+void VirtualShadowPages::_append_render_job(const Entry &p_entry) {
+	render_jobs.push_back(p_entry.level);
+	render_jobs.push_back(p_entry.gx);
+	render_jobs.push_back(p_entry.gy);
+	render_jobs.push_back(p_entry.slot);
+}
+
 void VirtualShadowPages::setup(int p_clipmap_levels, real_t p_level0_world_size, int p_page_size_texels, int p_virtual_res, int p_physical_pages) {
 	levels = CLAMP(p_clipmap_levels, 1, 32);
 	level0_size = MAX(p_level0_world_size, (real_t)0.001);
@@ -69,6 +90,7 @@ void VirtualShadowPages::setup(int p_clipmap_levels, real_t p_level0_world_size,
 	physical_capacity = MAX(p_physical_pages, 1);
 	cache.clear();
 	requested.clear();
+	render_jobs.clear();
 	free_slots.clear();
 	for (int i = physical_capacity - 1; i >= 0; i--) {
 		free_slots.push_back(i);
@@ -96,6 +118,7 @@ void VirtualShadowPages::begin_frame(const Vector3 &p_light_dir, const Vector3 &
 	ERR_FAIL_COND_MSG(levels == 0, "VirtualShadowPages.setup() must be called first.");
 	frame++;
 	requested.clear();
+	render_jobs.clear();
 	evicted = 0;
 	dropped = 0;
 	Vector3 d = p_light_dir.normalized();
@@ -140,7 +163,6 @@ int VirtualShadowPages::level_for_footprint(real_t p_footprint) const {
 
 void VirtualShadowPages::request_for_receivers(const PackedVector3Array &p_points, const PackedFloat32Array &p_pixel_footprints) {
 	ERR_FAIL_COND_MSG(levels == 0, "VirtualShadowPages.setup() must be called first.");
-	int half = pages_per_axis >> 1;
 	for (int i = 0; i < p_points.size(); i++) {
 		real_t fp = i < p_pixel_footprints.size() ? p_pixel_footprints[i] : texel_world_size(0);
 		int l = level_for_footprint(fp);
@@ -148,8 +170,7 @@ void VirtualShadowPages::request_for_receivers(const PackedVector3Array &p_point
 		real_t pw = page_world_size(l);
 		int gx = (int)Math::floor(p.dot(right) / pw);
 		int gy = (int)Math::floor(p.dot(up) / pw);
-		Vector2i c = center[l];
-		if (Math::abs(gx - c.x) >= half || Math::abs(gy - c.y) >= half) {
+		if (!_in_current_window(l, gx, gy)) {
 			continue;
 		}
 		requested.insert(_key(l, gx, gy));
@@ -244,6 +265,7 @@ Dictionary VirtualShadowPages::end_frame() {
 		HashMap<int64_t, Entry>::Iterator it = cache.find(k);
 		if (it) {
 			if (it->value.dirty) {
+				_append_render_job(it->value);
 				it->value.dirty = false;
 				rendered++;
 			} else {
@@ -264,6 +286,7 @@ Dictionary VirtualShadowPages::end_frame() {
 		e.gx = (int)(((k >> 24) & 0xFFFFFF) - 0x800000);
 		e.gy = (int)((k & 0xFFFFFF) - 0x800000);
 		cache[k] = e;
+		_append_render_job(e);
 		allocated++;
 		rendered++;
 	}
@@ -293,6 +316,12 @@ PackedInt32Array VirtualShadowPages::page_table() const {
 	table.fill(-1);
 	for (const KeyValue<int64_t, Entry> &kv : cache) {
 		const Entry &e = kv.value;
+		// Cache entries from an earlier camera position are still valid for
+		// possible reuse, but MUST NOT overwrite toroidal mappings of the
+		// currently visible clipmap (same page index modulo N).
+		if (!_in_current_window(e.level, e.gx, e.gy)) {
+			continue;
+		}
 		table.write[e.level * n * n + Math::posmod(e.gy, n) * n + Math::posmod(e.gx, n)] = e.slot;
 	}
 	return table;
@@ -319,4 +348,5 @@ void VirtualShadowPages::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("resident_count"), &VirtualShadowPages::resident_count);
 	ClassDB::bind_method(D_METHOD("is_resident", "level", "gx", "gy"), &VirtualShadowPages::is_resident);
 	ClassDB::bind_method(D_METHOD("page_table"), &VirtualShadowPages::page_table);
+	ClassDB::bind_method(D_METHOD("get_render_jobs"), &VirtualShadowPages::get_render_jobs);
 }

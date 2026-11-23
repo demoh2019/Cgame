@@ -36,7 +36,7 @@
 // Nanite-style cluster DAG LOD hierarchy built with meshoptimizer.
 //
 // Level 0 holds the meshlets of the source mesh. Every following level groups up to
-// GROUP_SIZE neighboring clusters, simplifies the merged triangles to half with the
+// GROUP_SIZE neighbouring clusters, simplifies the merged triangles to half with the
 // group border locked (meshopt_SimplifyLockBorder) and re-splits the result into new
 // meshlets. All clusters of a group share one LOD sphere and one error value, so a cut
 // selected by select_cut() is crack free.
@@ -59,7 +59,16 @@ public:
 	static Dictionary build_hierarchy(const PackedVector3Array &p_vertices, const PackedInt32Array &p_indices, int p_levels = 4);
 	static PackedInt32Array select_cut(const Dictionary &p_hierarchy, const Vector3 &p_camera_pos, real_t p_fov_y, real_t p_screen_height, real_t p_error_pixels = 1.0);
 	static int triangle_count(const Dictionary &p_hierarchy, const PackedInt32Array &p_cut);
-	// Copies every source vertex stream unchanged; replaces just triangle indices.
-	// Does not compact vertices or stream GPU pages.
+	// Assemble a selected cluster cut using original vertex array channels.
+	// All selected triangles retain global vertex IDs; only indices change.
+	// Draw-ready alias used by Albion PBR HLOD; preserves all source vertex streams.
 	static Array build_cut_surface(const Dictionary &p_hierarchy, const PackedInt32Array &p_cut, const Array &p_source_arrays);
+	static Array build_cut_arrays(const Array &p_source_arrays, const Dictionary &p_hierarchy, const PackedInt32Array &p_cut);
+	// Attribute-aware meshoptimizer path for static imported triangle surfaces.
+	// Returns Mesh::ARRAY_MAX source arrays with ONLY the index buffer replaced.
+	// Source normals/UV guide simplification; colors, tangents, skinning,
+	// secondary UV and custom channels are left bit-for-bit intact.
+	// Empty array means invalid input or no safe reduction.
+	static Array simplify_surface_arrays(const Array &p_surface_arrays, int p_target_triangles,
+			float p_normal_weight = 0.6f, float p_uv_weight = 0.6f);
 };

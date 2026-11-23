@@ -14,6 +14,7 @@ const WadingTravel = preload("res://scripts/shared/wading_travel.gd")
 const Swimming = preload("res://scripts/shared/swimming.gd")
 
 const MAX_DELTA := 0.1 # A longer step is clamped, so a lag spike cannot teleport a player.
+const COLLISION_STEP := 0.2 # Sample every 20 cm to avoid stepping over narrow obstacles.
 
 
 ## `input` has "x", "z" (a move direction, any length up to 1) and "sprint". Returns the new position
@@ -91,16 +92,35 @@ static func _step_on_foot(world, position: Vector3, input: Dictionary, delta: fl
 
 ## Moves along `direction` (unit or shorter) at `speed` meters per second. Shared by players and zombies.
 static func move(world, position: Vector3, direction: Vector2, speed: float, delta: float, allow_swim: bool = false) -> Vector3:
+	if not is_finite(delta) or not is_finite(speed) or not direction.is_finite() or speed <= 0.0:
+		return Vector3(position.x, world.height_at(position.x, position.z), position.z)
 	delta = clampf(delta, 0.0, MAX_DELTA)
 	if direction.length_squared() > 1.0:
 		direction = direction.normalized()
-	var target := Vector2(position.x, position.z) + direction * speed * delta
-	# Try the full move, then each axis alone, so the mover slides along walls and shores.
-	var candidates: Array[Vector2] = [target, Vector2(target.x, position.z), Vector2(position.x, target.y)]
-	for candidate in candidates:
-		if _is_free(world, candidate, allow_swim):
-			return Vector3(candidate.x, world.height_at(candidate.x, candidate.y), candidate.y)
-	return Vector3(position.x, world.height_at(position.x, position.z), position.z)
+	var displacement: Vector2 = direction * speed * delta
+	if not displacement.is_finite():
+		return Vector3(position.x, world.height_at(position.x, position.z), position.z)
+	# Endpoint-only tests let a fast-moving character tunnel through a thin prop or wall.
+	# Server and client prediction use identical small steps, with the same slide policy.
+	var segments: int = maxi(1, ceili(displacement.length() / COLLISION_STEP))
+	var increment: Vector2 = displacement / float(segments)
+	var point := Vector2(position.x, position.z)
+	# Query the authoritative obstacle index once for the full swept path,
+	# not once per substep: each nearby blocker is checked at every candidate.
+	var nearby: Array = world.blockers_near(point.x, point.y,
+		displacement.length() + Defs.PLAYER_RADIUS + 1.0)
+	for _i in segments:
+		var target: Vector2 = point + increment
+		var candidates: Array[Vector2] = [target, Vector2(target.x, point.y), Vector2(point.x, target.y)]
+		var accepted := false
+		for candidate in candidates:
+			if _is_free(world, candidate, allow_swim, nearby):
+				point = candidate
+				accepted = true
+				break
+		if not accepted:
+			break
+	return Vector3(point.x, world.height_at(point.x, point.y), point.y)
 
 
 ## Short, server-authored physical impulses use many collision-checked
@@ -133,12 +153,43 @@ static func sweep_displacement(world, position: Vector3, displacement: Vector2,
 	return result
 
 
-static func _is_free(world, point: Vector2, allow_swim: bool = false) -> bool:
+## The server never loads decorative meshes. Its seeded structures carry their
+## footprint and orientation; use that for buildings and walls, rather than a
+## circle that leaves the corners of large models walkable.
+static func overlaps_blocker(point: Vector2, blocker: Dictionary) -> bool:
+	var offset := point - Vector2(float(blocker["x"]), float(blocker["z"]))
+	var kind: String = str(blocker.get("kind", ""))
+	var scale: float = float(blocker.get("scale", 0.0))
+	if scale > 0.0 and is_finite(scale) and (kind == "building" or kind == "wall"):
+		var yaw: float = float(blocker.get("yaw", 0.0))
+		if is_finite(yaw):
+			# Inverse of the MeshInstance's Basis(Vector3.UP, yaw) in XZ.
+			var local := Vector2(
+				cos(yaw) * offset.x - sin(yaw) * offset.y,
+				sin(yaw) * offset.x + cos(yaw) * offset.y)
+			# Catalog houses are fitted to a 7 m footprint at scale 6;
+			# wall segments are 3.8 m long at scale 3.
+			var half: Vector2 = (Vector2.ONE * scale * (7.0 / 12.0)
+				if kind == "building" else Vector2(scale * (3.8 / 6.0), scale * 0.11))
+			var outside := Vector2(maxf(absf(local.x) - half.x, 0.0),
+				maxf(absf(local.y) - half.y, 0.0))
+			return outside.length_squared() < Defs.PLAYER_RADIUS * Defs.PLAYER_RADIUS
+	# Trees, rock piles, crates and other props keep their circular collision.
+	var combined: float = Defs.PLAYER_RADIUS + float(blocker["radius"])
+	return offset.length_squared() < combined * combined
+
+
+## Shared point-collision test used by locomotion, raid-boss spawns and
+## supply-drop guards. The public two-argument form performs its own lookup;
+## movement passes its cached swept-path array (including a valid empty array)
+## to avoid repeated queries for every substep.
+static func _is_free(world, point: Vector2, allow_swim: bool = false, nearby = null) -> bool:
 	# Wading is allowed until the water is deeper than a meter; beyond that only swimmers.
 	if not allow_swim and world.height_at(point.x, point.y) < Defs.WATER_LEVEL - 1.0:
 		return false
-	for blocker in world.blockers_near(point.x, point.y, Defs.PLAYER_RADIUS + 1.0):
-		var offset := Vector2(blocker["x"] - point.x, blocker["z"] - point.y)
-		if offset.length() < Defs.PLAYER_RADIUS + float(blocker["radius"]):
+	if nearby == null:
+		nearby = world.blockers_near(point.x, point.y, Defs.PLAYER_RADIUS + 1.0)
+	for blocker in nearby:
+		if overlaps_blocker(point, blocker):
 			return false
 	return true

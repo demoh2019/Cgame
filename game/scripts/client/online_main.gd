@@ -3,6 +3,7 @@ extends Node3D
 ## network state and what is drawn.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const ResourceGathering = preload("res://scripts/shared/resource_gathering.gd")
 const WoundFx = preload("res://scripts/client/wound_fx.gd")
 const BrawlMeter = preload("res://scripts/client/brawl_meter.gd")
 const FarField = preload("res://scripts/client/far_field.gd")
@@ -20,6 +21,7 @@ const MoonVisuals = preload("res://scripts/client/moon_visuals.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Net = preload("res://scripts/shared/net.gd")
+const NetProtocol = preload("res://scripts/shared/net_protocol.gd")
 const GameClient = preload("res://scripts/client/game_client.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 const TerrainRvt = preload("res://scripts/client/terrain_rvt.gd")
@@ -73,6 +75,8 @@ const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const GraphicsTextureStreaming = preload("res://scripts/client/graphics_texture_streaming.gd")
 const TerrainLivePatch = preload("res://scripts/client/terrain_live_patch.gd")
+const VirtualGeometryProbe = preload("res://scripts/client/virtual_geometry_probe.gd")
+const VirtualGeometryPageInspector = preload("res://scripts/client/virtual_geometry_page_inspector.gd")
 const ObjectPopulationProfiler = preload("res://scripts/client/object_population_profiler.gd")
 const AmbientTickBudget = preload("res://scripts/client/ambient_tick_budget.gd")
 const AMBIENT_CPU_BUDGET_US := [900, 1500, 2500, 4000] # Quality tiers, main-thread cosmetics only.
@@ -124,6 +128,7 @@ const DAY_LENGTH := WorldCycle.DAY_LENGTH # Shared with server simulation and lo
 var net
 var client
 var peer: ENetMultiplayerPeer
+var _rpc_protocol_failed := false
 var streamer: WorldStreamer
 var _terrain_rvt: Node
 # Last displayed position, not input intent: online prediction uses actual
@@ -135,6 +140,7 @@ var _stream_velocity := Vector3.ZERO
 var chunk_root: Node3D
 var entities: Node3D
 var camera: Camera3D
+var _meshlet_page_probe: RefCounted = null # Optional task/mesh GPU residency probe.
 var _wound_fx: Node3D # Cuts, bullet wounds, blood spray and severed limbs on struck enemies.
 var sun: DirectionalLight3D
 var environment: Environment
@@ -248,6 +254,15 @@ var _underwater_tint: ColorRect # Blue murk while the camera is below the surfac
 var _breath_label: Label # Air left while diving.
 var _dof_elapsed := 0.35 # Coalesce cinematic focus updates to ~3 Hz.
 var _attack_cooldown := 0.0
+var _resource_weakspot: MeshInstance3D # One reusable marker, never one object per resource.
+var _resource_marker_rescan_at: int = 0
+var _resource_marker_target: Dictionary = {}
+var _hold_pickup_since_ms: int = -1 # -1 unless the initial E press collected a loose resource.
+var _hold_pickup_next_ms: int = 0
+var _hold_pickup_pending: Dictionary = {} # node id -> retry-until milliseconds
+const HOLD_PICKUP_DELAY_MS := 360
+const HOLD_PICKUP_INTERVAL_MS := 260
+const HOLD_PICKUP_RETRY_MS := 1500
 var _charge_msec := -1 # Melee attack held since (ms); release = light swing or power blow.
 const CHARGE_START_MS := 220 # A shorter press is a quick swing.
 const CHARGE_FULL_MS := 850
@@ -282,6 +297,9 @@ var _demo_frames := 0 # Frames since the first snapshot arrived.
 
 
 func _exit_tree() -> void:
+	if _meshlet_page_probe != null:
+		VirtualGeometryProbe.detach_for_debug(_meshlet_page_probe, camera)
+		_meshlet_page_probe = null
 	if _trace.enabled and _trace_path != "":
 		_trace.save(_trace_path)
 	for monitor_name in _ambient_monitors:
@@ -297,7 +315,7 @@ func _exit_tree() -> void:
 func _ready() -> void:
 	Engine.physics_ticks_per_second = 30
 	# Prefer the native Godot scheduler when the fork exposes it. Standard
-	# Godot builds retain the same pure GDScript behaviour automatically.
+	# Godot builds retain the same pure GDScript behavior automatically.
 	if EngineFeatures.has("FrameUpdateBudget"):
 		var native_budget: Object = EngineFeatures.make("FrameUpdateBudget")
 		if native_budget != null and native_budget.has_method("record_cost") \
@@ -353,11 +371,14 @@ func _ready() -> void:
 	GraphicsQuality.load_preference()
 	_access = UiAccessibilityLayer.new() # Loads settings, language and key bindings; must precede the menus below.
 	add_child(_access)
+	# Both graphics selectors use the same renderer and budget application.
+	_access.menu.connect("graphics_selected", Callable(self, "_apply_graphics_selection"))
 	var graphics_config := ConfigFile.new()
 	if graphics_config.load(GraphicsQuality.SETTINGS_PATH) == OK:
 		_auto_graphics = bool(graphics_config.get_value("rendering", "auto", false))
 	if _auto_graphics:
 		GraphicsQuality.set_level(_auto_quality.level, false)
+	_access.menu.call("set_graphics_choice", GraphicsQuality.level(), _auto_graphics)
 	_adaptive_resolution.configure(GraphicsQuality.level(),
 		GraphicsQuality.metalfx_resolution_floor())
 	_update_gpu_measurements()
@@ -507,6 +528,14 @@ func _build_environment() -> void:
 	add_child(_perf)
 	_perf.set("trace", _trace)
 	_perf.set("loaded_cells_source", func() -> int: return streamer.get_loaded_count() if streamer != null else 0)
+	# Live world-generation cache diagnostics: constant-time counters with no
+	# scanning or extra procedural generation in the sampling path.
+	_perf.add_source("cache_cells", func() -> float:
+		return float(client.world.chunk_cache_size()) if client != null and client.world != null else 0.0)
+	_perf.add_source("cache_evicted", func() -> float:
+		return float(client.world.chunk_cache_evictions()) if client != null and client.world != null else 0.0)
+	_perf.add_source("cache_hit_pct", func() -> float:
+		return client.world.chunk_cache_hit_percent() if client != null and client.world != null else 0.0)
 	# Hardware ray-traced sun shadows + AO (ray query): Ultra only, and only where the GPU
 	# reports SUPPORTS_RAY_QUERY on Forward+. attach() is a no-op everywhere else.
 	if GraphicsQuality.level() >= 3:
@@ -525,6 +554,9 @@ func _build_environment() -> void:
 	_lightning_visual.name = "StormLightningWarning"
 	add_child(_lightning_visual)
 	camera.current = true
+	# Opt-in GPU-resident meshlet draw of the actual rock mesh; all production
+	# geometry, materials, collision and mining remain unchanged.
+	_meshlet_page_probe = VirtualGeometryProbe.attach_for_debug(Meshes.get_mesh("rock"), camera)
 	# The project supports occlusion, but the title screen and open world should
 	# never start with the extra software-culling pass enabled.
 	DungeonOcclusion.update_viewport(get_viewport(), GraphicsQuality.level(),
@@ -758,18 +790,16 @@ func _build_connect_screen() -> void:
 	quality_picker.add_item("Auto (GPU-aware 3D + details)", GraphicsQuality.NAMES.size())
 	quality_picker.select(GraphicsQuality.NAMES.size() if _auto_graphics else GraphicsQuality.level())
 	quality_picker.item_selected.connect(func(index: int) -> void:
-		var selected: int = quality_picker.get_item_id(index)
-		_set_auto_graphics(selected == GraphicsQuality.NAMES.size())
-		if _auto_graphics:
-			_auto_quality.set_mode("auto")
-			GraphicsQuality.set_level(_auto_quality.level, false)
-		else:
-			GraphicsQuality.set_level(selected)
-		_adaptive_resolution.configure(GraphicsQuality.level(),
-		GraphicsQuality.metalfx_resolution_floor())
-		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
-			streamer, _adaptive_resolution.scale if _auto_graphics else -1.0, _auto_graphics))
+		_apply_graphics_selection(quality_picker.get_item_id(index)))
 	box.add_child(quality_picker)
+	# The same Settings window is available from the connection screen.
+	var settings_button := Button.new()
+	settings_button.text = "Settings"
+	settings_button.custom_minimum_size = Vector2(0, 40)
+	settings_button.pressed.connect(func() -> void:
+		if _access != null and is_instance_valid(_access.menu):
+			_access.menu.open())
+	box.add_child(settings_button)
 	var gap2 := Control.new()
 	gap2.custom_minimum_size = Vector2(0, 8)
 	box.add_child(gap2)
@@ -872,13 +902,19 @@ func _connect() -> void:
 		net.role = "client"
 		get_tree().root.add_child.call_deferred(net) # RPC paths must match the server: /root/Net.
 		client = GameClient.new(net)
+		if not NetProtocol.install(multiplayer as SceneMultiplayer, net,
+				Callable(self, "_on_rpc_protocol_rejected")):
+			status_label.text = "Cannot initialize network RPC protocol."
+			return
+		multiplayer.peer_authentication_failed.connect(_on_rpc_authentication_failed)
 		multiplayer.connected_to_server.connect(func() -> void:
 			NetTimeouts.apply(peer, 1) # Loading the world must not time the link out.
 			status_label.text = "Joining..."
 			client.join(name_edit.text, account.get("token", ""), account.get("refresh", "")))
 		multiplayer.connection_failed.connect(_on_connection_failed)
 		multiplayer.server_disconnected.connect(func() -> void:
-			status_label.text = "Disconnected."
+			if not _rpc_protocol_failed:
+				status_label.text = "Disconnected."
 			connect_panel.visible = true)
 		net.welcomed.connect(_on_welcomed)
 		net.join_refused.connect(func(reason: String) -> void: status_label.text = reason)
@@ -887,6 +923,7 @@ func _connect() -> void:
 
 ## The ENet connection alone, so a solo world that is still starting can be retried without signing in again.
 func _open_peer(host: String, port: int) -> void:
+	_rpc_protocol_failed = false
 	peer = ENetMultiplayerPeer.new()
 	if peer.create_client(host, port) != OK:
 		status_label.text = "Could not connect."
@@ -895,7 +932,20 @@ func _open_peer(host: String, port: int) -> void:
 	status_label.text = "Connecting..." if _solo_attempts_left == 0 else "Starting your world..."
 
 
+func _on_rpc_protocol_rejected(_peer_id: int) -> void:
+	_rpc_protocol_failed = true
+	status_label.text = "Incompatible RPC protocol. Restart/update both client and server from the same build."
+	connect_panel.visible = true
+
+
+func _on_rpc_authentication_failed(peer_id: int) -> void:
+	# Also covers old servers that do not implement the pre-RPC handshake.
+	_on_rpc_protocol_rejected(peer_id)
+
+
 func _on_connection_failed() -> void:
+	if _rpc_protocol_failed:
+		return
 	if _solo_attempts_left > 0 and local_server.is_running():
 		_solo_attempts_left -= 1
 		await get_tree().create_timer(1.5).timeout
@@ -1301,7 +1351,14 @@ func _spawn_effects(event: Dictionary) -> void:
 				chips = Color(0.55, 0.38, 0.2)
 			elif item.begins_with("stone") or item.begins_with("ore"):
 				chips = Color(0.6, 0.6, 0.62)
-			effects.gathered(here, chips)
+			effects.gathered(at, chips)
+			if bool(event.get("precise", false)):
+				var node_for_impact: Dictionary = client.node_by_id(
+					int(event.get("node", -1)), at)
+				if not node_for_impact.is_empty():
+					var impact: Vector3 = ResourceGathering.weakspot_position(
+						node_for_impact, maxi(0, int(event.get("hit", 1)) - 1))
+					effects.ring(impact, Color(1.0, 0.77, 0.25), 0.65, 0.32)
 		"crate":
 			effects.loot(here)
 		"skill_up":
@@ -1310,6 +1367,21 @@ func _spawn_effects(event: Dictionary) -> void:
 
 func _on_skill_event(event: Dictionary) -> void:
 	_spawn_effects(event)
+	if event["type"] == "gathered":
+		var gatherer: int = int(event.get("peer", -1))
+		if gatherer == client.peer_id and int(event.get("amount", 0)) > 0:
+			var reward: String = "+%d %s" % [int(event["amount"]),
+				str(Defs.item(str(event.get("item", ""))).get("name", event.get("item", "")))]
+			hud.say(("WEAK SPOT! " if bool(event.get("precise", false)) else "") + reward)
+		if bool(event.get("strike", false)):
+			var source: Dictionary = client.node_by_id(int(event.get("node", -1)),
+				Vector3(float(event.get("x", client.predicted.x)), 0.0,
+					float(event.get("z", client.predicted.z))))
+			var clip: String = "TreeChopping_Loop" if str(source.get("kind", "")) == "tree" else "Farm_Harvest"
+			if gatherer == client.peer_id and avatar_model != null:
+				avatar_model.play_action(clip)
+			elif gatherer != client.peer_id:
+				entities.play_action_on("player", gatherer, clip)
 	if event["type"] == "attack" and avatar_model != null:
 		# Everyone's swings and shots: this player's own model, or the one drawn for that player.
 		if int(event.get("peer", -1)) == client.peer_id:
@@ -1795,8 +1867,22 @@ func _physics_process(delta: float) -> void:
 	var aim := _aim_direction()
 	var yaw: float = atan2(aim.x, aim.y) if aim != Vector2.ZERO else float(client.yaw)
 	client.send_input(move, sprint, yaw, delta, crouch)
+	_update_held_pickups()
 	var can_swing: bool = alive and not _build_mode and not hud.is_menu_open() and not _access.is_open() and aim != Vector2.ZERO
-	if can_swing and _melee_equipped():
+	var hit_node: Dictionary = {}
+	if can_swing and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		hit_node = client.nearest_strike_node(client.predicted, aim)
+	if not hit_node.is_empty():
+		# Mining/chopping takes priority over combat only when aimed at a nearby node.
+		_charge_msec = -1
+		if _attack_cooldown <= 0.0:
+			client.resource_hit(int(hit_node["id"]), _resource_swing_aim(hit_node, aim))
+			var tool: String = Defs.tool_tier_for_node(str(hit_node["kind"]))
+			var equipped: String = client.inventory.best_tool(tool)
+			var tier: int = Defs.tier_of(equipped) if not equipped.is_empty() else 0
+			_attack_cooldown = ResourceGathering.swing_cooldown(tier)
+			_last_attack_msec = Time.get_ticks_msec()
+	elif can_swing and _melee_equipped():
 		# Brawling: tap to swing, hold to wind up a power blow, release to strike.
 		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 			if _charge_msec < 0 and _attack_cooldown <= 0.0:
@@ -1819,6 +1905,9 @@ func _physics_process(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	if _meshlet_page_probe != null and camera != null:
+		RenderingServer.call_on_render_thread(Callable(_meshlet_page_probe, "set_view").bind(
+			camera.global_position, camera.get_frustum()))
 	if _capture_path != "" and client != null and client.welcomed:
 		_capture_time += delta
 		if _capture_time >= 60.0:
@@ -2032,21 +2121,30 @@ func _process(delta: float) -> void:
 
 
 func _apply_world_state() -> void:
-	# Rescanning every node of every loaded chunk each frame cost ~1.2 ms; only chunks that have not seen
-	# the current server revision (new chunks, or after a gather/crate change) need it.
+	# Depletion changes geometry and terrain contact; strike progress changes
+	# only GPU instance tint. Never rescan every resource on an ordinary hit.
 	var revision: int = client.world_state_revision
+	var damage_revision: int = client.resource_damage_revision
 	var hidden: Dictionary = {}
 	for cell in streamer.get_loaded_cells():
 		var chunk := streamer.get_chunk(cell)
 		if chunk == null or not chunk.has_method("apply_state"):
 			continue
-		if chunk.has_meta("aa_state_revision") and int(chunk.get_meta("aa_state_revision")) == revision:
+		var geometry_dirty: bool = not chunk.has_meta("aa_state_revision") \
+			or int(chunk.get_meta("aa_state_revision")) != revision
+		var damage_dirty: bool = not chunk.has_meta("aa_damage_revision") \
+			or int(chunk.get_meta("aa_damage_revision")) != damage_revision
+		if not geometry_dirty and not damage_dirty:
 			continue
-		if hidden.is_empty():
-			hidden.merge(client.depleted)
-			hidden.merge(client.crates_used)
-		chunk.apply_state(hidden)
-		chunk.set_meta("aa_state_revision", revision)
+		if geometry_dirty:
+			if hidden.is_empty():
+				hidden.merge(client.depleted)
+				hidden.merge(client.crates_used)
+			chunk.apply_state(hidden)
+			chunk.set_meta("aa_state_revision", revision)
+		if damage_dirty and chunk.has_method("apply_resource_damage"):
+			chunk.apply_resource_damage(client.resource_hits)
+			chunk.set_meta("aa_damage_revision", damage_revision)
 
 
 ## Announces the settlement or the region you walk into.
@@ -2285,11 +2383,73 @@ func _typing() -> bool:
 	return focus is LineEdit or (_access != null and _access.is_open()) # The settings menu swallows game hotkeys too.
 
 
+## A single bright, pulsing impact marker. It is positioned using the same
+## deterministic server rules and replicated strike count, not client guesses.
+## Map a click on the glowing 3D marker to its horizontal world bearing.
+## Without this, isometric aiming projects to the ground below the elevated
+## marker and exact mouse clicks would frequently miss the precision check.
+func _resource_swing_aim(node: Dictionary, fallback: Vector2) -> Vector2:
+	if node.is_empty() or camera == null or client == null:
+		return fallback
+	var hit_count: int = int(client.resource_hits.get(int(node["id"]), 0))
+	var spot: Vector3 = ResourceGathering.weakspot_position(node, hit_count)
+	if camera.is_position_behind(spot):
+		return fallback
+	var screen: Vector2 = camera.unproject_position(spot)
+	var cursor: Vector2 = get_viewport().get_visible_rect().size * 0.5 if _first_person \
+		else get_viewport().get_mouse_position()
+	if not screen.is_finite() or cursor.distance_to(screen) > 36.0:
+		return fallback
+	var offset := Vector2(spot.x - client.predicted.x, spot.z - client.predicted.z)
+	return offset.normalized() if offset.length_squared() > 0.01 else fallback
+
+
+func _update_resource_weakspot(node: Dictionary) -> void:
+	var can_show: bool = not node.is_empty() and ResourceGathering.is_strike(
+		str(node.get("kind", ""))) and bool(client.you.get("alive", false)) \
+		and not bool(client.you.get("mounted", false)) and not hud.is_menu_open()
+	if not can_show:
+		if _resource_weakspot != null:
+			_resource_weakspot.visible = false
+		return
+	if _resource_weakspot == null:
+		_resource_weakspot = MeshInstance3D.new()
+		_resource_weakspot.name = "MiningWeakspotMarker"
+		var ball := SphereMesh.new()
+		ball.radius = 0.12
+		ball.height = 0.24
+		ball.radial_segments = 10
+		ball.rings = 5
+		var glow := StandardMaterial3D.new()
+		glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		glow.albedo_color = Color(1.0, 0.72, 0.18, 0.92)
+		glow.emission_enabled = true
+		glow.emission = Color(1.0, 0.48, 0.08)
+		glow.emission_energy_multiplier = 2.0
+		ball.material = glow
+		_resource_weakspot.mesh = ball
+		_resource_weakspot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(_resource_weakspot)
+	var node_id: int = int(node["id"])
+	var completed: int = int(client.resource_hits.get(node_id, 0))
+	_resource_weakspot.position = ResourceGathering.weakspot_position(node, completed)
+	var pulse: float = 1.0 + 0.17 * sin(float(Time.get_ticks_msec()) * 0.008)
+	_resource_weakspot.scale = Vector3.ONE * pulse
+	_resource_weakspot.visible = not client.depleted.has(node_id)
+
+
 func _update_prompt() -> void:
 	var text := ""
 	var p: Vector3 = client.predicted
 	var loot: Dictionary = client.nearest_loot(p, Defs.REACH)
 	var node: Dictionary = client.nearest_node(p, Defs.REACH)
+	# A pickup closer than the tree must not hide the tree's weak spot.
+	# Scan a forward-facing candidate 8x/s instead of scanning every frame.
+	var now_ms: int = Time.get_ticks_msec()
+	if now_ms >= _resource_marker_rescan_at:
+		_resource_marker_rescan_at = now_ms + 125
+		_resource_marker_target = client.nearest_strike_node(p, _aim_direction())
+	_update_resource_weakspot(_resource_marker_target)
 	var below: bool = Dungeon.is_underground(p.x)
 	if below and Dungeon.at_stairs(p.x, p.z):
 		text = "[E] Climb the stairs back to the surface"
@@ -2299,7 +2459,23 @@ func _update_prompt() -> void:
 	elif not loot.is_empty():
 		text = "[E] Loot" if loot["kind"] == "bag" else "[E] Search the crate"
 	elif not node.is_empty():
-		text = "[E] Gather %s (tier %d)" % [node["kind"], node["tier"]]
+		var resource_kind: String = str(node["kind"])
+		if ResourceGathering.is_pickup(resource_kind):
+			var pickup_label: String = str({
+				"pebble": "Pick up loose stones",
+				"branch": "Pick up fallen sticks",
+				"bush": "Gather fibers",
+				"berry": "Pick berries",
+			}.get(resource_kind, "Collect resources"))
+			text = "[E] %s (hold E for nearby resources)" % pickup_label
+		elif ResourceGathering.is_strike(resource_kind):
+			var hits_done: int = int(client.resource_hits.get(int(node["id"]), 0))
+			var total_hits: int = ResourceGathering.strikes_needed(resource_kind)
+			text = "[LMB] %s %s (T%d) | %d/%d hits | Aim at golden spot for +1" % [
+				"Chop" if resource_kind == "tree" else "Mine", resource_kind,
+				int(node["tier"]), hits_done, total_hits]
+		else:
+			text = "[E] Gather %s (tier %d)" % [resource_kind, int(node["tier"])]
 		var needed := Defs.tool_tier_for_node(node["kind"])
 		if needed != "":
 			var tool_id: String = client.inventory.best_tool(needed)
@@ -2384,6 +2560,26 @@ func _update_gpu_measurements() -> void:
 	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(),
 		(_auto_graphics or _screenshot_path != "") and
 		RenderingServer.get_current_rendering_method() == "forward_plus")
+
+
+## Common graphics path for the title picker and in-game Settings.
+## Preserves native renderer, world streamer and GPU resolution behavior.
+func _apply_graphics_selection(index: int) -> void:
+	var selected: int = clampi(index, 0, GraphicsQuality.NAMES.size())
+	_set_auto_graphics(selected == GraphicsQuality.NAMES.size())
+	if _auto_graphics:
+		_auto_quality.set_mode("auto")
+		GraphicsQuality.set_level(_auto_quality.level, false)
+	else:
+		GraphicsQuality.set_level(selected)
+	_adaptive_resolution.configure(GraphicsQuality.level(),
+		GraphicsQuality.metalfx_resolution_floor())
+	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
+		streamer, _adaptive_resolution.scale if _auto_graphics else -1.0, _auto_graphics)
+	if is_instance_valid(_quality_picker):
+		_quality_picker.select(selected)
+	if _access != null and is_instance_valid(_access.menu):
+		_access.menu.call("set_graphics_choice", GraphicsQuality.level(), _auto_graphics)
 
 
 func _set_auto_graphics(enabled: bool) -> void:
@@ -2584,6 +2780,20 @@ func _update_first_person_mouse() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Nanite P1 asset-page validation on *actual* streamed foliage/props.
+	# Explicit debug keystroke only: no mesh scans/uploads per gameplay frame.
+	# Consume before ordinary F8 parry to avoid gameplay effects.
+	if OS.is_debug_build() and event is InputEventKey and event.pressed and \
+			not event.echo and event.ctrl_pressed and event.shift_pressed and \
+			event.keycode == KEY_F8:
+		var page_stats: Dictionary = VirtualGeometryPageInspector.inspect_streamed_world(
+			get_tree(), 8, 4096)
+		var page_report: String = VirtualGeometryPageInspector.format_report(page_stats)
+		print(page_report)
+		if hud != null:
+			hud.say(page_report)
+		get_viewport().set_input_as_handled()
+		return
 	# P1 large-world terrain editor validation: manually sculpt a small visual
 	# patch of the actually streamed ChunkedTerrain3D under the player. Debug
 	# only; collision is disabled here and server ground/AI are authoritative.
@@ -2648,7 +2858,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_profiler.visible = not _profiler.visible
 		get_viewport().set_input_as_handled()
 		return
-	# Ctrl+Shift+F9: PCG debugging — crosses at every procedurally placed point, coloured by asset.
+	# Ctrl+Shift+F9: PCG debugging — crosses at every procedurally placed point, colored by asset.
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.shift_pressed \
 			and event.keycode == KEY_F9 and _pcg_dressing != null:
 		_pcg_dressing.set_debug_draw(not PcgWorldDressing.debug_draw)
@@ -2657,14 +2867,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_F11:
-		_set_auto_graphics(false)
-		GraphicsQuality.cycle()
-		_adaptive_resolution.configure(GraphicsQuality.level(),
-		GraphicsQuality.metalfx_resolution_floor())
-		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
-		streamer, _adaptive_resolution.scale if _auto_graphics else -1.0, _auto_graphics)
-		if is_instance_valid(_quality_picker):
-			_quality_picker.select(GraphicsQuality.level())
+		_apply_graphics_selection((GraphicsQuality.level() + 1) % GraphicsQuality.NAMES.size())
 		var message := "Graphics: %s (Ctrl+F11 to change)" % GraphicsQuality.get_name()
 		if hud != null:
 			hud.say(message)
@@ -3044,6 +3247,35 @@ func _cycle_weapon() -> void:
 	client.use_item(owned[(current + 1) % owned.size()])
 
 
+## Holding E after a loose-resource pickup collects nearby sticks, pebbles,
+## fiber and berries one by one. A single initial press still has all its old
+## door/loot/dungeon semantics; only a verified pickup starts this mode.
+func _update_held_pickups() -> void:
+	if _hold_pickup_since_ms < 0:
+		return
+	if not Input.is_key_pressed(KEY_E) or Input.is_key_pressed(KEY_SHIFT) \
+			or _typing() or _build_mode or hud.is_menu_open() or _access.is_open() \
+			or not bool(client.you.get("alive", false)) \
+			or bool(client.you.get("mounted", false)):
+		_hold_pickup_since_ms = -1
+		_hold_pickup_pending.clear()
+		return
+	var now_ms: int = Time.get_ticks_msec()
+	if now_ms < _hold_pickup_since_ms + HOLD_PICKUP_DELAY_MS \
+			or now_ms < _hold_pickup_next_ms:
+		return
+	_hold_pickup_next_ms = now_ms + HOLD_PICKUP_INTERVAL_MS
+	for id in _hold_pickup_pending.keys():
+		if client.depleted.has(id) or now_ms >= int(_hold_pickup_pending[id]):
+			_hold_pickup_pending.erase(id)
+	var nearby: Dictionary = client.nearest_pickup_node(
+		client.predicted, Defs.REACH + 0.5, _hold_pickup_pending)
+	if not nearby.is_empty():
+		var node_id: int = int(nearby["id"])
+		_hold_pickup_pending[node_id] = now_ms + HOLD_PICKUP_RETRY_MS
+		client.resource_pickup(node_id)
+
+
 func _interact() -> void:
 	var p: Vector3 = client.predicted
 	# The hatch of a bunker leads down into its dungeon; the stairs of the first room lead back up.
@@ -3063,7 +3295,20 @@ func _interact() -> void:
 		return
 	var node: Dictionary = client.nearest_node(p, Defs.REACH)
 	if not node.is_empty():
-		client.gather(node["id"])
+		if ResourceGathering.is_pickup(str(node["kind"])):
+			var pickup_id: int = int(node["id"])
+			client.resource_pickup(pickup_id)
+			_hold_pickup_since_ms = Time.get_ticks_msec()
+			_hold_pickup_next_ms = _hold_pickup_since_ms + HOLD_PICKUP_DELAY_MS
+			_hold_pickup_pending.clear()
+			_hold_pickup_pending[pickup_id] = _hold_pickup_since_ms + HOLD_PICKUP_RETRY_MS
+		elif ResourceGathering.is_strike(str(node["kind"])):
+			var facing: Vector2 = _aim_direction()
+			if facing == Vector2.ZERO:
+				facing = _look_direction()
+			client.resource_hit(int(node["id"]), _resource_swing_aim(node, facing))
+		else:
+			client.gather(int(node["id"]))
 
 
 # --- Scripted demo for screenshots and videos --------------------------------------------------------------

@@ -44,6 +44,43 @@ func run(t) -> void:
 	t.eq(sparse.size(), 1, "sparse batches are not fragmented")
 	t.check(sparse.has("rock:1"), "sparse batch keeps the unmodified key")
 
+	t.current = "large chunk batches retain stable ids, order and cell borders"
+	var origin := Vector2(-120.0, 300.0)
+	var ore: Array = []
+	var expected: Dictionary = {}
+	var insertion_order: Array[String] = []
+	for i in 2048:
+		var local_x: float = float((i * 13) % 64) + 0.25
+		var local_z: float = float((i * 29) % 64) + 0.5
+		if i % 17 == 0:
+			local_x = -2.0
+		if i % 19 == 0:
+			local_z = 66.0
+		var node: Dictionary = {"id": 10000 + i,
+			"x": origin.x + local_x, "z": origin.y + local_z}
+		ore.append(node)
+		var expected_id: String = ObjectBatchGrid.key_for(
+			"ore:2", Vector2(float(node["x"]), float(node["z"])), origin, 64.0, 4)
+		if not expected.has(expected_id):
+			expected[expected_id] = []
+			insertion_order.append(expected_id)
+		var reference_nodes: Array = expected[expected_id]
+		reference_nodes.append(node)
+	var actual: Dictionary = ObjectBatchGrid.partition(
+		{"ore:2": ore}, origin, 64.0, 12, 4)
+	t.eq(actual.keys(), insertion_order,
+		"occupied cells retain first-encounter order and exact public keys")
+	var actual_count: int = 0
+	for expected_id in insertion_order:
+		var batch: Dictionary = actual[expected_id]
+		t.eq(batch["kind"], "ore:2", "resource type is unchanged in %s" % expected_id)
+		var actual_nodes: Array = batch["nodes"]
+		t.eq(actual_nodes, expected[expected_id],
+			"resource ids and within-cell ordering are preserved in %s" % expected_id)
+		actual_count += actual_nodes.size()
+	t.eq(actual_count, ore.size(), "all dense ore instances reach the renderer")
+	t.eq(ore.size(), 2048, "batching does not mutate the source list")
+
 	t.current = "screen-space LOD presets preserve Ultra geometry"
 	var low: Dictionary = GraphicsQuality.profile(0)
 	var balanced: Dictionary = GraphicsQuality.profile(1)

@@ -3,6 +3,7 @@ extends RefCounted
 ## and a predicted position for the local player that is corrected whenever the server answers.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const ResourceGathering = preload("res://scripts/shared/resource_gathering.gd")
 const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
@@ -46,8 +47,10 @@ var ember_pools: Dictionary = {} # Replicated server-owned burning ground.
 var outposts: Array = [] # Public server-controlled PvP objectives.
 var bags: Dictionary = {}
 var depleted: Dictionary = {}
+var resource_hits: Dictionary = {} # Server-verified nearby node id -> completed strikes.
 var crates_used: Dictionary = {}
-var world_state_revision: int = Time.get_ticks_usec() # Bumped only when depleted/crates_used really change, so views skip per-frame rescans.
+var world_state_revision: int = Time.get_ticks_usec() # Geometry and collision visibility only.
+var resource_damage_revision: int = 1 # Per-instance mining tint; avoid full chunk visibility scans on every hit.
 var server_time: float = 0.0
 var snapshots_received: int = 0
 var events: Array = [] # Recent events, newest last (for the HUD log).
@@ -90,6 +93,16 @@ func active_supply_beacon() -> Dictionary:
 
 func on_events(list: Array) -> void:
 	for event in list:
+		if str(event.get("type", "")) == "gathered" and bool(event.get("strike", false)):
+			var node_id: int = int(event.get("node", -1))
+			if bool(event.get("final", false)):
+				if resource_hits.erase(node_id):
+					resource_damage_revision += 1
+			else:
+				var next_hits: int = int(event.get("hit", 0))
+				if int(resource_hits.get(node_id, -1)) != next_hits:
+					resource_hits[node_id] = next_hits
+					resource_damage_revision += 1
 		if str(event.get("type", "")) == "party_supply_request":
 			var seen: Dictionary = PartySupplyBeacon.read(
 				event, peer_id, you.get("party", {}), server_time)
@@ -173,6 +186,12 @@ func on_snapshot(snapshot: Dictionary) -> void:
 				world.add_structure_blockers(id, HousePieces.blockers_of(entity))
 			else:
 				world.add_dynamic_blocker(id, float(entity["x"]), float(entity["z"]), 0.85)
+	var next_resource_hits: Dictionary = {}
+	for entry in snapshot.get("resource_hits", []):
+		next_resource_hits[int(entry["id"])] = int(entry["hits"])
+	if resource_hits != next_resource_hits:
+		resource_damage_revision += 1
+	resource_hits = next_resource_hits
 	var next_depleted: Dictionary = {}
 	for id in snapshot["depleted"]:
 		next_depleted[id] = true
@@ -181,6 +200,10 @@ func on_snapshot(snapshot: Dictionary) -> void:
 		next_crates[id] = true
 	if next_depleted != depleted or next_crates != crates_used:
 		world_state_revision += 1
+		# Prediction must see the same gaps as the server's depleted geometry
+		# before replaying input; otherwise mining creates invisible walls.
+		if next_depleted != depleted:
+			world.sync_depleted_nodes(next_depleted)
 	depleted = next_depleted
 	crates_used = next_crates
 	_reconcile(snapshot)
@@ -281,6 +304,14 @@ func join(player_name: String, token: String = "", refresh: String = "") -> void
 
 func gather(node_id: int) -> void:
 	net.c_gather.rpc_id(1, node_id)
+
+
+func resource_pickup(node_id: int) -> void:
+	net.c_resource_pickup.rpc_id(1, node_id)
+
+
+func resource_hit(node_id: int, direction: Vector2) -> void:
+	net.c_resource_hit.rpc_id(1, node_id, direction.x, direction.y)
 
 
 func place_fish_trap() -> void:
@@ -838,10 +869,60 @@ func nearest_node(point: Vector3, radius: float) -> Dictionary:
 			for node in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["nodes"]:
 				if depleted.has(node["id"]):
 					continue
-				var distance := Vector2(node["x"] - point.x, node["z"] - point.z).length()
+				var center_distance: float = Vector2(float(node["x"]) - point.x, float(node["z"]) - point.z).length()
+				# Logs and stones are interactable from their solid footprint edge.
+				var margin: float = ResourceGathering.reach_margin(node)
+				var distance: float = maxf(0.0, center_distance - margin)
 				if distance < best_distance:
 					best = node
 					best_distance = distance
+	return best
+
+
+## Select a mineable node in front of the player's actual swing, ignoring ground pickups.
+func nearest_strike_node(point: Vector3, direction: Vector2, radius: float = Defs.REACH + 0.5) -> Dictionary:
+	var best: Dictionary = {}
+	var best_distance: float = radius
+	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			for node in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["nodes"]:
+				if depleted.has(node["id"]) or not ResourceGathering.is_strike(str(node["kind"])):
+					continue
+				if not ResourceGathering.aimed_at(point, node, direction, radius):
+					continue
+				var center_distance: float = Vector2(float(node["x"]) - point.x,
+					float(node["z"]) - point.z).length()
+				var margin: float = ResourceGathering.reach_margin(node)
+				var distance: float = maxf(0.0, center_distance - margin)
+				if distance < best_distance:
+					best_distance = distance
+					best = node
+	return best
+
+
+## Only true one-press gatherables, not trees, ores, doors or loot crates.
+## The held-E collector skips already sent requests until depletion arrives.
+func nearest_pickup_node(point: Vector3, radius: float,
+		skip_ids: Dictionary = {}) -> Dictionary:
+	if world == null:
+		return {}
+	var best: Dictionary = {}
+	var best_distance: float = radius
+	var cell: Vector2i = WorldGen.cell_of(point.x, point.z)
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			for node in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["nodes"]:
+				var node_id: int = int(node["id"])
+				if depleted.has(node_id) or skip_ids.has(node_id) \
+						or not ResourceGathering.is_pickup(str(node["kind"])):
+					continue
+				var offset := Vector2(float(node["x"]) - point.x,
+					float(node["z"]) - point.z)
+				var distance: float = offset.length()
+				if distance < best_distance:
+					best_distance = distance
+					best = node
 	return best
 
 

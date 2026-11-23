@@ -20,6 +20,15 @@
 		[/codeblock]
 	</description>
 	<methods>
+		<method name="build_cut_arrays" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="source_arrays" type="Array" />
+			<param index="1" name="hierarchy" type="Dictionary" />
+			<param index="2" name="cut" type="PackedInt32Array" />
+			<description>
+				Assembles the selected LOD cut as [Mesh.ARRAY_MAX] surface arrays, preserving all original vertex attribute arrays and replacing only [constant Mesh.ARRAY_INDEX]. The [param source_arrays] must contain the exact [constant Mesh.ARRAY_VERTEX] positions used to build [param hierarchy]. Each selected cluster uses original global vertex indices; invalid, repeated or out-of-range cluster IDs are rejected. The returned surface arrays may be passed to [method ArrayMesh.add_surface_from_arrays]; set its original material separately. Geometry simplification is still position-only; these preserved attributes are not weighted in the simplifier's error metric. This API is CPU-side and does not perform GPU cluster traversal or streaming.
+			</description>
+		</method>
 		<method name="build_hierarchy" qualifiers="static">
 			<return type="Dictionary" />
 			<param index="0" name="vertices" type="PackedVector3Array" />
@@ -27,6 +36,18 @@
 			<param index="2" name="levels" type="int" default="4" />
 			<description>
 				Builds the hierarchy with at most [param levels] levels (clamped to [code][1, 16][/code]). Stops early when a level cannot be simplified further. Groups whose simplification gains nothing, for example because their border is fully locked, are left as roots. Returns an empty dictionary, with an error message, for an empty mesh or an index outside [param vertices].
+			</description>
+		</method>
+		<method name="simplify_surface_arrays" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="surface_arrays" type="Array" />
+			<param index="1" name="target_triangles" type="int" />
+			<param index="2" name="normal_weight" type="float" default="0.6" />
+			<param index="3" name="uv_weight" type="float" default="0.6" />
+			<description>
+				Performs native meshoptimizer attribute-aware static triangle simplification on the existing indexed [Mesh] surface arrays. Uses source positions and optionally supplied normals and first UV channel as weighted error terms, locking topological border edges. Returns a complete [constant Mesh.ARRAY_MAX]-sized copy of the source arrays with only [constant Mesh.ARRAY_INDEX] replaced; original vertex positions, normals, tangents, colors, UV2, skin data, custom channels and their original vertex IDs stay unchanged. The caller is responsible for retaining the original material on the resulting [ArrayMesh].
+				Source positions must be finite and contain 3 through 1,000,000 vertices. Input must contain at least two indexed triangles and at most 3,000,000 index values. Normals and UVs, when supplied, must match vertex count and be finite. Index values must reference existing vertices; the positive triangle target must be smaller than the source count. Attribute weights must be finite values from 0 through 8. The method returns an empty array without modifying the original mesh when validation fails or meshoptimizer cannot reduce topology. The output may contain more triangles than the requested target if topology/border locking prevents further reduction, so callers must check the returned count.
+				This CPU import/load-time helper is **not** GPU Nanite rendering, texture/cluster page streaming, or a replacement for the position-only [method build_hierarchy] and [method select_cut] implementation.
 			</description>
 		</method>
 		<method name="select_cut" qualifiers="static">

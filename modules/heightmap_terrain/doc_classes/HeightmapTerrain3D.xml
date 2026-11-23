@@ -5,11 +5,23 @@
     </brief_description>
     <description>
         Generates a triangle mesh from a [TerrainHeightmap], including normals, UVs, and vertex colors. The editor provides a brush toolbar for raising, lowering, and coloring the terrain with Undo/Redo. The generated mesh is regenerated when height or color data changes.
-        [b]Note:[/b] The current implementation is intended for small meshes only, as editing any sample rebuilds the entire mesh. Physics collision, tiled LOD, foliage, and world streaming are not generated automatically.
+        [b]Note:[/b] The current implementation is intended for small meshes only, as editing any sample rebuilds the entire mesh. Physics collision can be generated and synchronized with height edits when [member auto_collision_enabled] is on; it is off by default. Chunked LOD and world streaming are separate systems.
     </description>
     <tutorials>
     </tutorials>
     <methods>
+        <method name="get_auto_collision_triangle_count" qualifiers="const">
+            <return type="int" />
+            <description>
+                Returns the current generated collision triangle count when [member auto_collision_enabled] is active, otherwise 0. The collider is automatically capped at 8192 triangles independently of the visual mesh.
+            </description>
+        </method>
+        <method name="get_auto_collision_shape" qualifiers="const">
+            <return type="Shape3D" />
+            <description>
+                Returns the current internal concave terrain collision shape, or [code]null[/code] if no shape has been generated. A disabled collider can still retain its last shape to avoid rebuilding when re-enabled.
+            </description>
+        </method>
         <method name="build_mesh" qualifiers="const">
             <return type="ArrayMesh" />
             <description>
@@ -26,6 +38,12 @@
         </method>
     </methods>
     <members>
+        <member name="auto_collision_enabled" type="bool" setter="set_auto_collision_enabled" getter="is_auto_collision_enabled" default="false">
+            Opt-in terrain collision through an internal StaticBody3D. The collision surface follows all heightmap geometry edits, while color/material edits do not rebuild an unchanged shape. Live edits are coalesced into a deferred update for physics-server safety.
+        </member>
+        <member name="auto_collision_step" type="int" setter="set_auto_collision_step" getter="get_auto_collision_step" default="1">
+            Minimum heightmap sample stride for the terrain collider (1..16). The engine increases it further if needed to cap the collider at 8192 triangles. The visual mesh retains the full original sampling resolution.
+        </member>
         <member name="cell_size" type="float" setter="set_cell_size" getter="get_cell_size" default="1.0">
             Distance in local units between adjacent samples.
         </member>

@@ -11,6 +11,7 @@ const ServerTickGovernor = preload("res://scripts/server/server_tick_governor.gd
 const WorldPersistence = preload("res://scripts/server/world_persistence.gd")
 const SoloCharacterStore = preload("res://scripts/server/solo_character_store.gd")
 const Net = preload("res://scripts/shared/net.gd")
+const NetProtocol = preload("res://scripts/shared/net_protocol.gd")
 const GATEWAY_PATH := "res://scripts/server/nakama_gateway.gd"
 
 const DataLayers = preload("res://scripts/shared/data_layers.gd")
@@ -196,6 +197,12 @@ func _initialize() -> void:
 		printerr("SERVER could not listen on port %d (error %d)" % [port, error])
 		quit(2)
 		return
+	if not NetProtocol.install(get_multiplayer() as SceneMultiplayer, net,
+			Callable(self, "_on_rpc_protocol_rejected")):
+		printerr("SERVER could not initialize RPC protocol authentication.")
+		peer.close()
+		quit(3)
+		return
 	get_multiplayer().multiplayer_peer = peer
 	get_multiplayer().peer_disconnected.connect(func(id: int) -> void:
 		net.leave(id)
@@ -204,6 +211,10 @@ func _initialize() -> void:
 		NetTimeouts.apply(peer, id) # Survive a client's first-launch shader/world stall.
 		print("SERVER peer %d connected" % id))
 	print("SERVER listening on %d, seed %d, %d ticks/s%s, accounts: %s" % [port, world_seed, Defs.TICK_RATE, ", debug commands on" if net.allow_debug else "", nakama_address if nakama_address != "" else "offline"])
+
+
+func _on_rpc_protocol_rejected(peer_id: int) -> void:
+	print("SERVER rejected peer %d: incompatible RPC protocol. Update client and server together." % peer_id)
 
 
 func _physics_process(delta: float) -> bool:

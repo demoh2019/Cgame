@@ -8,6 +8,8 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
+const StoneResources = preload("res://scripts/shared/stone_resources.gd")
+const SolidScenery = preload("res://scripts/shared/solid_scenery.gd")
 
 var world_seed: int
 var _continent: FastNoiseLite
@@ -16,7 +18,18 @@ var _detail: FastNoiseLite
 var _temperature: FastNoiseLite
 var _moisture: FastNoiseLite
 var _cache: Dictionary = {}
+var _cache_ages: Dictionary = {} # Last use of each live chunk; incremental LRU eviction.
+var _static_blockers: Dictionary = {} # Per-chunk solid-only broadphase, same lifetime as _cache.
+var _cache_clock: int = 0
+var _cache_hits: int = 0
+var _cache_misses: int = 0
+var _cache_evictions: int = 0
 var dynamic_blockers: Dictionary = {} # Session structures shared with movement and prediction.
+# Generated resource geometry remains immutable for deterministic world seeding.
+# Only its collision eligibility is mutable, matching server depletion and
+# client snapshot state (the renderer hides the same node IDs).
+var depleted_blockers: Dictionary = {}
+
 var _hub_structures: Array = []
 var _level_rx: int = 1 << 30
 var _level_rz: int = 1 << 30
@@ -350,13 +363,58 @@ static func entity_id(cell: Vector2i, index: int) -> int:
 ## Everything in a chunk, derived from the seed: gatherable nodes, ruins with loot crates and the
 ## places where zombies spawn. The same call always gives the same answer.
 func chunk(cell: Vector2i) -> Dictionary:
+	_cache_clock += 1
 	if _cache.has(cell):
+		_cache_hits += 1
+		_cache_ages[cell] = _cache_clock
 		return _cache[cell]
-	if _cache.size() > CACHE_LIMIT:
-		_cache.clear()
-	var data := _generate_chunk(cell)
+	_cache_misses += 1
+	# Evict only the least recently used chunk. Clearing the entire cache
+	# caused a burst of expensive world-generation work at the 256-cell edge.
+	if _cache.size() >= CACHE_LIMIT:
+		var oldest_cell: Vector2i = _cache_ages.keys()[0]
+		var oldest_age: int = int(_cache_ages[oldest_cell])
+		for cached_cell in _cache_ages:
+			var age: int = int(_cache_ages[cached_cell])
+			if age < oldest_age:
+				oldest_cell = cached_cell
+				oldest_age = age
+		_cache.erase(oldest_cell)
+		_cache_ages.erase(oldest_cell)
+		_static_blockers.erase(oldest_cell)
+		_cache_evictions += 1
+	var data: Dictionary = _generate_chunk(cell)
 	_cache[cell] = data
+	_cache_ages[cell] = _cache_clock
+	# Index only solid objects, preserving the original group iteration order.
+	# Depleted resource IDs are deliberately checked at query time.
+	var solids: Array = []
+	for group in ["nodes", "crates", "structures", "props"]:
+		for item in data[group]:
+			if bool(item.get("blocks", false)):
+				solids.append([item, group == "nodes"])
+	_static_blockers[cell] = solids
 	return data
+
+
+## Lightweight counters used by the in-game performance overlay and tests.
+func chunk_cache_stats() -> Dictionary:
+	return {"size": _cache.size(), "capacity": CACHE_LIMIT, "hits": _cache_hits,
+		"misses": _cache_misses, "evictions": _cache_evictions,
+		"collision_chunks": _static_blockers.size()}
+
+
+func chunk_cache_size() -> int:
+	return _cache.size()
+
+
+func chunk_cache_evictions() -> int:
+	return _cache_evictions
+
+
+func chunk_cache_hit_percent() -> float:
+	var total: int = _cache_hits + _cache_misses
+	return 0.0 if total == 0 else 100.0 * float(_cache_hits) / float(total)
 
 
 ## Sunken caches lie on the bottom of deep water; only a diver can open them. A separate
@@ -487,6 +545,7 @@ func _add_outposts(cell: Vector2i, origin: Vector2, zone: int, ruin: bool, struc
 ## clustered around them, densest in forest, thinner in swamp and plains. Real gatherable,
 ## collidable tree nodes (server and client agree), on their own random stream so every other
 ## node of the chunk keeps its place. Ids 960-999.
+const PICKUP_ID_BASE := 790 # 790..809: between loose-stone and outpost IDs.
 const GROVE_ID_BASE := 960
 const GROVE_ID_MAX := 40
 const GROVE_TREES := {"forest": [18, 30], "swamp": [8, 14], "plains": [4, 10]}
@@ -534,6 +593,36 @@ func _add_groves(cell: Vector2i, origin: Vector2, tier: int, nodes: Array, sites
 		placed += 1
 
 
+## Small items are real server/client-shared resource nodes, not cosmetic PCG meshes.
+## Separate random stream and reserved IDs keep all existing tree/ore placement stable.
+func _add_ground_pickups(cell: Vector2i, origin: Vector2, nodes: Array, sites: Array) -> void:
+	var prng := RandomNumberGenerator.new()
+	prng.seed = mix(cell.x, cell.y, world_seed, 109)
+	var wanted: int = prng.randi_range(4, 8)
+	var placed: int = 0
+	for _attempt in 48:
+		if placed >= wanted:
+			break
+		var p: Vector2 = origin + Vector2(prng.randf(), prng.randf()) * Defs.CHUNK_SIZE
+		if is_water(p.x, p.y) or is_safe(p.x, p.y) or _in_site_clearing(p, sites):
+			continue
+		var too_close: bool = false
+		for existing in nodes:
+			if Vector2(float(existing["x"]), float(existing["z"])).distance_to(p) < 1.5:
+				too_close = true
+				break
+		if too_close:
+			continue
+		var kind: String = "pebble" if prng.randf() < 0.52 else "branch"
+		var info: Dictionary = Defs.node_info(kind)
+		nodes.append({
+			"id": entity_id(cell, PICKUP_ID_BASE + placed), "kind": kind, "tier": 1,
+			"x": p.x, "z": p.y, "y": height_at(p.x, p.y),
+			"radius": info["radius"], "blocks": false,
+		})
+		placed += 1
+
+
 func _add_sunken_caches(cell: Vector2i, origin: Vector2, zone: int, crates: Array) -> void:
 	var sunken_rng := RandomNumberGenerator.new()
 	sunken_rng.seed = mix(cell.x, cell.y, world_seed, 71)
@@ -553,6 +642,84 @@ func _add_sunken_caches(cell: Vector2i, origin: Vector2, zone: int, crates: Arra
 			"x": p.x, "z": p.y, "y": height_at(p.x, p.y), "radius": 0.6, "blocks": false,
 		})
 		placed += 1
+
+
+## Loose rocks have stable, independently seeded resource ids. The older
+## generated chunks use < 550; outposts start at 850, hostiles at 900,
+## sunken caches at 950, and grove trees at 960.
+const STONE_ID_BASE := 550
+const STONE_ID_LIMIT := 240
+
+
+func _try_add_stone(cell: Vector2i, origin: Vector2, point: Vector2, small: bool,
+		tier: int, sites: Array, nodes: Array, placed: Array[Vector2],
+		rng: RandomNumberGenerator, position_index: int) -> bool:
+	if position_index >= STONE_ID_LIMIT:
+		return false
+	if point.x < origin.x or point.y < origin.y or point.x >= origin.x + Defs.CHUNK_SIZE or point.y >= origin.y + Defs.CHUNK_SIZE:
+		return false
+	if is_water(point.x, point.y) or is_safe(point.x, point.y) or _in_site_clearing(point, sites):
+		return false
+	if roads != null and roads.coverage_at(point.x, point.y) > 0.0:
+		return false
+	for other in placed:
+		if other.distance_squared_to(point) < (0.9 if small else 3.0) ** 2:
+			return false
+	var biome: String = biome_at(point.x, point.y)
+	var variant: int = StoneResources.pick_model(biome, small, rng)
+	if variant < 0:
+		return false
+	var entry: Dictionary = StoneResources.MODELS[variant]
+	# A tiny pickable stone uses the real scanned/kit model; a large rock is
+	# a normal mineable resource and requires tools/skill according to tier.
+	var scale: float = rng.randf_range(0.4, 0.75) if small else rng.randf_range(0.75, 1.2)
+	var kind: String = "pebble" if small else "rock"
+	var info: Dictionary = Defs.node_info(kind)
+	var visual_radius: float = clampf(float(entry["size"]) * scale * 0.4, 0.12, 1.8)
+	nodes.append({
+		"id": entity_id(cell, STONE_ID_BASE + position_index),
+		"kind": kind, "tier": 1 if small else tier,
+		"stone_model": variant, "scale": scale, "yaw": rng.randf() * TAU,
+		"x": point.x, "z": point.y, "y": height_at(point.x, point.y),
+		"radius": visual_radius if not small else float(info["radius"]),
+		"blocks": not small,
+	})
+	placed.append(point)
+	return true
+
+
+## This is server/client shared world content, not decorative MultiMeshes.
+## Every visible loose stone has an authoritative id, depletion and inventory
+## reward. The separate random stream leaves original trees, ores and crates
+## unchanged and limits the resource overhead of each chunk.
+func _add_loose_stones(cell: Vector2i, origin: Vector2, tier: int, nodes: Array,
+		sites: Array) -> void:
+	var center: Vector2 = origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
+	if center.length() < Defs.HUB_SAFE_RADIUS + 30.0:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = mix(cell.x, cell.y, world_seed, 233)
+	var anchors: Array[Dictionary] = []
+	for node in nodes:
+		if str(node["kind"]) in ["rock", "ore"]:
+			anchors.append(node)
+	var placed: Array[Vector2] = []
+	var count := 0
+	for anchor in anchors:
+		if count >= STONE_ID_LIMIT:
+			break
+		var center_at := Vector2(float(anchor["x"]), float(anchor["z"]))
+		for _attempt in rng.randi_range(2, 5):
+			var at: Vector2 = center_at + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(1.3, 3.7)
+			if _try_add_stone(cell, origin, at, true, tier, sites, nodes, placed, rng, count):
+				count += 1
+	# Isolated boulders still appear when a chunk has few regular rock nodes.
+	for _attempt in 3:
+		if count >= STONE_ID_LIMIT:
+			break
+		var at := origin + Vector2(rng.randf(), rng.randf()) * Defs.CHUNK_SIZE
+		if _try_add_stone(cell, origin, at, false, tier, sites, nodes, placed, rng, count):
+			count += 1
 
 
 func _generate_chunk(cell: Vector2i) -> Dictionary:
@@ -710,10 +877,75 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 	_add_hostiles(cell, origin, zone, ruin, spawns)
 	_add_groves(cell, origin, tier, nodes, sites)
 	_add_outposts(cell, origin, zone, ruin, structures, crates, props, sites)
+	_add_ground_pickups(cell, origin, nodes, sites)
+	_add_loose_stones(cell, origin, tier, nodes, sites)
+	_add_fallen_wood(cell, origin, tier, nodes, structures, crates, props, sites)
 	var generated := {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
 	if spawn_extender != null:
 		spawn_extender.extend(cell, generated)
 	return generated
+
+
+## Large fallen trunks use the same world IDs on the server and every client.
+## Slots 810..819 do not overlap loose stones (550..789), pickups (790..809),
+## outposts (850+), hostiles (900+) or grove trees (960+).
+const FALLEN_WOOD_ID_BASE := 810
+const FALLEN_WOOD_MAX := 1
+
+
+func _add_fallen_wood(cell: Vector2i, origin: Vector2, tier: int, nodes: Array,
+		structures: Array, crates: Array, props: Array, sites: Array) -> void:
+	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
+	if center.length() < Defs.HUB_SAFE_RADIUS + 40.0 or Dungeon.is_underground(origin.x + Defs.CHUNK_SIZE):
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = mix(cell.x, cell.y, world_seed, 149)
+	if rng.randf() > 0.55:
+		return
+	var placed := 0
+	for _attempt in 16:
+		if placed >= FALLEN_WOOD_MAX:
+			break
+		# Keep every 5m log away from borders so adjacent chunks cannot
+		# create overlapping collision on either side of a streaming seam.
+		var point := origin + Vector2(rng.randf_range(6.0, Defs.CHUNK_SIZE - 6.0),
+			rng.randf_range(6.0, Defs.CHUNK_SIZE - 6.0))
+		if is_water(point.x, point.y) or is_safe(point.x, point.y):
+			continue
+		if roads != null and roads.coverage_at(point.x, point.y) > 0.0:
+			continue
+		var variants: Array[int] = SolidScenery.available_variants(biome_at(point.x, point.y))
+		if variants.is_empty():
+			continue
+		var variant: int = variants[rng.randi_range(0, variants.size() - 1)]
+		var scale: float = rng.randf_range(0.85, 1.15)
+		var radius: float = SolidScenery.radius(variant, scale)
+		var blocked := false
+		for site in sites:
+			if point.distance_to(Vector2(float(site["x"]), float(site["z"]))) < float(site["radius"]) + radius + 2.0:
+				blocked = true
+				break
+		if blocked:
+			continue
+		for group in [nodes, structures, crates, props]:
+			for obj in group:
+				var clearance: float = radius + float(obj.get("radius", 0.5)) + 0.7
+				if point.distance_squared_to(Vector2(float(obj["x"]), float(obj["z"]))) < clearance * clearance:
+					blocked = true
+					break
+			if blocked:
+				break
+		if blocked:
+			continue
+		var descriptor: Dictionary = SolidScenery.MODELS[variant]
+		nodes.append({
+			"id": entity_id(cell, FALLEN_WOOD_ID_BASE + placed),
+			"kind": str(descriptor["resource"]), "solid_model": variant,
+			"x": point.x, "z": point.y, "y": height_at(point.x, point.y),
+			"yaw": rng.randf() * TAU, "scale": scale, "radius": radius,
+			"tier": tier, "blocks": true,
+		})
+		placed += 1
 
 
 ## Trees and rocks keep out of the inner part of a settlement, camp or city.
@@ -782,6 +1014,21 @@ static func _pick_zombie(zone: int, rng: RandomNumberGenerator) -> String:
 	return "walker"
 
 
+## A depleted resource has no visible mesh and must not block locomotion.
+## This is updated only on a server gather/respawn or a changed client snapshot.
+func set_node_depleted(node_id: int, depleted: bool) -> void:
+	if depleted:
+		depleted_blockers[node_id] = true
+	else:
+		depleted_blockers.erase(node_id)
+
+
+## Snapshots replace the complete live depletion set, including corrections
+## after reconnect. Copy it rather than alias mutable client state.
+func sync_depleted_nodes(nodes: Dictionary) -> void:
+	depleted_blockers = nodes.duplicate()
+
+
 ## Static things that block movement near a point, for both the server and client prediction.
 func add_dynamic_blocker(id: int, x: float, z: float, radius: float) -> void:
 	if is_finite(x) and is_finite(z) and is_finite(radius) and radius > 0.0:
@@ -829,11 +1076,20 @@ func blockers_near(x: float, z: float, radius: float) -> Array:
 	var cell_b := cell_of(x + radius, z + radius)
 	for cx in range(cell_a.x, cell_b.x + 1):
 		for cz in range(cell_a.y, cell_b.y + 1):
-			var data := chunk(Vector2i(cx, cz))
-			for group in ["nodes", "crates", "structures", "props"]:
-				for n in data[group]:
-					if n["blocks"] and absf(n["x"] - x) < radius + n["radius"] and absf(n["z"] - z) < radius + n["radius"]:
-						result.append(n)
+			var cell: Vector2i = Vector2i(cx, cz)
+			chunk(cell) # Ensures a matching solid-only index exists on cache miss.
+			for entry in _static_blockers[cell]:
+				var n: Dictionary = entry[0]
+				# Depletion affects actual collisions, not just MultiMesh
+				# visibility. The cached geometry must never become a
+				# ghost barrier when a model is mined or reappear too early.
+				if bool(entry[1]) and depleted_blockers.has(n["id"]):
+					continue
+				if bool(n["blocks"]) and (
+						absf(float(n["x"]) - x) < radius + float(n["radius"]) and
+						absf(float(n["z"]) - z) < radius + float(n["radius"])
+					):
+					result.append(n)
 	# Include built obstacles without erasing the procedural hub/terrain blockers.
 	for barricade in dynamic_blockers.values():
 		if absf(float(barricade["x"]) - x) <= radius + float(barricade["radius"]) and absf(float(barricade["z"]) - z) <= radius + float(barricade["radius"]):

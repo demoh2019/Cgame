@@ -23,6 +23,7 @@ var _center: Array[Vector2i] = []   # per-level clipmap centre in global page co
 var _cache: Dictionary = {}          # key:int -> {slot:int, dirty:bool, used:int, level:int, gx:int, gy:int}
 var _free: Array[int] = []
 var _requested: Dictionary = {}      # key:int -> true (this frame)
+var _render_jobs := PackedInt32Array() # packed (level, gx, gy, physical_slot) for current frame
 var _frame: int = 0
 var _evicted: int = 0
 var _dropped: int = 0
@@ -38,6 +39,7 @@ func setup(clipmap_levels: int, level0_world_size: float, page_size_texels: int,
 	physical_capacity = maxi(physical_pages, 1)
 	_cache.clear()
 	_requested.clear()
+	_render_jobs.clear()
 	_free.clear()
 	for i in range(physical_capacity - 1, -1, -1):
 		_free.append(i)
@@ -64,6 +66,7 @@ func texel_world_size(level: int) -> float:
 func begin_frame(light_dir: Vector3, camera_pos: Vector3) -> void:
 	_frame += 1
 	_requested.clear()
+	_render_jobs.clear()
 	_evicted = 0
 	_dropped = 0
 	var d: Vector3 = light_dir.normalized()
@@ -100,8 +103,18 @@ func level_for_footprint(footprint: float) -> int:
 	return levels - 1
 
 
+@warning_ignore("integer_division")
+func _in_current_window(level: int, gx: int, gy: int) -> bool:
+	if level < 0 or level >= _center.size() or pages_per_axis < 1:
+		return false
+	var half: int = pages_per_axis / 2
+	var dx: int = gx - _center[level].x
+	var dy: int = gy - _center[level].y
+	return (dx >= -half and dx < pages_per_axis - half
+			and dy >= -half and dy < pages_per_axis - half)
+
+
 func request_for_receivers(points: PackedVector3Array, pixel_footprints: PackedFloat32Array) -> void:
-	var half: int = pages_per_axis >> 1
 	for i in points.size():
 		var fp: float = pixel_footprints[i] if i < pixel_footprints.size() else texel_world_size(0)
 		var l: int = level_for_footprint(fp)
@@ -109,8 +122,7 @@ func request_for_receivers(points: PackedVector3Array, pixel_footprints: PackedF
 		var pw: float = page_world_size(l)
 		var gx: int = int(floorf(p.dot(_right) / pw))
 		var gy: int = int(floorf(p.dot(_up) / pw))
-		var c: Vector2i = _center[l]
-		if absi(gx - c.x) >= half or absi(gy - c.y) >= half:
+		if not _in_current_window(l, gx, gy):
 			continue
 		_requested[_key(l, gx, gy)] = true
 
@@ -168,6 +180,7 @@ func end_frame() -> Dictionary:
 		if _cache.has(k):
 			var e2: Dictionary = _cache[k]
 			if e2["dirty"]:
+				_append_render_job(e2)
 				e2["dirty"] = false
 				rendered += 1
 			else:
@@ -180,7 +193,9 @@ func end_frame() -> Dictionary:
 		var lvl: int = (k >> 48) & 0xFF
 		var gx: int = ((k >> 24) & 0xFFFFFF) - 0x800000
 		var gy: int = (k & 0xFFFFFF) - 0x800000
-		_cache[k] = {"slot": slot, "dirty": false, "used": _frame, "level": lvl, "gx": gx, "gy": gy}
+		var entry := {"slot": slot, "dirty": false, "used": _frame, "level": lvl, "gx": gx, "gy": gy}
+		_cache[k] = entry
+		_append_render_job(entry)
 		allocated += 1
 		rendered += 1
 	return {
@@ -188,6 +203,19 @@ func end_frame() -> Dictionary:
 		"evicted": _evicted, "dropped": _dropped, "requested": keys.size(),
 		"resident": _cache.size(),
 	}
+
+
+func _append_render_job(entry: Dictionary) -> void:
+	_render_jobs.append(int(entry["level"]))
+	_render_jobs.append(int(entry["gx"]))
+	_render_jobs.append(int(entry["gy"]))
+	_render_jobs.append(int(entry["slot"]))
+
+
+## Flattened 4-int records, one per newly assigned/invalidated page.
+## Consume after end_frame() and before begin_frame() clears the batch.
+func get_render_jobs() -> PackedInt32Array:
+	return _render_jobs
 
 
 func resident_count() -> int:
@@ -212,6 +240,8 @@ func page_table() -> PackedInt32Array:
 		var gx: int = e["gx"]
 		var gy: int = e["gy"]
 		var slot: int = e["slot"]
+		if not _in_current_window(l, gx, gy):
+			continue
 		table[l * n * n + posmod(gy, n) * n + posmod(gx, n)] = slot
 	return table
 

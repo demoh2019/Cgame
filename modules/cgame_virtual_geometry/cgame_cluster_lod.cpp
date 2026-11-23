@@ -388,6 +388,183 @@ int CgameClusterLOD::triangle_count(const Dictionary &p_hierarchy, const PackedI
 	return total;
 }
 
+// A safe native import/load-time index reduction path. Meshoptimizer chooses
+// collapses using per-vertex normal and UV penalties; the resulting triangles
+// refer to ORIGINAL source vertex IDs, preserving every packed surface
+// attribute, including tangents, colors, UV2, bones and custom channels.
+// This is not GPU-driven cluster rendering or geometry streaming.
+Array CgameClusterLOD::simplify_surface_arrays(const Array &p_surface_arrays,
+		int p_target_triangles, float p_normal_weight, float p_uv_weight) {
+	Array invalid;
+	if (p_surface_arrays.size() != Mesh::ARRAY_MAX ||
+			p_surface_arrays[Mesh::ARRAY_VERTEX].get_type() != Variant::PACKED_VECTOR3_ARRAY ||
+			p_surface_arrays[Mesh::ARRAY_INDEX].get_type() != Variant::PACKED_INT32_ARRAY ||
+			!Math::is_finite(p_normal_weight) || !Math::is_finite(p_uv_weight) ||
+			p_normal_weight < 0.0f || p_uv_weight < 0.0f ||
+			p_normal_weight > 8.0f || p_uv_weight > 8.0f) {
+		return invalid;
+	}
+	const PackedVector3Array vertices = p_surface_arrays[Mesh::ARRAY_VERTEX];
+	const PackedInt32Array indices = p_surface_arrays[Mesh::ARRAY_INDEX];
+	const int vertex_count = vertices.size();
+	const int index_count = indices.size();
+	if (vertex_count < 3 || vertex_count > 1000000 ||
+			index_count < 6 || index_count > 3000000 ||
+			index_count % 3 != 0 || p_target_triangles < 1 ||
+			p_target_triangles >= index_count / 3) {
+		return invalid;
+	}
+	PackedVector3Array normals;
+	if (p_surface_arrays[Mesh::ARRAY_NORMAL].get_type() == Variant::PACKED_VECTOR3_ARRAY) {
+		normals = p_surface_arrays[Mesh::ARRAY_NORMAL];
+	} else if (p_surface_arrays[Mesh::ARRAY_NORMAL].get_type() != Variant::NIL) {
+		return invalid;
+	}
+	PackedVector2Array uvs;
+	if (p_surface_arrays[Mesh::ARRAY_TEX_UV].get_type() == Variant::PACKED_VECTOR2_ARRAY) {
+		uvs = p_surface_arrays[Mesh::ARRAY_TEX_UV];
+	} else if (p_surface_arrays[Mesh::ARRAY_TEX_UV].get_type() != Variant::NIL) {
+		return invalid;
+	}
+	if ((!normals.is_empty() && normals.size() != vertex_count) ||
+			(!uvs.is_empty() && uvs.size() != vertex_count)) {
+		return invalid;
+	}
+	const bool use_normals = normals.size() == vertex_count;
+	const bool use_uvs = uvs.size() == vertex_count;
+	const int attribute_count = (use_normals ? 3 : 0) + (use_uvs ? 2 : 0);
+
+	LocalVector<float> positions;
+	positions.resize(size_t(vertex_count) * 3);
+	LocalVector<float> attributes;
+	if (attribute_count > 0) {
+		attributes.resize(size_t(vertex_count) * attribute_count);
+	}
+	float weights[5] = {};
+	int weight_index = 0;
+	if (use_normals) {
+		for (int c = 0; c < 3; ++c) {
+			weights[weight_index++] = p_normal_weight;
+		}
+	}
+	if (use_uvs) {
+		for (int c = 0; c < 2; ++c) {
+			weights[weight_index++] = p_uv_weight;
+		}
+	}
+	const Vector3 *src_vertices = vertices.ptr();
+	const Vector3 *src_normals = use_normals ? normals.ptr() : nullptr;
+	const Vector2 *src_uvs = use_uvs ? uvs.ptr() : nullptr;
+	for (int i = 0; i < vertex_count; ++i) {
+		if (!src_vertices[i].is_finite()) {
+			return invalid;
+		}
+		const float x = float(src_vertices[i].x);
+		const float y = float(src_vertices[i].y);
+		const float z = float(src_vertices[i].z);
+		if (!Math::is_finite(x) || !Math::is_finite(y) || !Math::is_finite(z)) {
+			return invalid;
+		}
+		positions[i * 3] = x;
+		positions[i * 3 + 1] = y;
+		positions[i * 3 + 2] = z;
+		int a = i * attribute_count;
+		if (use_normals) {
+			if (!src_normals[i].is_finite()) {
+				return invalid;
+			}
+			attributes[a++] = float(src_normals[i].x);
+			attributes[a++] = float(src_normals[i].y);
+			attributes[a++] = float(src_normals[i].z);
+		}
+		if (use_uvs) {
+			if (!src_uvs[i].is_finite()) {
+				return invalid;
+			}
+			attributes[a++] = float(src_uvs[i].x);
+			attributes[a++] = float(src_uvs[i].y);
+		}
+	}
+	LocalVector<uint32_t> src_indices;
+	src_indices.resize(index_count);
+	for (int i = 0; i < index_count; ++i) {
+		if (indices[i] < 0 || indices[i] >= vertex_count) {
+			return invalid; // Never simplify or submit out-of-bounds triangles.
+		}
+		src_indices[i] = uint32_t(indices[i]);
+	}
+	LocalVector<uint32_t> destination;
+	destination.resize(index_count);
+	float geometric_error = 0.0f;
+	const unsigned int flags = meshopt_SimplifyLockBorder | meshopt_SimplifyErrorAbsolute;
+	const size_t reduced_count = attribute_count > 0 ?
+			meshopt_simplifyWithAttributes(destination.ptr(), src_indices.ptr(), index_count,
+					positions.ptr(), vertex_count, sizeof(float) * 3,
+					attributes.ptr(), size_t(attribute_count) * sizeof(float),
+					weights, attribute_count, nullptr, size_t(p_target_triangles) * 3,
+					1.0e30f, flags, &geometric_error) :
+			meshopt_simplify(destination.ptr(), src_indices.ptr(), index_count,
+					positions.ptr(), vertex_count, sizeof(float) * 3,
+					size_t(p_target_triangles) * 3, 1.0e30f, flags, &geometric_error);
+	if (reduced_count < 3 || reduced_count >= size_t(index_count) ||
+			reduced_count % 3 != 0) {
+		return invalid;
+	}
+	PackedInt32Array reduced;
+	reduced.resize(reduced_count);
+	int32_t *write = reduced.ptrw();
+	for (size_t i = 0; i < reduced_count; ++i) {
+		write[i] = int32_t(destination[i]);
+	}
+	Array result = p_surface_arrays.duplicate();
+	result[Mesh::ARRAY_INDEX] = reduced;
+	return result;
+}
+
+Array CgameClusterLOD::build_cut_arrays(const Array &p_source_arrays, const Dictionary &p_hierarchy, const PackedInt32Array &p_cut) {
+	Array invalid;
+	ERR_FAIL_COND_V_MSG(p_source_arrays.size() != Mesh::ARRAY_MAX ||
+			p_source_arrays[Mesh::ARRAY_VERTEX].get_type() != Variant::PACKED_VECTOR3_ARRAY ||
+			!p_hierarchy.has("vertices") || !p_hierarchy.has("clusters") ||
+			p_hierarchy["vertices"].get_type() != Variant::PACKED_VECTOR3_ARRAY ||
+			p_hierarchy["clusters"].get_type() != Variant::ARRAY,
+			invalid, "CgameClusterLOD: expected Mesh.ARRAY_MAX vertex arrays and a matching cluster hierarchy.");
+	const PackedVector3Array vertices = p_source_arrays[Mesh::ARRAY_VERTEX];
+	const PackedVector3Array hierarchy_vertices = p_hierarchy["vertices"];
+	ERR_FAIL_COND_V_MSG(vertices.is_empty() || vertices != hierarchy_vertices,
+			invalid, "CgameClusterLOD: hierarchy must reference these exact source vertices.");
+	const Array clusters = p_hierarchy["clusters"];
+	PackedByteArray visited;
+	visited.resize(clusters.size());
+	PackedInt32Array cut_indices;
+	for (int i = 0; i < p_cut.size(); i++) {
+		const int id = p_cut[i];
+		ERR_FAIL_COND_V_MSG(id < 0 || id >= clusters.size() || visited[id] != 0 ||
+				clusters[id].get_type() != Variant::DICTIONARY,
+				invalid, "CgameClusterLOD: malformed or repeated cluster ID in selected cut.");
+		visited.set(id, 1);
+		const Dictionary cluster = clusters[id];
+		ERR_FAIL_COND_V_MSG(!cluster.has("indices") ||
+				cluster["indices"].get_type() != Variant::PACKED_INT32_ARRAY,
+				invalid, "CgameClusterLOD: cluster has no triangle index list.");
+		const PackedInt32Array indices = cluster["indices"];
+		ERR_FAIL_COND_V_MSG(indices.is_empty() || indices.size() % 3 != 0,
+				invalid, "CgameClusterLOD: selected cluster is not triangle-aligned.");
+		for (int j = 0; j < indices.size(); j++) {
+			ERR_FAIL_COND_V_MSG(indices[j] < 0 || indices[j] >= vertices.size(),
+					invalid, "CgameClusterLOD: cluster index is outside the source vertex array.");
+		}
+		cut_indices.append_array(indices);
+	}
+	ERR_FAIL_COND_V_MSG(cut_indices.is_empty(), invalid, "CgameClusterLOD: selected cut is empty.");
+	// All simplified indices reference ORIGINAL vertex IDs. Only replace
+	// ARRAY_INDEX: no interpolation of UV seams, colors, tangents or bone
+	// weights, and no duplication of vertex buffers until upload.
+	Array result = p_source_arrays.duplicate();
+	result[Mesh::ARRAY_INDEX] = cut_indices;
+	return result;
+}
+
 Array CgameClusterLOD::build_cut_surface(const Dictionary &p_hierarchy, const PackedInt32Array &p_cut, const Array &p_source_arrays) {
 	Array invalid;
 	ERR_FAIL_COND_V_MSG(p_source_arrays.size() != Mesh::ARRAY_MAX, invalid, "CgameClusterLOD: invalid source surface arrays.");
@@ -439,4 +616,8 @@ void CgameClusterLOD::_bind_methods() {
 	ClassDB::bind_static_method("CgameClusterLOD", D_METHOD("select_cut", "hierarchy", "camera_pos", "fov_y", "screen_height", "error_pixels"), &CgameClusterLOD::select_cut, DEFVAL(1.0));
 	ClassDB::bind_static_method("CgameClusterLOD", D_METHOD("triangle_count", "hierarchy", "cut"), &CgameClusterLOD::triangle_count);
 	ClassDB::bind_static_method("CgameClusterLOD", D_METHOD("build_cut_surface", "hierarchy", "cut", "source_arrays"), &CgameClusterLOD::build_cut_surface);
+	ClassDB::bind_static_method("CgameClusterLOD", D_METHOD("build_cut_arrays", "source_arrays", "hierarchy", "cut"), &CgameClusterLOD::build_cut_arrays);
+	ClassDB::bind_static_method("CgameClusterLOD",
+			D_METHOD("simplify_surface_arrays", "surface_arrays", "target_triangles", "normal_weight", "uv_weight"),
+			&CgameClusterLOD::simplify_surface_arrays, DEFVAL(0.6f), DEFVAL(0.6f));
 }

@@ -16,8 +16,8 @@ extends RefCounted
 ## CPU culling and fallback paths are covered by tests/test_meshlet_renderer.gd.
 ##
 ## Packed GPU layout (all little endian, std430 / std140 compatible):
-##   positions   vec4 per source vertex (xyz, 1.0)
-##   vertex_ids  uint per meshlet vertex slot: index into positions, meshlets concatenated
+##   positions   vec4 per vertex slot in each resident page (xyz, 1.0)
+##   vertex_ids  uint per meshlet vertex slot: absolute physical GPU slot vertex offset
 ##   triangles   uint per triangle: a | b << 8 | c << 16 (local indices into the meshlet vertex list)
 ##   descriptors 48 bytes per meshlet: uvec4 (vertex_offset, triangle_offset, vertex_count,
 ##               triangle_count), vec4 (center.xyz, radius), vec4 (cone axis.xyz, cone cutoff)
@@ -29,6 +29,8 @@ extends RefCounted
 ## RenderingDevice.draw_list_draw_mesh_tasks_indirect().
 
 const Meshlets = preload("res://scripts/shared/meshlets.gd")
+const PagePolicy = preload("res://scripts/shared/meshlet_page_streaming.gd")
+const ClusterLOD = preload("res://scripts/shared/cluster_lod.gd")
 
 const TASK_SHADER_PATH: String = "res://shaders/compute/meshlet.task.glsl"
 const MESH_SHADER_PATH: String = "res://shaders/compute/meshlet.mesh.glsl"
@@ -58,10 +60,22 @@ var last_path: int = DrawPath.NONE
 var meshlet_count: int = 0
 var vertex_count: int = 0
 var last_error: String = ""
+## GPU-only geometry page pool. The task shader still culls individual meshlets.
+## Default keeps up to 64 pages (~3.5 MiB of meshlet payload) on the GPU.
+## Avoid allocating duplicate flattened CPU geometry for the page-streamed path.
+## The legacy full packed layout remains available when false.
+var gpu_streamed_source_only: bool = false
+var max_resident_pages: int = 64
+var max_page_uploads_per_frame: int = 4
+var last_page_uploads: int = 0
+
+
 
 var _vertices: PackedVector3Array = PackedVector3Array()
 var _meshlets: Array = []
 var _packed: Dictionary = {}
+var _page_bounds: Array[Dictionary] = []
+var _slot_pages: PackedInt32Array = PackedInt32Array()
 var _camera_pos: Vector3 = Vector3.ZERO
 var _planes: Array = []
 
@@ -77,6 +91,34 @@ var _buffers: Array[RID] = []
 var _frame_buffer: RID = RID()
 var _gpu_failed: bool = false
 
+
+
+## Build the CPU fallback of a selected cluster cut without losing texture UVs,
+## vertex colors, normals or tangents. The mesh-shader path is position-only
+## for now; this ArrayMesh path is what authored PBR assets should use.
+## One surface at a time: multi-material assets keep their surface boundaries.
+static func build_material_preserving_cut(source_mesh: ArrayMesh,
+		hierarchy: Dictionary, cut: PackedInt32Array, surface: int = 0) -> ArrayMesh:
+	if source_mesh == null or surface < 0 or surface >= source_mesh.get_surface_count():
+		return null
+	# Blend shape targets need simplification-aware remapping. Refuse until
+	# that pipeline exists instead of returning a silently corrupted mesh.
+	if source_mesh.get_blend_shape_count() > 0:
+		return null
+	var source_arrays: Array = source_mesh.surface_get_arrays(surface)
+	var arrays: Array = ClusterLOD.build_cut_arrays(source_arrays, hierarchy, cut)
+	if arrays.is_empty():
+		return null
+	var output := ArrayMesh.new()
+	# Mesh arrays do not encode custom attribute layouts. Preserve their
+	# format bits (and eight-bone/compression options) explicitly, otherwise
+	# a custom0/1/2/3 stream can be silently interpreted with the wrong stride.
+	var src_format: int = source_mesh.surface_get_format(surface)
+	var flags: int = src_format & (Mesh.ARRAY_FORMAT_CUSTOM_MASK 			| Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS | Mesh.ARRAY_FLAG_COMPRESS_ATTRIBUTES)
+	output.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, flags)
+	output.surface_set_material(0, source_mesh.surface_get_material(surface))
+	output.resource_name = source_mesh.resource_name + "_cluster_lod"
+	return output
 
 # ---- packing (pure, no device) ---------------------------------------------------------------
 
@@ -160,6 +202,115 @@ static func pack_meshlets(vertices: PackedVector3Array, meshlets: Array) -> Dict
 		"vertex_count": vertices.size(),
 		"vertex_slots": total_vertex_slots,
 		"triangle_count": total_triangles,
+	}
+
+
+## Validates source meshlets without materializing full flattened CPU upload
+## streams. Streaming-only users keep the source mesh and page metadata on the
+## CPU and pack only the pages being uploaded to GPU slots.
+@warning_ignore("integer_division")
+static func inspect_streamable_meshlets(vertices: PackedVector3Array, meshlets: Array) -> Dictionary:
+	if meshlets.size() > MAX_MESHLETS:
+		return {"error": "too many meshlets"}
+	var slots: int = 0
+	var tris: int = 0
+	for i in meshlets.size():
+		var meshlet: Dictionary = meshlets[i]
+		var vids: PackedInt32Array = meshlet["vertex_ids"]
+		var indices: PackedInt32Array = meshlet["indices"]
+		if vids.is_empty() or vids.size() > MAX_MESHLET_VERTICES or \
+				indices.is_empty() or indices.size() % 3 != 0 or indices.size() / 3 > MAX_MESHLET_TRIANGLES:
+			return {"error": "invalid meshlet shape %d" % i}
+		for id in vids:
+			if id < 0 or id >= vertices.size() or not vertices[id].is_finite():
+				return {"error": "invalid source vertex in meshlet %d" % i}
+		for index in indices:
+			if index < 0 or index >= vids.size():
+				return {"error": "invalid local triangle in meshlet %d" % i}
+		var center: Vector3 = meshlet["bounds_center"]
+		var axis: Vector3 = meshlet["cone_axis"]
+		if not center.is_finite() or not axis.is_finite() or \
+				not is_finite(float(meshlet["bounds_radius"])) or float(meshlet["bounds_radius"]) < 0.0 or \
+				not is_finite(float(meshlet["cone_cutoff"])):
+			return {"error": "invalid meshlet bounds %d" % i}
+		slots += vids.size()
+		tris += indices.size() / 3
+	return {"error": "", "meshlet_count": meshlets.size(),
+		"vertex_count": vertices.size(), "vertex_slots": slots,
+		"triangle_count": tris, "streaming_only": true}
+
+
+## Encodes exactly one resident GPU slot. All vertex positions and triangle
+## indices are copied into that slot's fixed storage window. Other pages are
+## not present in the GPU buffers; the stable slot id is the task-group id.
+## The full pack_meshlets() layout remains available for CPU tooling/tests.
+@warning_ignore("integer_division")
+static func pack_resident_page(vertices: PackedVector3Array, meshlets: Array,
+		page_id: int, slot_id: int) -> Dictionary:
+	if page_id < 0 or slot_id < 0 or slot_id >= 256 or page_id >= ceili(float(meshlets.size()) / float(TASK_GROUP_SIZE)):
+		return {"error": "invalid page or slot"}
+	var start: int = page_id * TASK_GROUP_SIZE
+	var positions := PackedByteArray()
+	positions.resize(PagePolicy.POSITIONS_BYTES)
+	var vertex_ids := PackedByteArray()
+	vertex_ids.resize(PagePolicy.VERTEX_IDS_BYTES)
+	var triangles := PackedByteArray()
+	triangles.resize(PagePolicy.TRIANGLES_BYTES)
+	var descriptors := PackedByteArray()
+	descriptors.resize(PagePolicy.DESCRIPTORS_BYTES)
+	var count: int = mini(TASK_GROUP_SIZE, meshlets.size() - start)
+	for local_id in count:
+		var meshlet: Dictionary = meshlets[start + local_id]
+		var vids: PackedInt32Array = meshlet["vertex_ids"]
+		var idx: PackedInt32Array = meshlet["indices"]
+		if vids.is_empty() or vids.size() > MAX_MESHLET_VERTICES or idx.is_empty() or \
+				idx.size() % 3 != 0 or idx.size() / 3 > MAX_MESHLET_TRIANGLES:
+			return {"error": "invalid meshlet dimensions"}
+		for k in vids.size():
+			var source_id: int = vids[k]
+			if source_id < 0 or source_id >= vertices.size():
+				return {"error": "invalid vertex id"}
+			var position: Vector3 = vertices[source_id]
+			var position_index: int = local_id * MAX_MESHLET_VERTICES + k
+			var offset: int = position_index * 16
+			positions.encode_float(offset, position.x)
+			positions.encode_float(offset + 4, position.y)
+			positions.encode_float(offset + 8, position.z)
+			positions.encode_float(offset + 12, 1.0)
+			vertex_ids.encode_u32(position_index * 4,
+				slot_id * TASK_GROUP_SIZE * MAX_MESHLET_VERTICES + position_index)
+		var triangle_count: int = idx.size() / 3
+		for k in triangle_count:
+			var a: int = idx[k * 3]
+			var b: int = idx[k * 3 + 1]
+			var c: int = idx[k * 3 + 2]
+			if a < 0 or b < 0 or c < 0 or a >= vids.size() or b >= vids.size() or c >= vids.size():
+				return {"error": "invalid local triangle"}
+			triangles.encode_u32((local_id * MAX_MESHLET_TRIANGLES + k) * 4,
+				a | (b << 8) | (c << 16))
+		var offset: int = local_id * DESCRIPTOR_STRIDE
+		descriptors.encode_u32(offset,
+			slot_id * TASK_GROUP_SIZE * MAX_MESHLET_VERTICES + local_id * MAX_MESHLET_VERTICES)
+		descriptors.encode_u32(offset + 4,
+			slot_id * TASK_GROUP_SIZE * MAX_MESHLET_TRIANGLES + local_id * MAX_MESHLET_TRIANGLES)
+		descriptors.encode_u32(offset + 8, vids.size())
+		descriptors.encode_u32(offset + 12, triangle_count)
+		var center: Vector3 = meshlet["bounds_center"]
+		var axis: Vector3 = meshlet["cone_axis"]
+		var radius: float = float(meshlet["bounds_radius"])
+		var cutoff: float = float(meshlet["cone_cutoff"])
+		if not center.is_finite() or not axis.is_finite() or \
+				not is_finite(radius) or not is_finite(cutoff):
+			return {"error": "nonfinite meshlet bounds"}
+		for j in 3:
+			descriptors.encode_float(offset + 16 + j * 4, center[j])
+			descriptors.encode_float(offset + 32 + j * 4, axis[j])
+		descriptors.encode_float(offset + 28, radius)
+		descriptors.encode_float(offset + 44, cutoff)
+	return {
+		"error": "", "positions": positions, "vertex_ids": vertex_ids,
+		"triangles": triangles, "descriptors": descriptors,
+		"page_id": page_id, "slot_id": slot_id, "meshlet_count": count,
 	}
 
 
@@ -262,7 +413,7 @@ func setup_from_mesh(vertices: PackedVector3Array, indices: PackedInt32Array) ->
 func setup(vertices: PackedVector3Array, meshlets: Array) -> bool:
 	release()
 	last_error = ""
-	var result: Dictionary = pack_meshlets(vertices, meshlets)
+	var result: Dictionary = inspect_streamable_meshlets(vertices, meshlets) if gpu_streamed_source_only else pack_meshlets(vertices, meshlets)
 	if result.is_empty() or String(result.get("error", "")) != "":
 		last_error = String(result.get("error", "packing failed"))
 		_packed = {}
@@ -274,11 +425,23 @@ func setup(vertices: PackedVector3Array, meshlets: Array) -> bool:
 	_packed = result
 	meshlet_count = int(result["meshlet_count"])
 	vertex_count = int(result["vertex_count"])
+	_page_bounds = PagePolicy.build_bounds(meshlets)
 	return true
 
 
 func get_packed() -> Dictionary:
 	return _packed
+
+
+func page_count() -> int:
+	return _page_bounds.size()
+
+
+func get_page_stats() -> Dictionary:
+	return {"total_pages": page_count(), "resident_pages": PagePolicy.resident_count(_slot_pages),
+		"slot_count": _slot_pages.size(), "bytes_per_slot": PagePolicy.PAGE_BYTES,
+		"gpu_capacity_bytes": _slot_pages.size() * PagePolicy.PAGE_BYTES,
+		"last_page_uploads": last_page_uploads, "slots": _slot_pages.duplicate()}
 
 
 func mesh_shader_supported() -> bool:
@@ -441,7 +604,7 @@ func create_multimesh_instance(transforms: Array[Transform3D]) -> MultiMeshInsta
 ## Called from the CompositorEffect on the render thread. Draws all meshlets into the scene
 ## color + depth buffers after the opaque pass.
 func record_draw(render_data: RenderData) -> void:
-	if _packed.is_empty() or _gpu_failed or force_fallback:
+	if _packed.is_empty() or _page_bounds.is_empty() or _gpu_failed or force_fallback:
 		return
 	var rd: RenderingDevice = RenderingServer.get_rendering_device()
 	if rd == null or not rd.has_feature(FEATURE_MESH_SHADER as RenderingDevice.Features):
@@ -457,14 +620,56 @@ func record_draw(render_data: RenderData) -> void:
 		_gpu_failed = true
 		return
 	var cam: Transform3D = scene_data.get_cam_transform()
+	if not _stream_gpu_pages(cam.origin):
+		_gpu_failed = true
+		return
 	var view_proj: Projection = scene_data.get_cam_projection() * Projection(cam.affine_inverse())
-	var frame: PackedByteArray = pack_frame_data(view_proj, model, _planes, cam.origin, meshlet_count, cull_flags)
+	# Task ids address fixed resident slots, not original CPU meshlet ids.
+	var frame: PackedByteArray = pack_frame_data(view_proj, model, _planes, cam.origin,
+		_slot_pages.size() * TASK_GROUP_SIZE, cull_flags)
 	rd.buffer_update(_frame_buffer, 0, frame.size(), frame)
 	var draw_list: int = rd.draw_list_begin(_framebuffer, RenderingDevice.DRAW_DEFAULT_ALL)
 	rd.draw_list_bind_render_pipeline(draw_list, _pipeline)
 	rd.draw_list_bind_uniform_set(draw_list, _uniform_set, 0)
-	rd.call("draw_list_draw_mesh_tasks", draw_list, ceili(float(meshlet_count) / float(TASK_GROUP_SIZE)), 1, 1)
+	rd.call("draw_list_draw_mesh_tasks", draw_list, _slot_pages.size(), 1, 1)
 	rd.draw_list_end()
+
+
+## Refill at most max_page_uploads_per_frame fixed GPU slots. All four
+## payload buffers remain allocated until release; switching logical pages
+## changes only these small slot regions, never the whole meshlet hierarchy.
+## This runs on the rendering thread before draw_list_begin; no readback.
+func _stream_gpu_pages(camera_position: Vector3) -> bool:
+	last_page_uploads = 0
+	if _slot_pages.is_empty():
+		return true
+	var wanted: PackedInt32Array = PagePolicy.wanted_pages(
+		_page_bounds, camera_position, model, _slot_pages.size(), _planes)
+	var transfers: Dictionary = PagePolicy.plan(
+		_slot_pages, wanted, maxi(max_page_uploads_per_frame, 1))
+	var uploads: Array = transfers["uploads"]
+	for item in uploads:
+		var slot: int = int(item["slot"])
+		var page: int = int(item["page"])
+		var packed: Dictionary = pack_resident_page(_vertices, _meshlets, page, slot)
+		if String(packed.get("error", "")) != "":
+			last_error = "meshlet page packing failed: " + String(packed["error"])
+			return false
+		var streams: Array = [
+			[packed["positions"], PagePolicy.POSITIONS_BYTES],
+			[packed["vertex_ids"], PagePolicy.VERTEX_IDS_BYTES],
+			[packed["triangles"], PagePolicy.TRIANGLES_BYTES],
+			[packed["descriptors"], PagePolicy.DESCRIPTORS_BYTES],
+		]
+		for index in 4:
+			var bytes: PackedByteArray = streams[index][0]
+			var stride: int = int(streams[index][1])
+			if _rd.buffer_update(_buffers[index], slot * stride, bytes.size(), bytes) != OK:
+				last_error = "uploading meshlet page %d to GPU slot %d failed" % [page, slot]
+				return false
+		last_page_uploads += 1
+	_slot_pages = transfers["slots"]
+	return true
 
 
 func _storage(binding: int, rid: RID) -> RDUniform:
@@ -486,11 +691,25 @@ func _ensure_gpu(color: RID, depth: RID) -> bool:
 	if not _shader.is_valid() and not _create_shader():
 		return false
 	if _buffers.is_empty():
-		_buffers.append(_rd.storage_buffer_create(maxi(_packed["positions"].size(), 16), _packed["positions"]))
-		_buffers.append(_rd.storage_buffer_create(maxi(_packed["vertex_ids"].size(), 16), _packed["vertex_ids"]))
-		_buffers.append(_rd.storage_buffer_create(maxi(_packed["triangles"].size(), 16), _packed["triangles"]))
-		_buffers.append(_rd.storage_buffer_create(maxi(_packed["descriptors"].size(), 16), _packed["descriptors"]))
+		# Bound the allocations by resident slots, not total scene meshlet count.
+		# Pages are uploaded on demand, and only resident payload is on GPU.
+		var slots: int = mini(_page_bounds.size(), clampi(max_resident_pages, 1, 256))
+		_slot_pages.resize(slots)
+		_slot_pages.fill(-1)
+		_buffers.append(_rd.storage_buffer_create(maxi(slots * PagePolicy.POSITIONS_BYTES, 16)))
+		_buffers.append(_rd.storage_buffer_create(maxi(slots * PagePolicy.VERTEX_IDS_BYTES, 16)))
+		_buffers.append(_rd.storage_buffer_create(maxi(slots * PagePolicy.TRIANGLES_BYTES, 16)))
+		var empty_descriptors := PackedByteArray()
+		empty_descriptors.resize(maxi(slots * PagePolicy.DESCRIPTORS_BYTES, 16))
+		_buffers.append(_rd.storage_buffer_create(empty_descriptors.size(), empty_descriptors))
 		_frame_buffer = _rd.uniform_buffer_create(FRAME_DATA_SIZE)
+		for buffer in _buffers:
+			if not buffer.is_valid():
+				last_error = "GPU meshlet page buffer allocation failed"
+				return false
+		if not _frame_buffer.is_valid():
+			last_error = "GPU meshlet frame uniform allocation failed"
+			return false
 	if not _framebuffer.is_valid():
 		var attachments: Array[RID] = [color, depth]
 		_framebuffer = _rd.framebuffer_create(attachments)
@@ -581,4 +800,6 @@ func release() -> void:
 	_shader = RID()
 	_frame_buffer = RID()
 	_buffers.clear()
+	_slot_pages.clear()
+	last_page_uploads = 0
 	_gpu_failed = false
