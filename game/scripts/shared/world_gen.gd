@@ -658,7 +658,7 @@ func _try_add_stone(cell: Vector2i, origin: Vector2, point: Vector2, small: bool
 		return false
 	if is_water(point.x, point.y) or is_safe(point.x, point.y) or _in_site_clearing(point, sites):
 		return false
-	if roads != null and roads.coverage_at(point.x, point.y) > 0.0:
+	if roads != null and roads.coverage_on_land(point.x, point.y) > 0.0:
 		return false
 	for other in placed:
 		if other.distance_squared_to(point) < (0.9 if small else 3.0) ** 2:
@@ -925,7 +925,7 @@ func _add_roadside_caches(cell: Vector2i, origin: Vector2, tier: int, nodes: Arr
 			continue
 		if is_water(p.x, p.y) or is_safe(p.x, p.y) or _in_site_clearing(p, sites):
 			continue
-		if roads.coverage_at(p.x, p.y) > 0.01:
+		if roads.coverage_on_land(p.x, p.y) > 0.01:
 			continue
 		var blocked := false
 		for group in [nodes, structures, crates, props]:
@@ -955,7 +955,7 @@ func _add_roadside_caches(cell: Vector2i, origin: Vector2, tier: int, nodes: Arr
 			if ambush_local.x >= 2.0 and ambush_local.y >= 2.0 and \
 					ambush_local.x < Defs.CHUNK_SIZE - 2.0 and ambush_local.y < Defs.CHUNK_SIZE - 2.0:
 				if not is_water(ambush.x, ambush.y) and not is_safe(ambush.x, ambush.y) and \
-						roads.coverage_at(ambush.x, ambush.y) <= 0.01:
+						roads.coverage_on_land(ambush.x, ambush.y) <= 0.01:
 					var hiding_spot_free := not _in_site_clearing(ambush, sites)
 					if hiding_spot_free:
 						for group in [nodes, structures, crates, props]:
@@ -1005,7 +1005,7 @@ func _add_fallen_wood(cell: Vector2i, origin: Vector2, tier: int, nodes: Array,
 			rng.randf_range(6.0, Defs.CHUNK_SIZE - 6.0))
 		if is_water(point.x, point.y) or is_safe(point.x, point.y):
 			continue
-		if roads != null and roads.coverage_at(point.x, point.y) > 0.0:
+		if roads != null and roads.coverage_on_land(point.x, point.y) > 0.0:
 			continue
 		var variants: Array[int] = SolidScenery.available_variants(biome_at(point.x, point.y))
 		if variants.is_empty():
