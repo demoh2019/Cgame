@@ -555,7 +555,15 @@ void CgamePopulationLOD::_rules_pass(real_t p_dt) {
 	for (uint32_t k = 0; k < empty.size(); k++) {
 		herds.erase(empty[k]);
 	}
-	// Respawn.
+	// Populate each region's total once after decay. Multiple nests share
+	// current capacity instead of rescanning the full herd map per nest.
+	RBMap<int, int> region_totals;
+	if (!spawners.is_empty()) {
+		for (const KeyValue<int, Herd> &kv : herds) {
+			region_totals[kv.value.region] += kv.value.count;
+		}
+	}
+	// Respawn order and RNG state remain unchanged.
 	for (uint32_t k = 0; k < spawners.size(); k++) {
 		Spawner &s = spawners[k];
 		s.acc += s.rate * p_dt;
@@ -564,13 +572,15 @@ void CgamePopulationLOD::_rules_pass(real_t p_dt) {
 		if (add <= 0) {
 			continue;
 		}
-		const int room = s.cap - herd_region_count(s.region);
+		const RBMap<int, int>::Element *existing = region_totals.find(s.region);
+		const int room = s.cap - (existing ? existing->get() : 0);
 		add = MIN(add, room);
 		if (add <= 0) {
 			s.acc = 0.0;
 			continue;
 		}
 		_add_to_region(s.region, s.type, add);
+		region_totals[s.region] += add;
 		stats_data.spawned += add;
 	}
 }
