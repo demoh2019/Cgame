@@ -77,7 +77,7 @@ class TestGpuMeshletPageContract(unittest.TestCase):
         self.assertIn('const VirtualGeometryProbe = preload("res://scripts/client/virtual_geometry_probe.gd")', self.client)
         self.assertIn('VirtualGeometryProbe.attach_for_debug(Meshes.get_mesh("rock"), camera)', self.client)
         self.assertIn('VirtualGeometryProbe.detach_for_debug(_meshlet_page_probe, camera)', self.client)
-        self.assertIn('_meshlet_page_probe.call("set_view", camera.global_position, camera.get_frustum())', self.client)
+        self.assertIn('RenderingServer.call_on_render_thread(Callable(_meshlet_page_probe, "set_view").bind(', self.client)
         self.assertIn("func create_fallback_instance()", self.renderer)
         self.assertIn("func choose_path()", self.renderer)
         self.assertNotIn("CGAME_MESHLET_PAGE_PROBE", (ROOT / "game/scripts/server/game_server.gd").read_text())
