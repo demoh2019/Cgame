@@ -394,10 +394,16 @@ func contents(site: Dictionary) -> Dictionary:
 			_npcs(result, rng, site, [["fisher", 1], ["villager", 1]], 4.0, 12.0)
 			_zombies(result, rng, center, rng.randi_range(0, 2), 14.0, 28.0, zone, false)
 	site["contents"] = result
+	if kind == "city":
+		# Cached content no longer needs temporary lots or the clearance grid.
+		# The regional road renderer keeps only the lightweight path polylines.
+		var cached_plan: Dictionary = city_plan(site)
+		cached_plan.erase("lots")
+		cached_plan.erase("index")
 	return result
 
 
-## Lazily bake each city's roads, building lots and clearance grid only once.
+## Lazily bake each city's road paths once, without eagerly allocating indices.
 ## The POI record is shared by local generation and the regional road renderer.
 func city_plan(site: Dictionary) -> Dictionary:
 	if site.has("city_plan"):
@@ -407,18 +413,26 @@ func city_plan(site: Dictionary) -> Dictionary:
 	var radius: float = float(site["radius"])
 	var rotation: float = float(site["layout_rotation"])
 	var paths: Array = CityLayout.streets(layout, radius, rotation)
-	var plan: Dictionary = {
-		"paths": paths,
-		"index": CityLayout.index_streets(paths),
-		"lots": CityLayout.building_lots(int(site["seed"]), layout, radius, rotation),
-	}
+	var plan: Dictionary = {"paths": paths}
 	site["city_plan"] = plan
+	return plan
+
+
+## A temporary grid and lot list live only for authoritative city generation.
+func _city_content_plan(site: Dictionary) -> Dictionary:
+	var plan: Dictionary = city_plan(site)
+	if not plan.has("index"):
+		var paths: Array = plan["paths"]
+		plan["index"] = CityLayout.index_streets(paths)
+	if not plan.has("lots"):
+		plan["lots"] = CityLayout.building_lots(int(site["seed"]), str(site["layout"]),
+				float(site["radius"]), float(site["layout_rotation"]))
 	return plan
 
 
 ## City buildings follow the seeded district plan, leaving actual room for painted streets.
 func _city_buildings(result: Dictionary, rng: RandomNumberGenerator, site: Dictionary, center: Vector2, taken: Array) -> void:
-	var plan: Dictionary = city_plan(site)
+	var plan: Dictionary = _city_content_plan(site)
 	var candidates: Array[Dictionary] = plan["lots"]
 	var street_index: Dictionary = plan["index"]
 	var wanted: int = rng.randi_range(14, 22)
@@ -443,7 +457,7 @@ func _city_buildings(result: Dictionary, rng: RandomNumberGenerator, site: Dicti
 
 ## Keep rubble, loot and enemies inside the same footprint as the city blocks.
 func _trim_city_footprint(result: Dictionary, site: Dictionary, center: Vector2) -> void:
-	var plan: Dictionary = city_plan(site)
+	var plan: Dictionary = _city_content_plan(site)
 	var street_index: Dictionary = plan["index"]
 	var layout: String = str(site["layout"])
 	var rotation: float = float(site["layout_rotation"])
@@ -464,7 +478,7 @@ func _trim_city_footprint(result: Dictionary, site: Dictionary, center: Vector2)
 ## Lootable salvage caches in ruined-city courtyards. They are ordinary server-authoritative
 ## crates, so existing scavenging, tier, respawn and persistence rules apply unchanged.
 func _city_salvage(result: Dictionary, rng: RandomNumberGenerator, site: Dictionary, center: Vector2) -> void:
-	var plan: Dictionary = city_plan(site)
+	var plan: Dictionary = _city_content_plan(site)
 	var street_index: Dictionary = plan["index"]
 	var lots: Array[Dictionary] = plan["lots"]
 	var placed := 0
