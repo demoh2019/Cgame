@@ -8,6 +8,9 @@ const BUDGET_MB := [1536.0, 2560.0, 4096.0, 6144.0]
 const PRESSURE := 0.92 # Share of the budget that counts as pressure.
 const RELIEF := 0.75 # Upgrades are blocked above this share.
 const SUSTAIN := 2.0
+# Loading stalls and suspended windows do not represent sustained VRAM use.
+# The same guard is applied before the optional native budget tracker.
+const MAX_SAMPLE_DELTA := 0.2
 
 var _pressure_seconds := 0.0
 
@@ -24,9 +27,16 @@ static func upgrade_allowed(used: float, level: int) -> bool:
 	return used <= budget_bytes(level + 1) * RELIEF
 
 
+## A zero byte reading means that the renderer could not report GPU
+## residency (common in headless/Compatibility), not that memory is free.
+static func valid_sample(used: float, delta: float) -> bool:
+	return is_finite(used) and used > 0.0 and is_finite(delta) and \
+		delta > 0.0 and delta <= MAX_SAMPLE_DELTA
+
+
 ## True once memory has stayed above the pressure line for SUSTAIN seconds.
 func sample(used: float, level: int, delta: float) -> bool:
-	if not is_finite(delta) or delta <= 0.0:
+	if not valid_sample(used, delta):
 		return false
 	if used > budget_bytes(level) * PRESSURE:
 		_pressure_seconds += delta
