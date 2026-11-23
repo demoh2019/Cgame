@@ -3821,6 +3821,14 @@ func _process(_delta: float) -> void:
 	var under_attack: int = int(base_upkeep.get("under_attack", 0))
 	if under_attack > 0:
 		_info_label.text += "\nBASE UNDER ATTACK: infected are damaging %d owned structure(s)!" % under_attack
+		# Server selects the most recently attacked *owned* wall. This is a
+		# private navigation hint, never inferred from other players' bases.
+		var attack_point: Vector2 = TravelNavigation.target(base_upkeep, "attack_x", "attack_z")
+		var player_point: Vector2 = TravelNavigation.target(client.you, "x", "z")
+		var attack_distance: int = TravelNavigation.distance_meters(player_point, attack_point)
+		if attack_distance >= 0:
+			_info_label.text += " | %dm %s" % [
+				attack_distance, TravelNavigation.compass(player_point, attack_point)]
 	var upkeep_at_risk: int = int(base_upkeep.get("at_risk", 0))
 	if upkeep_at_risk > 0:
 		var minutes_remaining: int = ceili(maxf(0.0,

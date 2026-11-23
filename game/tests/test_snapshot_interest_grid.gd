@@ -6,6 +6,8 @@ const GameServer = preload("res://scripts/server/game_server.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const Net = preload("res://scripts/shared/net.gd")
+const BarricadeSnapshotIndex = preload("res://scripts/shared/barricade_snapshot_index.gd")
+const Structures = preload("res://scripts/shared/structures.gd")
 
 
 func run(t) -> void:
@@ -121,3 +123,121 @@ func run(t) -> void:
 		"one network broadcast prepares index before per-peer snapshots")
 	t.check(net_source.contains('sim.finish_snapshot_interest()'),
 		"network broadcast retires index after all viewers")
+
+	t.current = "batched wall visibility matches full scans in crowded settlements"
+	var packed_walls: Dictionary = {}
+	var random := RandomNumberGenerator.new()
+	random.seed = 9421008
+	for i in 220:
+		packed_walls[10000 + i] = {"id": 10000 + i,
+			"x": random.randf_range(-350.0, 350.0),
+			"z": random.randf_range(-350.0, 350.0),
+			"hp": 120.0, "tier": 1, "upkeep_until": 7200.0,
+			"owner": 201, "owner_account": "alpha"}
+	var built: Dictionary = BarricadeSnapshotIndex.build(packed_walls, 30.0, {})
+	t.eq((built["entries"] as Array).size(), packed_walls.size(),
+		"one source slot per wall regardless of position")
+	for sample in 90:
+		var eye := Vector2(random.randf_range(-355.0, 355.0),
+			random.randf_range(-355.0, 355.0))
+		var radius: float = 90.0 if sample % 3 == 0 else (
+			0.0 if sample % 3 == 1 else 140.0)
+		var brute: Array[int] = []
+		for wall in packed_walls.values():
+			if Structures.within_range(eye, Vector2(float(wall["x"]),
+					float(wall["z"])), radius):
+				brute.append(int(wall["id"]))
+		var actual: Array[int] = []
+		for wall in BarricadeSnapshotIndex.visible(built, eye, radius):
+			actual.append(int(wall["id"]))
+		t.eq(actual, brute, "wall broadcast query %d preserves exact radius and source order" % sample)
+	t.eq(BarricadeSnapshotIndex.visible(built, Vector2.ZERO, 100000.0).size(),
+		packed_walls.size(), "huge interest uses bounded full-scan fallback")
+	t.check(BarricadeSnapshotIndex.visible(built, Vector2(NAN, 0.0), 90.0).is_empty(),
+		"invalid viewer coordinates cannot disclose nearby walls")
+	t.check(BarricadeSnapshotIndex.visible(built, Vector2.ZERO, NAN).is_empty(),
+		"invalid interest radius returns no structures")
+
+	t.current = "private wall status and direction include only verified ownership"
+	var own_wall: Dictionary = {"id": 30001, "x": 255.0, "y": 1.0, "z": 248.0,
+		"hp": 40.0, "tier": 1, "owner": 201, "owner_account": "alpha",
+		"upkeep_until": 60.0}
+	var other_wall: Dictionary = {"id": 30002, "x": 800.0, "y": 1.0, "z": 800.0,
+		"hp": 20.0, "tier": 1, "owner": 202, "owner_account": "beta",
+		"upkeep_until": 60.0}
+	var guest_wall: Dictionary = {"id": 30003, "x": -200.0, "y": 1.0, "z": -200.0,
+		"hp": 120.0, "tier": 1, "owner": 201, "owner_account": "",
+		"upkeep_until": 60.0}
+	var owned_walls: Dictionary = {30001: own_wall, 30002: other_wall, 30003: guest_wall}
+	var hits: Dictionary = {30001: 45.0, 30002: 49.0, 30003: 48.0}
+	var summaries: Dictionary = BarricadeSnapshotIndex.build(owned_walls, 40.0, hits)
+	var private_owner: Dictionary = BarricadeSnapshotIndex.private_status(summaries, 201, "alpha")
+	t.eq(int(private_owner["at_risk"]), 2,
+		"account and guest walls are both included only for their owner")
+	t.eq(int(private_owner["damaged"]), 1, "critical wall damage counts only owned structures")
+	t.eq(int(private_owner["under_attack"]), 2,
+		"private warning counts both active attacks but not unrelated bases")
+	t.near(float(private_owner["soonest_seconds"]), 20.0, 0.001,
+		"nearest upkeep countdown is server-derived")
+	t.near(float(private_owner["attack_x"]), -200.0, 0.001,
+		"most recent owned attack chooses the correct distant wall, not another account")
+	t.near(float(private_owner["attack_z"]), -200.0, 0.001,
+		"private bearing includes the correct z coordinate")
+	var outsider: Dictionary = BarricadeSnapshotIndex.private_status(summaries, 204, "gamma")
+	t.eq(int(outsider["under_attack"]), 0, "third party cannot see any private attack")
+	t.check(not outsider.has("attack_x") and not outsider.has("attack_z"),
+		"unrelated players never receive private wall location hints")
+	t.eq(int(BarricadeSnapshotIndex.private_status(summaries, 202, "beta")["under_attack"]), 1,
+		"other account sees only its own active damage")
+	t.eq(int(BarricadeSnapshotIndex.private_status(summaries, 201, "")["under_attack"]), 1,
+		"unauthenticated guest only sees original peer-owned wall")
+	t.check(not BarricadeSnapshotIndex.private_status(
+			BarricadeSnapshotIndex.build(owned_walls, 100.0, hits),
+			201, "alpha").has("attack_x"),
+		"expired attacks never send stale coordinates or continue HUD alerts")
+
+	t.current = "GameServer shares wall lists for the whole network broadcast"
+	var wall_sim := GameServer.new(WorldGen.new(23110), 23111)
+	var builder = wall_sim.add_player(201, "Builder", "alpha")
+	var watcher = wall_sim.add_player(202, "Watcher", "beta")
+	builder.position = Vector3(250, 1.0, 250)
+	watcher.position = Vector3(800, 1.0, 800)
+	wall_sim.time = 40.0
+	wall_sim.barricades = owned_walls.duplicate(true)
+	wall_sim._wall_infected_attack_until = hits.duplicate()
+	var direct_owner: Dictionary = wall_sim.snapshot_for(201)
+	var direct_watcher: Dictionary = wall_sim.snapshot_for(202)
+	wall_sim.prepare_snapshot_interest()
+	t.eq(wall_sim._snapshot_wall_tick, wall_sim.tick_count,
+		"shared scripted wall cache is prepared even without optional native grid")
+	t.eq((wall_sim._snapshot_wall_index["entries"] as Array).size(), 3,
+		"one cache contains the whole authoritative wall population")
+	var batched_owner: Dictionary = wall_sim.snapshot_for(201)
+	var batched_watcher: Dictionary = wall_sim.snapshot_for(202)
+	t.eq(batched_owner["barricades"], direct_owner["barricades"],
+		"owner sees byte-equivalent visible wall records in indexed broadcast")
+	t.eq(batched_watcher["barricades"], direct_watcher["barricades"],
+		"other viewer sees unchanged private interest and public ordering")
+	t.eq(batched_owner["you"]["base_upkeep"], direct_owner["you"]["base_upkeep"],
+		"private owner alert and bearing match direct authoritative snapshot")
+	t.eq(batched_watcher["you"]["base_upkeep"], direct_watcher["you"]["base_upkeep"],
+		"other account receives identical private summary without leakage")
+	wall_sim.finish_snapshot_interest()
+	t.check(wall_sim._snapshot_wall_index.is_empty(), "finished broadcast releases cached wall entries")
+	t.eq(int(wall_sim.last_snapshot_wall_stats["queries"]), 2,
+		"two recipients reused the same one-pass wall index")
+	t.eq(int(wall_sim.last_snapshot_wall_stats["walls"]), 3,
+		"wall interest diagnostics report actual server structures")
+
+	t.current = "wall mutation during a pending broadcast invalidates cached data"
+	wall_sim.prepare_snapshot_interest()
+	var old_hp: float = float(wall_sim.barricades[30001]["hp"])
+	t.check(not wall_sim.damage_barricade(30001, 5.0), "live damage updates wall without destruction")
+	t.check(float(wall_sim.barricades[30001]["hp"]) < old_hp,
+		"damage uses authoritative structure durability")
+	var corrected: Dictionary = wall_sim.snapshot_for(201)
+	t.eq(corrected["barricades"][0]["hp"], wall_sim.barricades[30001]["hp"],
+		"stale broadcast cache never hides wall durability changes")
+	t.eq(int(corrected["you"]["base_upkeep"]["under_attack"]), 2,
+		"stale cache fallback rebuilds the owner's private attack status")
+	wall_sim.finish_snapshot_interest()
