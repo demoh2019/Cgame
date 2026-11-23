@@ -978,6 +978,26 @@ func _tree_key(node: Dictionary) -> String:
 	return "tree:" + str(options[WorldGen.mix(int(node["id"]), 3, 5) % options.size()])
 
 
+## A missing optional nature pack must not turn a hand-sized pickup
+## into a visually huge generic boulder. Shared across chunks (one mesh/material).
+static var _pebble_fallback_cache: Mesh
+
+
+static func pebble_fallback_mesh() -> Mesh:
+	if _pebble_fallback_cache == null:
+		var pebble := SphereMesh.new()
+		pebble.radius = 0.18
+		pebble.height = 0.26
+		pebble.radial_segments = 8
+		pebble.rings = 4
+		var stone_material := StandardMaterial3D.new()
+		stone_material.albedo_color = Color(0.45, 0.44, 0.43)
+		stone_material.roughness = 0.96
+		pebble.material = stone_material
+		_pebble_fallback_cache = pebble
+	return _pebble_fallback_cache
+
+
 ## Mesh of a group. Kinds with a number ("tree:3", "building:5") are variants; the catalog picks the model installed for it,
 ## and each branch falls back to the Kenney or procedural models when its packs are missing.
 func _mesh_for(kind: String) -> Mesh:
@@ -989,6 +1009,8 @@ func _mesh_for(kind: String) -> Mesh:
 			if entry.has("nature"):
 				if _use_nature:
 					model = Assets.nature_mesh(str(entry["nature"]))
+				if model == null:
+					model = pebble_fallback_mesh()
 			else:
 				model = ModelCatalog.entry_mesh(entry)
 			if model != null:
