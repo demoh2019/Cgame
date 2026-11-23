@@ -84,6 +84,24 @@ func run(t) -> void:
 	panel.free()
 	terrain.free()
 
+	t.current = "Large authoring chunks split into bounded native patch transactions"
+	var big_heights: PackedFloat32Array = _base(129, 129)
+	var big_native := ChunkedTerrain3D.new()
+	big_native.set_height_data(big_heights, Vector2i(129, 129))
+	var big_edit := TerrainEditLayers.new()
+	big_edit.setup(129, 129, 128, big_heights)
+	big_edit.take_dirty_chunks()
+	var big_layer: int = big_edit.add_layer("Mountain")
+	big_edit.apply_brush(big_layer, TerrainEditLayers.Brush.RAISE,
+		Vector2(64.0, 64.0), 2.0, 0.2, TerrainEditLayers.Falloff.CONSTANT)
+	var big_result: Dictionary = TerrainEditBridge.flush_dirty(big_edit, big_native)
+	t.check(bool(big_result.get("ok", false)), "128-quad terrain tiles split into native-safe edits")
+	t.check(int(big_result.get("applied", 0)) > 1,
+		"large dirty region is decomposed into multiple bounded patch submissions")
+	t.near(big_native.get_height_data()[64 * 129 + 64], 0.45, 0.00001,
+		"large-chunk paint still reaches the real native height grid")
+	big_native.free()
+
 	t.current = "Bad target dimensions cannot silently drop authoring edits"
 	var wrong := ChunkedTerrain3D.new()
 	wrong.set_height_data(_base(17, 17), Vector2i(17, 17))
