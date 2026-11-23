@@ -291,6 +291,12 @@ TEST_CASE("[CgamePopulationLOD] localized attraction retains exact full-grid sem
 
 TEST_CASE("[CgamePopulationLOD] multiple native nests share their regional agent cap") {
 	Ref<CgamePopulationLOD> p = make_lod(772);
+	// Block all exits so migration cannot change the tested region mid-tick.
+	for (int region = 0; region < p->region_count(); region++) {
+		if (region != 44) {
+			p->set_blocked(region, true);
+		}
+	}
 	p->add_herd(44, comp("walker", 2));
 	p->add_spawner(44, "walker", 4.0, 9);
 	p->add_spawner(44, "runner", 4.0, 9);
