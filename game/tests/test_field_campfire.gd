@@ -124,3 +124,26 @@ func run(t) -> void:
 	sim._tick_world(0.01)
 	t.eq(sim.campfires.size(), 0, "expired fire cleaned up")
 	t.eq(sim.snapshot_for(93)["campfires"].size(), 0, "expired fire leaves snapshots")
+
+	t.current = "invalid campfire coordinates never grant remote warmth or consume fuel"
+	var invalid_camp := {"id": 700, "x": NAN, "y": 0.0, "z": place.y,
+		"expires": sim.time + 300.0}
+	var malformed_fires: Dictionary = {700: invalid_camp}
+	t.eq(FieldCampfire.refuel_reason(invalid_camp, camper.position, sim.time),
+		"invalid_position", "NaN fire coordinate cannot bypass refuel distance")
+	t.check(not FieldCampfire.has_warmth(malformed_fires, camper.position, sim.time),
+		"bad fire positions never grant protective warmth")
+	t.eq(FieldCampfire.visible(malformed_fires, camper.position, sim.time, 50.0), [],
+		"bad camp geometry is never replicated to peers")
+	t.eq(FieldCampfire.visible(malformed_fires, camper.position, sim.time, INF), [],
+		"infinite interest radius cannot request unbounded camp data")
+	t.eq(FieldCampfire.visible(malformed_fires, camper.position, NAN, 50.0), [],
+		"nonfinite server time cannot create bogus countdowns")
+	var good_camp: Dictionary = {"id": 701, "x": camper.position.x,
+		"y": camper.position.y, "z": camper.position.z, "expires": sim.time + 120.0}
+	t.check(FieldCampfire.has_warmth({701: good_camp}, camper.position, sim.time),
+		"ordinary active campfire still protects nearby survivor")
+	t.eq(FieldCampfire.visible({701: good_camp}, camper.position, sim.time, 5.0).size(),
+		1, "valid nearby campfire still replicates normally")
+	t.check(not FieldCampfire.has_warmth({701: good_camp}, camper.position, NAN),
+		"invalid server clock cannot grant shelter")

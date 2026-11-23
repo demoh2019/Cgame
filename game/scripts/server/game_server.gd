@@ -3232,9 +3232,11 @@ func cmd_plant(peer_id: int, seed_id: String) -> Dictionary:
 		return {"ok": false, "reason": "not_a_seed"}
 	if player.inventory.count(seed_id) < 1:
 		return {"ok": false, "reason": "missing_seed"}
-	if not player.position.is_finite():
+	if not player.position.is_finite() or not is_finite(player.yaw):
 		return {"ok": false, "reason": "invalid_position"}
 	var spot := Vector2(player.position.x, player.position.z) + Vector2(sin(player.yaw), cos(player.yaw)) * 1.5
+	if not spot.is_finite():
+		return {"ok": false, "reason": "invalid_position"
 	var account: String = _market_account(player)
 	var own := 0
 	for plot in farm_plots.values():
@@ -3258,23 +3260,31 @@ func cmd_harvest(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	if not player.position.is_finite() or not is_finite(time):
+		return {"ok": false, "reason": "invalid_position"}
 	var account: String = _market_account(player)
 	var here := Vector2(player.position.x, player.position.z)
-	var best_id := -1
-	var best_d: float = Farming.PLANT_REACH
+	var best_id: int = -1
+	var best_distance_squared: float = Farming.PLANT_REACH * Farming.PLANT_REACH
 	var unripe := false
 	for plot_id in farm_plots:
 		var plot: Dictionary = farm_plots[plot_id]
 		if str(plot["account"]) != account:
 			continue
-		var d: float = here.distance_to(Vector2(float(plot["x"]), float(plot["z"])))
-		if d > best_d:
+		var site := Vector2(float(plot.get("x", NAN)), float(plot.get("z", NAN)))
+		if not site.is_finite():
+			continue
+		var distance_squared: float = here.distance_squared_to(site)
+		if distance_squared > Farming.PLANT_REACH * Farming.PLANT_REACH:
 			continue
 		if not Farming.is_ripe(plot, time):
 			unripe = true
 			continue
-		best_d = d
-		best_id = int(plot_id)
+		# Same-distance plots keep a stable ID priority, not Dictionary order.
+		if best_id < 0 or distance_squared < best_distance_squared or (
+				distance_squared == best_distance_squared and int(plot_id) < best_id):
+			best_distance_squared = distance_squared
+			best_id = int(plot_id)
 	if best_id < 0:
 		return {"ok": false, "reason": "not_ripe" if unripe else "no_plot"}
 	var harvest: Dictionary = Farming.harvest_yield(str(farm_plots[best_id]["crop"]), rng)

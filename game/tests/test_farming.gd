@@ -29,6 +29,23 @@ func run(t) -> void:
 	t.eq(Farming.placement_refusal(2, false, Vector2.ZERO, {}, 0), "green_zone_only", "no farming in PvP zones")
 	t.eq(Farming.placement_refusal(0, false, Vector2.ZERO, {}, Farming.MAX_PLOTS), "too_many_plots", "plot cap")
 
+	t.current = "growth clocks and plot placement are robust"
+	t.eq(Farming.progress({"planted": 10.0, "grow": 100.0}, 60.0), 0.5,
+		"valid growth stays proportional to elapsed server time")
+	for bad_now in [NAN, INF, -INF]:
+		t.eq(Farming.progress({"planted": 0.0, "grow": 100.0}, bad_now), 0.0,
+			"nonfinite server time cannot mark crops ripe")
+	for bad_grow in [0.0, -100.0, NAN, INF]:
+		t.eq(Farming.progress({"planted": 0.0, "grow": bad_grow}, 500.0), 0.0,
+			"broken grow durations never grant instant harvest")
+	t.eq(Farming.progress({"planted": 200.0, "grow": 100.0}, 100.0), 0.0,
+		"clock rollback cannot advance crop progress")
+	t.eq(Farming.placement_refusal(0, false, Vector2(NAN, 0.0), {}, 0),
+		"invalid_position", "invalid plot coordinate is rejected")
+	t.eq(Farming.placement_refusal(0, false, Vector2.ZERO,
+		{1: {"x": NAN, "z": 0.0}}, 0), "",
+		"malformed persisted plots cannot poison every future placement")
+
 	t.current = "plant, grow, harvest"
 	var world = WorldGen.new(11223)
 	var server := GameServer.new(world, 31)
@@ -58,3 +75,27 @@ func run(t) -> void:
 	t.check(bool(harvest.get("ok", false)), "ripe crop harvested")
 	t.check(farmer.inventory.count("carrot") >= 2, "carrots in the backpack")
 	t.eq(server.farm_plots.size(), 0, "plot is cleared after harvest")
+
+	t.current = "nearest ripe plot selection is stable and ignores unripe plants"
+	var account: String = server._market_account(farmer)
+	var near_x: float = farmer.position.x
+	var near_z: float = farmer.position.z
+	server.farm_plots[9101] = {"account": account, "crop": "carrot",
+		"x": near_x + 0.2, "z": near_z, "planted": server.time,
+		"grow": 900.0}
+	server.farm_plots[9102] = {"account": account, "crop": "potato",
+		"x": near_x + 1.0, "z": near_z, "planted": server.time - 1500.0,
+		"grow": 1200.0}
+	t.check(bool(server.cmd_harvest(farmer.id).get("ok", false)),
+		"ripe plot can be harvested even when an unripe plot is closer")
+	t.check(server.farm_plots.has(9101) and not server.farm_plots.has(9102),
+		"unripe neighbor remains while ripe potatoes were collected")
+	server.farm_plots.erase(9101)
+	for plot_id in [9202, 9201]:
+		server.farm_plots[plot_id] = {"account": account, "crop": "carrot",
+			"x": near_x + 1.5, "z": near_z, "planted": server.time - 1000.0,
+			"grow": 900.0}
+	t.check(bool(server.cmd_harvest(farmer.id).get("ok", false)),
+		"first of two equally distant crops can be harvested")
+	t.check(not server.farm_plots.has(9201) and server.farm_plots.has(9202),
+		"smaller stable plot ID is collected first independent of insertion order")

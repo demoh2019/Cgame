@@ -864,12 +864,20 @@ func dismantle(id: int) -> void:
 
 func nearest_campfire(point: Vector3, radius: float = 3.2) -> int:
 	var closest: int = -1
+	if not point.is_finite() or not is_finite(radius) or radius < 0.0:
+		return closest
 	var best_squared: float = radius * radius
+	if not is_finite(best_squared):
+		return closest
 	for fire in campfires.values():
-		var offset := Vector2(point.x - float(fire["x"]), point.z - float(fire["z"]))
+		var fire_id: int = int(fire.get("id", -1))
+		var position := Vector2(float(fire.get("x", NAN)), float(fire.get("z", NAN)))
+		if fire_id < 0 or not position.is_finite():
+			continue
+		var offset := position - Vector2(point.x, point.z)
 		var distance_squared: float = offset.length_squared()
-		if distance_squared <= best_squared:
-			closest = int(fire["id"])
+		if distance_squared <= best_squared and (closest < 0 or distance_squared < best_squared or fire_id < closest):
+			closest = fire_id
 			best_squared = distance_squared
 	return closest
 
