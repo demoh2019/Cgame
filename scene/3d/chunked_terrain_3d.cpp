@@ -155,6 +155,10 @@ void ChunkedTerrain3D::_free_chunk_mesh_and_collision(Chunk &r_chunk) {
 		r_chunk.meshes[i] = RID();
 	}
 	r_chunk.lod = -1;
+	r_chunk.lod_use_clock = 0;
+	for (int i = 0; i < MAX_LOD; i++) {
+		r_chunk.lod_last_used[i] = 0;
+	}
 	r_chunk.morph = -1.0f;
 	r_chunk.visible = false;
 	_free_collision(r_chunk);
@@ -261,6 +265,40 @@ void ChunkedTerrain3D::_ensure_mesh(Chunk &r_chunk, int p_lod) {
 		rs->mesh_surface_set_material(mesh_rid, 0, material->get_rid());
 	}
 	r_chunk.meshes[p_lod] = mesh_rid;
+}
+
+// Only trim AFTER swapping the instance to the newly selected base RID.
+// Removing an in-use mesh invalidates the render instance on some drivers.
+void ChunkedTerrain3D::_trim_cached_lods(Chunk &r_chunk) {
+	if (max_cached_lods == 0 || r_chunk.lod < 0 || !r_chunk.instance.is_valid()) {
+		return;
+	}
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs == nullptr) {
+		return;
+	}
+	int resident = 0;
+	for (int i = 0; i < MAX_LOD; i++) {
+		resident += r_chunk.meshes[i].is_valid() ? 1 : 0;
+	}
+	while (resident > max_cached_lods) {
+		int victim = -1;
+		for (int i = 0; i < MAX_LOD; i++) {
+			if (i == r_chunk.lod || !r_chunk.meshes[i].is_valid()) {
+				continue;
+			}
+			if (victim < 0 || r_chunk.lod_last_used[i] < r_chunk.lod_last_used[victim]) {
+				victim = i;
+			}
+		}
+		if (victim < 0) {
+			break; // The active GPU mesh is never eligible for eviction.
+		}
+		rs->free_rid(r_chunk.meshes[victim]);
+		r_chunk.meshes[victim] = RID();
+		r_chunk.lod_last_used[victim] = 0;
+		--resident;
+	}
 }
 
 void ChunkedTerrain3D::_ensure_collision(Chunk &r_chunk) {
@@ -558,6 +596,8 @@ void ChunkedTerrain3D::_update_chunks(bool p_ignore_mesh_budget) {
 							rs->instance_set_base(chunk.instance, chunk.meshes[lod]);
 						}
 						chunk.lod = lod;
+						chunk.lod_last_used[lod] = ++chunk.lod_use_clock;
+						_trim_cached_lods(chunk);
 						chunk.morph = -1.0f; // Mesh topology changed; update its own morph uniform.
 					}
 				}
@@ -878,6 +918,40 @@ void ChunkedTerrain3D::set_mesh_streaming_priority(int p_mode) {
 	mesh_streaming_priority = CLAMP(p_mode, 0, 2);
 }
 
+void ChunkedTerrain3D::set_max_cached_lods(int p_limit) {
+	const int limit = CLAMP(p_limit, 0, MAX_LOD);
+	if (max_cached_lods == limit) {
+		return;
+	}
+	max_cached_lods = limit;
+	// Changing quality in a live world releases unused GPU meshes now, not
+	// after the next camera movement. A chunk with lod == -1 may still have
+	// an attached old RID, so wait for the next LOD binding in that case.
+	for (Chunk &chunk : chunks) {
+		_trim_cached_lods(chunk);
+	}
+}
+
+int ChunkedTerrain3D::get_cached_mesh_count() const {
+	int result = 0;
+	for (const Chunk &chunk : chunks) {
+		for (int lod = 0; lod < MAX_LOD; lod++) {
+			result += chunk.meshes[lod].is_valid() ? 1 : 0;
+		}
+	}
+	return result;
+}
+
+int ChunkedTerrain3D::get_chunk_cached_lod_count(const Vector2i &p_chunk) const {
+	ERR_FAIL_COND_V(p_chunk.x < 0 || p_chunk.y < 0 || p_chunk.x >= chunks_x || p_chunk.y >= chunks_z, 0);
+	const Chunk &chunk = chunks[p_chunk.y * chunks_x + p_chunk.x];
+	int result = 0;
+	for (int lod = 0; lod < MAX_LOD; lod++) {
+		result += chunk.meshes[lod].is_valid() ? 1 : 0;
+	}
+	return result;
+}
+
 void ChunkedTerrain3D::set_lod_geomorph_enabled(bool p_enabled) {
 	if (lod_geomorph_enabled == p_enabled) {
 		return;
@@ -1148,6 +1222,10 @@ void ChunkedTerrain3D::_invalidate_region(const Rect2i &p_region, bool p_geometr
 				chunk.instance = RID();
 			}
 			chunk.lod = -1;
+			chunk.lod_use_clock = 0;
+			for (int level = 0; level < MAX_LOD; level++) {
+				chunk.lod_last_used[level] = 0;
+			}
 			chunk.morph = -1.0f;
 			chunk.visible = false;
 			if (!p_geometry_changed) {
@@ -1256,6 +1334,10 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mesh_build_budget_usec"), &ChunkedTerrain3D::get_mesh_build_budget_usec);
 	ClassDB::bind_method(D_METHOD("set_mesh_streaming_priority", "mode"), &ChunkedTerrain3D::set_mesh_streaming_priority);
 	ClassDB::bind_method(D_METHOD("get_mesh_streaming_priority"), &ChunkedTerrain3D::get_mesh_streaming_priority);
+	ClassDB::bind_method(D_METHOD("set_max_cached_lods", "limit"), &ChunkedTerrain3D::set_max_cached_lods);
+	ClassDB::bind_method(D_METHOD("get_max_cached_lods"), &ChunkedTerrain3D::get_max_cached_lods);
+	ClassDB::bind_method(D_METHOD("get_cached_mesh_count"), &ChunkedTerrain3D::get_cached_mesh_count);
+	ClassDB::bind_method(D_METHOD("get_chunk_cached_lod_count", "chunk"), &ChunkedTerrain3D::get_chunk_cached_lod_count);
 	ClassDB::bind_method(D_METHOD("get_pending_mesh_build_count"), &ChunkedTerrain3D::get_pending_mesh_build_count);
 	ClassDB::bind_method(D_METHOD("set_screen_space_lod_enabled", "enabled"), &ChunkedTerrain3D::set_screen_space_lod_enabled);
 	ClassDB::bind_method(D_METHOD("is_screen_space_lod_enabled"), &ChunkedTerrain3D::is_screen_space_lod_enabled);
@@ -1318,6 +1400,7 @@ void ChunkedTerrain3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_pixel_error", PROPERTY_HINT_RANGE, "0,20,0.1,or_greater,suffix:px"), "set_lod_pixel_error", "get_lod_pixel_error");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "mesh_build_budget_usec", PROPERTY_HINT_RANGE, "0,20000,100,suffix:us"), "set_mesh_build_budget_usec", "get_mesh_build_budget_usec");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "mesh_streaming_priority", PROPERTY_HINT_ENUM, "Original order,Nearest first,Camera facing"), "set_mesh_streaming_priority", "get_mesh_streaming_priority");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cached_lods", PROPERTY_HINT_RANGE, "0,8,1"), "set_max_cached_lods", "get_max_cached_lods");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "screen_space_lod_enabled"), "set_screen_space_lod_enabled", "is_screen_space_lod_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_reference_fov", PROPERTY_HINT_RANGE, "1.01,178.99,0.1,degrees"), "set_lod_reference_fov", "get_lod_reference_fov");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_geometric_error_strength", PROPERTY_HINT_RANGE, "0,1,0.05"), "set_lod_geometric_error_strength", "get_lod_geometric_error_strength");
