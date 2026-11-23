@@ -55,6 +55,8 @@ class TestGpuMeshletPageContract(unittest.TestCase):
         self.assertNotIn("buffer_get_data", self.renderer)
         self.assertIn("_slot_pages.size() * TASK_GROUP_SIZE", self.renderer)
         self.assertIn("draw_list_draw_mesh_tasks", self.renderer)
+        self.assertIn("inspect_streamable_meshlets(vertices, meshlets) if gpu_streamed_source_only", self.renderer)
+        self.assertIn("renderer.gpu_streamed_source_only = true", self.probe)
         self.assertIn("m.counts.z == 0u || m.counts.w == 0u", self.task)
         self.assertIn("if not _stream_gpu_pages(cam.origin)", self.renderer)
         stream = self.renderer.split("func _stream_gpu_pages(", 1)[1].split("func _storage(", 1)[0]
