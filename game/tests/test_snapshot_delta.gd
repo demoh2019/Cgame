@@ -90,6 +90,11 @@ func run(t) -> void:
 	t.eq(p2["baseline"], -1, "still full while nothing acked (lost packet)")
 	bl.acknowledge(1, 2)
 	t.eq(bl.baseline_for(1), s2, "ack sets baseline to that snapshot")
+	var client_baseline: Dictionary = bl.baseline_for(1)
+	(client_baseline[3] as Dictionary)["hp"] = -900
+	((client_baseline[3] as Dictionary)["tags"] as Array).append("external_mutation")
+	t.eq(bl.baseline_for(1), s2,
+		"reading a baseline returns a deep copy and cannot corrupt pending deltas")
 	var s3: Dictionary = s2.duplicate(true)
 	(s3[4] as Dictionary)["hp"] = 10
 	var p3: Dictionary = bl.build_packet(1, 3, s3)

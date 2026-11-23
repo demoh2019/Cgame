@@ -147,6 +147,13 @@ func run(t) -> void:
 	t.check(initial_spot.distance_to(moved_spot) > 0.15,
 		"gold marker changes position after each real hit")
 	t.check(initial_spot.y > float(tree["y"]), "weak point appears on the model, not below the ground")
+	var huge_id_node: Dictionary = tree.duplicate(true)
+	huge_id_node["id"] = 9223372036854770000
+	var wrapped_id_node: Dictionary = huge_id_node.duplicate(true)
+	wrapped_id_node["id"] = posmod(int(huge_id_node["id"]), 360)
+	t.eq(ResourceGathering.weakspot_position(huge_id_node, 2147483647),
+		ResourceGathering.weakspot_position(wrapped_id_node, 2147483647),
+		"large stable resource IDs use overflow-safe deterministic weak point rotation")
 	var perfect_server := GameServer.new(world, 43)
 	var accurate_player = perfect_server.add_player(811, "Miner")
 	accurate_player.position = Vector3(x + 1.5, world.height_at(x + 1.5, z), z)

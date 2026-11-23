@@ -67,7 +67,10 @@ static func aimed_at(player_pos: Vector3, node: Dictionary, direction: Vector2, 
 static func weakspot_position(node: Dictionary, completed_hits: int) -> Vector3:
 	var id: int = int(node.get("id", 0))
 	var index: int = maxi(0, completed_hits)
-	var angle: float = deg_to_rad(float(posmod(id * 37 + index * 107, 360)))
+	# Reduce first: world-node IDs can be near int64 limits. Multiplying the
+	# full ID would overflow and move the client/server weak spot marker.
+	var angle_degrees: int = posmod(posmod(id, 360) * 37 + posmod(index, 360) * 107, 360)
+	var angle: float = deg_to_rad(float(angle_degrees))
 	var kind: String = str(node.get("kind", ""))
 	var radius: float = clampf(float(node.get("radius", 0.5)) * (0.6 if kind == "tree" else 0.72), 0.22, 1.1)
 	var height: float = 1.05 if kind == "tree" else clampf(float(node.get("radius", 0.6)) * 0.85, 0.38, 1.2)

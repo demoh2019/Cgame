@@ -208,7 +208,9 @@ static func entrance_on_paths(paths: Array, toward: Vector2) -> Vector2:
 		var path: PackedVector2Array = street
 		if path.is_empty():
 			continue
-		for point in [path[0], path[path.size() - 1]]:
+		# Closed ring streets have identical endpoints. Evaluate all sampled
+		# vertices so the regional road can meet the correct side of the city.
+		for point in path:
 			var candidate: Vector2 = point
 			var score: float = candidate.dot(heading) - absf(candidate.cross(heading)) * 0.15
 			if score > best_score:
@@ -219,7 +221,7 @@ static func entrance_on_paths(paths: Array, toward: Vector2) -> Vector2:
 
 ## Minimum distance to the polyline centreline, for obstacle and building placement.
 static func street_distance(point: Vector2, paths: Array) -> float:
-	var nearest: float = INF
+	var nearest_squared: float = INF
 	for street in paths:
 		var path: PackedVector2Array = street
 		for i in path.size() - 1:
@@ -230,8 +232,10 @@ static func street_distance(point: Vector2, paths: Array) -> float:
 			if length_sq < 0.00001:
 				continue
 			var t: float = clampf((point - a).dot(delta) / length_sq, 0.0, 1.0)
-			nearest = minf(nearest, point.distance_to(a + delta * t))
-	return nearest
+			nearest_squared = minf(nearest_squared, point.distance_squared_to(a + delta * t))
+	# Most generation queries only need comparisons; avoid a square root for
+	# every street segment, keeping just one for the final exact distance.
+	return sqrt(nearest_squared)
 
 
 ## A compact, deterministic grid of nearby street segments for building and loot clearance.

@@ -9,6 +9,7 @@ const SUITES := [
 	"res://tests/test_debris_simulation_lod.gd",
 	"res://tests/test_radial_blast_shielding.gd",
 	"res://tests/test_world_gen.gd",
+	"res://tests/test_city_street_entrance.gd",
 	"res://tests/test_static_blocker_grid.gd",
 	"res://tests/test_resource_aim_interaction.gd",
 	"res://tests/test_noise_batch_sampling.gd",

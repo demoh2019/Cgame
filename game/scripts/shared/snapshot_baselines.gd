@@ -53,12 +53,17 @@ func baseline_for(client_id: int) -> Dictionary:
 		return {}
 	var slot: Dictionary = _clients[client_id]
 	var state: Dictionary = slot["acked_state"]
-	return state
+	# Never leak the stored acknowledged state to callers: an accidental HUD
+	# or debug mutation would corrupt every later delta for this client.
+	return state.duplicate(true)
 
 
 func build_packet(client_id: int, sequence: int, state: Dictionary, tolerances: Dictionary = {}) -> Dictionary:
 	var slot: Dictionary = _slot(client_id)
-	var delta: Dictionary = SnapshotDelta.diff(baseline_for(client_id), state, tolerances)
+	# The server can read its private baseline directly without cloning the
+	# entire entity set on every snapshot tick.
+	var baseline: Dictionary = slot["acked_state"]
+	var delta: Dictionary = SnapshotDelta.diff(baseline, state, tolerances)
 	var packet: Dictionary = {"sequence": sequence, "baseline": int(slot["acked_seq"]), "delta": delta}
 	record_sent(client_id, sequence, state)
 	return packet
