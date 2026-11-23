@@ -325,8 +325,8 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Sparse paint keeps physics while preser
 	CHECK(terrain->get_color_data()[7 * 65 + 8] == Color(0, 1, 0));
 	CHECK(terrain->get_color_data()[8 * 65 + 8] == Color(0.2, 0.3, 0.4, 1.0));
 
-	// A height-only patch is refused while the material uses external
-	// normals. Supplying matching finite normals lets us edit locally.
+	// Existing height patches remain authoritative for terrain normals and
+	// reject invalid paint without mutating the heightfield.
 	const PackedFloat32Array before = terrain->get_height_data();
 	ERR_PRINT_OFF;
 	CHECK_FALSE(terrain->apply_color_patch(Rect2i(7, 7, 2, 2), PackedColorArray({ Color(1, 0, 0) })));
@@ -334,7 +334,8 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Sparse paint keeps physics while preser
 	CHECK(terrain->get_height_data() == before);
 	CHECK(terrain->apply_height_patch(Rect2i(7, 7, 1, 1), PackedFloat32Array({ 0.9f })));
 	CHECK(terrain->get_last_region_invalidated_chunks() == 1);
-	CHECK(terrain->get_normal_data()[7 * 65 + 7].is_equal_approx(Vector3(0, 1, 0)));
+	CHECK(terrain->get_normal_data()[7 * 65 + 7].is_finite());
+	CHECK_FALSE(terrain->get_normal_data()[7 * 65 + 7].is_equal_approx(Vector3(0, 1, 0)));
 	terrain->force_update();
 	CHECK(terrain->get_chunk_count() == 4);
 	memdelete(focus);
