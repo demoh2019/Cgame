@@ -735,7 +735,21 @@ TEST_CASE("[CgameClusterLOD] attribute aware surface simplification preserves au
 	Array position_only = arrays.duplicate();
 	position_only[Mesh::ARRAY_NORMAL] = Variant();
 	position_only[Mesh::ARRAY_TEX_UV] = Variant();
+	position_only[Mesh::ARRAY_TANGENT] = Variant();
 	CHECK(CgameClusterLOD::simplify_surface_arrays(position_only, 320).size() == Mesh::ARRAY_MAX);
+
+	// Use a reducible grid: these checks cannot pass merely because the
+	// simplifier was unable to reduce an already tiny mesh.
+	Array malformed = arrays.duplicate();
+	malformed[Mesh::ARRAY_TANGENT] = PackedFloat32Array({ 1.0f, 0.0f });
+	CHECK(CgameClusterLOD::simplify_surface_arrays(malformed, 320).is_empty());
+	PackedFloat32Array invalid_tangents = tangents;
+	invalid_tangents.set(invalid_tangents.size() - 1, Math::NaN);
+	malformed[Mesh::ARRAY_TANGENT] = invalid_tangents;
+	CHECK(CgameClusterLOD::simplify_surface_arrays(malformed, 320).is_empty());
+	malformed[Mesh::ARRAY_TANGENT] = uvs;
+	CHECK(CgameClusterLOD::simplify_surface_arrays(malformed, 320).is_empty());
+	CHECK(CgameClusterLOD::simplify_surface_arrays(arrays, 320).size() == Mesh::ARRAY_MAX);
 }
 
 TEST_CASE("[CgameClusterLOD] attribute simplification rejects malformed late data atomically") {

@@ -389,7 +389,7 @@ int CgameClusterLOD::triangle_count(const Dictionary &p_hierarchy, const PackedI
 }
 
 // A safe native import/load-time index reduction path. Meshoptimizer chooses
-// collapses using per-vertex normal and UV penalties; the resulting triangles
+// collapses using per-vertex normal, UV and tangent-frame penalties; the resulting triangles
 // refer to ORIGINAL source vertex IDs, preserving every packed surface
 // attribute, including tangents, colors, UV2, bones and custom channels.
 // This is not GPU-driven cluster rendering or geometry streaming.
@@ -430,9 +430,21 @@ Array CgameClusterLOD::simplify_surface_arrays(const Array &p_surface_arrays,
 			(!uvs.is_empty() && uvs.size() != vertex_count)) {
 		return invalid;
 	}
+	PackedFloat32Array tangents;
+	if (p_surface_arrays[Mesh::ARRAY_TANGENT].get_type() == Variant::PACKED_FLOAT32_ARRAY) {
+		tangents = p_surface_arrays[Mesh::ARRAY_TANGENT];
+	} else if (p_surface_arrays[Mesh::ARRAY_TANGENT].get_type() != Variant::NIL) {
+		return invalid;
+	}
+	if (!tangents.is_empty() && tangents.size() != vertex_count * 4) {
+		return invalid;
+	}
 	const bool use_normals = normals.size() == vertex_count;
 	const bool use_uvs = uvs.size() == vertex_count;
-	const int attribute_count = (use_normals ? 3 : 0) + (use_uvs ? 2 : 0);
+	const bool use_tangents = tangents.size() == vertex_count * 4;
+	// Penalize collapses across divergent tangent frames (including mirrored
+	// UV handedness), not just geometric normals and texture coordinates.
+	const int attribute_count = (use_normals ? 3 : 0) + (use_uvs ? 2 : 0) + (use_tangents ? 4 : 0);
 
 	LocalVector<float> positions;
 	positions.resize(size_t(vertex_count) * 3);
@@ -440,7 +452,7 @@ Array CgameClusterLOD::simplify_surface_arrays(const Array &p_surface_arrays,
 	if (attribute_count > 0) {
 		attributes.resize(size_t(vertex_count) * attribute_count);
 	}
-	float weights[5] = {};
+	float weights[9] = {};
 	int weight_index = 0;
 	if (use_normals) {
 		for (int c = 0; c < 3; ++c) {
@@ -452,9 +464,16 @@ Array CgameClusterLOD::simplify_surface_arrays(const Array &p_surface_arrays,
 			weights[weight_index++] = p_uv_weight;
 		}
 	}
+	if (use_tangents) {
+		for (int component = 0; component < 3; ++component) {
+			weights[weight_index++] = p_normal_weight * 0.5f;
+		}
+		weights[weight_index++] = p_normal_weight;
+	}
 	const Vector3 *src_vertices = vertices.ptr();
 	const Vector3 *src_normals = use_normals ? normals.ptr() : nullptr;
 	const Vector2 *src_uvs = use_uvs ? uvs.ptr() : nullptr;
+	const float *src_tangents = use_tangents ? tangents.ptr() : nullptr;
 	for (int i = 0; i < vertex_count; ++i) {
 		if (!src_vertices[i].is_finite()) {
 			return invalid;
@@ -483,6 +502,15 @@ Array CgameClusterLOD::simplify_surface_arrays(const Array &p_surface_arrays,
 			}
 			attributes[a++] = float(src_uvs[i].x);
 			attributes[a++] = float(src_uvs[i].y);
+		}
+		if (use_tangents) {
+			for (int component = 0; component < 4; ++component) {
+				const float value = src_tangents[i * 4 + component];
+				if (!Math::is_finite(value)) {
+					return invalid;
+				}
+				attributes[a++] = value;
+			}
 		}
 	}
 	LocalVector<uint32_t> src_indices;

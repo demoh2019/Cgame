@@ -84,6 +84,23 @@ func run(t) -> void:
 	t.eq(MeshLOD.copy_lods(null, 0).size(), 0, "null mesh is safe")
 	t.eq(MeshLOD.copy_lods(mesh, 100).size(), 0, "out-of-range surface is safe")
 
+	t.current = "native rebuild preserves custom vertex channel encodings"
+	var custom_arrays: Array = mesh.surface_get_arrays(0)
+	custom_arrays[Mesh.ARRAY_CUSTOM0] = PackedFloat32Array([
+		1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])
+	var encoding: int = Mesh.ARRAY_CUSTOM_RGB_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT
+	var custom_mesh := ArrayMesh.new()
+	custom_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, custom_arrays,
+		[], {}, encoding)
+	t.eq(MeshLOD.vertex_encoding_flags(custom_mesh, 0), encoding,
+		"float custom-channel format is retained instead of defaulting to RGBA8")
+	var rebuilt_custom := ArrayMesh.new()
+	rebuilt_custom.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,
+		custom_mesh.surface_get_arrays(0), [], {}, MeshLOD.vertex_encoding_flags(custom_mesh, 0))
+	t.eq(rebuilt_custom.surface_get_arrays(0)[Mesh.ARRAY_CUSTOM0],
+		custom_mesh.surface_get_arrays(0)[Mesh.ARRAY_CUSTOM0],
+		"rebuilding geometry retains the original custom float stream")
+
 	t.current = "scanned prop triangle budgets use importer LODs"
 	# Synthetic indexed terrain is deterministic and needs no scanned plant asset pack.
 	var grid_side := 16
@@ -112,6 +129,13 @@ func run(t) -> void:
 	dense.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, source_arrays)
 	var original_material := StandardMaterial3D.new()
 	dense.surface_set_material(0, original_material)
+	t.check(MeshLOD.with_generated_lods(dense, 10000) == dense,
+		"strict threshold skips a small mesh")
+	var generated_lod: Mesh = MeshLOD.with_generated_lods(dense, 1)
+	t.check(generated_lod != dense,
+		"earlier skipped threshold cannot poison a later LOD request")
+	t.check(MeshLOD.with_generated_lods(dense, 1) == generated_lod,
+		"same threshold reuses generated geometry")
 	var budgeted: Mesh = MeshLOD.with_triangle_budget(dense, 80)
 	t.check(budgeted != null, "triangle budget produces a usable mesh")
 	t.check(budgeted == MeshLOD.with_triangle_budget(dense, 80),
