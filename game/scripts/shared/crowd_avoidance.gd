@@ -31,7 +31,7 @@ static func compute_velocities(positions: PackedVector2Array, velocities: Packed
 	if max_neighbors <= 0 or neighbor_dist <= 0.0 or time_horizon <= 0.0 or 			time_step <= 0.0 or radius <= 0.0:
 		for i in n:
 			var target: Vector2 = preferred[i]
-			if target.is_finite():
+			if target.is_finite() and positions[i].is_finite() and velocities[i].is_finite() and absf(positions[i].x) <= 10000000.0 and absf(positions[i].y) <= 10000000.0:
 				out[i] = target.limit_length(max_speed)
 		return out
 	var cell: float = maxf(neighbor_dist, 0.001)
@@ -50,7 +50,7 @@ static func compute_velocities(positions: PackedVector2Array, velocities: Packed
 			grid[key] = PackedInt32Array([i])
 	var nd_sq := neighbor_dist * neighbor_dist
 	var neigh_idx := PackedInt32Array()
-	var neigh_d := PackedFloat32Array()
+	var neigh_d := PackedFloat64Array()
 	var line_p := PackedVector2Array()
 	var line_d := PackedVector2Array()
 	for i in n:
@@ -75,10 +75,12 @@ static func compute_velocities(positions: PackedVector2Array, velocities: Packed
 					if dsq >= nd_sq:
 						continue
 					# Insertion into a list kept sorted by distance and capped at max_neighbors.
-					if neigh_idx.size() >= max_neighbors and dsq >= neigh_d[neigh_d.size() - 1]:
-						continue
+					if neigh_idx.size() >= max_neighbors:
+						var last: int = neigh_idx.size() - 1
+						if dsq > neigh_d[last] or (dsq == neigh_d[last] and j > neigh_idx[last]):
+							continue
 					var at := neigh_idx.size()
-					while at > 0 and neigh_d[at - 1] > dsq:
+					while at > 0 and (neigh_d[at - 1] > dsq or (neigh_d[at - 1] == dsq and neigh_idx[at - 1] > j)):
 						at -= 1
 					neigh_idx.insert(at, j)
 					neigh_d.insert(at, dsq)

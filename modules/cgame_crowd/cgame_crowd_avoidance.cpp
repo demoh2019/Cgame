@@ -33,6 +33,16 @@
 #include "core/object/worker_thread_pool.h"
 #include "core/templates/hash_map.h"
 
+// Invalid agents are isolated before constructing any velocity constraints.
+static bool crowd_agent_valid(const Vector2 &p_position, const Vector2 &p_velocity) {
+	return p_position.is_finite() && p_velocity.is_finite() &&
+			Math::abs(p_position.x) <= 10000000.0 && Math::abs(p_position.y) <= 10000000.0;
+}
+
+static Vector2 crowd_bounded_preference(const Vector2 &p_preferred, real_t p_max_speed) {
+	return p_preferred.is_finite() ? p_preferred.limit_length(p_max_speed) : Vector2();
+}
+
 // Uniform spatial hash: agent indices sorted by cell, with a cell -> range map.
 struct CgameCrowdAvoidance::Grid {
 	struct Range {
@@ -67,25 +77,29 @@ struct CgameCrowdAvoidance::Grid {
 	}
 
 	static int64_t key(int32_t p_x, int32_t p_y) {
-		return ((int64_t)p_x << 32) ^ (int64_t)(uint32_t)p_y;
+		return int64_t(p_x) * INT64_C(4294967296) + int64_t(uint32_t(p_y));
 	}
 
-	void build(const Vector2 *p_positions, uint32_t p_count, real_t p_cell) {
+	void build(const Vector2 *p_positions, const Vector2 *p_velocities, uint32_t p_count, real_t p_cell) {
 		cell = p_cell;
 		LocalVector<Entry> entries;
-		entries.resize(p_count);
 		for (uint32_t i = 0; i < p_count; i++) {
-			entries[i].key = key(cell_coord(p_positions[i].x, cell), cell_coord(p_positions[i].y, cell));
-			entries[i].index = i;
+			if (!crowd_agent_valid(p_positions[i], p_velocities[i])) {
+				continue;
+			}
+			Entry entry;
+			entry.key = key(cell_coord(p_positions[i].x, cell), cell_coord(p_positions[i].y, cell));
+			entry.index = i;
+			entries.push_back(entry);
 		}
 		// Total order on (key, index): fully deterministic.
 		entries.sort_custom<EntryLess>();
-		sorted.resize(p_count);
+		sorted.resize(entries.size());
 		uint32_t i = 0;
-		while (i < p_count) {
+		while (i < entries.size()) {
 			uint32_t j = i;
 			const int64_t k = entries[i].key;
-			while (j < p_count && entries[j].key == k) {
+			while (j < entries.size() && entries[j].key == k) {
 				sorted[j] = entries[j].index;
 				j++;
 			}
@@ -217,6 +231,11 @@ void CgameCrowdAvoidance::_compute_range(const ThreadData &p_data, uint32_t p_be
 	for (uint32_t i = p_begin; i < p_end; i++) {
 		const Vector2 pi = p_data.positions[i];
 		const Vector2 vi = p_data.velocities[i];
+		if (!crowd_agent_valid(pi, vi)) {
+			p_data.out[i] = Vector2();
+			continue;
+		}
+		const Vector2 pref = crowd_bounded_preference(p_data.preferred[i], prm.max_speed);
 		neigh_idx.clear();
 		neigh_d.clear();
 		const int32_t cx = Grid::cell_coord(pi.x, cell);
@@ -259,6 +278,10 @@ void CgameCrowdAvoidance::_compute_range(const ThreadData &p_data, uint32_t p_be
 			}
 		}
 
+		if (neigh_idx.is_empty()) {
+			p_data.out[i] = pref;
+			continue;
+		}
 		lines.clear();
 		for (uint32_t k = 0; k < neigh_idx.size(); k++) {
 			const uint32_t j = neigh_idx[k];
@@ -299,16 +322,12 @@ void CgameCrowdAvoidance::_compute_range(const ThreadData &p_data, uint32_t p_be
 			lines.push_back(line);
 		}
 
-		Vector2 pref = p_data.preferred[i];
-		if (pref.length_squared() > prm.max_speed * prm.max_speed) {
-			pref = pref.normalized() * prm.max_speed;
-		}
 		Vector2 result;
 		const uint32_t fail = _linear_program2(lines, prm.max_speed, pref, false, result);
 		if (fail < lines.size()) {
 			_linear_program3(lines, fail, prm.max_speed, result);
 		}
-		p_data.out[i] = result;
+		p_data.out[i] = result.is_finite() ? result.limit_length(prm.max_speed) : pref;
 	}
 }
 
@@ -323,8 +342,25 @@ void CgameCrowdAvoidance::compute(const Vector2 *p_positions, const Vector2 *p_v
 	if (p_count == 0) {
 		return;
 	}
+	if (!Math::is_finite(p_params.max_speed) || p_params.max_speed <= 0.0 ||
+			!Math::is_finite(p_params.radius) || p_params.radius < 0.0 ||
+			!Math::is_finite(p_params.neighbor_dist) || !Math::is_finite(p_params.time_horizon) ||
+			!Math::is_finite(p_params.time_step)) {
+		for (uint32_t i = 0; i < p_count; i++) {
+			r_out[i] = Vector2();
+		}
+		return;
+	}
+	if (p_count == 1 || p_params.max_neighbors <= 0 || p_params.neighbor_dist <= 0.0 ||
+			p_params.time_horizon <= 0.0 || p_params.time_step <= 0.0 || p_params.radius <= 0.0) {
+		for (uint32_t i = 0; i < p_count; i++) {
+			r_out[i] = crowd_agent_valid(p_positions[i], p_velocities[i]) ?
+					crowd_bounded_preference(p_preferred[i], p_params.max_speed) : Vector2();
+		}
+		return;
+	}
 	Grid grid;
-	grid.build(p_positions, p_count, MAX(p_params.neighbor_dist, (real_t)0.001));
+	grid.build(p_positions, p_velocities, p_count, MAX(p_params.neighbor_dist, (real_t)0.001));
 	ThreadData data;
 	data.positions = p_positions;
 	data.velocities = p_velocities;
@@ -351,7 +387,10 @@ PackedVector2Array CgameCrowdAvoidance::compute_velocities(const PackedVector2Ar
 	if (n == 0) {
 		return out;
 	}
-	ERR_FAIL_COND_V_MSG(p_velocities.size() != n || p_preferred.size() != n, out, "CgameCrowdAvoidance: positions, velocities and preferred must have the same size.");
+	if (p_velocities.size() != n || p_preferred.size() != n) {
+		out.fill(Vector2());
+		return out;
+	}
 	Params params;
 	params.radius = p_radius;
 	params.max_speed = p_max_speed;

@@ -6,6 +6,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const ScriptORCA = preload("res://scripts/shared/crowd_avoidance.gd")
+const CrowdFacade = preload("res://scripts/native/cgame_crowd_facade.gd")
 
 
 func _pack(server, world, ids: Array, target_id: int) -> Array:
@@ -147,3 +148,37 @@ func run(t) -> void:
 	t.eq(filtered[0], Vector2.ZERO, "invalid NPC is excluded from spatial hash")
 	t.eq(filtered[1], Vector2(-2.0, 0.0),
 		"valid NPC keeps moving when another entity is invalid")
+
+
+
+	t.current = "active engine ORCA isolates invalid agents and skips empty constraints"
+	var broken_velocity := PackedVector2Array([Vector2.INF, Vector2.ZERO])
+	var isolated: PackedVector2Array = CrowdFacade.compute_velocities(
+		sites, broken_velocity, desired, 0.4, 2.0, 2.0, 3.0, 8)
+	t.eq(isolated, PackedVector2Array([Vector2.ZERO, Vector2(-2.0, 0.0)]),
+		"one malformed velocity cannot contaminate its valid neighbor")
+	t.eq(CrowdFacade.compute_velocities(sites, actual, desired,
+		0.4, 2.0, 0.0, 3.0, 8), plain, "disabled prediction bypasses solver")
+	t.eq(CrowdFacade.compute_velocities(sites, actual, desired,
+		0.4, NAN, 2.0, 3.0, 8), PackedVector2Array([Vector2.ZERO, Vector2.ZERO]),
+		"invalid speed produces safe stationary velocities")
+	t.eq(CrowdFacade.compute_velocities(sites, PackedVector2Array(), desired,
+		0.4, 2.0, 2.0, 3.0, 8), PackedVector2Array([Vector2.ZERO, Vector2.ZERO]),
+		"invalid array sizes are handled safely")
+
+	# More than the native worker threshold, with negative spatial cells.
+	var sparse_sites := PackedVector2Array()
+	var sparse_vel := PackedVector2Array()
+	var sparse_pref := PackedVector2Array()
+	for i in 300:
+		sparse_sites.append(Vector2(-float(i) * 20.0, 0.0))
+		sparse_vel.append(Vector2.ZERO)
+		sparse_pref.append(Vector2(3.0, 0.0))
+	sparse_vel[100] = Vector2.INF
+	sparse_pref[200] = Vector2.INF
+	var sparse: PackedVector2Array = CrowdFacade.compute_velocities(
+		sparse_sites, sparse_vel, sparse_pref, 0.4, 2.0, 2.0, 3.0, 8)
+	t.eq(sparse.size(), 300, "parallel path keeps one output per input")
+	for i in sparse.size():
+		var expected := Vector2.ZERO if i == 100 or i == 200 else Vector2(2.0, 0.0)
+		t.eq(sparse[i], expected, "isolated agent receives bounded preferred velocity")
