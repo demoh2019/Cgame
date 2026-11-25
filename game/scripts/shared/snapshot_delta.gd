@@ -49,11 +49,15 @@ static func diff(baseline: Dictionary, current: Dictionary, tolerances: Dictiona
 ## Returns a new state; the baseline is never mutated or aliased.
 static func apply(baseline: Dictionary, delta: Dictionary) -> Dictionary:
 	var out: Dictionary = {}
-	for id in baseline:
-		out[id] = _copy(baseline[id])
 	var removed: PackedInt64Array = delta.get("removed", PackedInt64Array())
+	var retired: Dictionary = {}
 	for id in removed:
-		out.erase(id)
+		retired[id] = true
+	# Entities leaving the interest set never need a deep copy. Keep the
+	# original insertion order of survivors, then process additions as before.
+	for id in baseline:
+		if not retired.has(id):
+			out[id] = _copy(baseline[id])
 	var added: Dictionary = delta.get("added", {})
 	for id in added:
 		out[id] = _copy(added[id])
