@@ -72,6 +72,7 @@ const SUITES := [
 	"res://tests/test_audio_virtual_voices.gd",
 	"res://tests/test_procedural_sound_fallback.gd",
 	"res://tests/test_chase_crowd_avoidance.gd",
+	"res://tests/test_ai_numeric_guards.gd",
 	"res://tests/test_herd_population.gd",
 	"res://tests/test_motion_matched_locomotion.gd",
 	"res://tests/test_audio_voice_admission.gd",

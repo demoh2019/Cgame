@@ -70,6 +70,13 @@ static func assign(slots_world: PackedVector2Array, members: PackedVector2Array)
 	result.fill(-1)
 	if n == 0 or m == 0:
 		return result
+	# Keep costs strictly below the Hungarian sentinel (1e18).
+	for point in members:
+		if not point.is_finite() or absf(point.x) > 1.0e15 or absf(point.y) > 1.0e15:
+			return result
+	for point in slots_world:
+		if not point.is_finite() or absf(point.x) > 1.0e15 or absf(point.y) > 1.0e15:
+			return result
 	if n <= HUNGARIAN_LIMIT and m <= HUNGARIAN_LIMIT:
 		if n <= m:
 			var cost := PackedFloat64Array()
@@ -98,7 +105,7 @@ static func assign(slots_world: PackedVector2Array, members: PackedVector2Array)
 static func assignment_cost(slots_world: PackedVector2Array, members: PackedVector2Array, assignment: PackedInt32Array) -> float:
 	var total := 0.0
 	for i in range(assignment.size()):
-		if assignment[i] >= 0:
+		if assignment[i] >= 0 and i < members.size() and assignment[i] < slots_world.size():
 			total += members[i].distance_to(slots_world[assignment[i]])
 	return total
 

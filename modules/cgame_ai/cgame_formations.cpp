@@ -200,6 +200,18 @@ PackedInt32Array CgameFormations::assign(const PackedVector2Array &p_slots_world
 	if (n == 0 || m == 0) {
 		return result;
 	}
+	// The Hungarian sentinel is 1e18. Reject invalid or out-of-world
+	// coordinates before distances can exceed it or become non-finite.
+	for (const Vector2 &point : p_members) {
+		if (!point.is_finite() || Math::abs(point.x) > 1.0e15 || Math::abs(point.y) > 1.0e15) {
+			return result;
+		}
+	}
+	for (const Vector2 &point : p_slots_world) {
+		if (!point.is_finite() || Math::abs(point.x) > 1.0e15 || Math::abs(point.y) > 1.0e15) {
+			return result;
+		}
+	}
 	if (n <= HUNGARIAN_LIMIT && m <= HUNGARIAN_LIMIT) {
 		if (n <= m) {
 			Vector<double> cost;

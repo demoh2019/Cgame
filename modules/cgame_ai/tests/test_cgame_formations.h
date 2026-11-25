@@ -189,6 +189,29 @@ TEST_CASE("[CgameFormations] Hungarian assignment is optimal, greedy fallback is
 	CHECK(valid_assignment(CgameFormations::assign(CgameFormations::slots("line", 64, 1.0), first64), 64));
 }
 
+TEST_CASE("[CgameFormations] Invalid costs cannot stall assignment") {
+	PackedVector2Array slots;
+	slots.push_back(Vector2());
+	slots.push_back(Vector2(5, 0));
+	PackedVector2Array members;
+	members.push_back(Vector2(Math::NaN, 0));
+	members.push_back(Vector2(5, 0));
+	PackedInt32Array rejected = CgameFormations::assign(slots, members);
+	REQUIRE(rejected.size() == 2);
+	CHECK(rejected[0] == -1);
+	CHECK(rejected[1] == -1);
+	members.write[0] = Vector2(1.0e20, 0);
+	rejected = CgameFormations::assign(slots, members);
+	CHECK(rejected[0] == -1);
+	CHECK(rejected[1] == -1);
+	members.write[0] = Vector2();
+	const PackedInt32Array valid = CgameFormations::assign(slots, members);
+	CHECK(valid[0] == 0);
+	CHECK(valid[1] == 1);
+	slots.write[0] = Vector2(Math::INF, 0);
+	CHECK(CgameFormations::assign(slots, members)[0] == -1);
+}
+
 TEST_CASE("[CgameFormations] blending and smoothing") {
 	const PackedVector2Array from_s = CgameFormations::slots("line", 4, 2.0);
 	const PackedVector2Array to_s = CgameFormations::slots("column", 4, 2.0);

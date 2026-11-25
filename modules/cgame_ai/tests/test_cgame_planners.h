@@ -181,6 +181,19 @@ TEST_CASE("[CgameUtilityAI] curves, compensation and best") {
 	CHECK(CgameUtilityAI::best(zeros) == -1);
 }
 
+TEST_CASE("[CgameUtilityAI] Invalid scores do not win or propagate") {
+	CHECK(CgameUtilityAI::curve(CgameUtilityAI::LINEAR, Math::NaN) == 0.0);
+	CHECK(CgameUtilityAI::curve(CgameUtilityAI::LOGISTIC, 0.5, Math::INF) == 0.0);
+	PackedFloat32Array scores;
+	scores.push_back(Math::INF);
+	scores.push_back(0.5);
+	scores.push_back(Math::NaN);
+	CHECK(CgameUtilityAI::combine(scores) == 0.0);
+	CHECK(CgameUtilityAI::best(scores) == 1);
+	CHECK(CgameUtilityAI::infected_target_score(1.0, Math::NaN, 1.0, true, false) == 0.0);
+	CHECK(CgameUtilityAI::infected_target_score(-1.0, 30.0, 1.0, true, false) == 0.0);
+}
+
 TEST_CASE("[CgameUtilityAI] infected prey choice") {
 	const double near_healthy = CgameUtilityAI::infected_target_score(5.0, 30.0, 1.0, false, false);
 	const double far_healthy = CgameUtilityAI::infected_target_score(12.0, 30.0, 1.0, false, false);

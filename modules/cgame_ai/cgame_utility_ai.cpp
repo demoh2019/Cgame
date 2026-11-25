@@ -33,6 +33,9 @@
 #include "core/math/math_funcs.h"
 
 double CgameUtilityAI::curve(int p_kind, double p_x, double p_slope, double p_shift) {
+	if (!Math::is_finite(p_x) || !Math::is_finite(p_slope) || !Math::is_finite(p_shift)) {
+		return 0.0;
+	}
 	double v = CLAMP(p_x, 0.0, 1.0);
 	switch (p_kind) {
 		case QUADRATIC: {
@@ -51,7 +54,7 @@ double CgameUtilityAI::curve(int p_kind, double p_x, double p_slope, double p_sh
 			v = v * p_slope + p_shift;
 		} break;
 	}
-	return CLAMP(v, 0.0, 1.0);
+	return Math::is_finite(v) ? CLAMP(v, 0.0, 1.0) : 0.0;
 }
 
 double CgameUtilityAI::combine(const PackedFloat32Array &p_scores) {
@@ -60,6 +63,9 @@ double CgameUtilityAI::combine(const PackedFloat32Array &p_scores) {
 	}
 	double total = 1.0;
 	for (int i = 0; i < p_scores.size(); i++) {
+		if (!Math::is_finite(p_scores[i])) {
+			return 0.0;
+		}
 		total *= CLAMP(double(p_scores[i]), 0.0, 1.0);
 		if (total <= 0.0) {
 			return 0.0;
@@ -74,7 +80,7 @@ int CgameUtilityAI::best(const PackedFloat32Array &p_scores) {
 	int index = -1;
 	double top = 0.0;
 	for (int i = 0; i < p_scores.size(); i++) {
-		if (double(p_scores[i]) > top) {
+		if (Math::is_finite(p_scores[i]) && double(p_scores[i]) > top) {
 			top = p_scores[i];
 			index = i;
 		}
@@ -83,7 +89,7 @@ int CgameUtilityAI::best(const PackedFloat32Array &p_scores) {
 }
 
 double CgameUtilityAI::infected_target_score(double p_distance, double p_leash, double p_health_fraction, bool p_is_current, bool p_noisy) {
-	if (!Math::is_finite(p_distance) || p_leash <= 0.0) {
+	if (!Math::is_finite(p_distance) || p_distance < 0.0 || !Math::is_finite(p_leash) || p_leash <= 0.0) {
 		return 0.0;
 	}
 	if (p_distance > p_leash) {

@@ -13,7 +13,7 @@ const NOISE_BONUS := 0.15
 
 static func score(distance: float, leash: float, health_fraction: float,
 		is_current: bool, noisy: bool) -> float:
-	if not is_finite(distance) or leash <= 0.0:
+	if not is_finite(distance) or distance < 0.0 or not is_finite(leash) or leash <= 0.0:
 		return 0.0
 	if distance > leash:
 		# The leash itself is enforced by the chase state; an existing focus is never dropped here.
