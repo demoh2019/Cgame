@@ -6,11 +6,19 @@ extends RefCounted
 ## Concepts (not code) from Unreal Engine's ReplicationGraph/Iris node model and Valve/Quake
 ## relevancy+rate throttling; no engine source copied. Original implementation for Cgame.
 
-var cell_size: float = 64.0
+var cell_size: float = 64.0:
+	set(value):
+		if not is_finite(value) or value <= 0.0 or cell_size == value:
+			return
+		cell_size = value
+		_cells.clear()
+		for id in entities:
+			_cell_add(id, entities[id]["position"])
 var clock: float = 0.0
 var entities: Dictionary = {}  # id -> entity dict
 var class_cfg: Dictionary = {}  # class -> {priority, interval, bytes}
 var _cells: Dictionary = {}  # Vector2i -> {id: true}
+var _special: Dictionary = {} # Always-relevant and owner-only entity IDs.
 var _conn: Dictionary = {}  # connection id -> {last_sent, starve, wake_seen}
 var _wake_counter: int = 0
 
@@ -33,6 +41,8 @@ func add_entity(id: int, cls: String, position: Vector3, owner_id: int = -1, alw
 		remove_entity(id)
 	entities[id] = {"id": id, "class": cls, "position": position, "owner": owner_id, "always_relevant": always_relevant, "owner_only": owner_only, "dormant": false, "wake": 0}
 	_cell_add(id, position)
+	if always_relevant or owner_only:
+		_special[id] = true
 
 
 func remove_entity(id: int) -> void:
@@ -41,6 +51,13 @@ func remove_entity(id: int) -> void:
 	var e: Dictionary = entities[id]
 	_cell_remove(id, e["position"])
 	entities.erase(id)
+	_special.erase(id)
+	# Match the native backend: a reused entity ID represents a new lifetime,
+	# not an old send timestamp, starvation score or consumed wake event.
+	for state in _conn.values():
+		state["last_sent"].erase(id)
+		state["starve"].erase(id)
+		state["wake_seen"].erase(id)
 
 
 func set_position(id: int, position: Vector3) -> void:
@@ -101,25 +118,38 @@ func _candidates(connection: Dictionary) -> Dictionary:
 	var cid: int = int(connection["id"])
 	var pos: Vector3 = connection["position"]
 	var radius: float = float(connection.get("view_radius", 100.0))
-	for k in entities:
+	for k in _special:
 		var e: Dictionary = entities[k]
-		if bool(e["always_relevant"]) or (bool(e["owner_only"]) and int(e["owner"]) == cid):
+		# Owner-only takes precedence even if both flags were set.
+		if bool(e["owner_only"]):
+			if int(e["owner"]) == cid:
+				out[k] = true
+		elif bool(e["always_relevant"]):
 			out[k] = true
 	var lo: Vector2i = _cell_of(pos - Vector3(radius, 0.0, radius))
 	var hi: Vector2i = _cell_of(pos + Vector3(radius, 0.0, radius))
-	for cx in range(lo.x, hi.x + 1):
-		for cz in range(lo.y, hi.y + 1):
-			var key := Vector2i(cx, cz)
-			if not _cells.has(key):
+	var columns: int = int(hi.x) - int(lo.x) + 1
+	var rows: int = int(hi.y) - int(lo.y) + 1
+	# Wide sparse views visit occupied cells instead of a huge empty rectangle.
+	var buckets: Array[Dictionary] = []
+	if columns > _cells.size() or rows > _cells.size() or columns * rows > _cells.size():
+		for key in _cells:
+			if key.x >= lo.x and key.x <= hi.x and key.y >= lo.y and key.y <= hi.y:
+				buckets.append(_cells[key])
+	else:
+		for cx in range(lo.x, hi.x + 1):
+			for cz in range(lo.y, hi.y + 1):
+				var key := Vector2i(cx, cz)
+				if _cells.has(key):
+					buckets.append(_cells[key])
+	for b in buckets:
+		for id in b:
+			var e2: Dictionary = entities[id]
+			if bool(e2["owner_only"]) and int(e2["owner"]) != cid:
 				continue
-			var b: Dictionary = _cells[key]
-			for id in b:
-				var e2: Dictionary = entities[id]
-				if bool(e2["owner_only"]) and int(e2["owner"]) != cid:
-					continue
-				var p: Vector3 = e2["position"]
-				if p.distance_to(pos) <= radius:
-					out[id] = true
+			var p: Vector3 = e2["position"]
+			if p.distance_to(pos) <= radius:
+				out[id] = true
 	return out
 
 
