@@ -74,13 +74,15 @@ static func aimed_at(player_pos: Vector3, node: Dictionary, direction: Vector2, 
 	var distance_sq: float = offset.length_squared()
 	var margin: float = reach_margin(node)
 	var max_reach: float = reach + margin
-	if distance_sq > max_reach * max_reach:
+	var reach_sq: float = max_reach * max_reach
+	if not is_finite(distance_sq) or not is_finite(reach_sq) or distance_sq > reach_sq:
 		return false
 	var close_reach: float = 0.8 + margin
 	if distance_sq <= close_reach * close_reach:
 		return true
 	# Squared distance avoids repeated square roots and normalizations on hit RPCs.
-	return offset.dot(direction) >= 0.35 * sqrt(distance_sq * direction_squared)
+	var aim_dot: float = offset.dot(direction)
+	return is_finite(aim_dot) and aim_dot >= 0.35 * sqrt(distance_sq) * sqrt(direction_squared)
 
 
 ## Weak spots rotate around a node after each confirmed hit. The position is

@@ -19,7 +19,7 @@
 			<param index="1" name="priority" type="float" />
 			<param index="2" name="generation" type="int" />
 			<description>
-				Queues or re-prioritises [param cell]. Higher priority is served first. Returns [code]false[/code] if [param generation] is older than one already seen.
+				Queues or re-prioritises [param cell]. Higher priority is served first. Returns [code]false[/code] if [param generation] is older than one already seen or [param priority] is not finite. Invalid priorities do not change the newest generation.
 			</description>
 		</method>
 		<method name="cancel_stale">
@@ -80,7 +80,7 @@
 		<method name="stats" qualifiers="const">
 			<return type="Dictionary" />
 			<description>
-				Returns counters: [code]requested[/code], [code]completed[/code], [code]cancelled_queued[/code], [code]cancelled_inflight[/code], [code]dropped_late[/code], [code]rejected_stale[/code], [code]revived[/code], [code]queued[/code] and [code]in_flight[/code].
+				Returns counters: [code]requested[/code], [code]completed[/code], [code]cancelled_queued[/code], [code]cancelled_inflight[/code], [code]dropped_late[/code], [code]rejected_stale[/code], [code]rejected_invalid[/code], [code]revived[/code], [code]queued[/code] and [code]in_flight[/code].
 			</description>
 		</method>
 		<method name="clear">

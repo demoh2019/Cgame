@@ -161,6 +161,33 @@ TEST_CASE("[StreamRequestQueue] Invalid priorities cannot supersede valid genera
 	CHECK(int(queue->stats()["rejected_invalid"]) == 0);
 }
 
+TEST_CASE("[StreamRequestQueue] Bounded selection matches full ranking") {
+	for (int budget : { 1, 5, 128, 129, 350 }) {
+		Ref<StreamRequestQueue> q;
+		q.instantiate();
+		for (int i = 0; i < 300; i++) {
+			q->request(Vector2i(i, 0), (double)(i % 7), 1);
+		}
+		q->request(Vector2i(3, 0), 100.0, 1);
+		Vector<Vector2i> expected;
+		expected.push_back(Vector2i(3, 0));
+		for (int priority = 6; priority >= 0; priority--) {
+			for (int i = priority; i < 300; i += 7) {
+				if (i != 3) {
+					expected.push_back(Vector2i(i, 0));
+				}
+			}
+		}
+		TypedArray<Vector2i> batch = q->next_batch(budget);
+		REQUIRE(batch.size() == MIN(budget, 300));
+		for (int i = 0; i < batch.size(); i++) {
+			CHECK(Vector2i(batch[i]) == expected[i]);
+		}
+		CHECK(q->in_flight_count() == batch.size());
+		CHECK(q->queued_count() == 300 - batch.size());
+	}
+}
+
 TEST_CASE("[StreamRequestQueue] Generations cancel stale requests") {
 	Ref<StreamRequestQueue> q2;
 	q2.instantiate();

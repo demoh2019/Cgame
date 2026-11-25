@@ -102,6 +102,12 @@ func run(t) -> void:
 		Vector2.RIGHT, 2.0),
 		"infinite model radius cannot expand authorized mining reach")
 
+	t.check(not ResourceGathering.aimed_at(Vector3.ZERO, near_rock, Vector2.RIGHT, 1.0e200),
+		"overflowing reach squared cannot authorize interactions")
+	var remote_rock: Dictionary = {"kind": "rock", "x": 1000.0, "z": 0.0}
+	t.check(not ResourceGathering.aimed_at(Vector3.ZERO, remote_rock, Vector2.RIGHT, 1.0e200),
+		"invalid extreme reach cannot authorize a remote strike")
+
 	t.current = "server-validated mining with incremental grants and shared depletion"
 	var world := WorldGen.new(42)
 	var tree: Dictionary = _find(world, "tree")

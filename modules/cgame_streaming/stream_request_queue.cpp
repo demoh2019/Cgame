@@ -130,6 +130,42 @@ struct QueuedEntryBefore {
 		return p_a.seq < p_b.seq;
 	}
 };
+
+// A heap with the weakest candidate at its root, matching the GDScript fallback.
+void push_worst(LocalVector<QueuedEntry> &r_heap, const QueuedEntry &p_entry) {
+	r_heap.push_back(p_entry);
+	uint32_t child = r_heap.size() - 1;
+	const QueuedEntryBefore before;
+	while (child > 0) {
+		const uint32_t parent = (child - 1) / 2;
+		if (!before(r_heap[parent], r_heap[child])) {
+			break;
+		}
+		SWAP(r_heap[parent], r_heap[child]);
+		child = parent;
+	}
+}
+
+void fix_worst_root(LocalVector<QueuedEntry> &r_heap) {
+	uint32_t parent = 0;
+	const QueuedEntryBefore before;
+	while (true) {
+		const uint32_t left = parent * 2 + 1;
+		if (left >= r_heap.size()) {
+			break;
+		}
+		uint32_t worst = left;
+		const uint32_t right = left + 1;
+		if (right < r_heap.size() && before(r_heap[left], r_heap[right])) {
+			worst = right;
+		}
+		if (!before(r_heap[parent], r_heap[worst])) {
+			break;
+		}
+		SWAP(r_heap[parent], r_heap[worst]);
+		parent = worst;
+	}
+}
 } //namespace
 
 TypedArray<Vector2i> StreamRequestQueue::next_batch(int p_budget) {
@@ -142,9 +178,21 @@ TypedArray<Vector2i> StreamRequestQueue::next_batch(int p_budget) {
 		return out;
 	}
 	LocalVector<QueuedEntry> queued;
+	// Small frame budgets need only the best K entries, not a full queue sort.
+	const bool use_heap = allowed <= 128;
+	const QueuedEntryBefore before;
 	for (const KeyValue<Vector2i, Req> &kv : reqs) {
-		if (kv.value.state == STATE_QUEUED) {
-			queued.push_back({ kv.key, kv.value.priority, kv.value.seq });
+		if (kv.value.state != STATE_QUEUED) {
+			continue;
+		}
+		const QueuedEntry entry = { kv.key, kv.value.priority, kv.value.seq };
+		if (!use_heap) {
+			queued.push_back(entry);
+		} else if (queued.size() < (uint32_t)allowed) {
+			push_worst(queued, entry);
+		} else if (before(entry, queued[0])) {
+			queued[0] = entry;
+			fix_worst_root(queued);
 		}
 	}
 	queued.sort_custom<QueuedEntryBefore>();

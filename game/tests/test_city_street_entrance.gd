@@ -2,12 +2,15 @@ extends RefCounted
 ## City ring entrances, street-index parity and varied settlement shapes.
 const CityLayout = preload("res://scripts/shared/city_layout.gd")
 
+
+
+func run(t) -> void:
 	t.current = "malformed city geometry stays fail-closed and bounded"
 	t.check(not CityLayout.contains(Vector2.ZERO, "radial", INF),
 		"infinite settlement radius cannot cover the whole map")
 	t.check(not CityLayout.contains(Vector2.ZERO, "radial", NAN),
 		"NaN settlement radius cannot create a valid footprint")
-	t.check(not CityLayout.contains(Vector2.ZERO, "radial", radius, NAN),
+	t.check(not CityLayout.contains(Vector2.ZERO, "radial", 64.0, NAN),
 		"nonfinite city rotation cannot create a valid footprint")
 	t.check(CityLayout.building_lots(17, "radial", INF, 0.0).is_empty(),
 		"invalid radius cannot create infinite building lot positions")
@@ -17,11 +20,9 @@ const CityLayout = preload("res://scripts/shared/city_layout.gd")
 		"infinite radius cannot create unbounded road geometry")
 	t.check(CityLayout.streets("radial", CityLayout.MAX_LAYOUT_RADIUS + 1.0, 0.0).is_empty(),
 		"oversized city radius is rejected before road subdivision")
-	t.check(CityLayout.streets("radial", radius, INF).is_empty(),
+	t.check(CityLayout.streets("radial", 64.0, INF).is_empty(),
 		"nonfinite rotation cannot create corrupt road vertices")
 
-
-func run(t) -> void:
 	t.current = "closed city ring connects to the side facing the regional road"
 	var ring := PackedVector2Array([
 		Vector2(10.0, 0.0), Vector2(0.0, 10.0),
