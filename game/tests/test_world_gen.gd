@@ -459,6 +459,25 @@ func run(t) -> void:
 	built_grid.upsert(42, {"id": 42, "x": NAN, "z": 1.0, "radius": 1.0})
 	t.eq(int(built_grid.stats()["entries"]), index_size, "invalid geometry is not indexed")
 
+	t.current = "extreme finite dynamic blocker coordinates cannot wrap tile indices"
+	var remote_grid := DynamicBlockerGrid.new()
+	var far_x: float = 68719476736.0
+	var distant: Dictionary = {"id": 1, "x": far_x, "z": -far_x, "radius": 3.0}
+	var local: Dictionary = {"id": 2, "x": 0.0, "z": 0.0, "radius": 2.0}
+	var remote_live: Dictionary = {1: distant, 2: local}
+	remote_grid.upsert(1, distant)
+	remote_grid.upsert(2, local)
+	t.eq(int(remote_grid.stats()["oversized"]), 1, "unrepresentable tile bounds use exact fallback")
+	t.eq(remote_grid.query(remote_live, far_x, -far_x, 0.0), [distant],
+			"far finite query finds its true obstacle")
+	t.eq(remote_grid.query(remote_live, 0.0, 0.0, 0.0), [local],
+			"remote geometry does not alias a nearby tile")
+	t.eq(remote_grid.query(remote_live, 0.0, 0.0, far_x), [distant, local],
+			"wide finite query keeps exhaustive insertion order")
+	remote_grid.remove(1)
+	remote_live.erase(1)
+	t.eq(int(remote_grid.stats()["oversized"]), 0, "removing remote geometry releases overflow state")
+
 	t.current = "indexed dynamic collisions agree with exhaustive deterministic queries"
 	var seeded := RandomNumberGenerator.new()
 	seeded.seed = 812719
