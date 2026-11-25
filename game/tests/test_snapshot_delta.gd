@@ -51,6 +51,28 @@ func run(t) -> void:
 	var fd2: Dictionary = SnapshotDelta.diff(f0, {1: {"x": 1.05, "y": 2.0}}, {"x": 0.01})
 	t.check(((fd2["changed"] as Dictionary)[1] as Dictionary).has("x"), "change beyond tolerance resent")
 
+	t.current = "snapshot retirement and replacement ordering"
+	var retirement_base: Dictionary = _world(120)
+	var retirement_next: Dictionary = {}
+	for id in range(0, 120, 10):
+		retirement_next[id] = retirement_base[id].duplicate(true)
+	retirement_next[500] = {"meta": {"xs": [7, 8]}}
+	var retirement_delta: Dictionary = SnapshotDelta.diff(retirement_base, retirement_next)
+	var retirement_result: Dictionary = SnapshotDelta.apply(retirement_base, retirement_delta)
+	t.eq(retirement_result, retirement_next, "large interest-set turnover rebuilds the correct state")
+	t.eq(retirement_result.keys(), retirement_next.keys(), "survivors retain insertion order")
+	(retirement_result[0]["meta"]["xs"] as Array).append(99)
+	t.eq(retirement_base[0]["meta"]["xs"], [1, 2], "surviving nested data stays isolated")
+	(retirement_result[500]["meta"]["xs"] as Array).append(99)
+	t.eq(retirement_delta["added"][500]["meta"]["xs"], [7, 8], "added nested data stays isolated")
+	var overlapping: Dictionary = SnapshotDelta.apply(_world(3), {
+		"removed": PackedInt64Array([1, 1, 99]),
+		"added": {1: {"hp": 60}},
+		"changed": {1: {"hp": 42}, 99: {"hp": 1}},
+		"dropped": {1: ["tags"]}})
+	t.eq(overlapping.keys(), [0, 2, 1], "removed then re-added entities append in the original operation order")
+	t.eq(overlapping[1], {"hp": 42}, "field edits apply after re-addition")
+
 	t.current = "quantization"
 	for v in [-10.0, -3.3, 0.0, 0.123, 7.77, 10.0]:
 		var q: int = NetQuantization.quantize_float(v, -10.0, 10.0, 12)
