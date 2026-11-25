@@ -77,12 +77,13 @@ struct CgameCrowdAvoidance::Grid {
 	}
 
 	static int64_t key(int32_t p_x, int32_t p_y) {
-		return int64_t(p_x) * INT64_C(4294967296) + int64_t(uint32_t(p_y));
+		return int64_t(p_x) * 4294967296LL + int64_t(uint32_t(p_y));
 	}
 
 	void build(const Vector2 *p_positions, const Vector2 *p_velocities, uint32_t p_count, real_t p_cell) {
 		cell = p_cell;
 		LocalVector<Entry> entries;
+		entries.reserve(p_count);
 		for (uint32_t i = 0; i < p_count; i++) {
 			if (!crowd_agent_valid(p_positions[i], p_velocities[i])) {
 				continue;
