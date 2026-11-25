@@ -119,12 +119,17 @@ Dictionary CgameSnapshotDelta::diff(const Dictionary &p_baseline, const Dictiona
 
 Dictionary CgameSnapshotDelta::apply(const Dictionary &p_baseline, const Dictionary &p_delta) {
 	Dictionary out;
-	for (const KeyValue<Variant, Variant> &kv : p_baseline) {
-		out[kv.key] = _copy(kv.value);
-	}
-	PackedInt64Array removed = p_delta.get("removed", PackedInt64Array());
+	const PackedInt64Array removed = p_delta.get("removed", PackedInt64Array());
+	Dictionary retired;
 	for (int64_t id : removed) {
-		out.erase(id);
+		retired[id] = true;
+	}
+	// Do not deep-copy entities which have left the interest set.
+	// Preserve the original order of surviving entities.
+	for (const KeyValue<Variant, Variant> &kv : p_baseline) {
+		if (!retired.has(kv.key)) {
+			out[kv.key] = _copy(kv.value);
+		}
 	}
 	Dictionary added = p_delta.get("added", Dictionary());
 	for (const KeyValue<Variant, Variant> &kv : added) {
