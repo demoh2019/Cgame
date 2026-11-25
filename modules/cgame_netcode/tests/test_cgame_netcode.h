@@ -413,4 +413,33 @@ TEST_CASE("[CgameNetcode] Snapshot delta tolerances and empty delta") {
 	CHECK(!CgameSnapshotDelta::is_empty(CgameSnapshotDelta::diff(base, cur)));
 }
 
+TEST_CASE("[CgameNetcode] Snapshot retirement preserves surviving order and isolation") {
+	Dictionary base;
+	Dictionary current;
+	for (int id = 0; id < 120; id++) {
+		Dictionary entity;
+		Array items;
+		items.push_back(id);
+		entity["items"] = items;
+		base[id] = entity;
+		if (id % 10 == 0) {
+			current[id] = entity.duplicate(true);
+		}
+	}
+	Dictionary added;
+	added["hp"] = 50;
+	current[500] = added;
+	const Dictionary delta = CgameSnapshotDelta::diff(base, current);
+	Dictionary rebuilt = CgameSnapshotDelta::apply(base, delta);
+	CHECK(rebuilt.recursive_equal(current, 0));
+	CHECK(rebuilt.keys() == current.keys());
+	Dictionary survivor = rebuilt[0];
+	Array items = survivor["items"];
+	items.push_back(999);
+	CHECK(Array(Dictionary(base[0])["items"]).size() == 1);
+	Dictionary new_entity = rebuilt[500];
+	new_entity["hp"] = 1;
+	CHECK(int(Dictionary(Dictionary(delta["added"])[500])["hp"]) == 50);
+}
+
 } // namespace TestCgameNetcode
