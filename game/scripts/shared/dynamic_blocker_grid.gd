@@ -6,6 +6,9 @@ extends RefCounted
 const TILE_SIZE := 16.0
 const MAX_ENTRY_TILES := 64
 const MAX_QUERY_TILES := 256
+# Vector2i tile coordinates are signed 32-bit. Leave one tile of headroom
+# so finite but extreme inputs never wrap into an unrelated local bucket.
+const MAX_INDEX_COORD := 2147483646.0 * TILE_SIZE
 
 var _tiles: Dictionary = {} # Vector2i -> Dictionary of owner keys.
 var _occupied: Dictionary = {} # int or String owner key -> Array[Vector2i].
@@ -13,6 +16,10 @@ var _oversized: Dictionary = {} # Large buildings are checked on every query.
 var _order: Dictionary = {} # Stable insertion sequence for mixed int/String keys.
 var _serial: int = 0
 var last_candidates: int = 0
+
+
+static func _bounds_fit(x: float, z: float, radius: float) -> bool:
+	return absf(x) + radius <= MAX_INDEX_COORD and absf(z) + radius <= MAX_INDEX_COORD
 
 
 func upsert(key: Variant, blocker: Dictionary) -> void:
@@ -26,6 +33,10 @@ func upsert(key: Variant, blocker: Dictionary) -> void:
 		_serial += 1
 	else:
 		_unindex(key)
+	if not _bounds_fit(x, z, radius):
+		_oversized[key] = true
+		_occupied[key] = []
+		return
 	var from: Vector2i = Vector2i(floori((x - radius) / TILE_SIZE), floori((z - radius) / TILE_SIZE))
 	var to: Vector2i = Vector2i(floori((x + radius) / TILE_SIZE), floori((z + radius) / TILE_SIZE))
 	var columns: int = to.x - from.x + 1
@@ -74,6 +85,9 @@ func query(blockers: Dictionary, x: float, z: float, radius: float) -> Array:
 		return result
 	# A giant query falls back to an exhaustive pass; avoid walking an
 	# unbounded number of tiles on malformed/exceptionally wide requests.
+	# Check the floating bounds before converting them to Vector2i.
+	if not _bounds_fit(x, z, radius):
+		return _scan_all(blockers, x, z, radius)
 	var from: Vector2i = Vector2i(floori((x - radius) / TILE_SIZE), floori((z - radius) / TILE_SIZE))
 	var to: Vector2i = Vector2i(floori((x + radius) / TILE_SIZE), floori((z + radius) / TILE_SIZE))
 	var columns: int = to.x - from.x + 1
