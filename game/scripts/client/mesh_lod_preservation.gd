@@ -54,7 +54,7 @@ static func decode_indices(encoded: PackedByteArray, stride: int, vertex_count: 
 	return result
 
 
-static var _generated: Dictionary = {} # source Mesh -> Mesh with LODs (or the source when not worth it)
+static var _generated: Dictionary = {} # source Mesh -> threshold -> generated Mesh
 
 ## Gives a static ArrayMesh automatic LODs (meshoptimizer, as Godot's importer does) when it has none.
 ## Baked props lost their importer LODs when their surfaces were rebuilt, so every scattered rock and
@@ -63,8 +63,10 @@ static var _generated: Dictionary = {} # source Mesh -> Mesh with LODs (or the s
 static func with_generated_lods(mesh: Mesh, min_triangles: int = 200) -> Mesh:
 	if mesh == null or not (mesh is ArrayMesh):
 		return mesh
-	if _generated.has(mesh):
-		return _generated[mesh]
+	var threshold: int = maxi(1, min_triangles)
+	var cached: Dictionary = _generated.get(mesh, {})
+	if cached.has(threshold):
+		return cached[threshold]
 	var result: Mesh = mesh
 	var triangles := 0
 	var has_lods := false
@@ -74,7 +76,7 @@ static func with_generated_lods(mesh: Mesh, min_triangles: int = 200) -> Mesh:
 		triangles += int(data.get("index_count", data.get("vertex_count", 0))) / 3
 		if mesh.surface_get_primitive_type(s) != Mesh.PRIMITIVE_TRIANGLES or (mesh as ArrayMesh).get_blend_shape_count() > 0:
 			has_lods = true # Not a plain static triangle mesh: leave it alone.
-	if not has_lods and triangles >= min_triangles:
+	if not has_lods and triangles >= threshold:
 		var importer := ImporterMesh.new()
 		for s in mesh.get_surface_count():
 			importer.add_surface(Mesh.PRIMITIVE_TRIANGLES, mesh.surface_get_arrays(s), [], {},
@@ -85,12 +87,23 @@ static func with_generated_lods(mesh: Mesh, min_triangles: int = 200) -> Mesh:
 			rebuilt.resource_name = mesh.resource_name
 			rebuilt.custom_aabb = (mesh as ArrayMesh).custom_aabb
 			result = rebuilt
-	_generated[mesh] = result
+	cached[threshold] = result
+	_generated[mesh] = cached
 	return result
 
 
-## Native meshopt simplification uses *normal and UV weighted error*, not
-## positions only. The replacement index list references original vertices;
+## Vertex encoding flags must follow the original channels when rebuilding
+## a surface. A custom channel's bytes alone do not specify its encoding.
+static func vertex_encoding_flags(mesh: ArrayMesh, surface: int) -> int:
+	var mask: int = Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS
+	for shift in [Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT, Mesh.ARRAY_FORMAT_CUSTOM1_SHIFT,
+			Mesh.ARRAY_FORMAT_CUSTOM2_SHIFT, Mesh.ARRAY_FORMAT_CUSTOM3_SHIFT]:
+		mask |= Mesh.ARRAY_FORMAT_CUSTOM_MASK << int(shift)
+	return int(mesh.surface_get_format(surface)) & mask
+
+
+## Native meshopt simplification uses normal, UV and (on newer engines)
+## tangent-frame weighted error, not positions only. The replacement index list references original vertices;
 ## all imported tangent, color, UV2, skin and custom channels remain intact.
 ## Only used once while caching one-surface static props with no existing
 ## importer LODs. Stock Godot and older Cgame use the original importer path.
@@ -123,8 +136,17 @@ static func with_native_attribute_budget(mesh: Mesh, max_triangles: int) -> Mesh
 	if reduced.size() < 3 or reduced.size() % 3 != 0 or \
 			reduced.size() >= original.size() or reduced.size() > max_triangles * 3:
 		return mesh
+	# Older engines and future native implementations must honor the index-only
+	# contract before their output can be submitted to RenderingServer.
+	for channel in Mesh.ARRAY_MAX:
+		if channel != Mesh.ARRAY_INDEX and candidate[channel] != arrays[channel]:
+			return mesh
+	for index in reduced:
+		if index < 0 or index >= arrays[Mesh.ARRAY_VERTEX].size():
+			return mesh
 	var result := ArrayMesh.new()
-	result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, candidate)
+	result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, candidate, [], {},
+		vertex_encoding_flags(mesh as ArrayMesh, 0))
 	result.surface_set_material(0, mesh.surface_get_material(0))
 	result.surface_set_name(0, (mesh as ArrayMesh).surface_get_name(0))
 	result.custom_aabb = (mesh as ArrayMesh).custom_aabb
