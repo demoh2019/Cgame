@@ -292,6 +292,29 @@ TEST_CASE("[CgameNetcode] Replication graph relevance") {
 	CHECK(!g->has_entity(2));
 }
 
+TEST_CASE("[CgameNetcode] Replication graph owner-only precedence and reused entity IDs") {
+	Ref<CgameReplicationGraph> g;
+	g.instantiate();
+	g->set_class_config("private", 1.0, 60.0, 10);
+	g->add_entity(10, "private", Vector3(), 7, true, true);
+	Dictionary other;
+	other["id"] = 8;
+	other["position"] = Vector3();
+	CHECK(g->gather_for(other).is_empty());
+	Dictionary owner;
+	owner["id"] = 7;
+	owner["position"] = Vector3(1000, 0, 1000);
+	CHECK(g->gather_for(owner).size() == 1);
+	owner["position"] = Vector3();
+	CHECK(g->gather_for(owner).is_empty());
+	g->remove_entity(10);
+	g->add_entity(10, "private", Vector3());
+	CHECK(g->gather_for(owner).size() == 1);
+	CHECK(g->gather_for(other).size() == 1);
+	g->remove_entity(10);
+	CHECK(g->gather_for(other).is_empty());
+}
+
 TEST_CASE("[CgameNetcode] Replication graph frequency, dormancy and wake") {
 	Ref<CgameReplicationGraph> g;
 	g.instantiate();
