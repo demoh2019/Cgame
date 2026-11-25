@@ -5,8 +5,13 @@ const CpuBudget = preload("res://scripts/shared/cpu_budget.gd")
 
 
 func run(t) -> void:
+	_exercise(t, CpuBudget.new())
+	if ClassDB.class_exists("CgameCPUBudget"):
+		_exercise(t, ClassDB.instantiate("CgameCPUBudget"))
+
+
+func _exercise(t, budget: Object) -> void:
 	t.current = "priority-weighted frame allocation and proportional minimums"
-	var budget := CpuBudget.new()
 	budget.register_system("terrain", 2.0, 1.0, 4.0)
 	budget.register_system("audio", 1.0, 0.5, 2.0)
 	t.eq(budget.system_count(), 2, "both render and audio lanes registered")

@@ -59,6 +59,32 @@ func _scenario(seed_value: int) -> Dictionary:
 
 
 func run(t) -> void:
+	t.current = "live herd backend rejects invalid events and frame times"
+	var population: Object = CrowdFacade.make_population_lod()
+	population.setup(3, 3, 64.0, 42)
+	var center: Vector2 = population.region_center(4)
+	population.add_herd(4, {"walker": 3})
+	population.add_attractor("noise", center, 2.0, 100.0, 1.0)
+	var expected: float = population.attraction(4)
+	population.add_attractor("noise", center, NAN, 100.0, 1.0)
+	population.add_attractor("noise", Vector2.INF, 5.0, 100.0, 1.0)
+	population.add_attractor("noise", center, 5.0, INF, 1.0)
+	population.add_attractor("noise", center, 5.0, 100.0, INF)
+	population.add_attractor("noise", center, 5.0, 100.0, 0.0)
+	t.eq(population.active_attractor_count(), 1, "malformed event pulses never accumulate")
+	t.near(population.attraction(4), expected, 0.00001, "bad pulses cannot poison attraction")
+	var original: Dictionary = CrowdFacade.herd_info(population, int(population.herd_ids()[0]))
+	for invalid_dt in [NAN, INF, -1.0, 0.0]:
+		population.tick(invalid_dt)
+	t.eq(CrowdFacade.herd_info(population, int(population.herd_ids()[0])), original,
+		"invalid and paused ticks preserve the authoritative herd")
+	t.eq(population.active_attractor_count(), 1, "invalid frames do not age live events")
+	population.add_spawner(4, "walker", INF, 20)
+	population.set_decay(4, NAN)
+	population.tick(1.1)
+	t.eq(population.active_attractor_count(), 0, "valid tick still expires temporary events")
+	t.eq(population.abstract_count(), 3, "bad nest and decay values cannot change population")
+
 	t.current = "flag defaults"
 	var plain := GameServer.new(WorldGen.new(41), 41)
 	t.eq(plain.herd_simulation_enabled, CrowdFacade.has_native_population_lod(), "herd_simulation_enabled defaults to native availability")

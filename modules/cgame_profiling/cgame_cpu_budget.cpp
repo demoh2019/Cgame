@@ -50,11 +50,15 @@ double CgameCPUBudget::_demand(const System &p_system) const {
 }
 
 void CgameCPUBudget::register_system(const String &p_name, double p_priority, double p_min_ms, double p_desired_ms) {
+	if (p_name.is_empty()) {
+		return;
+	}
 	System s;
 	s.name = p_name;
-	s.priority = MAX(p_priority, 0.0001);
-	s.min_ms = MAX(p_min_ms, 0.0);
-	s.desired_ms = MAX(p_desired_ms, s.min_ms);
+	s.priority = Math::is_finite(p_priority) ? MAX(p_priority, 0.0001) : 0.0001;
+	s.min_ms = Math::is_finite(p_min_ms) ? MAX(p_min_ms, 0.0) : 0.0;
+	s.desired_ms = Math::is_finite(p_desired_ms) ? MAX(p_desired_ms, s.min_ms) : s.min_ms;
+	allocation.erase(p_name);
 	const int idx = _find(p_name);
 	if (idx >= 0) {
 		systems[idx] = s;
@@ -77,6 +81,7 @@ double CgameCPUBudget::demand_ms(const String &p_name) const {
 }
 
 Dictionary CgameCPUBudget::allocate(double p_frame_budget_ms) {
+	p_frame_budget_ms = Math::is_finite(p_frame_budget_ms) ? MAX(p_frame_budget_ms, 0.0) : 0.0;
 	Dictionary out;
 	allocation.clear();
 	double min_sum = 0.0;
@@ -145,7 +150,7 @@ double CgameCPUBudget::allocation_ms(const String &p_name) const {
 
 void CgameCPUBudget::report_usage(const String &p_name, double p_ms) {
 	const int idx = _find(p_name);
-	if (idx < 0) {
+	if (idx < 0 || !Math::is_finite(p_ms) || p_ms < 0.0) {
 		return;
 	}
 	System &s = systems[idx];

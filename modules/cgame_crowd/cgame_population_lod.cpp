@@ -112,6 +112,9 @@ real_t CgamePopulationLOD::get_kind_weight(const String &p_kind) const {
 }
 
 void CgamePopulationLOD::add_attractor(const String &p_kind, const Vector2 &p_pos, real_t p_strength, real_t p_radius, real_t p_ttl) {
+	if (!p_pos.is_finite() || !Math::is_finite(p_strength) || !Math::is_finite(p_radius) || !Math::is_finite(p_ttl) || p_radius <= 0.0 || p_ttl == 0.0) {
+		return;
+	}
 	Attractor a;
 	a.kind = p_kind;
 	a.pos = p_pos;
@@ -162,6 +165,9 @@ void CgamePopulationLOD::clear_attractors() {
 
 void CgamePopulationLOD::set_decay(int p_region, real_t p_rate) {
 	ERR_FAIL_COND(!_valid_region(p_region));
+	if (!Math::is_finite(p_rate)) {
+		return;
+	}
 	if (p_rate <= 0.0) {
 		decay.erase(p_region);
 	} else {
@@ -171,6 +177,9 @@ void CgamePopulationLOD::set_decay(int p_region, real_t p_rate) {
 
 void CgamePopulationLOD::add_spawner(int p_region, const String &p_type, real_t p_rate, int p_cap) {
 	ERR_FAIL_COND(!_valid_region(p_region));
+	if (!Math::is_finite(p_rate) || p_rate <= 0.0 || p_cap <= 0 || p_type.is_empty()) {
+		return;
+	}
 	Spawner s;
 	s.region = p_region;
 	s.type = p_type;
@@ -354,6 +363,11 @@ Dictionary CgamePopulationLOD::stats() const {
 // --- Simulation -----------------------------------------------------------------
 
 void CgamePopulationLOD::tick(real_t p_dt, const PackedVector2Array &p_player_positions) {
+	// A paused or invalid simulation frame must not age signals, move
+	// herds, consume RNG state or change population counts.
+	if (!Math::is_finite(p_dt) || p_dt <= 0.0) {
+		return;
+	}
 	players = p_player_positions;
 	time += p_dt;
 	_age_attractors(p_dt);

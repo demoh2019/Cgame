@@ -127,6 +127,8 @@ func is_blocked(region: int) -> bool:
 ## kind: "noise" | "corpse" | "loot" | "night" (or any key of kind_weight).
 ## ttl < 0 means permanent.
 func add_attractor(kind: String, pos: Vector2, strength: float, radius: float, ttl: float = -1.0) -> void:
+	if not pos.is_finite() or not is_finite(strength) or not is_finite(radius) or not is_finite(ttl) or radius <= 0.0 or ttl == 0.0:
+		return
 	_attractors.append({"kind": kind, "pos": pos, "strength": strength, "radius": maxf(1.0, radius), "ttl": ttl})
 	_attr_dirty = true
 
@@ -181,6 +183,8 @@ func set_night(value: bool) -> void:
 
 ## Herds inside this region lose `rate` agents per second (e.g. fire, base defences).
 func set_decay(region: int, rate: float) -> void:
+	if region < 0 or region >= region_count() or not is_finite(rate):
+		return
 	if rate <= 0.0:
 		_decay.erase(region)
 	else:
@@ -190,6 +194,8 @@ func set_decay(region: int, rate: float) -> void:
 ## A nest: adds `rate` agents of `type` per second to the region while its
 ## abstract population stays below `cap`.
 func add_spawner(region: int, type: String, rate: float, cap: int) -> void:
+	if region < 0 or region >= region_count() or not is_finite(rate) or rate <= 0.0 or cap <= 0 or type.is_empty():
+		return
 	_spawners.append({"region": region, "type": type, "rate": rate, "cap": cap, "acc": 0.0})
 
 
@@ -301,6 +307,9 @@ func stats() -> Dictionary:
 # --- Simulation -----------------------------------------------------------------
 
 func tick(dt: float, player_positions: PackedVector2Array = PackedVector2Array()) -> void:
+	# Paused and invalid frames cannot mutate simulation or its random stream.
+	if not is_finite(dt) or dt <= 0.0:
+		return
 	_players = player_positions
 	_time += dt
 	_age_attractors(dt)
