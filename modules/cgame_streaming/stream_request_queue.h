@@ -73,6 +73,7 @@ private:
 	int64_t stat_cancelled_inflight = 0;
 	int64_t stat_dropped_late = 0;
 	int64_t stat_rejected_stale = 0;
+	int64_t stat_rejected_invalid = 0;
 	int64_t stat_revived = 0;
 
 	int _count(State p_state) const;

@@ -13,11 +13,26 @@ var _history: Dictionary = {} # id -> Array of [time, Vector3]
 
 
 func record(id: int, now: float, position: Vector3) -> void:
+	if not is_finite(now) or not position.is_finite():
+		return
 	var samples: Array = _history.get(id, [])
+	if not samples.is_empty():
+		var last_time: float = float(samples[-1][0])
+		if now < last_time:
+			return
+		if now == last_time:
+			samples[-1] = [now, position]
+			return
 	samples.append([now, position])
-	while samples.size() > 2 and now - float(samples[0][0]) > HISTORY_SECONDS:
+	while samples.size() > 128 or (samples.size() > 2 and now - float(samples[0][0]) > HISTORY_SECONDS):
 		samples.pop_front()
 	_history[id] = samples
+
+
+## Same diagnostic as the native engine implementation.
+func sample_count(id: int) -> int:
+	var samples: Array = _history.get(id, [])
+	return samples.size()
 
 
 func forget(id: int) -> void:
@@ -40,7 +55,7 @@ static func rewind_for(round_trip: float) -> float:
 ## Interpolated position at `at`; `fallback` when no usable history exists.
 func position_at(id: int, at: float, fallback: Vector3) -> Vector3:
 	var samples: Array = _history.get(id, [])
-	if samples.is_empty() or at >= float(samples[-1][0]):
+	if not is_finite(at) or samples.is_empty() or at >= float(samples[-1][0]):
 		return fallback
 	if at <= float(samples[0][0]):
 		return samples[0][1]

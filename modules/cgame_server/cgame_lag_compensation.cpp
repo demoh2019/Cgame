@@ -34,12 +34,27 @@
 #include "core/object/class_db.h"
 
 void CgameLagCompensation::record(int p_id, double p_now, const Vector3 &p_position) {
+	if (!Math::is_finite(p_now) || !p_position.is_finite()) {
+		return;
+	}
 	Vector<Sample> &samples = history[p_id];
+	if (!samples.is_empty()) {
+		const int last = samples.size() - 1;
+		if (p_now < samples[last].time) {
+			return;
+		}
+		if (p_now == samples[last].time) {
+			samples.write[last].position = p_position;
+			return;
+		}
+	}
 	Sample s;
 	s.time = p_now;
 	s.position = p_position;
 	samples.push_back(s);
-	while (samples.size() > 2 && p_now - samples[0].time > HISTORY_SECONDS) {
+	// Bound storage even when a caller records at a much higher frequency
+	// than the game's authoritative tick rate.
+	while (samples.size() > 128 || (samples.size() > 2 && p_now - samples[0].time > HISTORY_SECONDS)) {
 		samples.remove_at(0);
 	}
 }
@@ -76,7 +91,7 @@ double CgameLagCompensation::rewind_for(double p_round_trip) {
 // Interpolated position at the given time; the fallback when no usable history exists.
 Vector3 CgameLagCompensation::position_at(int p_id, double p_at, const Vector3 &p_fallback) const {
 	const Vector<Sample> *found = history.getptr(p_id);
-	if (!found || found->is_empty()) {
+	if (!found || found->is_empty() || !Math::is_finite(p_at)) {
 		return p_fallback;
 	}
 	const Vector<Sample> &samples = *found;

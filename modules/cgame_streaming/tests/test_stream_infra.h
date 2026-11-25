@@ -35,6 +35,7 @@
 #include "../stream_replication.h"
 #include "../stream_request_queue.h"
 
+#include "core/math/math_funcs.h"
 #include "core/object/callable_mp.h"
 #include "scene/3d/node_3d.h"
 #include "tests/test_macros.h"
@@ -143,6 +144,21 @@ TEST_CASE("[StreamRequestQueue] Priority then FIFO order") {
 	CHECK(rest.size() == 1);
 	CHECK(Vector2i(rest[0]) == Vector2i(0, 0));
 	CHECK(q->next_batch(5).size() == 0);
+}
+
+TEST_CASE("[StreamRequestQueue] Invalid priorities cannot supersede valid generations") {
+	Ref<StreamRequestQueue> queue;
+	queue.instantiate();
+	CHECK_FALSE(queue->request(Vector2i(1, 0), Math::NaN, 99));
+	CHECK_FALSE(queue->request(Vector2i(2, 0), Math::INF, 99));
+	CHECK(queue->get_newest_generation() == 0);
+	CHECK(int(queue->stats()["rejected_invalid"]) == 2);
+	CHECK(queue->request(Vector2i(3, 0), 1.0, 1));
+	TypedArray<Vector2i> batch = queue->next_batch(1);
+	REQUIRE(batch.size() == 1);
+	CHECK(Vector2i(batch[0]) == Vector2i(3, 0));
+	queue->clear();
+	CHECK(int(queue->stats()["rejected_invalid"]) == 0);
 }
 
 TEST_CASE("[StreamRequestQueue] Generations cancel stale requests") {

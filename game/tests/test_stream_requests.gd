@@ -1,6 +1,7 @@
 extends RefCounted
 ## Queue budget remains deterministic even with dense streaming requests.
 const StreamRequests = preload("res://scripts/shared/stream_requests.gd")
+const LagFallback = preload("res://scripts/server/lag_compensation.gd")
 
 
 func run(t) -> void:
@@ -67,3 +68,30 @@ func run(t) -> void:
 		"valid finite priority still enters the queue")
 	t.eq(guard.next_batch(1), [Vector2i(2, 0)],
 		"valid world streaming still schedules after rejected inputs")
+
+	t.current = "native streaming queue rejects invalid priorities when supported"
+	if ClassDB.class_exists("StreamRequestQueue"):
+		var native_queue: Object = ClassDB.instantiate("StreamRequestQueue")
+		if native_queue.stats().has("rejected_invalid"):
+			t.check(not native_queue.request(Vector2i(1, 0), NAN, 99),
+				"native queue rejects nonfinite priorities before advancing generation")
+			t.eq(native_queue.get_newest_generation(), 0, "native generation stays valid")
+			t.check(native_queue.request(Vector2i(2, 0), 1.0, 1), "valid load still queues")
+			t.eq(native_queue.next_batch(1), [Vector2i(2, 0)], "native queue returns valid load")
+
+	t.current = "server lag history is bounded and monotonic"
+	var history := LagFallback.new()
+	history.record(7, 1.0, Vector3(1, 0, 0))
+	history.record(7, 1.0, Vector3(2, 0, 0))
+	history.record(7, 0.9, Vector3(90, 0, 0))
+	history.record(7, NAN, Vector3(99, 0, 0))
+	history.record(7, 1.05, Vector3.INF)
+	t.eq(history.sample_count(7), 1, "duplicate and invalid samples do not grow history")
+	history.record(7, 1.1, Vector3(4, 0, 0))
+	t.near(history.position_at(7, 1.05, Vector3.ZERO).x, 3.0, 0.0001,
+		"latest same-tick pose participates in interpolation")
+	t.eq(history.position_at(7, NAN, Vector3.ONE), Vector3.ONE,
+		"invalid rewind time returns live position")
+	for i in 256:
+		history.record(8, 2.0 + float(i) * 0.0001, Vector3(i, 0, 0))
+	t.eq(history.sample_count(8), 128, "high-frequency history has a hard memory cap")

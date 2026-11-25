@@ -174,6 +174,24 @@ TEST_CASE("[CgameLagCompensation] History is trimmed, forgotten and pruned") {
 	CHECK(history->sample_count(3) == 0);
 }
 
+TEST_CASE("[CgameLagCompensation] Invalid and duplicate timestamps cannot grow history") {
+	Ref<CgameLagCompensation> history;
+	history.instantiate();
+	history->record(7, 1.0, Vector3(1, 0, 0));
+	history->record(7, 1.0, Vector3(2, 0, 0));
+	history->record(7, 0.9, Vector3(90, 0, 0));
+	history->record(7, Math::NaN, Vector3(99, 0, 0));
+	history->record(7, 1.05, Vector3(Math::NaN, 0, 0));
+	CHECK(history->sample_count(7) == 1);
+	history->record(7, 1.1, Vector3(4, 0, 0));
+	CHECK(history->position_at(7, 1.05, Vector3()).x == doctest::Approx(3.0));
+	CHECK(history->position_at(7, Math::NaN, Vector3(8, 0, 0)) == Vector3(8, 0, 0));
+	for (int i = 0; i < 256; i++) {
+		history->record(8, 2.0 + i * 0.0001, Vector3(i, 0, 0));
+	}
+	CHECK(history->sample_count(8) == 128);
+}
+
 // ---------------------------------------------------------------- replay recorder
 
 // A tiny deterministic "server" with the entry points the replayer is allowed (and not allowed) to use.

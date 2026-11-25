@@ -30,6 +30,7 @@
 
 #include "stream_request_queue.h"
 
+#include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
 #include "core/templates/hash_set.h"
 
@@ -46,6 +47,12 @@ int64_t StreamRequestQueue::get_newest_generation() const {
 }
 
 bool StreamRequestQueue::request(const Vector2i &p_cell, double p_priority, int64_t p_generation) {
+	// A non-finite priority is not a strict ordering key. Reject it before
+	// updating the generation or allowing it to enter the scheduling heap.
+	if (!Math::is_finite(p_priority)) {
+		stat_rejected_invalid++;
+		return false;
+	}
 	if (p_generation < newest_generation) {
 		stat_rejected_stale++;
 		return false;
@@ -223,6 +230,7 @@ Dictionary StreamRequestQueue::stats() const {
 	s["cancelled_inflight"] = stat_cancelled_inflight;
 	s["dropped_late"] = stat_dropped_late;
 	s["rejected_stale"] = stat_rejected_stale;
+	s["rejected_invalid"] = stat_rejected_invalid;
 	s["revived"] = stat_revived;
 	s["queued"] = queued_count();
 	s["in_flight"] = in_flight_count();
@@ -235,7 +243,7 @@ void StreamRequestQueue::clear() {
 	newest_generation = 0;
 	seq_counter = 0;
 	stat_requested = stat_completed = stat_cancelled_queued = stat_cancelled_inflight = 0;
-	stat_dropped_late = stat_rejected_stale = stat_revived = 0;
+	stat_dropped_late = stat_rejected_stale = stat_rejected_invalid = stat_revived = 0;
 }
 
 void StreamRequestQueue::_bind_methods() {
