@@ -57,4 +57,6 @@ public:
 	// Strict parser useful for asset build validation and CPU fallback
 	// inspection. Rejects corrupt offsets and invalid triangle references.
 	static Dictionary inspect_page(const PackedByteArray &p_page);
+	// Also verifies every global vertex reference against the actual mesh.
+	static Dictionary inspect_page_for_mesh(const PackedByteArray &p_page, int p_vertex_count);
 };

@@ -32,24 +32,43 @@ static func inspect_mesh(mesh: Mesh, max_page_bytes: int = 4096) -> Dictionary:
 		if mesh.surface_get_primitive_type(surface) != Mesh.PRIMITIVE_TRIANGLES:
 			return result
 		var arrays: Array = mesh.surface_get_arrays(surface)
-		if arrays.size() != Mesh.ARRAY_MAX or \
-				not (arrays[Mesh.ARRAY_VERTEX] is PackedVector3Array) or \
-				not (arrays[Mesh.ARRAY_INDEX] is PackedInt32Array):
+		if arrays.size() != Mesh.ARRAY_MAX or not (arrays[Mesh.ARRAY_VERTEX] is PackedVector3Array):
 			return result
 		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
-		if vertices.size() < 3 or indices.size() < 3 or indices.size() % 3 != 0:
+		if vertices.size() < 3 or vertices.size() > 1000000:
+			return result
+		var indices := PackedInt32Array()
+		if arrays[Mesh.ARRAY_INDEX] is PackedInt32Array:
+			indices = arrays[Mesh.ARRAY_INDEX]
+		if indices.is_empty():
+			if vertices.size() % 3 != 0:
+				return result
+			indices.resize(vertices.size())
+			for i in indices.size():
+				indices[i] = i
+		if indices.size() < 3 or indices.size() > 3000000 or indices.size() % 3 != 0:
 			return result
 		var pages: Array = builder.call("build_pages", vertices, indices, max_page_bytes)
 		if pages.is_empty():
 			return result
 		var recovered: int = 0
+		var next_meshlet: int = 0
 		for page in pages:
 			if not (page is PackedByteArray) or page.size() > max_page_bytes:
 				return result
-			var decoded: Dictionary = builder.call("inspect_page", page)
-			if decoded.is_empty() or int(decoded.get("bytes", 0)) != page.size():
+			var decoded: Dictionary = builder.call("inspect_page_for_mesh", page, vertices.size()) \
+				if builder.has_method("inspect_page_for_mesh") else builder.call("inspect_page", page)
+			if (decoded.is_empty() or int(decoded.get("bytes", 0)) != page.size() or
+					int(decoded.get("first_meshlet", -1)) != next_meshlet):
 				return result
+			# Compatibility with older Cgame builds: the old parser only
+			# checked the global format limit, not the specific source mesh.
+			if not builder.has_method("inspect_page_for_mesh"):
+				for descriptor in decoded["meshlets"]:
+					for id in descriptor["vertex_ids"]:
+						if id < 0 or id >= vertices.size():
+							return result
+			next_meshlet += int(decoded["meshlet_count"])
 			recovered += int(decoded["triangle_count"])
 			result["bytes"] = int(result["bytes"]) + page.size()
 			result["meshlets"] = int(result["meshlets"]) + int(decoded["meshlet_count"])

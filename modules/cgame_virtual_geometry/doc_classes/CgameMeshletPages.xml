@@ -22,7 +22,15 @@
 			<return type="Dictionary" />
 			<param index="0" name="page" type="PackedByteArray" />
 			<description>
-				Strictly decodes a binary v1 page. Checks magic, version, total length, canonical contiguous offsets, 128-meshlet limit, finite bounds/cones, exact vertex and triangle stream lengths, and in-range local triangle indices. Returns an empty dictionary on corruption; otherwise provides [code]first_meshlet[/code], [code]meshlet_count[/code], [code]triangle_count[/code], [code]bytes[/code] and [code]meshlets[/code], each with [code]vertex_ids[/code], [code]local_indices[/code], [code]bounds_center[/code], [code]bounds_radius[/code], [code]cone_axis[/code] and [code]cone_cutoff[/code]. The original source mesh's total vertex count is not embedded in each page, so validate external vertex-buffer compatibility before rendering.
+				Strictly decodes a binary v1 page. Checks magic, version, total length, canonical contiguous offsets, 128-meshlet limit, finite bounds/cones, exact vertex and triangle stream lengths, and in-range local triangle indices. Returns an empty dictionary on corruption; otherwise provides [code]first_meshlet[/code], [code]meshlet_count[/code], [code]triangle_count[/code], [code]bytes[/code] and [code]meshlets[/code], each with [code]vertex_ids[/code], [code]local_indices[/code], [code]bounds_center[/code], [code]bounds_radius[/code], [code]cone_axis[/code] and [code]cone_cutoff[/code]. The original source mesh's total vertex count is not embedded in each page; use [method inspect_page_for_mesh] to validate references against the actual vertex-buffer size.
+			</description>
+		</method>
+		<method name="inspect_page_for_mesh" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="page" type="PackedByteArray" />
+			<param index="1" name="vertex_count" type="int" />
+			<description>
+				Performs the same strict validation as [method inspect_page] and rejects any original vertex reference outside [code]0..vertex_count-1[/code]. The supplied count must be between 3 and 1000000. This validates compatibility with a vertex-buffer length, not the identity or contents of the original mesh.
 			</description>
 		</method>
 	</methods>

@@ -31,6 +31,7 @@ extends RefCounted
 const Meshlets = preload("res://scripts/shared/meshlets.gd")
 const PagePolicy = preload("res://scripts/shared/meshlet_page_streaming.gd")
 const ClusterLOD = preload("res://scripts/shared/cluster_lod.gd")
+const MeshLOD = preload("res://scripts/client/mesh_lod_preservation.gd")
 
 const TASK_SHADER_PATH: String = "res://shaders/compute/meshlet.task.glsl"
 const MESH_SHADER_PATH: String = "res://shaders/compute/meshlet.mesh.glsl"
@@ -103,7 +104,7 @@ static func build_material_preserving_cut(source_mesh: ArrayMesh,
 		return null
 	# Blend shape targets need simplification-aware remapping. Refuse until
 	# that pipeline exists instead of returning a silently corrupted mesh.
-	if source_mesh.get_blend_shape_count() > 0:
+	if source_mesh.get_blend_shape_count() > 0 or source_mesh.surface_get_primitive_type(surface) != Mesh.PRIMITIVE_TRIANGLES:
 		return null
 	var source_arrays: Array = source_mesh.surface_get_arrays(surface)
 	var arrays: Array = ClusterLOD.build_cut_arrays(source_arrays, hierarchy, cut)
@@ -111,12 +112,13 @@ static func build_material_preserving_cut(source_mesh: ArrayMesh,
 		return null
 	var output := ArrayMesh.new()
 	# Mesh arrays do not encode custom attribute layouts. Preserve their
-	# format bits (and eight-bone/compression options) explicitly, otherwise
+	# format bits (and eight-bone layout) explicitly, otherwise
 	# a custom0/1/2/3 stream can be silently interpreted with the wrong stride.
-	var src_format: int = source_mesh.surface_get_format(surface)
-	var flags: int = src_format & (Mesh.ARRAY_FORMAT_CUSTOM_MASK 			| Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS | Mesh.ARRAY_FLAG_COMPRESS_ATTRIBUTES)
+	var flags: int = MeshLOD.vertex_encoding_flags(source_mesh, surface)
 	output.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, flags)
 	output.surface_set_material(0, source_mesh.surface_get_material(surface))
+	output.surface_set_name(0, source_mesh.surface_get_name(surface))
+	output.custom_aabb = source_mesh.custom_aabb
 	output.resource_name = source_mesh.resource_name + "_cluster_lod"
 	return output
 

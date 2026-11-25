@@ -124,6 +124,19 @@ TEST_CASE("[CgameMeshletPages] corrupted page byte counts offsets references and
 	REQUIRE(pages.size() > 0);
 	const PackedByteArray valid = pages[0];
 	CHECK_FALSE(CgameMeshletPages::inspect_page(valid).is_empty());
+	CHECK_FALSE(CgameMeshletPages::inspect_page_for_mesh(valid, vertices.size()).is_empty());
+	CHECK(CgameMeshletPages::inspect_page_for_mesh(valid, 0).is_empty());
+	CHECK(CgameMeshletPages::inspect_page_for_mesh(valid, 1000001).is_empty());
+	// A reference can be below the format limit while exceeding the
+	// actual source buffer. The first reference is at the header's vertex offset.
+	PackedByteArray out_of_mesh = valid;
+	const uint32_t vertex_offset = uint32_t(valid[20]) | (uint32_t(valid[21]) << 8) |
+			(uint32_t(valid[22]) << 16) | (uint32_t(valid[23]) << 24);
+	for (int byte = 0; byte < 4; byte++) {
+		out_of_mesh.set(vertex_offset + byte, uint8_t(uint32_t(vertices.size()) >> (byte * 8)));
+	}
+	CHECK_FALSE(CgameMeshletPages::inspect_page(out_of_mesh).is_empty());
+	CHECK(CgameMeshletPages::inspect_page_for_mesh(out_of_mesh, vertices.size()).is_empty());
 	PackedByteArray corrupt = valid;
 	corrupt.set(0, 0); // Invalid magic.
 	CHECK(CgameMeshletPages::inspect_page(corrupt).is_empty());

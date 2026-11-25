@@ -204,7 +204,14 @@ Array CgameMeshletPages::build_pages(const PackedVector3Array &p_vertices,
 }
 
 Dictionary CgameMeshletPages::inspect_page(const PackedByteArray &p_page) {
+	return inspect_page_for_mesh(p_page, 1000000);
+}
+
+Dictionary CgameMeshletPages::inspect_page_for_mesh(const PackedByteArray &p_page, int p_vertex_count) {
 	Dictionary invalid;
+	if (p_vertex_count < 3 || p_vertex_count > 1000000) {
+		return invalid;
+	}
 	const int size = p_page.size();
 	if (size < HEADER_BYTES + DESCRIPTOR_BYTES + 4 * 3 + 3 ||
 			size > MAX_PAGE_BYTES) {
@@ -258,7 +265,7 @@ Dictionary CgameMeshletPages::inspect_page(const PackedByteArray &p_page) {
 		int32_t *id_write = ids.ptrw();
 		for (uint32_t j = 0; j < ref_count; ++j) {
 			const uint32_t id = get_u32(src, cursor_vertex);
-			if (id >= 1000000) {
+			if (id >= uint32_t(p_vertex_count)) {
 				return invalid;
 			}
 			id_write[j] = int32_t(id);
@@ -304,4 +311,6 @@ void CgameMeshletPages::_bind_methods() {
 			&CgameMeshletPages::build_pages, DEFVAL(DEFAULT_PAGE_BYTES));
 	ClassDB::bind_static_method("CgameMeshletPages",
 			D_METHOD("inspect_page", "page"), &CgameMeshletPages::inspect_page);
+	ClassDB::bind_static_method("CgameMeshletPages",
+			D_METHOD("inspect_page_for_mesh", "page", "vertex_count"), &CgameMeshletPages::inspect_page_for_mesh);
 }

@@ -236,19 +236,21 @@ func run(t) -> void:
 	source_arrays[Mesh.ARRAY_COLOR] = colors
 	source_arrays[Mesh.ARRAY_TEX_UV] = uv
 	source_arrays[Mesh.ARRAY_NORMAL] = authored_normals
-	var custom0 := PackedByteArray()
-	custom0.resize(verts.size() * 12) # one RGB float custom channel per vertex
+	var custom0 := PackedFloat32Array()
+	var custom3 := PackedFloat32Array()
 	for i in verts.size():
-		custom0.encode_float(i * 12, float(i) * 0.015)
-		custom0.encode_float(i * 12 + 4, 0.5)
-		custom0.encode_float(i * 12 + 8, 1.0)
+		custom0.append_array(PackedFloat32Array([float(i) * 0.015, 0.5, 1.0]))
+		custom3.append(float(i) * 0.001)
 	source_arrays[Mesh.ARRAY_CUSTOM0] = custom0
-	var custom_flags: int = Mesh.ARRAY_CUSTOM_RGB_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT
+	source_arrays[Mesh.ARRAY_CUSTOM3] = custom3
+	var custom_flags: int = (Mesh.ARRAY_CUSTOM_RGB_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT) | (Mesh.ARRAY_CUSTOM_R_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM3_SHIFT)
 	var authored := ArrayMesh.new()
 	authored.resource_name = "AlbionTerrainFixture"
 	authored.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, source_arrays, [], {}, custom_flags)
 	var authored_material := StandardMaterial3D.new()
 	authored.surface_set_material(0, authored_material)
+	authored.surface_set_name(0, "scanned_surface")
+	authored.custom_aabb = AABB(Vector3(-10, -10, -10), Vector3(100, 100, 100))
 	# Compare to Godot's uploaded surface arrays rather than the authoring
 	# floats: vertex colors and UVs may be quantized during mesh creation.
 	var canonical: Array = authored.surface_get_arrays(0)
@@ -271,9 +273,15 @@ func run(t) -> void:
 			"PBR lighting normals survive the cut")
 		t.eq(output_arrays[Mesh.ARRAY_CUSTOM0], canonical[Mesh.ARRAY_CUSTOM0],
 			"custom packed attributes retain their original byte layout")
-		t.eq(output.surface_get_format(0) & Mesh.ARRAY_FORMAT_CUSTOM_MASK,
-			authored.surface_get_format(0) & Mesh.ARRAY_FORMAT_CUSTOM_MASK,
-			"per-vertex custom attribute format bits survive LOD construction")
+		t.eq(output_arrays[Mesh.ARRAY_CUSTOM3], canonical[Mesh.ARRAY_CUSTOM3],
+			"the high custom-channel slot survives the LOD cut")
+		var custom_mask: int = (Mesh.ARRAY_FORMAT_CUSTOM_MASK << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT) | (Mesh.ARRAY_FORMAT_CUSTOM_MASK << Mesh.ARRAY_FORMAT_CUSTOM3_SHIFT)
+		t.eq(output.surface_get_format(0) & custom_mask, custom_flags,
+			"shifted custom-channel encodings survive LOD construction")
+		t.eq(output.surface_get_name(0), authored.surface_get_name(0),
+			"authored surface name survives")
+		t.eq(output.custom_aabb, authored.custom_aabb,
+			"conservative authored culling bounds survive")
 		t.check((output_arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() > 0,
 			"chosen clusters are built as indexed triangles")
 		t.check((output_arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() <= indices.size(),

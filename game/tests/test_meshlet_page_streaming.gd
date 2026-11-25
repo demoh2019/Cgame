@@ -6,6 +6,7 @@ const PagePolicy = preload("res://scripts/shared/meshlet_page_streaming.gd")
 const MeshletRenderer = preload("res://scripts/client/meshlet_renderer.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const VirtualGeometryProbe = preload("res://scripts/client/virtual_geometry_probe.gd")
+const PageInspector = preload("res://scripts/client/virtual_geometry_page_inspector.gd")
 
 
 static func make_meshlets(count: int) -> Array:
@@ -148,6 +149,22 @@ func run(t) -> void:
 		"online game calls GPU probe on the canonical rock, not a duplicate game project")
 	t.check(client_source.contains('VirtualGeometryProbe.detach_for_debug(_meshlet_page_probe, camera)'),
 		"online game releases the page pool on shutdown")
+
+	t.current = "binary page inspection checks the actual game vertex buffer"
+	var inspected: Dictionary = PageInspector.inspect_mesh(actual_rock, 1024)
+	if ClassDB.class_exists("CgameMeshletPages"):
+		t.check(bool(inspected.get("verified", false)),
+			"canonical rock pages pass source-bound and contiguous ordinal validation")
+		t.check(int(inspected.get("triangles", 0)) > 0,
+			"verified pages contain real game triangles")
+		var inspected_unindexed: Dictionary = PageInspector.inspect_mesh(unindexed_mesh, 1024)
+		t.check(bool(inspected_unindexed.get("verified", false)),
+			"unindexed procedural mesh also passes page validation")
+		t.eq(int(inspected_unindexed.get("triangles", 0)), 2,
+			"both unindexed source triangles are inspected")
+	else:
+		t.check(not bool(inspected.get("supported", false)),
+			"stock engine retains a safe unsupported result")
 
 	t.current = "GPU task shaders exclude unresident descriptor slots"
 	var task_source: String = MeshletRenderer._read_text(MeshletRenderer.TASK_SHADER_PATH)
