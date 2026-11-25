@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/math/math_funcs.h"
 #include "core/object/ref_counted.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/local_vector.h"
@@ -62,9 +63,9 @@ protected:
 	static void _bind_methods();
 
 public:
-	void set_smoothing(double p_smoothing) { smoothing = CLAMP(p_smoothing, 0.0, 1.0); }
+	void set_smoothing(double p_smoothing) { smoothing = Math::is_finite(p_smoothing) ? CLAMP(p_smoothing, 0.0, 1.0) : 0.2; }
 	double get_smoothing() const { return smoothing; }
-	void set_headroom(double p_headroom) { headroom = MAX(p_headroom, 0.0); }
+	void set_headroom(double p_headroom) { headroom = Math::is_finite(p_headroom) ? MAX(p_headroom, 0.0) : 1.0; }
 	double get_headroom() const { return headroom; }
 
 	void register_system(const String &p_name, double p_priority, double p_min_ms, double p_desired_ms);
