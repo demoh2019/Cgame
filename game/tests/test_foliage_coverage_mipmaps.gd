@@ -29,8 +29,8 @@ func run(t) -> void:
 		image = source.call("create_alpha_coverage_mipmaps", 0.5) as Image
 	else:
 		image = source.duplicate()
-		t.eq(image.generate_mipmaps(false, true, 0.5), OK,
-			"regular Godot also supports alpha coverage mip generation")
+		t.eq(image.generate_mipmaps(), OK,
+			"regular Godot generates ordinary mipmaps without the Cgame extension")
 	t.check(image != null, "filtered image exists")
 	if image != null:
 		t.check(image.has_mipmaps(), "premium alpha has a complete mip chain")

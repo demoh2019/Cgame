@@ -131,6 +131,17 @@ TEST_CASE("[CgameMeshletPages] corrupted page byte counts offsets references and
 	corrupt.set(4, 255); // Unsupported layout version.
 	CHECK(CgameMeshletPages::inspect_page(corrupt).is_empty());
 	corrupt = valid;
+	for (int i = 8; i < 12; ++i) {
+		corrupt.set(i, 255); // Impossible first meshlet ordinal (UINT32_MAX).
+	}
+	CHECK(CgameMeshletPages::inspect_page(corrupt).is_empty());
+	corrupt = valid;
+	corrupt.set(8, 64); // 1000000, little endian.
+	corrupt.set(9, 66);
+	corrupt.set(10, 15);
+	corrupt.set(11, 0);
+	CHECK(CgameMeshletPages::inspect_page(corrupt).is_empty());
+	corrupt = valid;
 	corrupt.set(28, 0); // Header size mismatch.
 	CHECK(CgameMeshletPages::inspect_page(corrupt).is_empty());
 	corrupt = valid;

@@ -402,11 +402,11 @@ func run(t) -> void:
 	if native_samples != null:
 		native_samples.call("begin_frame", 0.01, 3)
 	for lane in AmbientTickBudget.LANES:
-		var measured: int = samples.get_lane_last_frame_cost_us(lane)
-		t.eq(measured, 165 if lane == "dust_devils" else (70 if lane == "dragonflies" else 0),
+		var lane_cost: int = samples.get_lane_last_frame_cost_us(lane)
+		t.eq(lane_cost, 165 if lane == "dust_devils" else (70 if lane == "dragonflies" else 0),
 			"correct completed CPU cost for %s" % lane)
 		if native_samples != null:
-			t.eq(int(native_samples.call("get_lane_last_frame_cost_us", StringName(lane))), measured,
+			t.eq(int(native_samples.call("get_lane_last_frame_cost_us", StringName(lane))), lane_cost,
 				"native/script per-lane CPU parity for %s" % lane)
 	samples.begin_frame(0.01, 3)
 	if native_samples != null:

@@ -228,14 +228,14 @@ func run(t) -> void:
 	source_arrays[Mesh.ARRAY_INDEX] = indices
 	var colors := PackedColorArray()
 	var uv := PackedVector2Array()
-	var normals := PackedVector3Array()
+	var authored_normals := PackedVector3Array()
 	for i in verts.size():
 		colors.append(Color(float(i % 3) / 3.0, 0.5, 0.8))
 		uv.append(Vector2(float(i % 17) / 17.0, float(i % 11) / 11.0))
-		normals.append(Vector3.UP)
+		authored_normals.append(Vector3.UP)
 	source_arrays[Mesh.ARRAY_COLOR] = colors
 	source_arrays[Mesh.ARRAY_TEX_UV] = uv
-	source_arrays[Mesh.ARRAY_NORMAL] = normals
+	source_arrays[Mesh.ARRAY_NORMAL] = authored_normals
 	var custom0 := PackedByteArray()
 	custom0.resize(verts.size() * 12) # one RGB float custom channel per vertex
 	for i in verts.size():

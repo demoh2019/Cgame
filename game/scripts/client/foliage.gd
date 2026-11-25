@@ -345,9 +345,9 @@ static func _coverage_texture(source: Texture2D, threshold: float) -> Texture2D:
 	if pixels.has_method("create_alpha_coverage_mipmaps"):
 		optimized = pixels.call("create_alpha_coverage_mipmaps", cutoff) as Image
 	else:
-		# Stock Godot uses the legacy coverage generator. The Cgame engine
-		# fixes its asymmetric alpha row-stride and clones source data.
-		optimized = pixels if pixels.generate_mipmaps(false, true, cutoff) == OK else null
+		# Stock Godot supports ordinary mipmaps, not the extended coverage API.
+		# Keep the imported texture if even ordinary mip generation fails.
+		optimized = pixels if pixels.generate_mipmaps() == OK else null
 	var result: Texture2D = ImageTexture.create_from_image(optimized) if optimized != null else source
 	_coverage_texture_cache[key] = result
 	return result

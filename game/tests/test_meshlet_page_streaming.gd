@@ -123,6 +123,21 @@ func run(t) -> void:
 			"live debug feature applies a bounded resident page budget")
 		t.eq(int(game_renderer.get("max_page_uploads_per_frame")), 1,
 			"live debug feature applies a transfer-per-frame limit")
+	var unindexed_arrays: Array = []
+	unindexed_arrays.resize(Mesh.ARRAY_MAX)
+	unindexed_arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([
+		Vector3.ZERO, Vector3.RIGHT, Vector3.FORWARD,
+		Vector3.RIGHT, Vector3(1, 0, -1), Vector3.FORWARD])
+	var unindexed_mesh := ArrayMesh.new()
+	unindexed_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, unindexed_arrays)
+	var unindexed_probe: RefCounted = VirtualGeometryProbe.prepare(unindexed_mesh)
+	t.check(unindexed_probe != null, "unindexed procedural triangles receive sequential indices")
+	if unindexed_probe != null:
+		var unindexed_fallback: ArrayMesh = unindexed_probe.call("build_array_mesh")
+		t.check(unindexed_fallback != null, "unindexed meshlets build the CPU fallback")
+		if unindexed_fallback != null:
+			t.eq(unindexed_fallback.surface_get_arrays(0)[Mesh.ARRAY_INDEX].size(), 6,
+				"both source triangles survive the fallback")
 	t.check(VirtualGeometryProbe.prepare(null) == null, "null game mesh is safely ignored")
 	t.check(VirtualGeometryProbe.prepare(ArrayMesh.new()) == null,
 		"missing geometry does not register a GPU draw")

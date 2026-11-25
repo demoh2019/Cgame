@@ -220,7 +220,9 @@ Dictionary CgameMeshletPages::inspect_page(const PackedByteArray &p_page) {
 	const uint32_t desc = get_u32(src, 16);
 	const uint32_t vertices = get_u32(src, 20);
 	const uint32_t triangles = get_u32(src, 24);
-	if (count < 1 || count > 128 || desc != HEADER_BYTES ||
+	// Source geometry is capped at one million triangles, so it cannot
+	// produce more than one million nonempty meshlets. Avoid ordinal overflow.
+	if (count < 1 || count > 128 || first > 1000000u - count || desc != HEADER_BYTES ||
 			vertices != desc + count * DESCRIPTOR_BYTES ||
 			vertices >= triangles || triangles >= uint32_t(size)) {
 		return invalid;

@@ -18,9 +18,22 @@ static func prepare(mesh: Mesh, max_pages: int = 16,
 	var arrays: Array = mesh.surface_get_arrays(0)
 	if arrays.size() != Mesh.ARRAY_MAX:
 		return null
+	if not arrays[Mesh.ARRAY_VERTEX] is PackedVector3Array:
+		return null
 	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
-	if vertices.is_empty() or indices.is_empty() or indices.size() % 3 != 0:
+	if vertices.is_empty() or vertices.size() > 1000000:
+		return null
+	var indices := PackedInt32Array()
+	if arrays[Mesh.ARRAY_INDEX] is PackedInt32Array:
+		indices = arrays[Mesh.ARRAY_INDEX]
+	if indices.is_empty():
+		# Procedural rock meshes can have triangle-list vertices without an index stream.
+		if vertices.size() % 3 != 0:
+			return null
+		indices.resize(vertices.size())
+		for i in indices.size():
+			indices[i] = i
+	if indices.size() > 3000000 or indices.size() % 3 != 0:
 		return null
 	var renderer := MeshletRenderer.new()
 	# Keep only source geometry + bounds on CPU. Pack/upload one page at a

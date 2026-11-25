@@ -835,7 +835,9 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 	# Every agent targeting the same survivor now sees the SAME eight ring
 	# slots. The server leases distinct slots; old builds without a shared pool
 	# retain the original per-agent phase-shifted EQS behavior.
-	var ring: PackedVector3Array = EnvironmentQuery3D.sample_ring(
+	# The class is optional on stock Godot. Resolve its static method only
+	# after the ClassDB guard above, so the server script still parses.
+	var ring: PackedVector3Array = ClassDB.call("class_call_static", &"EnvironmentQuery3D", &"sample_ring",
 		Vector3(target.x, 0.0, target.y), FLANK_RING, 8,
 		0.0 if use_smart_slots else float(posmod(id, 8)) * 0.4)
 	_flank_query.set("candidates", ring)
