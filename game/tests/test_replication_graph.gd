@@ -32,6 +32,43 @@ func run(t) -> void:
 	g.set_position(2, Vector3(20, 0, 20))
 	t.check(_ids(g.gather_for(_conn(8, Vector3.ZERO))).has(2), "moved entity enters view")
 
+	t.current = "graph owner-only precedence and entity lifetimes"
+	var private_graph := ReplicationGraph.new()
+	private_graph.set_class_config("private", 1.0, 60.0, 10)
+	private_graph.add_entity(10, "private", Vector3.ZERO, 7, true, true)
+	t.eq(_ids(private_graph.gather_for(_conn(8, Vector3.ZERO))), [],
+			"owner-only takes precedence over always-relevant even at close range")
+	t.eq(_ids(private_graph.gather_for(_conn(7, Vector3(1000, 0, 1000)))), [10],
+			"the owner receives private entities outside the spatial radius")
+	t.eq(private_graph.gather_for(_conn(7, Vector3.ZERO)).size(), 0,
+			"the active incarnation respects its send interval")
+	private_graph.remove_entity(10)
+	private_graph.add_entity(10, "private", Vector3.ZERO)
+	t.eq(_ids(private_graph.gather_for(_conn(7, Vector3.ZERO))), [10],
+			"a reused ID is immediately eligible and does not inherit its old timer")
+	t.eq(_ids(private_graph.gather_for(_conn(8, Vector3.ZERO))), [10],
+			"reusing an ID clears its previous private flags")
+	private_graph.remove_entity(10)
+	t.eq(private_graph.gather_for(_conn(8, Vector3.ZERO)).size(), 0,
+			"removed special IDs never leave stale candidates")
+
+	t.current = "graph sparse view and runtime cell size"
+	var sparse_graph := ReplicationGraph.new()
+	sparse_graph.add_entity(1, "npc", Vector3(-180, 0, 240))
+	sparse_graph.add_entity(2, "npc", Vector3(180, 0, 240))
+	sparse_graph.add_entity(3, "npc", Vector3(500000, 0, 0))
+	sparse_graph.add_entity(4, "npc", Vector3(0, 0, 0), 2, false, true)
+	t.eq(_ids(sparse_graph.gather_for(_conn(1, Vector3.ZERO, 100000.0))), [1, 2],
+			"huge sparse query retains exact distance and owner filtering")
+	sparse_graph.cell_size = 16.0
+	t.eq(_ids(sparse_graph.gather_for(_conn(1, Vector3(-180, 0, 240), 5.0))), [1],
+			"changing grid cell size rebuilds existing spatial buckets")
+	sparse_graph.cell_size = 0.0
+	t.eq(sparse_graph.cell_size, 16.0, "invalid cell size is rejected")
+	sparse_graph.set_position(1, Vector3(50, 0, 50))
+	t.eq(_ids(sparse_graph.gather_for(_conn(1, Vector3(50, 0, 50), 5.0))), [1],
+			"movement after cell resize updates the rebuilt grid")
+
 	t.current = "graph dormancy"
 	var d := ReplicationGraph.new()
 	d.set_class_config("door", 1.0, 0.0, 10)

@@ -164,7 +164,9 @@ void CgameReplicationGraph::clear() {
 void CgameReplicationGraph::_collect_candidates(int64_t p_conn_id, const Vector3 &p_pos, double p_radius, HashSet<int64_t> &r_out) const {
 	for (const int64_t &id : special) {
 		const Entity &e = entities[id];
-		if (e.always_relevant || (e.owner_only && e.owner == p_conn_id)) {
+		// Owner-only is a privacy constraint, not a distance hint. It wins
+		// over always-relevant when both flags are set.
+		if (e.owner_only ? e.owner == p_conn_id : e.always_relevant) {
 			r_out.insert(id);
 		}
 	}
