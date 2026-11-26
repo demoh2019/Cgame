@@ -24,6 +24,8 @@ var max_in_flight: int = 0
 var newest_generation: int = 0
 
 var _reqs: Dictionary = {}
+# Includes cancelled work until its completion releases the worker.
+var _active_workers: int = 0
 var _seq: int = 0
 var _completed: Array[Dictionary] = []
 var _stats: Dictionary = {
@@ -158,6 +160,7 @@ func next_batch(budget: int) -> Array[Vector2i]:
 	queued.sort_custom(_before)
 	for i in mini(allowed, queued.size()):
 		queued[i].state = State.IN_FLIGHT
+		_active_workers += 1
 		out.append(queued[i].cell)
 	return out
 
@@ -171,9 +174,11 @@ func complete(cell: Vector2i, result: Variant) -> bool:
 	var r: Req = _reqs[cell]
 	if r.state == State.CANCELLED or r.state == State.QUEUED or r.generation < newest_generation:
 		if r.state != State.QUEUED:
+			_active_workers -= 1
 			_reqs.erase(cell)
 		_stats["dropped_late"] = int(_stats["dropped_late"]) + 1
 		return false
+	_active_workers -= 1
 	_reqs.erase(cell)
 	_stats["completed"] = int(_stats["completed"]) + 1
 	_completed.append({"cell": cell, "result": result, "generation": r.generation})
@@ -198,19 +203,22 @@ func state_of(cell: Vector2i) -> int:
 
 
 func queued_count() -> int:
-	return _count(State.QUEUED)
+	return _reqs.size() - _active_workers
 
 
 func in_flight_count() -> int:
-	return _count(State.IN_FLIGHT) + _count(State.CANCELLED)
+	return _active_workers
 
 
-func _count(state: int) -> int:
-	var n := 0
-	for r: Req in _reqs.values():
-		if r.state == state:
-			n += 1
-	return n
+## Same reset contract as the native queue; retain configured worker cap.
+func clear() -> void:
+	_reqs.clear()
+	_completed.clear()
+	_active_workers = 0
+	_seq = 0
+	newest_generation = 0
+	for key in _stats:
+		_stats[key] = 0
 
 
 func stats() -> Dictionary:

@@ -62,6 +62,8 @@ private:
 	};
 
 	int max_in_flight = 0;
+	// Cancelled workers still occupy a slot until their result arrives.
+	int active_workers = 0;
 	int64_t newest_generation = 0;
 	HashMap<Vector2i, Req> reqs;
 	int64_t seq_counter = 0;
@@ -76,7 +78,6 @@ private:
 	int64_t stat_rejected_invalid = 0;
 	int64_t stat_revived = 0;
 
-	int _count(State p_state) const;
 
 protected:
 	static void _bind_methods();

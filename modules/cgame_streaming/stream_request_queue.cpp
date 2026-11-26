@@ -198,6 +198,7 @@ TypedArray<Vector2i> StreamRequestQueue::next_batch(int p_budget) {
 	queued.sort_custom<QueuedEntryBefore>();
 	for (uint32_t i = 0; i < queued.size() && (int)i < allowed; i++) {
 		reqs[queued[i].cell].state = STATE_IN_FLIGHT;
+		active_workers++;
 		out.push_back(queued[i].cell);
 	}
 	return out;
@@ -212,6 +213,7 @@ bool StreamRequestQueue::complete(const Vector2i &p_cell, const Variant &p_resul
 	Req &r = it->value;
 	if (r.state == STATE_CANCELLED || r.state == STATE_QUEUED || r.generation < newest_generation) {
 		if (r.state != STATE_QUEUED) {
+			active_workers--;
 			reqs.erase(p_cell);
 		}
 		stat_dropped_late++;
@@ -221,6 +223,7 @@ bool StreamRequestQueue::complete(const Vector2i &p_cell, const Variant &p_resul
 	d.cell = p_cell;
 	d.result = p_result;
 	d.generation = r.generation;
+	active_workers--;
 	reqs.erase(p_cell);
 	stat_completed++;
 	completed.push_back(d);
@@ -252,22 +255,12 @@ int StreamRequestQueue::state_of(const Vector2i &p_cell) const {
 	return it->value.state;
 }
 
-int StreamRequestQueue::_count(State p_state) const {
-	int n = 0;
-	for (const KeyValue<Vector2i, Req> &kv : reqs) {
-		if (kv.value.state == p_state) {
-			n++;
-		}
-	}
-	return n;
-}
-
 int StreamRequestQueue::queued_count() const {
-	return _count(STATE_QUEUED);
+	return reqs.size() - active_workers;
 }
 
 int StreamRequestQueue::in_flight_count() const {
-	return _count(STATE_IN_FLIGHT) + _count(STATE_CANCELLED);
+	return active_workers;
 }
 
 Dictionary StreamRequestQueue::stats() const {
@@ -287,6 +280,7 @@ Dictionary StreamRequestQueue::stats() const {
 
 void StreamRequestQueue::clear() {
 	reqs.clear();
+	active_workers = 0;
 	completed.clear();
 	newest_generation = 0;
 	seq_counter = 0;
