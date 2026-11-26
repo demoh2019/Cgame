@@ -79,6 +79,45 @@ func run(t) -> void:
 			t.check(native_queue.request(Vector2i(2, 0), 1.0, 1), "valid load still queues")
 			t.eq(native_queue.next_batch(1), [Vector2i(2, 0)], "native queue returns valid load")
 
+	t.current = "worker counts remain exact through cancellation and revival"
+	var implementations: Array = [StreamRequests.new()]
+	if ClassDB.class_exists("StreamRequestQueue"):
+		implementations.append(ClassDB.instantiate("StreamRequestQueue"))
+	for queue in implementations:
+		queue.set("max_in_flight", 2)
+		var a := Vector2i(10, 0)
+		var b := Vector2i(11, 0)
+		var c := Vector2i(12, 0)
+		queue.request(a, 3.0, 1)
+		queue.request(b, 2.0, 1)
+		queue.request(c, 1.0, 1)
+		t.eq(queue.next_batch(5).size(), 2, "two physical workers dispatched")
+		var keep: Array[Vector2i] = [c]
+		t.eq(queue.cancel_stale(2, keep), 2, "obsolete jobs are cancelled")
+		t.eq(queue.in_flight_count(), 2, "cancelled workers still consume capacity")
+		t.eq(queue.next_batch(5).size(), 0, "no worker oversubscription")
+		queue.request(a, 5.0, 2)
+		t.eq(queue.in_flight_count(), 2, "revival does not allocate another worker")
+		t.check(not queue.complete(c, "early"), "queued completion cannot release a worker")
+		t.eq(queue.queued_count(), 1, "queued cell remains waiting")
+		t.check(not queue.complete(b, "late"), "cancelled result discarded")
+		t.eq(queue.in_flight_count(), 1, "late completion releases one physical worker")
+		t.eq(queue.next_batch(5).size(), 1, "released capacity admits waiting work")
+		t.check(queue.complete(a, "revived"), "revived result accepted")
+		t.check(queue.complete(c, "done"), "last result accepted")
+		t.eq(queue.in_flight_count(), 0, "all worker slots released")
+		t.eq(queue.queued_count(), 0, "all requests drained")
+		t.check(not queue.complete(c, "duplicate"), "duplicate completion ignored")
+		t.eq(queue.in_flight_count(), 0, "duplicate cannot decrement below zero")
+		queue.request(a, 1.0, 2)
+		queue.next_batch(1)
+		# Older fallback builds had no reset method; this suite uses the
+		# current script and the longstanding native clear API.
+		queue.clear()
+		t.eq(queue.queued_count(), 0, "reset clears queued count")
+		t.eq(queue.in_flight_count(), 0, "reset clears worker count")
+		t.eq(queue.take_completed().size(), 0, "reset drops undrained completions")
+
 	t.current = "server lag history is bounded and monotonic"
 	var history := LagFallback.new()
 	history.record(7, 1.0, Vector3(1, 0, 0))

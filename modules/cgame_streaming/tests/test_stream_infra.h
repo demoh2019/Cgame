@@ -232,6 +232,45 @@ TEST_CASE("[StreamRequestQueue] In-flight cap and revive") {
 	CHECK_FALSE(q3->complete(Vector2i(4, 0), 1));
 }
 
+TEST_CASE("[StreamRequestQueue] Worker accounting survives cancel revive and clear") {
+	Ref<StreamRequestQueue> q;
+	q.instantiate();
+	q->set_max_in_flight(2);
+	const Vector2i a(0, 0), b(1, 0), c(2, 0), d(3, 0);
+	q->request(a, 4, 1);
+	q->request(b, 3, 1);
+	q->request(c, 2, 1);
+	CHECK(q->queued_count() == 3);
+	CHECK(q->next_batch(8).size() == 2);
+	CHECK(q->queued_count() == 1);
+	CHECK(q->in_flight_count() == 2);
+	TypedArray<Vector2i> keep;
+	keep.push_back(c);
+	CHECK(q->cancel_stale(2, keep) == 2);
+	CHECK(q->in_flight_count() == 2);
+	CHECK(q->next_batch(8).is_empty());
+	CHECK(q->request(a, 5, 2));
+	CHECK(q->in_flight_count() == 2);
+	CHECK_FALSE(q->complete(c, "not dispatched"));
+	CHECK(q->queued_count() == 1);
+	CHECK_FALSE(q->complete(b, "cancelled"));
+	CHECK(q->in_flight_count() == 1);
+	CHECK(q->next_batch(8).size() == 1);
+	CHECK(q->complete(a, "revived"));
+	CHECK(q->complete(c, "loaded"));
+	CHECK(q->in_flight_count() == 0);
+	CHECK(q->queued_count() == 0);
+	CHECK_FALSE(q->complete(c, "duplicate"));
+	q->request(d, 1, 2);
+	q->next_batch(1);
+	q->clear();
+	CHECK(q->in_flight_count() == 0);
+	CHECK(q->queued_count() == 0);
+	CHECK(q->take_completed().is_empty());
+	CHECK_FALSE(q->complete(d, "after clear"));
+	CHECK(q->in_flight_count() == 0);
+}
+
 TEST_CASE("[StreamReadinessGate] Prerequisites and reveal") {
 	Ref<StreamReadinessGate> r;
 	r.instantiate();

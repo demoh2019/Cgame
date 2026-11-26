@@ -155,6 +155,25 @@ static func plan_waypoint_route(streamer: WorldStreamer, waypoint: Vector2,
 		return result
 	var start := Vector2i(from_cell.x, from_cell.z)
 	var finish := Vector2i(to_cell.x, to_cell.z)
+	# Straight corridors need no AStarGrid allocation or graph initialization.
+	# Preserve the exact shortest path, including endpoint validation.
+	if start.x == finish.x or start.y == finish.y:
+		var straight: Array[Vector3i] = []
+		var step := Vector2i(signi(finish.x - start.x), signi(finish.y - start.y))
+		var point := start
+		var blocked: Dictionary = {}
+		for cell in blocked_cells:
+			if cell.y == 0:
+				blocked[cell] = true
+		while true:
+			var cell := Vector3i(point.x, 0, point.y)
+			if blocked.has(cell):
+				break
+			straight.append(cell)
+			if point == finish:
+				return straight
+			point += step
+	# Obstructed or turning routes retain the existing AStar detour path.
 	var grid := AStarGrid2D.new()
 	grid.region = Rect2i(
 		Vector2i(mini(start.x, finish.x) - 3, mini(start.y, finish.y) - 3),

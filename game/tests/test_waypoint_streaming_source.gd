@@ -101,6 +101,16 @@ func run(t) -> void:
 		corridor_streamer, clear_waypoint, corridor_streamer.focus_position)
 	t.eq(direct, [Vector3i(0, 0, 0), Vector3i(1, 0, 0), Vector3i(2, 0, 0)],
 		"the direct private waypoint corridor passes through adjacent XZ cells")
+	t.eq(StreamingPolicy.plan_waypoint_route(corridor_streamer,
+		Vector2(-24, 8), corridor_streamer.focus_position),
+		[Vector3i(0, 0, 0), Vector3i(-1, 0, 0), Vector3i(-2, 0, 0)],
+		"straight westbound corridor follows adjacent cells")
+	t.eq(StreamingPolicy.plan_waypoint_route(corridor_streamer,
+		Vector2(8, 8), corridor_streamer.focus_position), [Vector3i.ZERO],
+		"same-cell waypoint returns exactly one cell")
+	t.eq(StreamingPolicy.plan_waypoint_route(corridor_streamer,
+		clear_waypoint, corridor_streamer.focus_position, [Vector3i(1, 1, 0)]),
+		direct, "obstacles on another floor do not block surface streaming")
 	var detour: Array[Vector3i] = StreamingPolicy.plan_waypoint_route(
 		corridor_streamer, clear_waypoint, corridor_streamer.focus_position,
 		[Vector3i(1, 0, 0)])
