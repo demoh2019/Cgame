@@ -128,6 +128,19 @@ func run(t) -> void:
 		[Vector2(0, 2), Vector2(1, 0)],
 		"bonuses never override occupancy clearance")
 
+	t.current = "single-result and zero-separation raid queries preserve filters and bonuses"
+	var height_sites: Array[Vector2] = [Vector2(1, 0), Vector2(2, 0), Vector2(3, 0), Vector2(4, 0)]
+	var heights: Array[float] = [NAN, 30.0, 3.0, 0.0]
+	var height_bonuses: Array[float] = [1.0, 0.9, 0.5, 0.0]
+	var no_blockers: Array[Vector2] = []
+	for native_path in [false, true]:
+		t.eq(Reinforcements.spread_sites(height_sites, [Vector2.ZERO], Vector2.ZERO,
+			1, 5.0, native_path, no_blockers, 0.0, heights, 0.0, 3.0, height_bonuses),
+			[Vector2(3, 0)], "invalid heights are rejected and surviving bonus stays aligned")
+		t.eq(Reinforcements.spread_sites(height_sites, [Vector2.ZERO], Vector2.ZERO,
+			4, 0.0, native_path, no_blockers, 0.0, heights, 0.0, 3.0, height_bonuses),
+			[Vector2(3, 0), Vector2(4, 0)], "zero separation keeps all legal sites in score order")
+
 	t.current = "real server raid reinforcement spawn sites remain safe and bounded"
 	var cover_world := CoverWorld.new()
 	var covered := Reinforcements.sites(cover_world, {}, {}, Vector3.ZERO, 1, 2)

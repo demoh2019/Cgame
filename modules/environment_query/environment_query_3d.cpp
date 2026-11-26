@@ -429,11 +429,36 @@ Array EnvironmentQuery3D::query() const {
 }
 
 PackedVector3Array EnvironmentQuery3D::query_positions() const {
+	// Small capped requests already have a bounded, allocation-light path.
+	if (max_results > 0 && max_results <= 64) {
+		return query_top_positions(max_results);
+	}
 	PackedVector3Array positions;
-	const Array results = query();
-	for (int i = 0; i < results.size(); i++) {
-		const Dictionary entry = results[i];
-		positions.push_back(entry["position"]);
+	if (!origin.is_finite() || (use_threat && !threat_position.is_finite()) || min_distance > max_distance) {
+		return positions;
+	}
+	// Position-only consumers do not need per-hit Variant dictionaries.
+	Vector<QueryHit> hits;
+	for (int i = 0; i < candidates.size(); i++) {
+		QueryHit hit;
+		if (score_candidate(candidates[i], i, origin, threat_position, threat_positions,
+					exclusion_positions, min_exclusion_distance,
+					use_direction, direction_origin, direction_axis, min_direction_dot, max_direction_dot,
+					use_threat, horizontal_only, min_distance, max_distance,
+					max_vertical_difference, desired_distance, distance_weight, safety_weight,
+					min_threat_distance, candidate_bonuses.is_empty() ? 0.0 : candidate_bonuses[i], hit)) {
+			hits.push_back(hit);
+		}
+	}
+	if (hits.size() > 1) {
+		SortArray<QueryHit, HitComparator> sorter;
+		sorter.sort(hits.ptrw(), hits.size());
+	}
+	const int count = max_results == 0 ? hits.size() : MIN(max_results, hits.size());
+	positions.resize(count);
+	Vector3 *write = positions.ptrw();
+	for (int i = 0; i < count; i++) {
+		write[i] = hits[i].position;
 	}
 	return positions;
 }
@@ -776,6 +801,12 @@ PackedVector3Array EnvironmentQuery3D::query_spread_positions(int p_count, doubl
 	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_min_separation) || p_min_separation < 0.0, output, "Minimum separation must be finite and nonnegative.");
 	if (!origin.is_finite() || (use_threat && !threat_position.is_finite()) || min_distance > max_distance) {
 		return output;
+	}
+
+	// Separation has no effect for one result or a zero clearance radius.
+	// Keep the exact ranking and cap without building/sorting all hits.
+	if (p_count == 1 || max_results == 1 || p_min_separation == 0.0) {
+		return query_top_positions(p_count);
 	}
 
 	const int limit = max_results == 0 ? p_count : MIN(p_count, max_results);

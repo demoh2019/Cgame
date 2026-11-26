@@ -133,11 +133,17 @@ static func spread_sites(candidates: Array[Vector2], threats: Array[Vector2],
 	var vetted_bonuses: Array[float] = []
 	for i in candidates.size():
 		var point: Vector2 = candidates[i]
-		if point.is_finite() and point.distance_to(center) <= QUERY_MAX_DISTANCE:
-			vetted.append(point)
-			vetted_heights.append(candidate_heights[i] if max_height_difference > 0.0 else center_height)
-			if use_bonuses:
-				vetted_bonuses.append(candidate_bonuses[i])
+		if not point.is_finite() or point.distance_to(center) > QUERY_MAX_DISTANCE:
+			continue
+		var height: float = candidate_heights[i] if max_height_difference > 0.0 else center_height
+		# Reject unsafe terrain before constructing native candidates or
+		# sorting portable results. Keep aligned bonuses with the surviving sites.
+		if not is_finite(height) or (max_height_difference > 0.0 and absf(height - center_height) > max_height_difference):
+			continue
+		vetted.append(point)
+		vetted_heights.append(height)
+		if use_bonuses:
+			vetted_bonuses.append(candidate_bonuses[i])
 	if vetted.is_empty():
 		return selected
 
@@ -193,15 +199,11 @@ static func spread_sites(candidates: Array[Vector2], threats: Array[Vector2],
 				selected.append(Vector2(point.x, point.z))
 			return selected
 
-	# Portable path applies the same inclusive vertical and XZ clearance.
+	# Terrain was checked before dispatch; apply the remaining XZ clearance.
 	var permitted: Array[Vector2] = []
 	var permitted_bonuses: Array[float] = []
 	for i in vetted.size():
 		var point: Vector2 = vetted[i]
-		if max_height_difference > 0.0:
-			if not is_finite(vetted_heights[i]) or \
-					absf(vetted_heights[i] - center_height) > max_height_difference:
-				continue
 		var unoccupied := true
 		if min_exclusion_distance > 0.0:
 			for blocker in valid_exclusions:
