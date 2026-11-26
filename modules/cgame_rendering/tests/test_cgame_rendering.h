@@ -309,6 +309,39 @@ TEST_CASE("[CgameInstanceCulling] Hi-Z occlusion") {
 	CHECK(CgameInstanceCulling::cull_cpu_native(centers, halves, planes, CgameInstanceCulling::HiZ()).size() == 1);
 }
 
+TEST_CASE("[CgameInstanceCulling] Invalid depth metadata keeps instances visible") {
+	CgameInstanceCulling::HiZ hiz;
+	hiz.enabled = true;
+	hiz.width = 65536;
+	hiz.height = 65536;
+	hiz.depth.resize(1);
+	hiz.depth.write[0] = 0.0f;
+	const Vector3 center(0, 0, 0.9f);
+	const Vector3 half(0.1f, 0.1f, 0.05f);
+	CHECK_FALSE(CgameInstanceCulling::occluded(center, half, hiz));
+	hiz.width = 4;
+	hiz.height = 4;
+	CHECK_FALSE(CgameInstanceCulling::occluded(center, half, hiz));
+
+	Ref<CgameInstanceCulling> culling;
+	culling.instantiate();
+	culling->set_force_cpu(true);
+	PackedVector3Array centers;
+	centers.push_back(center);
+	PackedVector3Array halves;
+	halves.push_back(half);
+	PackedFloat32Array depth;
+	depth.push_back(0.0f);
+	Dictionary invalid;
+	invalid["width"] = int64_t(1) << 32;
+	invalid["height"] = 4;
+	invalid["depth"] = depth;
+	CHECK(culling->cull_packed(centers, halves, Array(), invalid).size() == 1);
+	invalid["width"] = 4;
+	CHECK(culling->cull_packed(centers, halves, Array(), invalid).size() == 1);
+	CHECK(culling->cull_packed(centers, PackedVector3Array(), Array(), invalid).is_empty());
+}
+
 TEST_CASE("[CgameInstanceCulling] Object API with forced CPU path") {
 	Ref<CgameInstanceCulling> culling;
 	culling.instantiate();

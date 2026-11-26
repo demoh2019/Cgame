@@ -86,27 +86,40 @@ static func plan(slots: PackedInt32Array, wanted: PackedInt32Array,
 	var seen: Dictionary = {}
 	for id in wanted:
 		seen[id] = true
+	# Build the slot queues once. Both are ascending, preserving the old
+	# first-free-then-first-unwanted policy without repeated linear scans.
+	var resident: Dictionary = {}
+	var free_slots: Array[int] = []
+	var replaceable_slots: Array[int] = []
+	for slot in next_slots.size():
+		var page: int = next_slots[slot]
+		if page == -1:
+			free_slots.append(slot)
+		else:
+			resident[page] = true
+			if not seen.has(page):
+				replaceable_slots.append(slot)
+	var free_cursor: int = 0
+	var replacement_cursor: int = 0
 	var remaining: int = upload_budget
 	for id in wanted:
 		if remaining <= 0:
 			break
-		if next_slots.has(id):
+		if id < 0 or resident.has(id):
 			continue
 		var victim: int = -1
-		for slot in next_slots.size():
-			if next_slots[slot] == -1:
-				victim = slot
-				break
-		if victim < 0:
-			for slot in next_slots.size():
-				if not seen.has(next_slots[slot]):
-					victim = slot
-					break
+		if free_cursor < free_slots.size():
+			victim = free_slots[free_cursor]
+			free_cursor += 1
+		elif replacement_cursor < replaceable_slots.size():
+			victim = replaceable_slots[replacement_cursor]
+			replacement_cursor += 1
 		if victim < 0:
 			break
 		if next_slots[victim] != -1:
 			evicted.append(next_slots[victim])
 		next_slots[victim] = id
+		resident[id] = true
 		uploads.append({"slot": victim, "page": id})
 		remaining -= 1
 	return {"slots": next_slots, "uploads": uploads, "evictions": evicted}

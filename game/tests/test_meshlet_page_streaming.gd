@@ -67,6 +67,46 @@ func run(t) -> void:
 	var paused: Dictionary = PagePolicy.plan(shifted["slots"], near_zero, 0)
 	t.eq(paused["slots"], shifted["slots"], "zero upload budget does not mutate resident buffers")
 
+	t.current = "large residency queues retain exact slot order"
+	var large_slots := PackedInt32Array()
+	for i in 256:
+		large_slots.append(-1 if i % 4 == 0 else i)
+	var requested := PackedInt32Array()
+	for i in range(1, 256, 8):
+		requested.append(i)
+	for i in range(256, 512):
+		requested.append(i)
+	# Duplicate requests must not create duplicate uploads.
+	requested.append(256)
+	var reference := large_slots.duplicate()
+	var ref_uploads: Array[Dictionary] = []
+	var ref_evictions := PackedInt32Array()
+	for id in requested:
+		if ref_uploads.size() >= 128:
+			break
+		if reference.has(id):
+			continue
+		var victim: int = reference.find(-1)
+		if victim < 0:
+			for slot in reference.size():
+				if not requested.has(reference[slot]):
+					victim = slot
+					break
+		if victim < 0:
+			break
+		if reference[victim] != -1:
+			ref_evictions.append(reference[victim])
+		reference[victim] = id
+		ref_uploads.append({"slot": victim, "page": id})
+	var planned: Dictionary = PagePolicy.plan(large_slots, requested, 128)
+	t.eq(planned["slots"], reference, "large slot queues match the original scan")
+	t.eq(planned["uploads"], ref_uploads, "upload order and budget are unchanged")
+	t.eq(planned["evictions"], ref_evictions, "eviction order is unchanged")
+	var duplicate_plan: Dictionary = PagePolicy.plan(PackedInt32Array([-1, -1]),
+		PackedInt32Array([-1, 7, 7, 8]), 4)
+	t.eq(duplicate_plan["slots"], PackedInt32Array([7, 8]), "invalid and duplicate requests do not waste slots")
+	t.eq((duplicate_plan["uploads"] as Array).size(), 2, "only two unique valid pages upload")
+
 	t.current = "fixed-slot GPU data layout with no whole-mesh upload"
 	var verts := PackedVector3Array([Vector3(1, 2, 3), Vector3(4, 2, 3), Vector3(1, 5, 3)])
 	var page: Dictionary = MeshletRenderer.pack_resident_page(verts, meshlets, 1, 2)
