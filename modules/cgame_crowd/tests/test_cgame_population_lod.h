@@ -315,7 +315,7 @@ TEST_CASE("[CgamePopulationLOD] sparse promotion regions match full-grid referen
 	RandomPCG rng;
 	rng.seed(21891);
 	for (int i = 0; i < 180; i++) {
-		p->add_herd((int)(rng.randi() % p->region_count()), comp("walker", 1 + (int)(rng.randi() % 9)));
+		p->add_herd((int)(rng.rand() % p->region_count()), comp("walker", 1 + (int)(rng.rand() % 9)));
 	}
 	p->add_herd(987, comp("runner", 5));
 	PackedVector2Array probes;

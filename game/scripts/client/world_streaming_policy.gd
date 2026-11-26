@@ -132,7 +132,9 @@ static func waypoint_is_near(point: Vector2, player: Vector3,
 			not is_finite(load_radius) or not is_finite(cell_size) or \
 			load_radius <= 0.0 or cell_size <= 0.0:
 		return false
-	return point.distance_to(Vector2(player.x, player.z)) <= load_radius + cell_size
+	var reach: float = load_radius + cell_size
+	var distance: float = point.distance_to(Vector2(player.x, player.z))
+	return is_finite(reach) and is_finite(distance) and distance <= reach
 
 
 ## AStarGrid2D plans a 4-neighbor local path around optional blocked
@@ -204,10 +206,23 @@ static func plan_waypoint_route(streamer: WorldStreamer, waypoint: Vector2,
 ## because an unchanged hazard list is nonempty.
 static func can_reuse_waypoint_route(cached: Array, first: Vector3i,
 		last: Vector3i, blocked_cells: Array[Vector3i] = []) -> bool:
-	if cached.is_empty() or cached[0] != first or cached[cached.size() - 1] != last:
+	if cached.is_empty() or cached.size() > 64 or first.y != 0 or last.y != 0 or \
+			cached[0] != first or cached[cached.size() - 1] != last:
 		return false
+	var visited: Dictionary = {}
+	var previous: Vector3i = first
+	for i in cached.size():
+		if not cached[i] is Vector3i:
+			return false
+		var cell: Vector3i = cached[i]
+		if cell.y != 0 or visited.has(cell):
+			return false
+		if i > 0 and absi(cell.x - previous.x) + absi(cell.z - previous.z) != 1:
+			return false
+		visited[cell] = true
+		previous = cell
 	for blocked in blocked_cells:
-		if blocked.y == 0 and cached.has(blocked):
+		if blocked.y == 0 and visited.has(blocked):
 			return false
 	if blocked_cells.is_empty():
 		var shortest: int = absi(last.x - first.x) + absi(last.z - first.z) + 1

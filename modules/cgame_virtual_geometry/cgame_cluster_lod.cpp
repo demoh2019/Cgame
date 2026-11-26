@@ -535,13 +535,16 @@ Array CgameClusterLOD::simplify_surface_arrays(const Array &p_surface_arrays,
 					positions.ptr(), vertex_count, sizeof(float) * 3,
 					size_t(p_target_triangles) * 3, 1.0e30f, flags, &geometric_error);
 	if (reduced_count < 3 || reduced_count >= size_t(index_count) ||
-			reduced_count % 3 != 0) {
+			reduced_count % 3 != 0 || !Math::is_finite(geometric_error) || geometric_error < 0.0f) {
 		return invalid;
 	}
 	PackedInt32Array reduced;
 	reduced.resize(reduced_count);
 	int32_t *write = reduced.ptrw();
 	for (size_t i = 0; i < reduced_count; ++i) {
+		if (destination[i] >= uint32_t(vertex_count)) {
+			return invalid;
+		}
 		write[i] = int32_t(destination[i]);
 	}
 	Array result = p_surface_arrays.duplicate();

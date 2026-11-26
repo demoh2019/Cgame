@@ -28,6 +28,26 @@ func run(t) -> void:
 	t.check(not WorldStreamingPolicy.plausible_velocity(Vector3(75.0, 0.0, 0.0)),
 		"raw un-clamped teleport velocities are rejected")
 
+	t.current = "waypoint streaming rejects invalid ranges and cached routes"
+	t.check(WorldStreamingPolicy.waypoint_is_near(Vector2(128, 0), Vector3.ZERO, 100.0, 32.0),
+		"nearby waypoint remains eligible for bounded prefetch")
+	t.check(not WorldStreamingPolicy.waypoint_is_near(Vector2(1.0e30, 0), Vector3.ZERO, 1.0e308, 1.0e308),
+		"overflowing reach cannot authorize an auxiliary source")
+	var route_start := Vector3i.ZERO
+	var route_end := Vector3i(2, 0, 0)
+	var route_middle := Vector3i(1, 0, 0)
+	t.check(WorldStreamingPolicy.can_reuse_waypoint_route([route_start, route_middle, route_end], route_start, route_end),
+		"valid cardinal route can be reused")
+	t.check(not WorldStreamingPolicy.can_reuse_waypoint_route([route_start, Vector3i(8, 0, 0), route_end], route_start, route_end),
+		"same-length route with disconnected cells cannot be reused")
+	t.check(not WorldStreamingPolicy.can_reuse_waypoint_route([route_start, Vector3i(1, 1, 0), route_end], route_start, route_end),
+		"wrong-layer route cannot be reused")
+	var route_obstacles: Array[Vector3i] = [Vector3i(8, 0, 8)]
+	t.check(not WorldStreamingPolicy.can_reuse_waypoint_route([route_start, route_middle, route_start, route_middle, route_end],
+		route_start, route_end, route_obstacles), "cached route loops are rejected even with obstacles")
+	t.check(not WorldStreamingPolicy.can_reuse_waypoint_route([route_start, "invalid", route_end], route_start, route_end),
+		"malformed cached cell is rejected")
+	
 	t.current = "native world partition movement budget"
 	var streamer := WorldStreamer.new()
 	t.near(streamer.lookahead_seconds, 0.0, 0.0001,

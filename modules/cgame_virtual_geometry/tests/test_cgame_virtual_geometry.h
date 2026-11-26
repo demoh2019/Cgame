@@ -572,7 +572,8 @@ TEST_CASE("[CgameClusterLOD] Indexed LOD cuts preserve source material attribute
 	CHECK(indices.size() == CgameClusterLOD::triangle_count(hierarchy, cut) * 3);
 	CHECK(indices.size() <= mesh.indices.size());
 	for (int i = 0; i < indices.size(); i++) {
-		CHECK(indices[i] >= 0 && indices[i] < mesh.vertices.size());
+		CHECK(indices[i] >= 0);
+		CHECK(indices[i] < mesh.vertices.size());
 	}
 	CHECK(source[::Mesh::ARRAY_INDEX] == mesh.indices); // Input cannot be mutated.
 
@@ -696,18 +697,18 @@ TEST_CASE("[CgameClusterLOD] attribute aware surface simplification preserves au
 		}
 	}
 	Array arrays;
-	arrays.resize(Mesh::ARRAY_MAX);
-	arrays[Mesh::ARRAY_VERTEX] = vertices;
-	arrays[Mesh::ARRAY_NORMAL] = normals;
-	arrays[Mesh::ARRAY_TANGENT] = tangents;
-	arrays[Mesh::ARRAY_COLOR] = colors;
-	arrays[Mesh::ARRAY_TEX_UV] = uvs;
-	arrays[Mesh::ARRAY_TEX_UV2] = uv2;
-	arrays[Mesh::ARRAY_INDEX] = indices;
+	arrays.resize(::Mesh::ARRAY_MAX);
+	arrays[::Mesh::ARRAY_VERTEX] = vertices;
+	arrays[::Mesh::ARRAY_NORMAL] = normals;
+	arrays[::Mesh::ARRAY_TANGENT] = tangents;
+	arrays[::Mesh::ARRAY_COLOR] = colors;
+	arrays[::Mesh::ARRAY_TEX_UV] = uvs;
+	arrays[::Mesh::ARRAY_TEX_UV2] = uv2;
+	arrays[::Mesh::ARRAY_INDEX] = indices;
 
 	const Array reduced = CgameClusterLOD::simplify_surface_arrays(arrays, 320);
-	REQUIRE(reduced.size() == Mesh::ARRAY_MAX);
-	const PackedInt32Array out_indices = reduced[Mesh::ARRAY_INDEX];
+	REQUIRE(reduced.size() == ::Mesh::ARRAY_MAX);
+	const PackedInt32Array out_indices = reduced[::Mesh::ARRAY_INDEX];
 	CHECK(out_indices.size() >= 3);
 	CHECK(out_indices.size() < indices.size());
 	CHECK(out_indices.size() <= 320 * 3);
@@ -716,12 +717,12 @@ TEST_CASE("[CgameClusterLOD] attribute aware surface simplification preserves au
 		CHECK(out_indices[i] >= 0);
 		CHECK(out_indices[i] < vertices.size());
 	}
-	const PackedVector3Array reduced_vertices = reduced[Mesh::ARRAY_VERTEX];
-	const PackedVector3Array reduced_normals = reduced[Mesh::ARRAY_NORMAL];
-	const PackedVector2Array reduced_uvs = reduced[Mesh::ARRAY_TEX_UV];
-	const PackedVector2Array reduced_uv2 = reduced[Mesh::ARRAY_TEX_UV2];
-	const PackedColorArray reduced_colors = reduced[Mesh::ARRAY_COLOR];
-	const PackedFloat32Array reduced_tangents = reduced[Mesh::ARRAY_TANGENT];
+	const PackedVector3Array reduced_vertices = reduced[::Mesh::ARRAY_VERTEX];
+	const PackedVector3Array reduced_normals = reduced[::Mesh::ARRAY_NORMAL];
+	const PackedVector2Array reduced_uvs = reduced[::Mesh::ARRAY_TEX_UV];
+	const PackedVector2Array reduced_uv2 = reduced[::Mesh::ARRAY_TEX_UV2];
+	const PackedColorArray reduced_colors = reduced[::Mesh::ARRAY_COLOR];
+	const PackedFloat32Array reduced_tangents = reduced[::Mesh::ARRAY_TANGENT];
 	CHECK(reduced_vertices == vertices);
 	CHECK(reduced_normals == normals);
 	CHECK(reduced_uvs == uvs);
@@ -729,40 +730,40 @@ TEST_CASE("[CgameClusterLOD] attribute aware surface simplification preserves au
 	CHECK(reduced_colors == colors);
 	CHECK(reduced_tangents == tangents);
 	// The original buffers remain unchanged (no destructive simplification).
-	const PackedInt32Array original_indices = arrays[Mesh::ARRAY_INDEX];
+	const PackedInt32Array original_indices = arrays[::Mesh::ARRAY_INDEX];
 	CHECK(original_indices == indices);
 	// Native attribute-less geometry can use the previous positional path.
 	Array position_only = arrays.duplicate();
-	position_only[Mesh::ARRAY_NORMAL] = Variant();
-	position_only[Mesh::ARRAY_TEX_UV] = Variant();
-	position_only[Mesh::ARRAY_TANGENT] = Variant();
-	CHECK(CgameClusterLOD::simplify_surface_arrays(position_only, 320).size() == Mesh::ARRAY_MAX);
+	position_only[::Mesh::ARRAY_NORMAL] = Variant();
+	position_only[::Mesh::ARRAY_TEX_UV] = Variant();
+	position_only[::Mesh::ARRAY_TANGENT] = Variant();
+	CHECK(CgameClusterLOD::simplify_surface_arrays(position_only, 320).size() == ::Mesh::ARRAY_MAX);
 
 	// Use a reducible grid: these checks cannot pass merely because the
 	// simplifier was unable to reduce an already tiny mesh.
 	Array malformed = arrays.duplicate();
-	malformed[Mesh::ARRAY_TANGENT] = PackedFloat32Array({ 1.0f, 0.0f });
+	malformed[::Mesh::ARRAY_TANGENT] = PackedFloat32Array({ 1.0f, 0.0f });
 	CHECK(CgameClusterLOD::simplify_surface_arrays(malformed, 320).is_empty());
 	PackedFloat32Array invalid_tangents = tangents;
 	invalid_tangents.set(invalid_tangents.size() - 1, Math::NaN);
-	malformed[Mesh::ARRAY_TANGENT] = invalid_tangents;
+	malformed[::Mesh::ARRAY_TANGENT] = invalid_tangents;
 	CHECK(CgameClusterLOD::simplify_surface_arrays(malformed, 320).is_empty());
-	malformed[Mesh::ARRAY_TANGENT] = uvs;
+	malformed[::Mesh::ARRAY_TANGENT] = uvs;
 	CHECK(CgameClusterLOD::simplify_surface_arrays(malformed, 320).is_empty());
-	CHECK(CgameClusterLOD::simplify_surface_arrays(arrays, 320).size() == Mesh::ARRAY_MAX);
+	CHECK(CgameClusterLOD::simplify_surface_arrays(arrays, 320).size() == ::Mesh::ARRAY_MAX);
 }
 
 TEST_CASE("[CgameClusterLOD] attribute simplification rejects malformed late data atomically") {
 	Array arrays;
-	arrays.resize(Mesh::ARRAY_MAX);
-	arrays[Mesh::ARRAY_VERTEX] = PackedVector3Array({
+	arrays.resize(::Mesh::ARRAY_MAX);
+	arrays[::Mesh::ARRAY_VERTEX] = PackedVector3Array({
 			Vector3(0, 0, 0), Vector3(0, 0, 1),
 			Vector3(1, 0, 0), Vector3(1, 0, 1) });
-	arrays[Mesh::ARRAY_NORMAL] = PackedVector3Array({
-			Vector3.UP, Vector3.UP, Vector3.UP, Vector3.UP });
-	arrays[Mesh::ARRAY_TEX_UV] = PackedVector2Array({
+	arrays[::Mesh::ARRAY_NORMAL] = PackedVector3Array({
+			Vector3(0, 1, 0), Vector3(0, 1, 0), Vector3(0, 1, 0), Vector3(0, 1, 0) });
+	arrays[::Mesh::ARRAY_TEX_UV] = PackedVector2Array({
 			Vector2(0, 0), Vector2(0, 1), Vector2(1, 0), Vector2(1, 1) });
-	arrays[Mesh::ARRAY_INDEX] = PackedInt32Array({ 0, 1, 2, 2, 1, 3 });
+	arrays[::Mesh::ARRAY_INDEX] = PackedInt32Array({ 0, 1, 2, 2, 1, 3 });
 	CHECK(CgameClusterLOD::simplify_surface_arrays(arrays, 2).is_empty());
 	CHECK(CgameClusterLOD::simplify_surface_arrays(arrays, 0).is_empty());
 	CHECK(CgameClusterLOD::simplify_surface_arrays(arrays, 1, Math::NaN).is_empty());
@@ -771,27 +772,27 @@ TEST_CASE("[CgameClusterLOD] attribute simplification rejects malformed late dat
 	CHECK(CgameClusterLOD::simplify_surface_arrays(arrays, 1, 0.6f, 9.0f).is_empty());
 
 	Array bad = arrays.duplicate();
-	bad[Mesh::ARRAY_INDEX] = PackedInt32Array({ 0, 1, 2, 2, 1, 999 });
+	bad[::Mesh::ARRAY_INDEX] = PackedInt32Array({ 0, 1, 2, 2, 1, 999 });
 	CHECK(CgameClusterLOD::simplify_surface_arrays(bad, 1).is_empty());
 	bad = arrays.duplicate();
-	bad[Mesh::ARRAY_NORMAL] = PackedVector3Array({ Vector3.UP });
+	bad[::Mesh::ARRAY_NORMAL] = PackedVector3Array({ Vector3(0, 1, 0) });
 	CHECK(CgameClusterLOD::simplify_surface_arrays(bad, 1).is_empty());
 	bad = arrays.duplicate();
-	bad[Mesh::ARRAY_TEX_UV] = PackedVector2Array({ Vector2(0, 0) });
+	bad[::Mesh::ARRAY_TEX_UV] = PackedVector2Array({ Vector2(0, 0) });
 	CHECK(CgameClusterLOD::simplify_surface_arrays(bad, 1).is_empty());
 	bad = arrays.duplicate();
-	bad[Mesh::ARRAY_VERTEX] = PackedVector3Array({
+	bad[::Mesh::ARRAY_VERTEX] = PackedVector3Array({
 			Vector3(0, 0, 0), Vector3(0, 0, 1),
 			Vector3(1, 0, 0), Vector3(Math::NaN, 0, 1) });
 	CHECK(CgameClusterLOD::simplify_surface_arrays(bad, 1).is_empty());
 	bad = arrays.duplicate();
-	bad[Mesh::ARRAY_TEX_UV] = PackedVector2Array({
+	bad[::Mesh::ARRAY_TEX_UV] = PackedVector2Array({
 			Vector2(0, 0), Vector2(0, 1), Vector2(1, 0), Vector2(Math::INF, 1) });
 	CHECK(CgameClusterLOD::simplify_surface_arrays(bad, 1).is_empty());
 	// Validation must not mutate a valid request after a bad attempt.
-	const PackedInt32Array unchanged = arrays[Mesh::ARRAY_INDEX];
+	const PackedInt32Array unchanged = arrays[::Mesh::ARRAY_INDEX];
 	CHECK(unchanged == PackedInt32Array({ 0, 1, 2, 2, 1, 3 }));
-	CHECK(arrays.size() == Mesh::ARRAY_MAX);
+	CHECK(arrays.size() == ::Mesh::ARRAY_MAX);
 }
 
 } // namespace TestCgameVirtualGeometry
