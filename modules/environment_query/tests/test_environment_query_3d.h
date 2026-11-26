@@ -95,4 +95,28 @@ TEST_CASE("[EnvironmentQuery3D] Invalid Top-K counts fail without changing resou
 	CHECK(query->query_top_positions(2).size() == 1);
 }
 
+TEST_CASE("[EnvironmentQuery3D] Position-only results preserve verbose ranking and spread limits") {
+	Ref<EnvironmentQuery3D> query;
+	query.instantiate();
+	PackedVector3Array points;
+	for (int i = 0; i < 100; i++) {
+		points.push_back(Vector3(i % 11 - 5, 0, i % 7 - 3));
+	}
+	points.push_back(Vector3(Math::NaN, 0, 0));
+	query->set_candidates(points);
+	query->set_origin(Vector3());
+	for (const int cap : { 0, 1, 7, 64, 65, 120 }) {
+		query->set_max_results(cap);
+		const Array verbose = query->query();
+		const PackedVector3Array positions = query->query_positions();
+		REQUIRE(positions.size() == verbose.size());
+		for (int i = 0; i < positions.size(); i++) {
+			const Dictionary entry = verbose[i];
+			CHECK(positions[i] == Vector3(entry["position"]));
+		}
+		CHECK(query->query_spread_positions(1, 5.0) == query->query_top_positions(1));
+		CHECK(query->query_spread_positions(16, 0.0) == query->query_top_positions(16));
+	}
+}
+
 } // namespace TestEnvironmentQuery3D
