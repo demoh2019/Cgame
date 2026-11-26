@@ -72,6 +72,10 @@ TEST_CASE("[CgameFramePacing] Ultra uses mailbox and no cap") {
 TEST_CASE("[CgameFramePacing] Unknown refresh falls back to 60 and levels clamp") {
 	CHECK(CgameFramePacing::compute_profile(0, 0.0f).max_fps == 60);
 	CHECK(CgameFramePacing::compute_profile(1, 29.0f).max_fps == 60);
+	CHECK(CgameFramePacing::compute_profile(1, std::numeric_limits<float>::infinity()).max_fps == 60);
+	CHECK(CgameFramePacing::compute_profile(1, std::numeric_limits<float>::quiet_NaN()).max_fps == 60);
+	CHECK(CgameFramePacing::compute_profile(1, 1.0e20f).max_fps == 60);
+	CHECK(CgameFramePacing::compute_profile(1, 480.0f).max_fps == 480);
 	CHECK(CgameFramePacing::compute_profile(-5, 60.0f).vsync == DisplayServerEnums::VSYNC_ENABLED);
 	CHECK(CgameFramePacing::compute_profile(99, 60.0f).vsync == DisplayServerEnums::VSYNC_MAILBOX);
 	const Dictionary d = CgameFramePacing::settings(0, 144.0f);
@@ -109,6 +113,9 @@ TEST_CASE("[CgameVRAMBudget] Budgets and upgrade gate") {
 	CHECK(CgameVRAMBudget::budget_bytes(9) == CgameVRAMBudget::budget_bytes(3));
 	CHECK(CgameVRAMBudget::upgrade_allowed(1000.0 * 1024.0 * 1024.0, 0));
 	CHECK_FALSE(CgameVRAMBudget::upgrade_allowed(2500.0 * 1024.0 * 1024.0, 0));
+	CHECK_FALSE(CgameVRAMBudget::upgrade_allowed(0.0, 0));
+	CHECK_FALSE(CgameVRAMBudget::upgrade_allowed(-1.0, 0));
+	CHECK_FALSE(CgameVRAMBudget::upgrade_allowed(std::numeric_limits<double>::quiet_NaN(), 0));
 }
 
 TEST_CASE("[CgameVRAMBudget] Pressure must be sustained") {
@@ -116,12 +123,20 @@ TEST_CASE("[CgameVRAMBudget] Pressure must be sustained") {
 	budget.instantiate();
 	const double over = CgameVRAMBudget::budget_bytes(2) * 0.95;
 	const double under = CgameVRAMBudget::budget_bytes(2) * 0.5;
-	CHECK_FALSE(budget->sample(over, 2, 1.0));
-	CHECK(budget->sample(over, 2, 1.0)); // 2 s sustained.
-	CHECK_FALSE(budget->sample(over, 2, 1.0)); // Counter was reset.
-	CHECK_FALSE(budget->sample(under, 2, 5.0)); // Relief resets it.
+	for (int i = 0; i < 15; i++) {
+		CHECK_FALSE(budget->sample(over, 2, 0.125));
+	}
+	CHECK_FALSE(budget->sample(over, 2, 1.0)); // Loading stall is ignored.
+	CHECK_FALSE(budget->sample(std::numeric_limits<double>::infinity(), 2, 0.125));
+	CHECK_FALSE(budget->sample(0.0, 2, 0.125)); // Missing reading preserves timer.
+	CHECK(budget->get_pressure_seconds() == doctest::Approx(1.875));
+	CHECK(budget->sample(over, 2, 0.125)); // 2 s sustained valid samples.
+	CHECK_FALSE(budget->sample(over, 2, 0.125));
+	CHECK_FALSE(budget->sample(under, 2, 0.125)); // Valid relief resets it.
 	CHECK(budget->get_pressure_seconds() == doctest::Approx(0.0));
-	CHECK_FALSE(budget->sample(over, 0, 3.0)); // Lowest tier has nowhere to go.
+	for (int i = 0; i < 16; i++) {
+		CHECK_FALSE(budget->sample(over, 0, 0.125)); // Lowest tier.
+	}
 	CHECK_FALSE(budget->sample(over, 2, std::numeric_limits<double>::infinity()));
 	CHECK_FALSE(budget->sample(over, 2, -1.0));
 }

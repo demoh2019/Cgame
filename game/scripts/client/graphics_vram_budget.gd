@@ -24,7 +24,13 @@ static func used_bytes() -> float:
 
 
 static func upgrade_allowed(used: float, level: int) -> bool:
-	return used <= budget_bytes(level + 1) * RELIEF
+	return is_finite(used) and used > 0.0 and used <= budget_bytes(clampi(level, 0, 3) + 1) * RELIEF
+
+
+## Unknown residency must not disable the FPS-based compatibility path.
+## Measurable memory pressure, however, vetoes a speculative upgrade.
+static func allows_auto_upgrade(used: float, level: int) -> bool:
+	return not is_finite(used) or used <= 0.0 or upgrade_allowed(used, level)
 
 
 ## A zero byte reading means that the renderer could not report GPU
@@ -46,3 +52,7 @@ func sample(used: float, level: int, delta: float) -> bool:
 	else:
 		_pressure_seconds = 0.0
 	return false
+
+
+func reset() -> void:
+	_pressure_seconds = 0.0

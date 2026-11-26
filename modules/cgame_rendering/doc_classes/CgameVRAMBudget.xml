@@ -33,7 +33,7 @@
 			<param index="1" name="level" type="int" />
 			<param index="2" name="delta" type="float" />
 			<description>
-				Adds [param delta] seconds to the pressure timer when [param used] bytes exceed 92% of the budget of [param level], and resets it otherwise. Returns [code]true[/code] (and resets the timer) once pressure has lasted 2 seconds and [param level] is above [code]0[/code]. Non-finite or non-positive [param delta] values are ignored.
+				Adds [param delta] seconds to the pressure timer when [param used] bytes exceed 92% of the budget of [param level], and resets it otherwise. Returns [code]true[/code] (and resets the timer) once pressure has lasted 2 seconds and [param level] is above [code]0[/code]. Non-finite or non-positive memory readings and frame durations, as well as frame durations above 0.2 seconds, are ignored without changing accumulated pressure.
 			</description>
 		</method>
 		<method name="upgrade_allowed" qualifiers="static">
@@ -41,7 +41,7 @@
 			<param index="0" name="used" type="float" />
 			<param index="1" name="level" type="int" />
 			<description>
-				Returns [code]true[/code] when [param used] bytes are at most 75% of the budget of [code]level + 1[/code].
+				Returns [code]true[/code] when [param used] is finite, positive and at most 75% of the budget of the next level. Missing residency telemetry does not constitute evidence that an upgrade is safe.
 			</description>
 		</method>
 		<method name="used_bytes" qualifiers="static">

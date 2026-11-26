@@ -1943,17 +1943,24 @@ func _process(delta: float) -> void:
 			_auto_quality.set_mode("auto")
 		var quality_limit: bool = GraphicsAutoQuality.at_resolution_limit(
 			rd, _adaptive_resolution.at_floor(), _adaptive_resolution.at_ceiling(), delta, gpu_ms)
+		var previous_level: int = _auto_quality.level
+		var vram_used: float = Rendering.vram_used_bytes()
 		var step_down: bool = quality_limit and _auto_quality.sample_frame(delta, gpu_ms)
+		# FPS recovery must not increase scene complexity while the GPU is
+		# still close to the next tier's memory budget.
+		if step_down and _auto_quality.level > previous_level and not GraphicsVramBudget.allows_auto_upgrade(vram_used, previous_level):
+			_auto_quality.level = previous_level
+			step_down = false
 		# GPU memory pressure steps down too, before the driver starts paging textures.
 		# Gate samples before *both* native and GDScript budget trackers:
 		# a frozen/loading frame and an unavailable VRAM reading are not pressure.
 		if not step_down and _auto_quality.mode == "auto":
-			var vram_used: float = Rendering.vram_used_bytes()
 			if GraphicsVramBudget.valid_sample(vram_used, delta) and \
 					_vram_budget.sample(vram_used, _auto_quality.level, delta):
 				_auto_quality.level -= 1
 				step_down = true
 		if step_down:
+			_vram_budget.reset()
 			GraphicsQuality.set_level(_auto_quality.level, false)
 			_adaptive_resolution.configure(GraphicsQuality.level(),
 		GraphicsQuality.metalfx_resolution_floor())
@@ -2597,6 +2604,7 @@ func _apply_graphics_selection(index: int) -> void:
 
 
 func _set_auto_graphics(enabled: bool) -> void:
+	_vram_budget.reset()
 	_auto_graphics = enabled
 	_update_gpu_measurements()
 	# Preserve the other rendering preferences in the same config file.

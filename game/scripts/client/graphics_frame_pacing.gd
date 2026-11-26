@@ -9,12 +9,16 @@ const FALLBACK_REFRESH := 60.0
 
 static func display_refresh() -> float:
 	var hz: float = DisplayServer.screen_get_refresh_rate()
-	return hz if hz >= 30.0 else FALLBACK_REFRESH
+	return _valid_refresh(hz)
+
+
+static func _valid_refresh(hz: float) -> float:
+	return hz if is_finite(hz) and hz >= 30.0 and hz <= 1000.0 else FALLBACK_REFRESH
 
 
 static func settings(level: int, refresh_hz: float) -> Dictionary:
 	var tier: int = clampi(level, 0, 3)
-	var hz: float = refresh_hz if refresh_hz >= 30.0 else FALLBACK_REFRESH
+	var hz: float = _valid_refresh(refresh_hz)
 	match tier:
 		0:
 			# Half-rate on high-refresh panels keeps laptops cool and frame time even.

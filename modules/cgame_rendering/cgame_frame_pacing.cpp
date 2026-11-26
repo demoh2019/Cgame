@@ -38,7 +38,7 @@
 
 CgameFramePacing::Profile CgameFramePacing::compute_profile(int p_level, float p_refresh_hz) {
 	const int tier = CLAMP(p_level, 0, 3);
-	const float hz = p_refresh_hz >= 30.0f ? p_refresh_hz : FALLBACK_REFRESH;
+	const float hz = Math::is_finite(p_refresh_hz) && p_refresh_hz >= 30.0f && p_refresh_hz <= 1000.0f ? p_refresh_hz : FALLBACK_REFRESH;
 	Profile profile;
 	switch (tier) {
 		case 0: {
@@ -69,7 +69,7 @@ float CgameFramePacing::display_refresh() {
 		return FALLBACK_REFRESH;
 	}
 	const float hz = ds->screen_get_refresh_rate();
-	return hz >= 30.0f ? hz : FALLBACK_REFRESH;
+	return Math::is_finite(hz) && hz >= 30.0f && hz <= 1000.0f ? hz : FALLBACK_REFRESH;
 }
 
 Dictionary CgameFramePacing::settings(int p_level, float p_refresh_hz) {

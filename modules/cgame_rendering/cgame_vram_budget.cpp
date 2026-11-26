@@ -48,11 +48,12 @@ double CgameVRAMBudget::used_bytes() {
 }
 
 bool CgameVRAMBudget::upgrade_allowed(double p_used, int p_level) {
-	return p_used <= budget_bytes(p_level + 1) * RELIEF;
+	return Math::is_finite(p_used) && p_used > 0.0 && p_used <= budget_bytes(CLAMP(p_level, 0, 3) + 1) * RELIEF;
 }
 
 bool CgameVRAMBudget::sample(double p_used, int p_level, double p_delta) {
-	if (!Math::is_finite(p_delta) || p_delta <= 0.0) {
+	// A suspended window or missing residency data is not evidence of pressure.
+	if (!Math::is_finite(p_used) || p_used <= 0.0 || !Math::is_finite(p_delta) || p_delta <= 0.0 || p_delta > 0.2) {
 		return false;
 	}
 	if (p_used > budget_bytes(p_level) * PRESSURE) {

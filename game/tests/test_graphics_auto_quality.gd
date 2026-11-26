@@ -3,6 +3,7 @@ extends RefCounted
 
 const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.gd")
 const GraphicsVramBudget = preload("res://scripts/client/graphics_vram_budget.gd")
+const GraphicsFramePacing = preload("res://scripts/client/graphics_frame_pacing.gd")
 
 
 func run(t) -> void:
@@ -120,3 +121,29 @@ func run(t) -> void:
 		"pixel budget uses the same GPU timer as world detail quality")
 	t.check(source.contains("GraphicsVramBudget.valid_sample(vram_used, delta)"),
 		"live client filters VRAM samples before the native or script pressure policy")
+
+	t.current = "VRAM recovery and display timing guards"
+	var next_budget: float = GraphicsVramBudget.budget_bytes(2)
+	t.check(not GraphicsVramBudget.allows_auto_upgrade(next_budget * 0.9, 1),
+		"known memory pressure prevents a speculative FPS-based upgrade")
+	t.check(GraphicsVramBudget.allows_auto_upgrade(next_budget * 0.5, 1),
+		"healthy residency permits an upgrade")
+	t.check(GraphicsVramBudget.allows_auto_upgrade(0.0, 1),
+		"unavailable residency preserves compatibility FPS adaptation")
+	t.check(not GraphicsVramBudget.upgrade_allowed(NAN, 1),
+		"strict upgrade API requires a valid reading")
+	vram.sample(high_usage, 1, 0.125)
+	vram.reset()
+	for i in 15:
+		t.check(not vram.sample(high_usage, 1, 0.125),
+			"new tier receives a fresh pressure window")
+	t.check(vram.sample(high_usage, 1, 0.125), "new tier lowers only after 2 valid seconds")
+	t.check(source.contains("GraphicsVramBudget.allows_auto_upgrade(vram_used, previous_level)"),
+		"live quality upgrade honors memory availability")
+	for hz in [NAN, INF, -1.0, 1.0e20]:
+		t.eq(GraphicsFramePacing.settings(1, hz)["max_fps"], 60,
+			"invalid monitor frequency falls back to a finite cap")
+	t.eq(GraphicsFramePacing.settings(0, 144.0)["max_fps"], 72,
+		"normal high-refresh performance profile remains half rate")
+	t.eq(GraphicsFramePacing.settings(1, 480.0)["max_fps"], 480,
+		"valid modern high-refresh displays are supported")
