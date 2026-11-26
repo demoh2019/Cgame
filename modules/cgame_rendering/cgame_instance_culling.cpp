@@ -154,7 +154,8 @@ bool CgameInstanceCulling::outside_frustum(const Vector3 &p_center, const Vector
 bool CgameInstanceCulling::occluded(const Vector3 &p_center, const Vector3 &p_half, const HiZ &p_hiz) {
 	const int wt = p_hiz.width;
 	const int ht = p_hiz.height;
-	if (wt <= 0 || ht <= 0 || p_hiz.depth.size() < wt * ht) {
+	if (wt <= 0 || ht <= 0 || int64_t(wt) * ht > p_hiz.depth.size() ||
+			int64_t(wt) * ht > INT32_MAX || !Math::is_finite(p_hiz.bias)) {
 		return false;
 	}
 	Vector2 mn(1.0e9f, 1.0e9f);
@@ -233,16 +234,27 @@ CgameInstanceCulling::HiZ CgameInstanceCulling::_parse_hiz(const Dictionary &p_h
 	if (p_hiz.is_empty()) {
 		return hiz;
 	}
+	// Invalid depth metadata must disable occlusion on BOTH paths. The
+	// shader otherwise indexes an undersized storage buffer; the CPU must
+	// also avoid overflowing signed width * height arithmetic.
+	const int64_t width = p_hiz.get("width", 0);
+	const int64_t height = p_hiz.get("height", 0);
+	const PackedFloat32Array depth = p_hiz.get("depth", PackedFloat32Array());
+	const float bias = p_hiz.get("bias", 0.0f);
+	if (width <= 0 || height <= 0 || width > 16777216 || height > 16777216 ||
+			width * height > INT32_MAX || width * height > depth.size() ||
+			!Math::is_finite(bias)) {
+		return hiz;
+	}
 	hiz.enabled = true;
-	hiz.view_proj = p_hiz["view_proj"];
-	hiz.width = p_hiz["width"];
-	hiz.height = p_hiz["height"];
-	const PackedFloat32Array depth = p_hiz["depth"];
+	hiz.view_proj = p_hiz.get("view_proj", Projection());
+	hiz.width = int(width);
+	hiz.height = int(height);
 	hiz.depth.resize(depth.size());
 	for (int i = 0; i < depth.size(); i++) {
 		hiz.depth.write[i] = depth[i];
 	}
-	hiz.bias = p_hiz.get("bias", 0.0f);
+	hiz.bias = bias;
 	return hiz;
 }
 
@@ -302,7 +314,7 @@ PackedInt32Array CgameInstanceCulling::cull_packed(const PackedVector3Array &p_c
 	const Vector<Vector3> halves = _to_vector(p_halves);
 	const Vector<Plane> planes = _parse_planes(p_frustum_planes);
 	const HiZ hiz = _parse_hiz(p_hiz);
-	if (rd != nullptr && !force_cpu && centers.size() > 0) {
+	if (rd != nullptr && !force_cpu && MIN(centers.size(), halves.size()) > 0) {
 		const Vector<int32_t> result = _cull_gpu(centers, halves, planes, hiz);
 		if (!result.is_empty() || last_gpu_ok) {
 			last_path = "gpu";
